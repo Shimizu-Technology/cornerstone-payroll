@@ -264,20 +264,28 @@ Each pay stub includes:
 - YTD (year-to-date) totals for all categories
 - Net pay
 
-### 5.5 Check Printing (PDF)
+### 5.5 Check Printing (PDF Overlay on Pre-Printed Stock)
 
-Generate printable checks with:
-- Payee name
+**How it works today:** Clients have their own pre-printed business checks (e.g., Bank of Guam) — the check stock already has the company name, address, bank routing/account info, lines, and formatting. QuickBooks currently prints ONLY the variable data (payee, amount, date, written amount) onto the correct positions on the pre-printed paper.
+
+**Our approach:** Generate a PDF overlay that prints variable data at configurable positions. The PDF is mostly whitespace with text placed precisely where the pre-printed fields are.
+
+**Variable data to print:**
+- Payee name (who the check is made out to)
 - Date
-- Amount (numeric and written)
-- Company name and address
+- Amount (numeric, e.g., "$1,234.56")
+- Amount (written, e.g., "One Thousand Two Hundred Thirty-Four and 56/100")
 - Memo line (e.g., "Payroll 01/20-02/02/2026")
-- Check number (sequential)
-- Pay stub attached (bottom portion of check)
 
-**Printing options:**
-- Print on blank check stock (MICR toner for bank line — future)
-- Print on pre-printed check stock (overlay payee/amount/date only)
+**Configurable positioning:**
+- Each field has X/Y coordinates + font size, configurable per company
+- Admin can set up a "check template" by specifying where each field prints
+- Include a test print feature (prints with sample data so they can verify alignment)
+- Save templates per company (different banks/check stock = different positions)
+
+**Check number:** Not printed by us — pre-printed on the check stock. We track check numbers in our system for record-keeping only (user enters the starting check number for each payroll run).
+
+**Pay stub attachment:** Separate page or bottom tear-off portion — configurable per company's check stock format.
 
 ### 5.6 Reporting
 
@@ -536,39 +544,56 @@ end
 
 ---
 
-## 9. Open Questions
+## 9. Meeting Prep — Questions for Cornerstone
 
-### 📋 Questions for Cornerstone Meeting (Feb 5, 2026)
+### 📋 Priority Questions (Need answers before building)
 
-**Current Workflow (Must Understand First)**
+**🔴 The Spreadsheet (Most Important)**
 
-1. **Get a copy of the master payroll spreadsheet** — The one with multiple tabs that calculates FIT, Social Security, Medicare, etc. from hours. This is the source of truth for how they do it today, and we'll use the formulas to validate our tax calculator.
-2. **How do hours get from the spreadsheet to checks?** — Is someone re-typing calculated amounts into QuickBooks? Is there a copy/paste step? An export? Understanding this handoff point tells us exactly what friction to eliminate.
-3. **Do they want to keep QuickBooks for anything?** — Or are they happy to drop it entirely once payroll + check printing works in the new system? If they use QB for other accounting, we need to know what stays.
+1. **Get a copy of the master payroll spreadsheet.** The one with multiple tabs that calculates FIT, Social Security, Medicare, etc. from hours. We'll use the actual formulas to validate our tax engine. This is non-negotiable — we need it to ensure our calculations match theirs exactly before going live.
 
-**Check Printing**
+2. **Walk through one payroll run end-to-end.** Have the CEO show the full process: hours come in → enter into spreadsheet → spreadsheet calculates taxes → amounts go into QuickBooks → checks print. Understanding every step tells us exactly what to automate.
 
-4. **What check stock do they use?** — Brand, size, format? Standard 8.5"×11" with 3-per-page? Single checks? Pre-printed (bank info already on it) or blank stock?
-5. **What printer do they print checks on?** — Standard laser? MICR toner? This affects how we format the PDF output.
+**🔴 Check Printing (Critical for MVP)**
 
-**Payroll Details**
+3. **Get a sample pre-printed check** (blank/voided is fine). We need to measure exact field positions — where does payee name go, where's the date, where's the amount (numeric + written), where's the memo line. Different banks/check printers have different layouts.
 
-6. **What deductions beyond taxes?** — Health insurance? Retirement/401k? Garnishments? Any pre-tax vs post-tax distinctions they track?
-7. **Overtime policy** — Straight federal FLSA (>40 hrs/week = 1.5×), or any Guam-specific rules they follow?
-8. **Holiday schedule** — Which holidays are paid? Guam has unique territorial holidays (Discovery Day, Liberation Day, etc.). Do employees get holiday pay automatically?
-9. **PTO/Sick policy** — Does Cornerstone track PTO/sick time? Accrual rates? Need to incorporate that into the system?
+4. **What size are the checks?** Standard 8.5"×11" with check on top and two stubs below? Or single checks? Or 3-per-page? This determines the PDF template layout.
 
-**Data & System**
+5. **What printer?** Standard office laser printer? We need to test alignment on their actual hardware. Also: do they use the same printer for all clients' checks, or do clients print their own?
 
-10. **Existing employee data** — Are the 4 employees already in the Cornerstone Tax app as users? Can we reuse that data or do we need to enter it fresh?
-11. **Tax table source** — Where do they currently get their withholding tables/formulas? Guam Dept of Rev & Tax? IRS publications? CPA knowledge?
-12. **Pay stub requirements** — Do they currently give employees pay stubs? What info do employees expect to see? Any specific format they're used to?
+6. **For their bigger clients** — does each client provide their own pre-printed check stock? Do all clients use Bank of Guam, or different banks? (Different banks = different check layouts = we need the template system to be configurable per company.)
 
-**Future / Scope**
+**🟡 Payroll Details**
 
-13. **Multi-company timeline** — When do they want to start processing payroll for their tax clients? That affects Phase 2 urgency.
-14. **Bank reconciliation priority** — How urgent is the bank reconciliation feature vs payroll? Can it wait until Phase 3?
-15. **Build in Cornerstone Tax or standalone?** — PRD recommends as a module in cornerstone-tax, but this repo exists if standalone is preferred. Leon to decide.
+7. **What deductions beyond taxes?** Health insurance? Retirement/401k? Garnishments? Loan repayments? Which are pre-tax vs post-tax? (The existing Excel probably shows this — review the spreadsheet to confirm.)
+
+8. **How do they currently handle overtime?** Standard FLSA (>40 hrs/week = 1.5×), or any special rules for certain clients?
+
+9. **Do they currently give employees pay stubs?** If so, what format? Print? Email? What info is on them? (If they have an example, get a copy.)
+
+10. **What's their current pay schedule?** Biweekly is confirmed — but what specific day is payday? How many days after the period ends?
+
+**🟡 Data & Clients**
+
+11. **How many clients do they currently process payroll for?** And how many total employees across all clients? This helps us gauge Phase 2 scope.
+
+12. **For internal (Cornerstone's 4 employees)** — do they all get the same deductions, or does each have different insurance/retirement setups?
+
+13. **Where do they get their tax tables/rates?** IRS Publication 15-T? CPA knowledge? Another source? We want to use the same source they trust.
+
+**🟢 Future Planning**
+
+14. **Timeline for client payroll expansion** — How soon after internal payroll works do they want to start processing for clients?
+
+15. **Bank reconciliation** — How urgent is this vs payroll? Can it wait 2-3 months?
+
+16. **Direct deposit** — Any clients asking for this? Is it a near-term need or can it wait?
+
+### ✅ Already Decided (Don't need to ask)
+- ~~Keep QuickBooks?~~ → **No, replace entirely.**
+- ~~Module or standalone?~~ → **Standalone app (cornerstone-payroll).**
+- ~~Check stock type?~~ → **Pre-printed (company checks with bank info already on them). We print variable data as an overlay.**
 
 ---
 
@@ -576,11 +601,46 @@ end
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Tax calculation errors | Medium | High | Validate against manual calculations for all 4 employees. Cross-reference with IRS Pub 15-T. Build comprehensive test suite. |
-| Check formatting issues | Medium | Medium | Get sample checks from Cornerstone. Test on their actual printer. Iterate. |
+| Tax calculation errors | Medium | High | Validate against manual calculations for all 4 employees. Cross-reference with IRS Pub 15-T and Cornerstone's existing Excel spreadsheet. Build comprehensive test suite. |
+| Check alignment issues | Medium | Medium | Get sample pre-printed checks from Cornerstone. Build configurable positioning system with test print feature. Iterate on their actual printer. |
 | Scope creep into Phase 2/3 | High | Medium | Strictly ship Phase 1 for internal use first. Don't build multi-company until internal is proven. |
 | Tax table changes mid-year | Low | Medium | Store tax tables as data (not hardcoded). Easy to update when new tables are published. |
-| SSN security | Low | High | Encrypt at rest with Rails encrypted attributes. Limit access to admin role only. Never log SSNs. |
+| Sensitive data security | Low | High | Rails Active Record Encryption for SSNs and bank info (AES-256-GCM, same pattern as cornerstone-tax). Limit access via WorkOS RBAC. Never log sensitive fields. Audit trail for all payroll actions. |
+
+### Security Approach
+
+**Encryption at rest** using Rails Active Record Encryption (same pattern already proven in `cornerstone-tax`):
+```ruby
+class Employee < ApplicationRecord
+  encrypts :ssn
+  encrypts :bank_routing_number
+  encrypts :bank_account_number
+end
+```
+Requires `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY`, and `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` environment variables.
+
+**Access control** via WorkOS RBAC — admin, payroll_manager, and employee roles with different permission levels.
+
+**Audit logging** — all payroll actions (create, approve, commit, void) logged with user ID, timestamp, and action details. Immutable audit trail.
+
+### QuickBooks Decision
+
+**Goal: Fully replace QuickBooks.** Cornerstone wants off QuickBooks entirely — it's currently used for check printing and some reports/calculations. Our system must cover:
+1. ✅ Tax calculations (from Excel spreadsheet → our tax engine)
+2. ✅ Check printing (PDF overlay on pre-printed stock)
+3. ✅ Payroll reports (register, YTD, tax summaries)
+4. 🔮 Phase 3: Bank reconciliation (the last QB dependency)
+
+### Configurable Design Principles
+
+Holidays, pay schedules, and check templates should all be **configurable per company**, not hardcoded:
+- **Pay frequency:** Stored per company (biweekly default, but support weekly/semi-monthly/monthly)
+- **Pay day:** Configurable (e.g., "every other Friday")
+- **Holidays:** Company-level holiday calendar (Guam territorial holidays as defaults, editable)
+- **Check template:** Per-company field positioning for their specific pre-printed check stock
+- **Deduction types:** Per-company (already designed via `deduction_types` table)
+
+This future-proofs for Phase 2 (multi-company) without over-engineering Phase 1.
 
 ---
 
