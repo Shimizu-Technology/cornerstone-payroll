@@ -8,6 +8,108 @@
 
 ---
 
+## 0. Existing Codebase Audit — `leon-tax-calculator`
+
+**Repos:** `Shimizu-Technology/leon-tax-calculator` (Rails API) + `Shimizu-Technology/leon-tax-calculator-frontend` (React)
+**Built:** ~September 2024
+**Stack:** Rails 7.1 / Ruby 3.2.3 / PostgreSQL / React 18 (CRA)
+
+Leon previously built a working tax calculator and payroll system. Before building Cornerstone Payroll from scratch, we audited this codebase to determine what's reusable.
+
+### What Exists (and is reusable)
+
+**Tax Engine — `app/services/calculator.rb`** ✅ Port
+- Full federal withholding brackets for single, married, head of household
+- Social Security at 6.2%, Medicare at 1.45%
+- Clean, stateless calculation methods
+- *Needs:* Update to 2025/2026 bracket values
+
+**Payroll Calculators — `app/services/payroll_calculator.rb`** ✅ Port
+- Strategy pattern: `PayrollCalculator.for(employee, record)` dispatches to `HourlyPayrollCalculator` or `SalaryPayrollCalculator`
+- Handles: gross pay, OT (1.5×), tips, retirement, Roth, withholding, SS, Medicare, custom deductions, net pay
+- Calculation ordering: gross → retirement → Roth → withholding → SS → Medicare → totals → net
+- *Needs:* Pay period annualization (currently calculates per-record, not annualized)
+
+**Employee Model** ✅ Port (with modifications)
+- Filing status, pay rate, hourly/salary toggle, retirement + Roth rates
+- Department assignment, company association
+- YTD total calculation method (sums all payroll records for a year)
+- *Needs:* More fields (SSN, address, hire date, allowances, status, pay frequency)
+
+**Payroll Record Model** ✅ Port (rename to PayrollItem)
+- Hours, OT, tips, bonuses, all tax breakdowns, gross/net
+- Custom columns via JSONB for flexible deductions/additions
+- `before_save` callback that runs full calculation pipeline
+- YTD auto-update after save
+- *Needs:* Pay period association, check number, approval tracking
+
+**Multi-Company + Department Hierarchy** ✅ Port
+- Company → Department → Employee already built
+- Company-level and department-level YTD totals
+- Custom columns per company (flexible deduction/addition types)
+
+**Schema Design** ✅ Port (extend)
+- `employees`, `payroll_records`, `employee_ytd_totals`, `company_ytd_totals`, `department_ytd_totals`, `companies`, `departments`, `custom_columns`
+- Solid foundation — extend with `pay_periods`, `time_entries`, `deduction_types`, `tax_tables`
+
+### What's Missing (must build new)
+
+| Feature | Notes |
+|---------|-------|
+| **SS wage base cap** | No check for $176,100 (2025) ceiling — keeps withholding past the cap |
+| **Additional Medicare Tax** | No 0.9% surcharge on wages over $200K |
+| **Pay period concept** | No pay periods — records are individual, no grouping or approval workflow |
+| **Annualized withholding** | Tax brackets are applied to per-period gross, not annualized. Should annualize per IRS Pub 15-T method |
+| **Allowances (W-4GU)** | No allowance deduction before withholding calculation |
+| **Tax table as data** | Brackets are hardcoded in `calculator.rb`. Should be database-driven for easy updates |
+| **PDF generation** | No pay stubs or check PDFs (frontend has a `CheckComponent` but it's screen-only) |
+| **Approval workflow** | No draft → approved → committed flow |
+| **Time entry** | Hours entered directly on payroll record. No separate time tracking |
+| **Tests** | No test suite found |
+
+### What Must Be Rebuilt
+
+| Component | Why |
+|-----------|-----|
+| **Frontend (complete redo)** | CRA is deprecated. Plain CSS files. React 18. No Tailwind. No component library. Must rebuild with Vite + React 19 + Tailwind following starter-app playbook. |
+| **Auth** | Basic bcrypt/JWT. Replace with Clerk (consistent with all Shimizu Tech apps). |
+| **Rails version** | 7.1 → 8.x. New project, not an upgrade-in-place. |
+
+### Decision: Hybrid Approach
+
+**Don't start from scratch. Don't just upgrade in place.**
+
+1. **Create a new Rails 8 API project** using the Shimizu starter-app playbook (Clerk, PostgreSQL, proper test setup)
+2. **Port the business logic** — Calculator service, PayrollCalculator strategy pattern, model structures, YTD tracking
+3. **Extend the schema** — Add pay periods, time entries, tax tables, approval states, PDF generation
+4. **Fix the gaps** — SS wage base cap, Additional Medicare Tax, annualized withholding, allowances
+5. **Build new Vite + React 19 + Tailwind frontend** — Clean, modern, following the design guide
+
+This gives us proven tax math + modern infrastructure. Estimated effort saved by porting: **~40% of backend work** (the hardest 40% — tax calculations and payroll logic).
+
+---
+
+### Tech Stack Decision
+
+| Layer | Choice | Rationale |
+|-------|--------|-----------|
+| **Backend** | Rails 8 API | Complex CRUD, many models/relationships, service objects, callbacks — Rails' sweet spot. Leon + team know it. Existing code is Rails. |
+| **Frontend** | React 19 + Vite + Tailwind | Modern, fast, consistent with all Shimizu Tech projects. Replaces CRA. |
+| **Auth** | Clerk | Standard across all projects. Role-based access (admin, payroll manager, employee). |
+| **Database** | PostgreSQL | Already proven in existing app. JSONB for flexible deductions. |
+| **PDF Generation** | Prawn (Ruby gem) | Industry standard for programmatic PDF in Rails. Pay stubs + checks. |
+| **Check Printing** | Prawn + check_writer gem | `check_writer` for amount-to-words, Prawn for layout. |
+| **Deployment** | Render (API) + Netlify (frontend) | Standard Shimizu Tech deployment. |
+| **Testing** | RSpec + Playwright | Backend unit/integration + frontend E2E. Gate script required. |
+
+**Why not Go?** Go is excellent for stateless services (like Media Tools API). But payroll is a deeply relational, business-logic-heavy CRUD app — exactly where Rails shines. The existing Calculator service pattern (strategy + polymorphism) is natural in Ruby, verbose in Go.
+
+**Why not FastAPI?** Same reasoning. Python/FastAPI is great for AI projects (HåfaGPT, Håfa Recipes). Payroll doesn't benefit from Python's ecosystem — it benefits from Rails' model layer, migrations, and conventions.
+
+**Why not add to Cornerstone Tax?** Originally recommended in Section 8, but Leon created a **separate repo** (`cornerstone-payroll`). This is the right call — payroll has its own lifecycle, deployment needs, and may become a standalone SaaS product. Keep it clean.
+
+---
+
 ## 1. Problem Statement
 
 Cornerstone Tax Services currently processes payroll using a combination of Excel spreadsheets and QuickBooks. This workflow has significant pain points:
@@ -67,14 +169,14 @@ This is the core domain knowledge. Guam's tax system is defined by Section 31 of
 | Deduction | Rate | Wage Base | Notes |
 |-----------|------|-----------|-------|
 | **Guam Territorial Income Tax** | Federal brackets | No cap | Uses IRS Publication 15-T withholding tables. Filed with Guam Dept of Revenue & Taxation, NOT the IRS. |
-| **Social Security (OASDI)** | 6.2% | $168,600 (2025) | Same as federal. Stops withholding at wage base. |
+| **Social Security (OASDI)** | 6.2% | $176,100 (2025) | Same as federal. Stops withholding at wage base. |
 | **Medicare** | 1.45% | No cap | Additional 0.9% on wages over $200K (single) |
 
 ### Employer-Side Taxes
 
 | Tax | Rate | Wage Base | Notes |
 |-----|------|-----------|-------|
-| **Social Security (OASDI)** | 6.2% | $168,600 | Employer match |
+| **Social Security (OASDI)** | 6.2% | $176,100 | Employer match |
 | **Medicare** | 1.45% | No cap | Employer match (no additional 0.9%) |
 
 ### Key Simplification
@@ -190,26 +292,27 @@ Generate printable checks with:
 
 ## 6. Technical Architecture
 
-### Option A: Module in Cornerstone Tax (Recommended for Phase 1)
-Add payroll as a module within the existing Cornerstone Tax app:
-- **Backend:** Rails API (already exists at `cornerstone-tax/backend/`)
-- **Frontend:** React + Vite (already exists at `cornerstone-tax/frontend/`)
-- **Auth:** Clerk (already configured)
-- **Database:** PostgreSQL (already running)
+### Decision: Standalone App (Updated Feb 4)
 
-**Pros:** Shared auth, shared employee/client data, one deployment
-**Cons:** Larger monolith, payroll concerns mixed with tax prep
+**Standalone Rails 8 API + Vite React frontend**, in its own repo (`cornerstone-payroll`).
 
-### Option B: Standalone App
-Separate Rails API + React frontend, own database.
+- **Backend:** Rails 8 API (Ruby 3.3+), ported business logic from `leon-tax-calculator`
+- **Frontend:** React 19 + Vite + Tailwind CSS (new build, replaces CRA)
+- **Auth:** Clerk (standard across all Shimizu Tech apps)
+- **Database:** PostgreSQL
+- **PDF:** Prawn gem (pay stubs + checks)
+- **Deployment:** Render (API) + Netlify (frontend)
 
-**Pros:** Clean separation, independently deployable
-**Cons:** Duplicate auth, need to sync employee data, more infrastructure
+**Why standalone (not module in Cornerstone Tax)?**
+- Payroll has its own lifecycle — different release cadence than tax prep
+- May become a SaaS product for Guam businesses
+- Clean separation of concerns
+- Independent deployment and scaling
+- Employee data can sync via shared Clerk org or API later if needed
 
-### Recommendation
-**Start with Option A** (module in Cornerstone). The employee and client data already exists there. If payroll grows into its own SaaS product later, extract it then. Don't over-engineer upfront.
+See **Section 0 (Existing Codebase Audit)** for full tech stack rationale.
 
-### Database Schema (New Tables)
+### Database Schema
 
 ```
 pay_periods
@@ -325,7 +428,7 @@ The tax engine is a service class that:
 2. Computes annualized income from the pay period
 3. Applies federal/Guam withholding brackets (from IRS Pub 15-T)
 4. Calculates per-period withholding
-5. Handles Social Security wage base cap (stop withholding after $168,600 YTD)
+5. Handles Social Security wage base cap (stop withholding after $176,100 YTD)
 6. Handles Additional Medicare Tax threshold
 
 ```ruby
@@ -408,22 +511,23 @@ end
 
 ---
 
-## 8. Decision: Build as Module vs Standalone
+## 8. Decision: Standalone App (Updated Feb 4)
 
-**Decision: Build as a module in Cornerstone Tax (Option A)**
+**Decision: Build as a standalone app in `cornerstone-payroll` repo.**
 
 **Rationale:**
-- Cornerstone already has User model, Clerk auth, and client management
-- Employee data can be shared (tax prep needs the same info)
-- Single deployment, single database
-- If it grows into a SaaS product, extract later
-- For 4 employees, standalone infrastructure is overkill
+- Leon created a separate repo — signals intent for independent product
+- Payroll may become a SaaS product for Guam businesses (market gap confirmed)
+- Own lifecycle, deployment, and scaling needs
+- Existing `leon-tax-calculator` provides 40% of backend logic to port
+- Clean architecture from day one vs extracting later
 
 **Implementation:**
-- New models in the existing Rails app
-- New React pages/components in the existing frontend
-- Payroll-specific routes under `/payroll/`
-- Separate service classes for tax calculations
+- New Rails 8 API project (not added to cornerstone-tax)
+- Port models/services from leon-tax-calculator (see Section 0)
+- New Vite + React 19 + Tailwind frontend
+- Clerk auth, standard Shimizu Tech deployment (Render + Netlify)
+- Separate PostgreSQL database
 
 ---
 
