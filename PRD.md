@@ -95,8 +95,9 @@ This gives us proven tax math + modern infrastructure. Estimated effort saved by
 |-------|--------|-----------|
 | **Backend** | Rails 8 API | Complex CRUD, many models/relationships, service objects, callbacks — Rails' sweet spot. Leon + team know it. Existing code is Rails. |
 | **Frontend** | React 19 + Vite + Tailwind | Modern, fast, consistent with all Shimizu Tech projects. Replaces CRA. |
-| **Auth** | Clerk | Standard across all projects. Role-based access (admin, payroll manager, employee). |
+| **Auth** | WorkOS AuthKit | 1M MAU free, native Ruby SDK, RBAC built-in, MFA included. Better fit for B2B than Clerk. |
 | **Database** | PostgreSQL | Already proven in existing app. JSONB for flexible deductions. |
+| **File Storage** | Cloudflare R2 | S3-compatible, zero egress fees, 35% cheaper storage. Works with Rails ActiveStorage. |
 | **PDF Generation** | Prawn (Ruby gem) | Industry standard for programmatic PDF in Rails. Pay stubs + checks. |
 | **Check Printing** | Prawn + check_writer gem | `check_writer` for amount-to-words, Prawn for layout. |
 | **Deployment** | Render (API) + Netlify (frontend) | Standard Shimizu Tech deployment. |
@@ -107,6 +108,10 @@ This gives us proven tax math + modern infrastructure. Estimated effort saved by
 **Why not FastAPI?** Same reasoning. Python/FastAPI is great for AI projects (HåfaGPT, Håfa Recipes). Payroll doesn't benefit from Python's ecosystem — it benefits from Rails' model layer, migrations, and conventions.
 
 **Why not add to Cornerstone Tax?** Originally recommended in Section 8, but Leon created a **separate repo** (`cornerstone-payroll`). This is the right call — payroll has its own lifecycle, deployment needs, and may become a standalone SaaS product. Keep it clean.
+
+**Why WorkOS over Clerk?** Payroll is B2B with sensitive financial data. WorkOS gives us: (1) MFA included free — critical for payroll security, (2) native Ruby SDK vs Clerk's JWT-only approach, (3) RBAC built-in for admin/manager/employee roles, (4) 1M free MAU vs 10K, (5) SSO/SAML ready if Cornerstone sells to enterprise clients. Clerk stays the standard for consumer-facing apps (Hafaloha, HafaPass) where embedded React components matter.
+
+**Why Cloudflare R2 over S3?** Zero egress fees (pay stubs get downloaded frequently), 35% cheaper storage, S3-compatible API (Rails ActiveStorage works with a config change). Leon already has a Cloudflare account (tunnels). First project to use R2 — if it works well, migrate other projects over time.
 
 ---
 
@@ -298,7 +303,7 @@ Generate printable checks with:
 
 - **Backend:** Rails 8 API (Ruby 3.3+), ported business logic from `leon-tax-calculator`
 - **Frontend:** React 19 + Vite + Tailwind CSS (new build, replaces CRA)
-- **Auth:** Clerk (standard across all Shimizu Tech apps)
+- **Auth:** WorkOS AuthKit (1M MAU free, native Ruby SDK, RBAC + MFA included)
 - **Database:** PostgreSQL
 - **PDF:** Prawn gem (pay stubs + checks)
 - **Deployment:** Render (API) + Netlify (frontend)
@@ -526,8 +531,8 @@ end
 - New Rails 8 API project (not added to cornerstone-tax)
 - Port models/services from leon-tax-calculator (see Section 0)
 - New Vite + React 19 + Tailwind frontend
-- Clerk auth, standard Shimizu Tech deployment (Render + Netlify)
-- Separate PostgreSQL database
+- WorkOS AuthKit for auth (RBAC + MFA), Cloudflare R2 for file storage
+- Standard Shimizu Tech deployment (Render + Netlify), separate PostgreSQL database
 
 ---
 
