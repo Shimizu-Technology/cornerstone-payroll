@@ -429,15 +429,37 @@ end
 
 ## 9. Open Questions
 
-1. **Check stock format** — What check stock does Cornerstone currently use? Pre-printed or blank? What size? (Standard 8.5"×11" with 3-per-page, or individual checks?)
-2. **Deductions** — What deductions do they currently withhold beyond taxes? Health insurance? Retirement? Garnishments?
-3. **Overtime policy** — Straight federal FLSA (>40 hrs/week = 1.5×), or any Guam-specific rules?
-4. **Holiday schedule** — Which holidays are paid? Guam has some unique territorial holidays (e.g., Discovery Day, Liberation Day).
-5. **PTO/Sick policy** — Does Cornerstone track PTO/sick time? Need to incorporate that?
-6. **Existing employee data** — Are the 4 employees already in the Cornerstone app as users?
-7. **Tax table source** — Where does Cornerstone currently get their withholding tables? Guam Dept of Rev & Tax publishes them?
-8. **Multi-company timeline** — When do they want to start processing client payroll? That affects Phase 2 urgency.
-9. **Build in Cornerstone Tax or this standalone repo?** — PRD recommends as a module in cornerstone-tax, but this repo exists if standalone is preferred.
+### 📋 Questions for Cornerstone Meeting (Feb 5, 2026)
+
+**Current Workflow (Must Understand First)**
+
+1. **Get a copy of the master payroll spreadsheet** — The one with multiple tabs that calculates FIT, Social Security, Medicare, etc. from hours. This is the source of truth for how they do it today, and we'll use the formulas to validate our tax calculator.
+2. **How do hours get from the spreadsheet to checks?** — Is someone re-typing calculated amounts into QuickBooks? Is there a copy/paste step? An export? Understanding this handoff point tells us exactly what friction to eliminate.
+3. **Do they want to keep QuickBooks for anything?** — Or are they happy to drop it entirely once payroll + check printing works in the new system? If they use QB for other accounting, we need to know what stays.
+
+**Check Printing**
+
+4. **What check stock do they use?** — Brand, size, format? Standard 8.5"×11" with 3-per-page? Single checks? Pre-printed (bank info already on it) or blank stock?
+5. **What printer do they print checks on?** — Standard laser? MICR toner? This affects how we format the PDF output.
+
+**Payroll Details**
+
+6. **What deductions beyond taxes?** — Health insurance? Retirement/401k? Garnishments? Any pre-tax vs post-tax distinctions they track?
+7. **Overtime policy** — Straight federal FLSA (>40 hrs/week = 1.5×), or any Guam-specific rules they follow?
+8. **Holiday schedule** — Which holidays are paid? Guam has unique territorial holidays (Discovery Day, Liberation Day, etc.). Do employees get holiday pay automatically?
+9. **PTO/Sick policy** — Does Cornerstone track PTO/sick time? Accrual rates? Need to incorporate that into the system?
+
+**Data & System**
+
+10. **Existing employee data** — Are the 4 employees already in the Cornerstone Tax app as users? Can we reuse that data or do we need to enter it fresh?
+11. **Tax table source** — Where do they currently get their withholding tables/formulas? Guam Dept of Rev & Tax? IRS publications? CPA knowledge?
+12. **Pay stub requirements** — Do they currently give employees pay stubs? What info do employees expect to see? Any specific format they're used to?
+
+**Future / Scope**
+
+13. **Multi-company timeline** — When do they want to start processing payroll for their tax clients? That affects Phase 2 urgency.
+14. **Bank reconciliation priority** — How urgent is the bank reconciliation feature vs payroll? Can it wait until Phase 3?
+15. **Build in Cornerstone Tax or standalone?** — PRD recommends as a module in cornerstone-tax, but this repo exists if standalone is preferred. Leon to decide.
 
 ---
 
