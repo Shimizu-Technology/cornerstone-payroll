@@ -73,14 +73,14 @@ Leon previously built a working tax calculator and payroll system. Before buildi
 | Component | Why |
 |-----------|-----|
 | **Frontend (complete redo)** | CRA is deprecated. Plain CSS files. React 18. No Tailwind. No component library. Must rebuild with Vite + React 19 + Tailwind following starter-app playbook. |
-| **Auth** | Basic bcrypt/JWT. Replace with Clerk (consistent with all Shimizu Tech apps). |
+| **Auth** | Basic bcrypt/JWT. Replace with WorkOS AuthKit (MFA + RBAC for payroll security). |
 | **Rails version** | 7.1 → 8.x. New project, not an upgrade-in-place. |
 
 ### Decision: Hybrid Approach
 
 **Don't start from scratch. Don't just upgrade in place.**
 
-1. **Create a new Rails 8 API project** using the Shimizu starter-app playbook (Clerk, PostgreSQL, proper test setup)
+1. **Create a new Rails 8 API project** using the Shimizu starter-app playbook (WorkOS, PostgreSQL, proper test setup)
 2. **Port the business logic** — Calculator service, PayrollCalculator strategy pattern, model structures, YTD tracking
 3. **Extend the schema** — Add pay periods, time entries, tax tables, approval states, PDF generation
 4. **Fix the gaps** — SS wage base cap, Additional Medicare Tax, annualized withholding, allowances
@@ -456,7 +456,7 @@ Each pay stub includes:
 - May become a SaaS product for Guam businesses
 - Clean separation of concerns
 - Independent deployment and scaling
-- Employee data can sync via shared Clerk org or API later if needed
+- Employee data can sync via shared WorkOS org or API later if needed
 
 See **Section 0 (Existing Codebase Audit)** for full tech stack rationale.
 
