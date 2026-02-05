@@ -1,0 +1,160 @@
+---
+description: Rails API Patterns
+globs: ["**/*.rb"]
+---
+
+# Rails API Patterns
+
+## Controller Structure
+```ruby
+# frozen_string_literal: true
+
+module Api
+  module V1
+    module Admin
+      class EmployeesController < ApplicationController
+        before_action :set_employee, only: [:show, :update, :destroy]
+
+        def index
+          employees = Employee.where(company_id: params[:company_id])
+          employees = apply_filters(employees)
+          employees = employees.page(params[:page]).per(params[:per_page] || 25)
+
+          render json: {
+            data: employees.map { |e| serialize_employee(e) },
+            meta: pagination_meta(employees)
+          }
+        end
+
+        def show
+          render json: { data: serialize_employee(@employee) }
+        end
+
+        def create
+          employee = Employee.new(employee_params)
+          
+          if employee.save
+            render json: { data: serialize_employee(employee) }, status: :created
+          else
+            render json: { error: 'Validation failed', details: employee.errors }, 
+                   status: :unprocessable_entity
+          end
+        end
+
+        def update
+          if @employee.update(employee_params)
+            render json: { data: serialize_employee(@employee) }
+          else
+            render json: { error: 'Validation failed', details: @employee.errors },
+                   status: :unprocessable_entity
+          end
+        end
+
+        def destroy
+          # Soft delete - set terminated_at
+          @employee.update(status: 'terminated', termination_date: Date.current)
+          head :no_content
+        end
+
+        private
+
+        def set_employee
+          @employee = Employee.find(params[:id])
+        end
+
+        def employee_params
+          params.require(:employee).permit(
+            :first_name, :last_name, :email, :ssn_encrypted,
+            :date_of_birth, :hire_date, :department_id, :job_title,
+            :employment_type, :pay_rate, :pay_type,
+            :filing_status, :allowances
+          )
+        end
+
+        def apply_filters(scope)
+          scope = scope.where(department_id: params[:department_id]) if params[:department_id].present?
+          scope = scope.where(status: params[:status]) if params[:status].present?
+          scope = scope.where('first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q', 
+                              q: "%#{params[:search]}%") if params[:search].present?
+          scope
+        end
+
+        def pagination_meta(collection)
+          {
+            current_page: collection.current_page,
+            total_pages: collection.total_pages,
+            total_count: collection.total_count,
+            per_page: collection.limit_value
+          }
+        end
+
+        def serialize_employee(employee)
+          # Never expose full SSN - only last 4 digits
+          employee.as_json(except: [:ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted])
+                  .merge(ssn_last_four: employee.ssn_encrypted&.last(4))
+        end
+      end
+    end
+  end
+end
+```
+
+## Service Object Pattern
+```ruby
+# app/services/employee_termination_service.rb
+class EmployeeTerminationService
+  def initialize(employee, terminated_at: Date.current)
+    @employee = employee
+    @terminated_at = terminated_at
+  end
+
+  def call
+    ActiveRecord::Base.transaction do
+      @employee.update!(
+        status: 'terminated',
+        termination_date: @terminated_at
+      )
+      # Additional cleanup logic here
+    end
+    
+    Result.success(@employee)
+  rescue ActiveRecord::RecordInvalid => e
+    Result.failure(e.message)
+  end
+end
+```
+
+## Model Patterns
+```ruby
+# Scopes for filtering
+scope :active, -> { where(status: 'active') }
+scope :by_department, ->(dept_id) { where(department_id: dept_id) }
+scope :search, ->(query) { 
+  where('first_name ILIKE :q OR last_name ILIKE :q', q: "%#{query}%") 
+}
+
+# Always use decimal for money
+validates :pay_rate, numericality: { greater_than_or_equal_to: 0 }
+```
+
+## Response Formats
+```ruby
+# Success with data
+render json: { data: resource }
+
+# Success with pagination
+render json: { data: resources, meta: { current_page: 1, total_pages: 5 } }
+
+# Created
+render json: { data: resource }, status: :created
+
+# Validation error
+render json: { error: 'Validation failed', details: resource.errors }, 
+       status: :unprocessable_entity
+
+# Not found
+render json: { error: 'Not found' }, status: :not_found
+
+# No content (for deletes)
+head :no_content
+```

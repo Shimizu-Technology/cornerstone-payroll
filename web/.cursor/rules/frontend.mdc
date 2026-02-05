@@ -1,0 +1,157 @@
+---
+description: React/Tailwind Patterns
+globs: ["**/*.tsx", "**/*.ts"]
+---
+
+# React & Tailwind Patterns
+
+## Component Structure
+```typescript
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { UserPlus } from 'lucide-react';
+
+interface Props {
+  title: string;
+  onAction?: () => void;
+}
+
+export function MyComponent({ title, onAction }: Props): JSX.Element {
+  const [isLoading, setIsLoading] = useState(false);
+
+  return (
+    <div className="p-6">
+      <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+      <Button onClick={onAction} disabled={isLoading}>
+        <UserPlus className="w-4 h-4 mr-2" />
+        Add User
+      </Button>
+    </div>
+  );
+}
+```
+
+## Spacing (8px Grid)
+```typescript
+// Use Tailwind spacing that follows 8px grid
+// p-2 = 8px, p-4 = 16px, p-6 = 24px, p-8 = 32px
+<div className="p-6 space-y-4">
+  <Card className="p-4">...</Card>
+</div>
+```
+
+## Icons (Lucide Only)
+```typescript
+// NO EMOJIS! Use lucide-react icons
+import { 
+  Plus, 
+  Search, 
+  Edit, 
+  Trash2, 
+  ChevronLeft,
+  ChevronRight,
+  User,
+  Building,
+  DollarSign,
+  Calendar 
+} from 'lucide-react';
+
+<Button>
+  <Plus className="w-4 h-4 mr-2" />
+  Add Employee
+</Button>
+```
+
+## Form Inputs
+```typescript
+<div className="space-y-4">
+  <div>
+    <label className="block text-sm font-medium text-gray-700 mb-1">
+      First Name
+    </label>
+    <Input
+      value={form.first_name}
+      onChange={(e) => setForm({ ...form, first_name: e.target.value })}
+      error={errors.first_name}
+      required
+    />
+    {errors.first_name && (
+      <p className="mt-1 text-sm text-red-600">{errors.first_name}</p>
+    )}
+  </div>
+</div>
+```
+
+## Responsive Design
+```typescript
+// Mobile-first: base styles for mobile, then add breakpoints
+<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+  ...
+</div>
+
+<div className="px-4 md:px-6 lg:px-8">
+  ...
+</div>
+```
+
+## Loading States
+```typescript
+{isLoading ? (
+  <div className="flex items-center justify-center py-12">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+  </div>
+) : (
+  <Table>...</Table>
+)}
+```
+
+## Empty States
+```typescript
+{employees.length === 0 && (
+  <div className="text-center py-12">
+    <User className="mx-auto h-12 w-12 text-gray-400" />
+    <h3 className="mt-2 text-sm font-medium text-gray-900">No employees</h3>
+    <p className="mt-1 text-sm text-gray-500">
+      Get started by adding your first employee.
+    </p>
+    <div className="mt-6">
+      <Button onClick={() => navigate('/employees/new')}>
+        <Plus className="w-4 h-4 mr-2" />
+        Add Employee
+      </Button>
+    </div>
+  </div>
+)}
+```
+
+## Color System
+```typescript
+// Brand colors defined in index.css @theme
+// Primary: Blue (primary-50 to primary-950)
+// Success: Green (success-50, success-500, etc.)
+// Warning: Yellow
+// Danger: Red
+
+// Usage:
+<Button className="bg-primary-600 hover:bg-primary-700">Save</Button>
+<Badge variant="success">Active</Badge>
+<span className="text-danger-600">Error message</span>
+```
+
+## API Error Handling
+```typescript
+try {
+  await employeesApi.create(formData);
+  navigate('/employees');
+} catch (error) {
+  if (error instanceof ApiError) {
+    if (error.details) {
+      // Field-level errors
+      setErrors(error.details);
+    } else {
+      // General error
+      setError(error.message);
+    }
+  }
+}
+```
