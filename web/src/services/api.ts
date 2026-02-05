@@ -379,6 +379,30 @@ export const reportsApi = {
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
 };
 
+// Pay Stubs (Admin API)
+export interface PayStubInfo {
+  payroll_item_id: number;
+  employee_name: string;
+  pay_period?: string;
+  pay_date: string;
+  net_pay: number;
+  generated?: boolean;
+  storage_key?: string;
+}
+
+export const payStubsApi = {
+  get: (payrollItemId: number) =>
+    api.get<{ pay_stub: PayStubInfo }>(`/admin/pay_stubs/${payrollItemId}`),
+  generate: (payrollItemId: number) =>
+    api.post<{ pay_stub: PayStubInfo }>(`/admin/pay_stubs/${payrollItemId}/generate`),
+  downloadUrl: (payrollItemId: number) =>
+    `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'}/admin/pay_stubs/${payrollItemId}/download`,
+  batchGenerate: (payPeriodId: number) =>
+    api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
+  employeeStubs: (employeeId: number, limit?: number) =>
+    api.get<{ employee: { id: number; name: string }; pay_stubs: PayStubInfo[] }>(`/admin/pay_stubs/employee/${employeeId}`, { limit }),
+};
+
 // Legacy dashboard (for migration)
 export const dashboardApi = {
   stats: (companyId: number) => api.get<DashboardStats>(`/companies/${companyId}/dashboard`),
