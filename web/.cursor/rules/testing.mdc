@@ -1,0 +1,27 @@
+---
+description: Testing Rules for Cornerstone Payroll Web
+alwaysApply: true
+---
+
+# Frontend Testing Standards
+
+## Quality Gates
+Before committing, ensure:
+1. `npx tsc --noEmit` - No TypeScript errors
+2. `npx eslint src` - No lint errors
+3. `npm run build` - Successful production build
+
+## TypeScript Strict Mode
+- No `any` types
+- Explicit function return types
+- Strict null checks enabled
+
+## Component Testing Approach
+- Test user interactions, not implementation
+- Test form validation states
+- Test loading/error/empty states
+
+## ESLint Rules
+- React hooks rules enforced
+- No unused variables
+- Consistent import ordering

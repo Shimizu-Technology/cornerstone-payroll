@@ -1,0 +1,86 @@
+---
+description: Testing Rules for Cornerstone Payroll API
+alwaysApply: true
+---
+
+# Testing Standards
+
+## Testing Pyramid
+1. **Request specs** (70%) - Test full HTTP cycle, most bugs caught here
+2. **Service specs** (20%) - Complex business logic
+3. **Model specs** (10%) - Validations and scopes only
+
+## Write Tests First
+Always write the failing spec before implementing the feature.
+
+## Request Spec Pattern
+```ruby
+# spec/requests/api/v1/admin/employees_spec.rb
+require 'rails_helper'
+
+RSpec.describe 'Api::V1::Admin::Employees', type: :request do
+  let(:company) { create(:company) }
+  let(:department) { create(:department, company: company) }
+
+  describe 'GET /api/v1/admin/employees' do
+    it 'returns paginated employees' do
+      create_list(:employee, 3, company: company)
+      
+      get '/api/v1/admin/employees', params: { company_id: company.id }
+      
+      expect(response).to have_http_status(:ok)
+      json = JSON.parse(response.body)
+      expect(json['data'].length).to eq(3)
+      expect(json['meta']).to include('total_count', 'current_page')
+    end
+  end
+
+  describe 'POST /api/v1/admin/employees' do
+    let(:valid_params) do
+      {
+        employee: {
+          first_name: 'John',
+          last_name: 'Doe',
+          email: 'john@example.com',
+          hire_date: '2024-01-15',
+          employment_type: 'hourly',
+          pay_rate: 15.00,
+          company_id: company.id
+        }
+      }
+    end
+
+    it 'creates an employee' do
+      expect {
+        post '/api/v1/admin/employees', params: valid_params
+      }.to change(Employee, :count).by(1)
+      
+      expect(response).to have_http_status(:created)
+    end
+  end
+end
+```
+
+## Factory Guidelines
+- Keep factories minimal, use traits for variations
+- Never use `create` in `let` unless needed - prefer `build`
+- Use `create_list` for multiple records
+
+## Common Assertions
+```ruby
+expect(response).to have_http_status(:ok)
+expect(response).to have_http_status(:created)
+expect(response).to have_http_status(:unprocessable_entity)
+expect(response).to have_http_status(:not_found)
+
+json = JSON.parse(response.body)
+expect(json['data']).to be_an(Array)
+expect(json['error']).to eq('Not found')
+```
+
+## Running Tests
+```bash
+bundle exec rspec                    # All tests
+bundle exec rspec spec/requests      # Request specs only
+bundle exec rspec spec/requests/api/v1/admin/employees_spec.rb:15  # Single test
+```

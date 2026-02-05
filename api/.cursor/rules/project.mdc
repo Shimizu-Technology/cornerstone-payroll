@@ -1,0 +1,54 @@
+---
+description: Cornerstone Payroll API - Project Context
+alwaysApply: true
+---
+
+# Cornerstone Payroll API
+
+## Overview
+Rails 8 API-only backend for Cornerstone Payroll, a payroll management system designed for small businesses in Guam.
+
+## Tech Stack
+- Ruby 3.3+, Rails 8 API-only mode
+- PostgreSQL with Active Record Encryption
+- RSpec for testing, FactoryBot for test data
+- Rubocop for linting, Brakeman for security
+- WorkOS for authentication (future integration)
+
+## Key Models
+- Company: Multi-tenant anchor
+- Employee: Workers with pay rates, tax info, encrypted SSN
+- Department: Organizational grouping
+- PayPeriod: Biweekly/weekly/monthly pay cycles
+- PayrollItem: Per-employee payroll calculations
+- TaxTable: Guam territorial tax brackets
+
+## Guiding Principles
+1. **Security first** - SSN/bank info encrypted, never exposed in responses
+2. **Test-driven** - Write specs first, 70% of bugs caught in request specs
+3. **Thin controllers** - Logic in service objects when complex
+4. **Soft deletes** - Use `terminated_at` or `active` flag, not hard deletes
+5. **Decimal precision** - Use `decimal` for money, never `float`
+
+## API Namespace
+All admin endpoints under `Api::V1::Admin` prefix:
+- `/api/v1/admin/employees`
+- `/api/v1/admin/departments`
+- `/api/v1/admin/pay_periods`
+
+## Common Patterns
+```ruby
+# Controller response format
+render json: { data: @employees, meta: pagination_meta }
+
+# Error responses
+render json: { error: message, details: errors }, status: :unprocessable_entity
+
+# Pagination params
+params.permit(:page, :per_page, :search, :department_id, :status)
+```
+
+## Encrypted Fields
+- `Employee#ssn_encrypted` - Show only last 4 digits in responses
+- `Employee#bank_account_number_encrypted`
+- `Employee#bank_routing_number_encrypted`
