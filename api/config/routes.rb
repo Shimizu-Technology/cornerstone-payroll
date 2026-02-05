@@ -25,6 +25,13 @@ Rails.application.routes.draw do
             end
           end
         end
+
+        # Reports
+        get "reports/dashboard", to: "reports#dashboard"
+        get "reports/payroll_register", to: "reports#payroll_register"
+        get "reports/employee_pay_history", to: "reports#employee_pay_history"
+        get "reports/tax_summary", to: "reports#tax_summary"
+        get "reports/ytd_summary", to: "reports#ytd_summary"
       end
     end
   end

@@ -1,32 +1,23 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Header } from '@/components/layout/Header';
-import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, payPeriodStatusConfig } from '@/lib/utils';
+import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
 
-// Placeholder data - will be replaced with API calls
-const stats = {
-  totalEmployees: 4,
-  activeEmployees: 4,
-  currentPayPeriod: {
-    id: 1,
-    start_date: '2026-01-20',
-    end_date: '2026-02-02',
-    pay_date: '2026-02-06',
-    status: 'draft' as PayPeriodStatus,
-  },
-  lastPayrollTotal: 12450.00,
-  ytdPayrollTotal: 24900.00,
-  pendingApprovals: 0,
-};
-
-function StatCard({ title, value, subtitle }: { title: string; value: string | number; subtitle?: string }) {
+function StatCard({ title, value, subtitle, loading }: { title: string; value: string | number; subtitle?: string; loading?: boolean }) {
   return (
     <Card>
       <CardContent className="pt-6">
         <p className="text-sm font-medium text-gray-500">{title}</p>
-        <p className="mt-2 text-3xl font-semibold text-gray-900">{value}</p>
+        {loading ? (
+          <div className="mt-2 h-9 bg-gray-100 animate-pulse rounded" />
+        ) : (
+          <p className="mt-2 text-3xl font-semibold text-gray-900">{value}</p>
+        )}
         {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
       </CardContent>
     </Card>
@@ -34,7 +25,29 @@ function StatCard({ title, value, subtitle }: { title: string; value: string | n
 }
 
 export function Dashboard() {
-  const statusConfig = payPeriodStatusConfig[stats.currentPayPeriod.status];
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardResponse['stats'] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  const loadDashboard = async () => {
+    try {
+      setLoading(true);
+      const response = await reportsApi.dashboard();
+      setStats(response.stats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const currentPayPeriod = stats?.current_pay_period;
+  const statusConfig = currentPayPeriod ? payPeriodStatusConfig[currentPayPeriod.status as PayPeriodStatus] : null;
 
   return (
     <div>
@@ -42,29 +55,40 @@ export function Dashboard() {
         title="Dashboard"
         description="Overview of your payroll operations"
         actions={
-          <Button>Run Payroll</Button>
+          <Button onClick={() => navigate('/pay-periods')}>Manage Pay Periods</Button>
         }
       />
 
       <div className="p-8">
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+            {error}
+          </div>
+        )}
+
         {/* Stats Grid */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Active Employees"
-            value={stats.activeEmployees}
-            subtitle={`${stats.totalEmployees} total`}
+            value={stats?.active_employees ?? 0}
+            subtitle={`${stats?.total_employees ?? 0} total`}
+            loading={loading}
           />
           <StatCard
             title="Last Payroll"
-            value={formatCurrency(stats.lastPayrollTotal)}
+            value={stats?.recent_payrolls?.[0] ? formatCurrency(stats.recent_payrolls[0].total_net) : '$0.00'}
+            loading={loading}
           />
           <StatCard
             title="YTD Payroll"
-            value={formatCurrency(stats.ytdPayrollTotal)}
+            value={stats?.ytd_totals ? formatCurrency(stats.ytd_totals.net_pay) : '$0.00'}
+            subtitle={stats?.ytd_totals ? `${stats.ytd_totals.payroll_count} pay periods` : undefined}
+            loading={loading}
           />
           <StatCard
-            title="Pending Approvals"
-            value={stats.pendingApprovals}
+            title="YTD Gross"
+            value={stats?.ytd_totals ? formatCurrency(stats.ytd_totals.gross_pay) : '$0.00'}
+            loading={loading}
           />
         </div>
 
@@ -73,44 +97,97 @@ export function Dashboard() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Current Pay Period</CardTitle>
-              <Badge
-                variant={
-                  stats.currentPayPeriod.status === 'committed' ? 'success' :
-                  stats.currentPayPeriod.status === 'approved' ? 'info' :
-                  stats.currentPayPeriod.status === 'calculated' ? 'warning' :
-                  'default'
-                }
-              >
-                {statusConfig.label}
-              </Badge>
+              {currentPayPeriod && statusConfig && (
+                <Badge
+                  variant={
+                    currentPayPeriod.status === 'committed' ? 'success' :
+                    currentPayPeriod.status === 'approved' ? 'info' :
+                    currentPayPeriod.status === 'calculated' ? 'warning' :
+                    'default'
+                  }
+                >
+                  {statusConfig.label}
+                </Badge>
+              )}
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-lg font-medium text-gray-900">
-                  {formatDateRange(stats.currentPayPeriod.start_date, stats.currentPayPeriod.end_date)}
-                </p>
-                <p className="text-sm text-gray-500">
-                  Pay date: {new Date(stats.currentPayPeriod.pay_date).toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                  })}
-                </p>
+            {loading ? (
+              <div className="h-16 bg-gray-100 animate-pulse rounded" />
+            ) : currentPayPeriod ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-lg font-medium text-gray-900">
+                    {currentPayPeriod.period_description}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Pay date: {new Date(currentPayPeriod.pay_date).toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {currentPayPeriod.employee_count} employees • {formatCurrency(currentPayPeriod.total_gross)} gross • {formatCurrency(currentPayPeriod.total_net)} net
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <Button variant="outline" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>
+                    View Details
+                  </Button>
+                  {currentPayPeriod.status === 'draft' && (
+                    <Button onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>
+                      Process Payroll
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-3">
-                <Button variant="outline">View Details</Button>
-                <Button>Process Payroll</Button>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-gray-500">No active pay period</p>
+                <Button className="mt-4" onClick={() => navigate('/pay-periods')}>
+                  Create Pay Period
+                </Button>
               </div>
-            </div>
+            )}
           </CardContent>
         </Card>
 
+        {/* Recent Payrolls */}
+        {stats?.recent_payrolls && stats.recent_payrolls.length > 0 && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>Recent Payrolls</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {stats.recent_payrolls.map((payroll) => (
+                  <div
+                    key={payroll.id}
+                    className="flex items-center justify-between py-2 border-b last:border-0 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded"
+                    onClick={() => navigate(`/pay-periods/${payroll.id}`)}
+                  >
+                    <div>
+                      <p className="font-medium text-gray-900">{payroll.period_description}</p>
+                      <p className="text-sm text-gray-500">
+                        {new Date(payroll.pay_date).toLocaleDateString()} • {payroll.employee_count} employees
+                      </p>
+                    </div>
+                    <p className="font-semibold text-green-600">{formatCurrency(payroll.total_net)}</p>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Quick Actions */}
         <div className="mt-8 grid gap-6 md:grid-cols-3">
-          <Card className="cursor-pointer hover:border-primary-300 transition-colors">
+          <Card
+            className="cursor-pointer hover:border-primary-300 transition-colors"
+            onClick={() => navigate('/employees/new')}
+          >
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-primary-100 rounded-lg">
@@ -126,7 +203,10 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:border-primary-300 transition-colors">
+          <Card
+            className="cursor-pointer hover:border-primary-300 transition-colors"
+            onClick={() => navigate('/pay-periods')}
+          >
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-green-100 rounded-lg">
@@ -142,7 +222,10 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:border-primary-300 transition-colors">
+          <Card
+            className="cursor-pointer hover:border-primary-300 transition-colors"
+            onClick={() => navigate('/reports')}
+          >
             <CardContent className="pt-6">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-purple-100 rounded-lg">
@@ -158,6 +241,35 @@ export function Dashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* YTD Tax Summary */}
+        {stats?.ytd_totals && stats.ytd_totals.gross_pay > 0 && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>{stats.ytd_totals.year} Year-to-Date Summary</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">Gross Pay</p>
+                  <p className="text-lg font-medium">{formatCurrency(stats.ytd_totals.gross_pay)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Withholding Tax</p>
+                  <p className="text-lg font-medium text-red-600">{formatCurrency(stats.ytd_totals.withholding_tax)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Social Security</p>
+                  <p className="text-lg font-medium text-red-600">{formatCurrency(stats.ytd_totals.social_security_tax)}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Medicare</p>
+                  <p className="text-lg font-medium text-red-600">{formatCurrency(stats.ytd_totals.medicare_tax)}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
