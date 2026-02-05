@@ -5,6 +5,7 @@
 **Author:** Jerry (drafted), Leon Shimizu (review)
 **Status:** Draft
 **Created:** 2026-02-04
+**Updated:** 2026-02-05 (TaxBusiness deep dive)
 
 ---
 
@@ -112,6 +113,140 @@ This gives us proven tax math + modern infrastructure. Estimated effort saved by
 **Why WorkOS over Clerk?** Payroll is B2B with sensitive financial data. WorkOS gives us: (1) MFA included free — critical for payroll security, (2) native Ruby SDK vs Clerk's JWT-only approach, (3) RBAC built-in for admin/manager/employee roles, (4) 1M free MAU vs 10K, (5) SSO/SAML ready if Cornerstone sells to enterprise clients. Clerk stays the standard for consumer-facing apps (Hafaloha, HafaPass) where embedded React components matter.
 
 **Why Cloudflare R2 over S3?** Zero egress fees (pay stubs get downloaded frequently), 35% cheaper storage, S3-compatible API (Rails ActiveStorage works with a config change). Leon already has a Cloudflare account (tunnels). First project to use R2 — if it works well, migrate other projects over time.
+
+---
+
+## 0.2 TaxBusiness Folder Deep Dive (Feb 5, 2026)
+
+Located at `/Users/jerry/shimizu-technology/TaxBusiness/`, this folder contains **real payroll data, working code, and test assets** that significantly reduce build effort.
+
+### Folder Structure
+
+| Path | Purpose | Reusable? |
+|------|---------|-----------|
+| `payroll-backend/` | Rails 7.2 API (leon-tax-calculator) | ✅ Port services + models |
+| `payroll-frontend/` | React + Vite + Tailwind UI | ✅ Reference for components |
+| `tax-calculator/` | Older Rails version | Reference only |
+| `test_uploads/` | MoSa's real payroll data | ✅ Test data |
+| `Sample_Check.png` | Pay stub format template | ✅ PDF spec |
+| `QuickBooks Class/` | Training materials (74MB PDF + 33GB video) | Reference |
+
+### test_uploads/ — Real MoSa's Payroll Data
+
+**Data Flow:**
+```
+Revel POS (hours) → LoansAndTips.xlsx (tips/loans) → Master_Payroll_File.xlsx
+```
+
+| File | Contents |
+|------|----------|
+| `Revel.xlsx` | POS export: `full_name`, `hours_worked`, `overtime_hours`, `regular_pay`, `overtime_pay` |
+| `LoansAndTips.xlsx` | 5 sheets: TIPS-BOH, TIPS-FOH, LOANS, SUMMARY — with SUMIF formulas |
+| `MosasEmployees-Correct.xlsx` | Employee master: name, department, pay_rate, retirement_rate, filing_status |
+| `Mosas_Payroll_PD_082924.xlsx` | Single pay period (Aug 12-25, 2024) |
+| `Master_Payroll_File (1).xlsx` | Aggregated payroll data |
+
+**Key Insights:**
+- ~50 employees at MoSa's (restaurant)
+- Tips split by BOH (Back of House/kitchen) vs FOH (Front of House/servers)
+- Departments: Kitchen, Joint, Salary, Hourly Maintenance
+- Filing statuses: mostly `single`, some `head_of_household`
+- Pay rates: $9.25 - $19.00/hour
+- Some employees have retirement (4-10%), most have 0%
+- Loan tracking with payment notes
+
+### Calculator.rb — Biweekly Tax Tables Already Built
+
+The existing `calculator.rb` has **IRS Pub 15-T biweekly withholding tables**:
+
+```ruby
+TAX_TABLES = {
+  single: [
+    { min_income: 0, max_income: 561.99, base_tax: 0.00, rate: 0.00, threshold: 0 },
+    { min_income: 562, max_income: 1007.99, base_tax: 0.00, rate: 0.10, threshold: 562 },
+    { min_income: 1008, max_income: 2374.99, base_tax: 44.60, rate: 0.12, threshold: 1008 },
+    { min_income: 2375, max_income: 4427.99, base_tax: 208.64, rate: 0.22, threshold: 2375 },
+    { min_income: 4428, max_income: 7943.99, base_tax: 660.30, rate: 0.24, threshold: 4428 },
+    { min_income: 7944, max_income: 9935.99, base_tax: 1504.14, rate: 0.32, threshold: 7944 },
+    { min_income: 9936, max_income: 23997.99, base_tax: 2141.58, rate: 0.35, threshold: 9936 },
+    { min_income: 23998, max_income: Float::INFINITY, base_tax: 7063.28, rate: 0.37, threshold: 23998 }
+  ],
+  married: [...],  // Similar structure
+  head_of_household: [...]  // Similar structure
+}
+```
+
+**These are per-pay-period brackets (not annual)** — exactly what we need for biweekly payroll.
+
+### Pay Stub Format (from Sample_Check.png)
+
+**TOP — Check Portion:**
+- Payee name (left), Amount numeric (right), Date (right)
+- Amount written: "One thousand two hundred eighteen and 91/100"
+- Pay Period: "08/12/2024 - 08/25/2024"
+
+**MIDDLE — Earnings + Taxes (two duplicate stubs):**
+
+| PAY | Hours | Rate | Current | YTD |
+|-----|-------|------|---------|-----|
+| Regular Pay | - | 11.25 | 0.00 | 9,196.79 |
+| Joint | 60.61 | 11.25 | 681.86 | 3,761.89 |
+| Vacation | - | 11.25 | 0.00 | 787.50 |
+| Overtime Pay | - | 16.88 | 0.00 | 87.95 |
+| Paycheck Tips | - | - | 814.61 | 14,047.79 |
+
+| TAXES | Current | YTD |
+|-------|---------|-----|
+| Federal Income Tax | 103.22 | 1,825.30 |
+| Social Security | 92.78 | 1,728.68 |
+| Medicare | 21.70 | 404.29 |
+
+| DEDUCTIONS | Current | YTD |
+|------------|---------|-----|
+| Health Insurance | 0.00 | 646.98 |
+| Loan | 0.00 | 60.35 |
+| 401(k) After Tax | 59.86 | 1,115.27 |
+
+| OTHER PAY | Current | YTD |
+|-----------|---------|-----|
+| 401(k) After Tax | 59.86 | 1,115.27 |
+
+**BOTTOM — Summary:**
+| | Current | YTD |
+|---|---------|-----|
+| Total Pay | $1,496.47 | $27,881.92 |
+| Taxes | $217.70 | $3,958.27 |
+| Deductions | $59.86 | $1,822.60 |
+| **NET PAY** | **$1,218.91** | |
+
+### Existing Frontend Components
+
+`payroll-frontend/src/components/payroll/`:
+- `check-preview-dialog.tsx` — Check/pay stub preview modal
+- `record-details-dialog.tsx` — Full payroll record view
+- `bulk-entry-form.tsx` — Multi-employee entry
+- `single-record-form.tsx` — Individual payroll entry
+- `import-form.tsx` — CSV/Excel import
+- `payroll-charts.tsx` — Visualizations
+- `records-lookup.tsx` — Search/filter
+
+### Revised Effort Estimate
+
+With TaxBusiness assets, **~50-60% is already built**:
+
+| Category | Status | Effort Remaining |
+|----------|--------|------------------|
+| Tax calculation engine | ✅ Built | Update to 2025/2026 brackets |
+| Payroll calculator (hourly/salary) | ✅ Built | Add SS wage cap, Additional Medicare |
+| YTD tracking | ✅ Built | Port as-is |
+| Employee/Company models | ✅ Built | Extend with new fields |
+| Frontend components | 🟡 Partial | Rebuild with React 19 + Tailwind |
+| Pay period workflow | ❌ Missing | Build new |
+| PDF generation | ❌ Missing | Build new (Prawn) |
+| Auth (WorkOS) | ❌ Missing | Build new |
+| R2 file storage | ❌ Missing | Build new |
+
+**Estimated remaining effort: ~40-50%** (down from original 60% estimate)
 
 ---
 
