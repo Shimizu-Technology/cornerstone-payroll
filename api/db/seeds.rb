@@ -3,7 +3,10 @@
 # Cornerstone Payroll - Database Seeds
 # Updated: 2026-02-06 for Guam/IRS 2026 tax tables
 
-puts "Seeding 2026 tax tables..."
+# Load the new Tax Configuration seeds first
+load Rails.root.join("db/seeds/tax_configs.rb")
+
+puts "\nSeeding legacy tax tables (for backward compatibility)..."
 
 # =============================================================================
 # 2026 Biweekly Tax Tables

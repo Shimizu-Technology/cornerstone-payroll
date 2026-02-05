@@ -45,6 +45,18 @@ Rails.application.routes.draw do
         get "pay_stubs/:id/download", to: "pay_stubs#download"
         post "pay_stubs/batch_generate", to: "pay_stubs#batch_generate"
         get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
+
+        # Tax Configuration Management
+        resources :tax_configs, only: [ :index, :show, :create, :update, :destroy ] do
+          member do
+            post :activate
+            get :audit_logs
+          end
+          collection do
+            patch ":id/filing_status/:filing_status", to: "tax_configs#update_filing_status"
+            patch ":id/brackets/:filing_status", to: "tax_configs#update_brackets"
+          end
+        end
       end
     end
   end

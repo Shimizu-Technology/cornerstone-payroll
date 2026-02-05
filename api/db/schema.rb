@@ -10,9 +10,25 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_05_213657) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_05_220121) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "annual_tax_configs", force: :cascade do |t|
+    t.decimal "additional_medicare_rate", precision: 6, scale: 5, default: "0.009", null: false
+    t.decimal "additional_medicare_threshold", precision: 12, scale: 2, default: "200000.0", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.boolean "is_active", default: false, null: false
+    t.decimal "medicare_rate", precision: 6, scale: 5, default: "0.0145", null: false
+    t.decimal "ss_rate", precision: 6, scale: 5, default: "0.062", null: false
+    t.decimal "ss_wage_base", precision: 12, scale: 2, null: false
+    t.integer "tax_year", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["is_active"], name: "index_annual_tax_configs_on_is_active"
+    t.index ["tax_year"], name: "index_annual_tax_configs_on_tax_year", unique: true
+  end
 
   create_table "companies", force: :cascade do |t|
     t.boolean "active", default: true
@@ -160,6 +176,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_213657) do
     t.index ["status"], name: "index_employees_on_status"
   end
 
+  create_table "filing_status_configs", force: :cascade do |t|
+    t.bigint "annual_tax_config_id", null: false
+    t.datetime "created_at", null: false
+    t.string "filing_status", null: false
+    t.decimal "standard_deduction", precision: 12, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.index ["annual_tax_config_id", "filing_status"], name: "idx_filing_status_configs_unique", unique: true
+    t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
   create_table "pay_periods", force: :cascade do |t|
     t.bigint "approved_by_id"
     t.datetime "committed_at"
@@ -220,6 +246,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_213657) do
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
   end
 
+  create_table "tax_brackets", force: :cascade do |t|
+    t.integer "bracket_order", null: false
+    t.datetime "created_at", null: false
+    t.bigint "filing_status_config_id", null: false
+    t.decimal "max_income", precision: 12, scale: 2
+    t.decimal "min_income", precision: 12, scale: 2, null: false
+    t.decimal "rate", precision: 6, scale: 5, null: false
+    t.datetime "updated_at", null: false
+    t.index ["filing_status_config_id", "bracket_order"], name: "idx_tax_brackets_order_unique", unique: true
+    t.index ["filing_status_config_id"], name: "index_tax_brackets_on_filing_status_config_id"
+  end
+
+  create_table "tax_config_audit_logs", force: :cascade do |t|
+    t.string "action", null: false
+    t.bigint "annual_tax_config_id", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.string "field_name"
+    t.string "ip_address"
+    t.text "new_value"
+    t.text "old_value"
+    t.bigint "user_id"
+    t.index ["annual_tax_config_id", "created_at"], name: "idx_audit_logs_config_time"
+    t.index ["annual_tax_config_id"], name: "index_tax_config_audit_logs_on_annual_tax_config_id"
+    t.index ["created_at"], name: "index_tax_config_audit_logs_on_created_at"
+  end
+
   create_table "tax_tables", force: :cascade do |t|
     t.decimal "additional_medicare_rate", precision: 6, scale: 5, default: "0.009"
     t.decimal "additional_medicare_threshold", precision: 12, scale: 2, default: "200000.0"
@@ -246,7 +298,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_213657) do
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
+  add_foreign_key "filing_status_configs", "annual_tax_configs"
   add_foreign_key "pay_periods", "companies"
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
+  add_foreign_key "tax_brackets", "filing_status_configs"
+  add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
 end
