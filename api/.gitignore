@@ -1,8 +1,42 @@
-
 # Environment files
 .env
 .env.local
 .env.*.local
 
-# Bootsnap cache
+# Ignore bundler config
+/.bundle
+
+# Ignore the default SQLite database
+/db/*.sqlite3
+/db/*.sqlite3-*
+
+# Ignore all log files and tempfiles
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+
+# Ignore pidfiles
+/tmp/pids/*
+!/tmp/pids/
+!/tmp/pids/.keep
+
+# Ignore storage (Active Storage files)
+/storage/*
+!/storage/.keep
+
+# Ignore bootsnap cache
 tmp/cache/bootsnap/
+
+# Ignore master key for decrypting credentials and more
+/config/master.key
+/config/credentials/*.key
+
+# Ignore node_modules (if any)
+/node_modules
+
+# Ignore .byebug_history
+.byebug_history
+
+# Mac files
+.DS_Store
