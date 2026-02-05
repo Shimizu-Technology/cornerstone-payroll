@@ -5,7 +5,7 @@
 **Author:** Jerry (drafted), Leon Shimizu (review)
 **Status:** Draft
 **Created:** 2026-02-04
-**Updated:** 2026-02-05 (TaxBusiness deep dive)
+**Updated:** 2026-02-06 (Tax Configuration Architecture)
 
 ---
 
@@ -327,6 +327,135 @@ Unlike mainland US payroll, there is **no separate state tax**. The Guam Territo
 - Use Guam equivalents of federal forms (e.g., Form 941-GU instead of 941)
 - W-2GU instead of W-2 at year-end
 - Due dates mirror federal schedule
+
+---
+
+## 4.1 Tax Configuration Architecture (Added Feb 6, 2026)
+
+**Principle: Store what IRS publishes (annual), calculate what we need (per-period)**
+
+### Design Goals
+1. **Simple annual updates** — Cornerstone staff can update tax tables in 5 minutes
+2. **No developer intervention** — Admin UI for all tax configuration changes
+3. **Audit trail** — Track who changed what and when
+4. **Multi-year support** — System maintains history of all tax years
+
+### What Changes Each Year
+IRS publishes new values every October for the next tax year:
+- **SS wage base** — e.g., $176,100 → $184,500
+- **Standard deductions** — per filing status
+- **Bracket thresholds** — the income cutoffs (adjust ~2-3% for inflation)
+
+### What Almost NEVER Changes
+- Tax rates (10%, 12%, 22%, 24%, 32%, 35%, 37%)
+- SS rate (6.2%)
+- Medicare rate (1.45%)
+- Additional Medicare rate (0.9%) and threshold ($200K)
+- The calculation method itself
+
+### Database Schema
+
+```sql
+-- One row per tax year
+annual_tax_configs
+  - id
+  - tax_year (unique, e.g., 2026)
+  - ss_wage_base (e.g., 184500.00)
+  - ss_rate (default 0.062)
+  - medicare_rate (default 0.0145)
+  - additional_medicare_rate (default 0.009)
+  - additional_medicare_threshold (default 200000)
+  - is_active (boolean — currently in use)
+  - created_by_id, updated_by_id (audit)
+  - timestamps
+
+-- Standard deductions per filing status (3 rows per year)
+filing_status_configs
+  - id
+  - annual_tax_config_id (FK)
+  - filing_status (single | married | head_of_household)
+  - standard_deduction (annual amount, e.g., 16100.00)
+  - timestamps
+  - unique index on [annual_tax_config_id, filing_status]
+
+-- Tax brackets (7 rows per filing status = 21 per year)
+tax_brackets
+  - id
+  - filing_status_config_id (FK)
+  - bracket_order (1-7)
+  - min_income (annual, e.g., 0)
+  - max_income (annual, e.g., 12400, null = infinity)
+  - rate (e.g., 0.10)
+  - timestamps
+  - unique index on [filing_status_config_id, bracket_order]
+```
+
+### Calculator Flow
+
+```ruby
+class GuamTaxCalculator
+  def initialize(tax_year:, filing_status:, pay_frequency:)
+    @config = AnnualTaxConfig.find_by!(tax_year: tax_year, is_active: true)
+    @filing_config = @config.filing_status_configs.find_by!(filing_status: filing_status)
+    @periods_per_year = PAY_FREQUENCIES[pay_frequency]  # biweekly = 26
+  end
+
+  def calculate(gross_pay:, ytd_gross: 0)
+    # Convert annual config to per-period amounts automatically
+    period_standard_deduction = @filing_config.standard_deduction / @periods_per_year
+    
+    # Apply standard deduction, then brackets
+    taxable = gross_pay - period_standard_deduction
+    withholding = calculate_from_brackets(taxable)
+    
+    # SS with wage base cap
+    ss = calculate_social_security(gross_pay, ytd_gross)
+    
+    # Medicare with additional tax threshold
+    medicare = calculate_medicare(gross_pay, ytd_gross)
+    
+    { withholding:, social_security: ss, medicare: }
+  end
+end
+```
+
+### Admin UI Flow
+
+**1. Tax Years List**
+```
+Tax Configurations
+━━━━━━━━━━━━━━━━━━
+2026 ✓ Active    [Edit] [View History]
+2025             [Edit] [View History]
+
+[+ Create 2027 from 2026]
+```
+
+**2. Create New Year**
+- Click "Create 2027 from 2026"
+- System copies all values from 2026
+- Admin updates the ~10 numbers that changed (from IRS Pub 15-T)
+- Save → ready for next year's payroll
+
+**3. Edit Year**
+- Simple form with all configurable values
+- Shows annual amounts (what IRS publishes)
+- System auto-calculates per-period amounts
+
+**4. Audit History**
+- Every change logged with user, timestamp, old value, new value
+- Immutable audit trail for compliance
+
+### Migration from Current Schema
+
+The current `tax_tables` table stores pre-calculated biweekly bracket data as JSONB. We will:
+1. Create new normalized tables
+2. Migrate existing 2026 data to new structure
+3. Update calculator to read from new tables
+4. Build admin UI
+5. Remove old `tax_tables` table
+
+This is a **one-time migration** that enables the simplified annual update workflow.
 
 ---
 

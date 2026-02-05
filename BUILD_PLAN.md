@@ -1,8 +1,9 @@
 # BUILD_PLAN.md — Cornerstone Payroll
 
 **Created:** 2026-02-05
+**Updated:** 2026-02-06 (Tax Configuration Architecture)
 **Author:** Jerry
-**Status:** Ready to Execute
+**Status:** In Progress — Phases 1-6 Complete
 
 This is the tactical execution plan for building Cornerstone Payroll. See `PRD.md` for the "what and why" — this document covers the "how and when."
 
@@ -132,21 +133,27 @@ ytd_totals (employee, company, department)
 
 ---
 
-## Phase 2: Tax Engine (Week 1-2)
+## Phase 2: Tax Engine (Week 1-2) ✅ COMPLETE + REDESIGN NEEDED
 
-### 2.1 Tax Table Seeding (CPR-3)
-**Priority:** P0 | **Effort:** 0.5 day
+### 2.1 Tax Table Seeding (CPR-3) ✅ DONE
+- [x] Created `tax_tables` migration
+- [x] Seeded 2026 biweekly brackets (updated from 2024 values)
+- [x] Added SS wage base $184,500 for 2026
 
-- [ ] Create `tax_tables` migration
-- [ ] Seed 2024 biweekly brackets (from existing `calculator.rb`)
-- [ ] Seed 2025 brackets (update values from IRS Pub 15-T)
-- [ ] Support multiple pay frequencies (biweekly, weekly, semi-monthly, monthly)
+**⚠️ ARCHITECTURE UPDATE (Feb 6, 2026):**
+The current `tax_tables` implementation stores pre-calculated biweekly bracket data as JSONB. This works but makes annual updates complex.
 
-**Source:** Copy bracket data from `/Users/jerry/shimizu-technology/TaxBusiness/payroll-backend/app/services/calculator.rb`
+**New approach:** Normalized schema with admin UI (see PRD Section 4.1):
+- Store ANNUAL values (what IRS publishes)
+- System auto-calculates per-period amounts
+- Admin can update via UI — no code changes needed
 
-### 2.2 Guam Tax Calculator (CPR-4)
-**Priority:** P0 | **Effort:** 1 day
+**New tickets created:**
+- CPR-35: Tax Configuration Schema Migration
+- CPR-36: Tax Configuration Admin UI
+- CPR-37: Tax Configuration Audit Logging
 
+### 2.2 Guam Tax Calculator (CPR-4) ✅ DONE
 Port and enhance `Calculator` service:
 
 ```ruby
