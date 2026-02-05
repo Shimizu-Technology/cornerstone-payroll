@@ -3,3 +3,6 @@
 .env
 .env.local
 .env.*.local
+
+# Bootsnap cache
+tmp/cache/bootsnap/
