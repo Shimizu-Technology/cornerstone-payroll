@@ -131,7 +131,6 @@ import type {
   PayrollItem,
   TimeEntry,
   DashboardStats,
-  PaginatedResponse,
   PaginationMeta,
 } from '@/types';
 
@@ -175,34 +174,74 @@ export const departmentsApi = {
     api.patch<{ data: Department }>(`/admin/departments/${id}`, { department: data }),
 };
 
-// Pay Periods
+// Pay Periods (Admin API)
+export interface PayPeriodListResponse {
+  pay_periods: PayPeriod[];
+  meta: {
+    total: number;
+    statuses: Record<string, number>;
+  };
+}
+
+export interface PayPeriodResponse {
+  pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
+}
+
+export interface RunPayrollResponse {
+  pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
+  results: {
+    success: { employee_id: number; name: string }[];
+    errors: { employee_id: number; error: string }[];
+  };
+}
+
 export const payPeriodsApi = {
-  list: (companyId: number, params?: { status?: string; page?: number }) =>
-    api.get<PaginatedResponse<PayPeriod>>(`/companies/${companyId}/pay_periods`, params),
-  get: (companyId: number, id: number) =>
-    api.get<PayPeriod>(`/companies/${companyId}/pay_periods/${id}`),
-  create: (companyId: number, data: { start_date: string; end_date: string; pay_date: string }) =>
-    api.post<PayPeriod>(`/companies/${companyId}/pay_periods`, { pay_period: data }),
-  calculate: (companyId: number, id: number) =>
-    api.post<PayPeriod>(`/companies/${companyId}/pay_periods/${id}/calculate`),
-  approve: (companyId: number, id: number) =>
-    api.post<PayPeriod>(`/companies/${companyId}/pay_periods/${id}/approve`),
-  commit: (companyId: number, id: number) =>
-    api.post<PayPeriod>(`/companies/${companyId}/pay_periods/${id}/commit`),
-  delete: (companyId: number, id: number) =>
-    api.delete<void>(`/companies/${companyId}/pay_periods/${id}`),
+  list: (params?: { status?: string; year?: number }) =>
+    api.get<PayPeriodListResponse>('/admin/pay_periods', params),
+  get: (id: number) =>
+    api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`),
+  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string }) =>
+    api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
+  update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string }) =>
+    api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
+  delete: (id: number) =>
+    api.delete<void>(`/admin/pay_periods/${id}`),
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, { regular?: number; overtime?: number; holiday?: number; pto?: number }> }) =>
+    api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
+  approve: (id: number) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
+  commit: (id: number) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
 };
 
-// Payroll Items
+// Payroll Items (Admin API)
+export interface PayrollItemsListResponse {
+  payroll_items: PayrollItem[];
+  summary: {
+    total_gross: number;
+    total_federal: number;
+    total_social_security: number;
+    total_medicare: number;
+    total_guam: number;
+    total_deductions: number;
+    total_net: number;
+    employee_count: number;
+  };
+}
+
 export const payrollItemsApi = {
-  list: (companyId: number, payPeriodId: number) =>
-    api.get<PayrollItem[]>(`/companies/${companyId}/pay_periods/${payPeriodId}/payroll_items`),
-  get: (companyId: number, payPeriodId: number, id: number) =>
-    api.get<PayrollItem>(`/companies/${companyId}/pay_periods/${payPeriodId}/payroll_items/${id}`),
-  update: (companyId: number, payPeriodId: number, id: number, data: Partial<PayrollItem>) =>
-    api.patch<PayrollItem>(`/companies/${companyId}/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data }),
-  bulkCreate: (companyId: number, payPeriodId: number, data: { records: Partial<PayrollItem>[] }) =>
-    api.post<PayrollItem[]>(`/companies/${companyId}/pay_periods/${payPeriodId}/payroll_items/bulk`, data),
+  list: (payPeriodId: number) =>
+    api.get<PayrollItemsListResponse>(`/admin/pay_periods/${payPeriodId}/payroll_items`),
+  get: (payPeriodId: number, id: number) =>
+    api.get<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
+  create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }) =>
+    api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { payroll_item: data, auto_calculate: data.auto_calculate }),
+  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean }) =>
+    api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate }),
+  delete: (payPeriodId: number, id: number) =>
+    api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
+  recalculate: (payPeriodId: number, id: number) =>
+    api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}/recalculate`),
 };
 
 // Time Entries

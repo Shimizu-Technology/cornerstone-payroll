@@ -36,6 +36,10 @@ class Employee < ApplicationRecord
     [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
   end
 
+  def active?
+    status == "active"
+  end
+
   def hourly?
     employment_type == "hourly"
   end

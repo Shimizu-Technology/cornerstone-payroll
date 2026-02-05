@@ -11,6 +11,20 @@ Rails.application.routes.draw do
       namespace :admin do
         resources :employees, only: [ :index, :show, :create, :update, :destroy ]
         resources :departments, only: [ :index, :create, :update ]
+
+        resources :pay_periods do
+          member do
+            post :run_payroll
+            post :approve
+            post :commit
+          end
+
+          resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
+            member do
+              post :recalculate
+            end
+          end
+        end
       end
     end
   end

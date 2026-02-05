@@ -63,8 +63,9 @@ class GuamTaxCalculator
 
     return 0.0 unless bracket
 
-    # Calculate withholding: base_tax + (income - threshold) * rate
-    excess = [ taxable_income - bracket[:threshold], 0 ].max
+    # Calculate withholding: base_tax + (income - min_income) * rate
+    # The threshold is the min_income of the bracket
+    excess = [ taxable_income - bracket[:min_income], 0 ].max
     withholding = bracket[:base_tax] + (excess * bracket[:rate])
 
     withholding.round(2)

@@ -119,20 +119,25 @@ export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed';
 
 export interface PayPeriod {
   id: number;
-  company_id: number;
+  company_id?: number;
   start_date: string;
   end_date: string;
   pay_date: string;
   status: PayPeriodStatus;
+  notes?: string;
+  period_description?: string;
   created_by_id?: number;
   approved_by_id?: number;
   committed_at?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
   // Computed/included
+  employee_count?: number;
   payroll_items_count?: number;
   total_gross?: number;
   total_net?: number;
+  // Nested payroll items (when requested)
+  payroll_items?: PayrollItem[];
 }
 
 // ----------------
@@ -141,43 +146,48 @@ export interface PayPeriod {
 
 export interface PayrollItem {
   id: number;
-  pay_period_id: number;
+  pay_period_id?: number;
   employee_id: number;
+  employee_name?: string;
   employment_type: EmploymentType;
   pay_rate: number;
   // Hours (for hourly employees)
-  regular_hours: number;
-  overtime_hours: number;
-  holiday_hours: number;
-  pto_hours: number;
+  hours_worked?: number;
+  overtime_hours?: number;
+  holiday_hours?: number;
+  pto_hours?: number;
+  total_hours?: number;
   // Additional earnings
-  reported_tips: number;
-  bonus: number;
+  reported_tips?: number;
+  bonus?: number;
   // Calculated pay
-  gross_pay: number;
-  net_pay: number;
+  gross_pay?: number;
+  net_pay?: number;
   // Tax withholdings
-  withholding_tax: number; // Guam Territorial Income Tax
-  social_security_tax: number;
-  medicare_tax: number;
+  withholding_tax?: number; // Guam Territorial Income Tax (same as federal)
+  social_security_tax?: number;
+  medicare_tax?: number;
+  additional_withholding?: number;
   // Deductions
-  retirement_payment: number;
-  roth_retirement_payment: number;
-  loan_payment: number;
-  insurance_payment: number;
+  retirement_payment?: number;
+  roth_retirement_payment?: number;
+  loan_payment?: number;
+  insurance_payment?: number;
+  total_deductions?: number;
   // Custom/flexible deductions
   custom_columns_data?: Record<string, number>;
   // YTD totals (snapshot at time of calculation)
-  ytd_gross: number;
-  ytd_withholding: number;
-  ytd_social_security: number;
-  ytd_medicare: number;
-  ytd_net: number;
+  ytd_gross?: number;
+  ytd_net?: number;
+  ytd_withholding_tax?: number;
+  ytd_social_security_tax?: number;
+  ytd_medicare_tax?: number;
+  ytd_retirement?: number;
   // Check info
   check_number?: string;
   check_printed_at?: string;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
   // Included relations
   employee?: Employee;
 }
