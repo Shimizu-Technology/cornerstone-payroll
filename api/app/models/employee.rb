@@ -68,4 +68,11 @@ class Employee < ApplicationRecord
       .where(pay_periods: { pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
       .sum(:social_security_tax)
   end
+
+  # Returns last 4 digits of SSN for display purposes
+  def ssn_last_four
+    return nil if ssn_encrypted.blank?
+    # Remove any non-digit characters and get last 4
+    ssn_encrypted.to_s.gsub(/\D/, "").last(4).presence
+  end
 end

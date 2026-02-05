@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, CheckCircle, History, Edit, Trash2, Copy } from 'lucide-react';
+import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 
 interface TaxBracket {
   id: number;
@@ -44,6 +44,14 @@ interface AuditLog {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
+interface EditableConfig {
+  ss_wage_base: number;
+  ss_rate: number;
+  medicare_rate: number;
+  additional_medicare_rate: number;
+  additional_medicare_threshold: number;
+}
+
 export default function TaxConfigs() {
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
@@ -53,6 +61,15 @@ export default function TaxConfigs() {
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [newYear, setNewYear] = useState(new Date().getFullYear() + 1);
   const [copyFromYear, setCopyFromYear] = useState<number | null>(null);
+  
+  // Editing state
+  const [isEditingGlobal, setIsEditingGlobal] = useState(false);
+  const [editableConfig, setEditableConfig] = useState<EditableConfig | null>(null);
+  const [editingFilingStatus, setEditingFilingStatus] = useState<string | null>(null);
+  const [editableStandardDeduction, setEditableStandardDeduction] = useState<number>(0);
+  const [editingBrackets, setEditingBrackets] = useState<string | null>(null);
+  const [editableBrackets, setEditableBrackets] = useState<TaxBracket[]>([]);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchConfigs();
@@ -60,7 +77,7 @@ export default function TaxConfigs() {
 
   const fetchConfigs = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs`);
+      const res = await fetch(`${API_URL}/admin/tax_configs`);
       const data = await res.json();
       setConfigs(data.tax_configs);
     } catch (error) {
@@ -72,7 +89,7 @@ export default function TaxConfigs() {
 
   const fetchConfigDetails = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs/${id}`);
+      const res = await fetch(`${API_URL}/admin/tax_configs/${id}`);
       const data = await res.json();
       setSelectedConfig(data.tax_config);
     } catch (error) {
@@ -82,7 +99,7 @@ export default function TaxConfigs() {
 
   const fetchAuditLogs = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs/${id}/audit_logs`);
+      const res = await fetch(`${API_URL}/admin/tax_configs/${id}/audit_logs`);
       const data = await res.json();
       setAuditLogs(data.audit_logs);
       setShowAuditModal(true);
@@ -98,7 +115,7 @@ export default function TaxConfigs() {
         body.copy_from_year = copyFromYear;
       }
       
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs`, {
+      const res = await fetch(`${API_URL}/admin/tax_configs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -115,7 +132,7 @@ export default function TaxConfigs() {
 
   const activateConfig = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs/${id}/activate`, {
+      const res = await fetch(`${API_URL}/admin/tax_configs/${id}/activate`, {
         method: 'POST'
       });
       if (res.ok) {
@@ -130,7 +147,7 @@ export default function TaxConfigs() {
     if (!confirm(`Are you sure you want to delete the ${year} tax configuration?`)) return;
     
     try {
-      const res = await fetch(`${API_URL}/api/v1/admin/tax_configs/${id}`, {
+      const res = await fetch(`${API_URL}/admin/tax_configs/${id}`, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -141,6 +158,124 @@ export default function TaxConfigs() {
       }
     } catch (error) {
       console.error('Failed to delete config:', error);
+    }
+  };
+
+  // Start editing global config settings
+  const startEditingGlobal = () => {
+    if (!selectedConfig) return;
+    setEditableConfig({
+      ss_wage_base: selectedConfig.ss_wage_base,
+      ss_rate: selectedConfig.ss_rate,
+      medicare_rate: selectedConfig.medicare_rate,
+      additional_medicare_rate: selectedConfig.additional_medicare_rate,
+      additional_medicare_threshold: selectedConfig.additional_medicare_threshold
+    });
+    setIsEditingGlobal(true);
+  };
+
+  // Save global config settings
+  const saveGlobalConfig = async () => {
+    if (!selectedConfig || !editableConfig) return;
+    setSaving(true);
+    
+    try {
+      const res = await fetch(`${API_URL}/admin/tax_configs/${selectedConfig.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editableConfig)
+      });
+      
+      if (res.ok) {
+        await fetchConfigDetails(selectedConfig.id);
+        fetchConfigs();
+        setIsEditingGlobal(false);
+        setEditableConfig(null);
+      }
+    } catch (error) {
+      console.error('Failed to save config:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Start editing filing status standard deduction
+  const startEditingFilingStatus = (fs: FilingStatusConfig) => {
+    setEditingFilingStatus(fs.filing_status);
+    setEditableStandardDeduction(fs.standard_deduction);
+  };
+
+  // Save filing status standard deduction
+  const saveFilingStatus = async () => {
+    if (!selectedConfig || !editingFilingStatus) return;
+    setSaving(true);
+    
+    try {
+      const res = await fetch(
+        `${API_URL}/admin/tax_configs/${selectedConfig.id}/filing_status/${editingFilingStatus}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ standard_deduction: editableStandardDeduction })
+        }
+      );
+      
+      if (res.ok) {
+        await fetchConfigDetails(selectedConfig.id);
+        setEditingFilingStatus(null);
+      }
+    } catch (error) {
+      console.error('Failed to save filing status:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Start editing brackets
+  const startEditingBrackets = (fs: FilingStatusConfig) => {
+    if (!fs.brackets) return;
+    setEditingBrackets(fs.filing_status);
+    setEditableBrackets(fs.brackets.map(b => ({ ...b })));
+  };
+
+  // Update a bracket in edit mode
+  const updateBracket = (order: number, field: keyof TaxBracket, value: number | null) => {
+    setEditableBrackets(prev => 
+      prev.map(b => b.bracket_order === order ? { ...b, [field]: value } : b)
+    );
+  };
+
+  // Save brackets
+  const saveBrackets = async () => {
+    if (!selectedConfig || !editingBrackets) return;
+    setSaving(true);
+    
+    try {
+      const res = await fetch(
+        `${API_URL}/admin/tax_configs/${selectedConfig.id}/brackets/${editingBrackets}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            brackets: editableBrackets.map(b => ({
+              bracket_order: b.bracket_order,
+              min_income: b.min_income,
+              max_income: b.max_income,
+              rate: b.rate
+            }))
+          })
+        }
+      );
+      
+      if (res.ok) {
+        await fetchConfigDetails(selectedConfig.id);
+        setEditingBrackets(null);
+        setEditableBrackets([]);
+      }
+    } catch (error) {
+      console.error('Failed to save brackets:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -299,38 +434,128 @@ export default function TaxConfigs() {
           </div>
 
           {/* Global Settings */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8 p-4 bg-gray-50 rounded-lg">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase">
-                SS Wage Base
-              </label>
-              <p className="mt-1 text-lg font-semibold text-gray-900">
-                {formatCurrency(selectedConfig.ss_wage_base)}
-              </p>
+          <div className="mb-8 p-4 bg-gray-50 rounded-lg">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-medium text-gray-700 uppercase">Tax Rates & Thresholds</h3>
+              {!isEditingGlobal ? (
+                <button
+                  onClick={startEditingGlobal}
+                  className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </button>
+              ) : (
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => { setIsEditingGlobal(false); setEditableConfig(null); }}
+                    className="inline-flex items-center text-sm text-gray-600 hover:text-gray-800"
+                    disabled={saving}
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveGlobalConfig}
+                    className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                    disabled={saving}
+                  >
+                    <Save className="h-4 w-4 mr-1" />
+                    {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              )}
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase">
-                SS Rate
-              </label>
-              <p className="mt-1 text-lg font-semibold text-gray-900">
-                {formatPercent(selectedConfig.ss_rate)}
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase">
-                Medicare Rate
-              </label>
-              <p className="mt-1 text-lg font-semibold text-gray-900">
-                {formatPercent(selectedConfig.medicare_rate)}
-              </p>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 uppercase">
-                Add'l Medicare
-              </label>
-              <p className="mt-1 text-lg font-semibold text-gray-900">
-                {formatPercent(selectedConfig.additional_medicare_rate)} over {formatCurrency(selectedConfig.additional_medicare_threshold)}
-              </p>
+            
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase">
+                  SS Wage Base
+                </label>
+                {isEditingGlobal && editableConfig ? (
+                  <input
+                    type="number"
+                    value={editableConfig.ss_wage_base}
+                    onChange={(e) => setEditableConfig({ ...editableConfig, ss_wage_base: parseFloat(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                    {formatCurrency(selectedConfig.ss_wage_base)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase">
+                  SS Rate
+                </label>
+                {isEditingGlobal && editableConfig ? (
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={editableConfig.ss_rate}
+                    onChange={(e) => setEditableConfig({ ...editableConfig, ss_rate: parseFloat(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                    {formatPercent(selectedConfig.ss_rate)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase">
+                  Medicare Rate
+                </label>
+                {isEditingGlobal && editableConfig ? (
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={editableConfig.medicare_rate}
+                    onChange={(e) => setEditableConfig({ ...editableConfig, medicare_rate: parseFloat(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                    {formatPercent(selectedConfig.medicare_rate)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase">
+                  Add'l Medicare Rate
+                </label>
+                {isEditingGlobal && editableConfig ? (
+                  <input
+                    type="number"
+                    step="0.001"
+                    value={editableConfig.additional_medicare_rate}
+                    onChange={(e) => setEditableConfig({ ...editableConfig, additional_medicare_rate: parseFloat(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                    {formatPercent(selectedConfig.additional_medicare_rate)}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 uppercase">
+                  Add'l Medicare Threshold
+                </label>
+                {isEditingGlobal && editableConfig ? (
+                  <input
+                    type="number"
+                    value={editableConfig.additional_medicare_threshold}
+                    onChange={(e) => setEditableConfig({ ...editableConfig, additional_medicare_threshold: parseFloat(e.target.value) })}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  />
+                ) : (
+                  <p className="mt-1 text-lg font-semibold text-gray-900">
+                    {formatCurrency(selectedConfig.additional_medicare_threshold)}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -342,44 +567,165 @@ export default function TaxConfigs() {
                   <h3 className="text-lg font-medium text-gray-900">
                     {formatFilingStatus(fs.filing_status)}
                   </h3>
-                  <div className="text-sm text-gray-500">
-                    Standard Deduction: <span className="font-semibold text-gray-900">{formatCurrency(fs.standard_deduction)}</span>
+                  <div className="flex items-center space-x-4">
+                    {editingFilingStatus === fs.filing_status ? (
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-500">Standard Deduction: $</span>
+                        <input
+                          type="number"
+                          value={editableStandardDeduction}
+                          onChange={(e) => setEditableStandardDeduction(parseFloat(e.target.value))}
+                          className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                        />
+                        <button
+                          onClick={() => setEditingFilingStatus(null)}
+                          className="text-gray-600 hover:text-gray-800"
+                          disabled={saving}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={saveFilingStatus}
+                          className="text-green-600 hover:text-green-800"
+                          disabled={saving}
+                        >
+                          <Save className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-500">
+                          Standard Deduction: <span className="font-semibold text-gray-900">{formatCurrency(fs.standard_deduction)}</span>
+                        </span>
+                        <button
+                          onClick={() => startEditingFilingStatus(fs)}
+                          className="text-indigo-600 hover:text-indigo-800"
+                          title="Edit Standard Deduction"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {fs.brackets && (
-                  <table className="min-w-full">
-                    <thead>
-                      <tr className="text-xs font-medium text-gray-500 uppercase">
-                        <th className="text-left py-2">Rate</th>
-                        <th className="text-right py-2">Min Income</th>
-                        <th className="text-right py-2">Max Income</th>
-                        <th className="text-right py-2">Biweekly Min</th>
-                        <th className="text-right py-2">Biweekly Max</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {fs.brackets.map((bracket) => (
-                        <tr key={bracket.id} className="text-sm">
-                          <td className="py-2 font-medium text-indigo-600">
-                            {bracket.rate_percent}%
-                          </td>
-                          <td className="py-2 text-right text-gray-900">
-                            {formatCurrency(bracket.min_income)}
-                          </td>
-                          <td className="py-2 text-right text-gray-900">
-                            {bracket.max_income ? formatCurrency(bracket.max_income) : '∞'}
-                          </td>
-                          <td className="py-2 text-right text-gray-500">
-                            {formatCurrency(bracket.min_income / 26)}
-                          </td>
-                          <td className="py-2 text-right text-gray-500">
-                            {bracket.max_income ? formatCurrency(bracket.max_income / 26) : '∞'}
-                          </td>
+                {fs.brackets && editingBrackets !== fs.filing_status && (
+                  <>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-500">Tax Brackets</span>
+                      <button
+                        onClick={() => startEditingBrackets(fs)}
+                        className="inline-flex items-center text-sm text-indigo-600 hover:text-indigo-800"
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Edit Brackets
+                      </button>
+                    </div>
+                    <table className="min-w-full">
+                      <thead>
+                        <tr className="text-xs font-medium text-gray-500 uppercase">
+                          <th className="text-left py-2">Rate</th>
+                          <th className="text-right py-2">Min Income</th>
+                          <th className="text-right py-2">Max Income</th>
+                          <th className="text-right py-2">Biweekly Min</th>
+                          <th className="text-right py-2">Biweekly Max</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {fs.brackets.map((bracket) => (
+                          <tr key={bracket.id} className="text-sm">
+                            <td className="py-2 font-medium text-indigo-600">
+                              {bracket.rate_percent}%
+                            </td>
+                            <td className="py-2 text-right text-gray-900">
+                              {formatCurrency(bracket.min_income)}
+                            </td>
+                            <td className="py-2 text-right text-gray-900">
+                              {bracket.max_income ? formatCurrency(bracket.max_income) : '∞'}
+                            </td>
+                            <td className="py-2 text-right text-gray-500">
+                              {formatCurrency(bracket.min_income / 26)}
+                            </td>
+                            <td className="py-2 text-right text-gray-500">
+                              {bracket.max_income ? formatCurrency(bracket.max_income / 26) : '∞'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
+
+                {/* Editable Brackets */}
+                {editingBrackets === fs.filing_status && (
+                  <>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm text-gray-500">Tax Brackets (Editing)</span>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => { setEditingBrackets(null); setEditableBrackets([]); }}
+                          className="inline-flex items-center text-sm text-gray-600 hover:text-gray-800"
+                          disabled={saving}
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Cancel
+                        </button>
+                        <button
+                          onClick={saveBrackets}
+                          className="inline-flex items-center text-sm text-green-600 hover:text-green-800"
+                          disabled={saving}
+                        >
+                          <Save className="h-4 w-4 mr-1" />
+                          {saving ? 'Saving...' : 'Save Brackets'}
+                        </button>
+                      </div>
+                    </div>
+                    <table className="min-w-full">
+                      <thead>
+                        <tr className="text-xs font-medium text-gray-500 uppercase">
+                          <th className="text-left py-2">Rate</th>
+                          <th className="text-right py-2">Min Income</th>
+                          <th className="text-right py-2">Max Income</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {editableBrackets.map((bracket) => (
+                          <tr key={bracket.bracket_order} className="text-sm">
+                            <td className="py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={(bracket.rate * 100).toFixed(1)}
+                                onChange={(e) => updateBracket(bracket.bracket_order, 'rate', parseFloat(e.target.value) / 100)}
+                                className="w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                              />
+                              <span className="ml-1 text-gray-500">%</span>
+                            </td>
+                            <td className="py-2 text-right">
+                              <input
+                                type="number"
+                                value={bracket.min_income}
+                                onChange={(e) => updateBracket(bracket.bracket_order, 'min_income', parseFloat(e.target.value))}
+                                className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-right"
+                              />
+                            </td>
+                            <td className="py-2 text-right">
+                              <input
+                                type="number"
+                                value={bracket.max_income ?? ''}
+                                placeholder="∞"
+                                onChange={(e) => updateBracket(bracket.bracket_order, 'max_income', e.target.value ? parseFloat(e.target.value) : null)}
+                                className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-right"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="mt-2 text-xs text-gray-500">
+                      Leave "Max Income" empty for the top bracket (no upper limit).
+                    </p>
+                  </>
                 )}
               </div>
             ))}

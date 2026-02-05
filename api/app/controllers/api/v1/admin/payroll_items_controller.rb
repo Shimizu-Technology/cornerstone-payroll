@@ -15,10 +15,9 @@ module Api
             payroll_items: @payroll_items.map { |item| payroll_item_json(item) },
             summary: {
               total_gross: @payroll_items.sum(:gross_pay),
-              total_federal: @payroll_items.sum(:federal_withholding),
-              total_social_security: @payroll_items.sum(:social_security),
-              total_medicare: @payroll_items.sum(:medicare),
-              total_guam: @payroll_items.sum(:guam_withholding),
+              total_withholding: @payroll_items.sum(:withholding_tax),
+              total_social_security: @payroll_items.sum(:social_security_tax),
+              total_medicare: @payroll_items.sum(:medicare_tax),
               total_deductions: @payroll_items.sum(:total_deductions),
               total_net: @payroll_items.sum(:net_pay),
               employee_count: @payroll_items.count
