@@ -144,21 +144,22 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do
     before do
-      # Create tax tables for calculations
-      TaxTable.create!(
+      # Create tax tables for calculations (use find_or_create to avoid uniqueness conflicts)
+      TaxTable.find_or_create_by!(
         tax_year: Date.today.year,
         filing_status: "single",
-        pay_frequency: "biweekly",
-        ss_rate: 0.062,
-        ss_wage_base: 168600.00,
-        medicare_rate: 0.0145,
-        allowance_amount: 177.88,
-        bracket_data: [
-          { min_income: 0, max_income: 11600, rate: 0.10, base_tax: 0 },
-          { min_income: 11600, max_income: 47150, rate: 0.12, base_tax: 1160 },
-          { min_income: 47150, max_income: 999999999, rate: 0.22, base_tax: 5426 }
+        pay_frequency: "biweekly"
+      ) do |t|
+        t.ss_rate = 0.062
+        t.ss_wage_base = 184500.00
+        t.medicare_rate = 0.0145
+        t.allowance_amount = 192.31
+        t.bracket_data = [
+          { min_income: 0, max_income: 476.92, rate: 0.10, base_tax: 0, threshold: 0 },
+          { min_income: 476.93, max_income: 1938.46, rate: 0.12, base_tax: 47.69, threshold: 476.93 },
+          { min_income: 1938.47, max_income: 999999999, rate: 0.22, base_tax: 223.07, threshold: 1938.47 }
         ]
-      )
+      end
     end
 
     it "calculates payroll for all active employees" do

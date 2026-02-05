@@ -30,7 +30,7 @@ RSpec.describe "Api::V1::Admin::Departments", type: :request do
       end
 
       it "includes employee count" do
-        dept = Department.first
+        dept = company.departments.first
         create_list(:employee, 3, company: company, department: dept)
 
         get "/api/v1/admin/departments", params: { company_id: company.id }
