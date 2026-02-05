@@ -256,7 +256,130 @@ export const timeEntriesApi = {
     api.delete<void>(`/companies/${companyId}/employees/${employeeId}/time_entries/${id}`),
 };
 
-// Dashboard
+// Dashboard & Reports (Admin API)
+export interface DashboardResponse {
+  stats: {
+    total_employees: number;
+    active_employees: number;
+    current_pay_period: {
+      id: number;
+      period_description: string;
+      pay_date: string;
+      status: string;
+      employee_count: number;
+      total_gross: number;
+      total_net: number;
+    } | null;
+    ytd_totals: {
+      year: number;
+      gross_pay: number;
+      withholding_tax: number;
+      social_security_tax: number;
+      medicare_tax: number;
+      retirement: number;
+      net_pay: number;
+      payroll_count: number;
+    };
+    recent_payrolls: {
+      id: number;
+      period_description: string;
+      pay_date: string;
+      employee_count: number;
+      total_net: number;
+    }[];
+  };
+}
+
+export interface PayrollRegisterReport {
+  report: {
+    type: string;
+    pay_period: {
+      id: number;
+      start_date: string;
+      end_date: string;
+      pay_date: string;
+      status: string;
+    };
+    summary: {
+      employee_count: number;
+      total_gross: number;
+      total_withholding: number;
+      total_social_security: number;
+      total_medicare: number;
+      total_retirement: number;
+      total_deductions: number;
+      total_net: number;
+    };
+    employees: PayrollItem[];
+  };
+}
+
+export interface TaxSummaryReport {
+  report: {
+    type: string;
+    period: {
+      year: number;
+      quarter?: number;
+      start_date: string;
+      end_date: string;
+    };
+    totals: {
+      gross_wages: number;
+      withholding_tax: number;
+      social_security_employee: number;
+      social_security_employer: number;
+      medicare_employee: number;
+      medicare_employer: number;
+      total_employment_taxes: number;
+    };
+    pay_periods_included: number;
+    employee_count: number;
+  };
+}
+
+export interface YtdSummaryReport {
+  report: {
+    type: string;
+    year: number;
+    employees: {
+      employee_id: number;
+      name: string;
+      employment_type: string;
+      status: string;
+      gross_pay: number;
+      withholding_tax: number;
+      social_security_tax: number;
+      medicare_tax: number;
+      retirement: number;
+      net_pay: number;
+    }[];
+    company_totals: {
+      year: number;
+      gross_pay: number;
+      withholding_tax: number;
+      social_security_tax: number;
+      medicare_tax: number;
+      retirement: number;
+      net_pay: number;
+      payroll_count: number;
+    };
+  };
+}
+
+export const reportsApi = {
+  dashboard: () =>
+    api.get<DashboardResponse>('/admin/reports/dashboard'),
+  payrollRegister: (payPeriodId: number) =>
+    api.get<PayrollRegisterReport>('/admin/reports/payroll_register', { pay_period_id: payPeriodId }),
+  employeePayHistory: (employeeId: number, limit?: number) =>
+    api.get<{ report: { employee: Employee; history: PayrollItem[]; ytd: Record<string, number> } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
+  taxSummary: (year?: number, quarter?: number) =>
+    api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
+  ytdSummary: (year?: number) =>
+    api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
+};
+
+// Legacy dashboard (for migration)
 export const dashboardApi = {
   stats: (companyId: number) => api.get<DashboardStats>(`/companies/${companyId}/dashboard`),
 };
