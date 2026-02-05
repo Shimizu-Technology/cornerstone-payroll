@@ -9,6 +9,7 @@ import { PayPeriods } from '@/pages/PayPeriods';
 import { PayPeriodDetail } from '@/pages/PayPeriodDetail';
 import { PayrollRun } from '@/pages/PayrollRun';
 import { Reports } from '@/pages/Reports';
+import TaxConfigs from '@/pages/TaxConfigs';
 import { Login } from '@/pages/Login';
 import { AuthCallback } from '@/pages/AuthCallback';
 
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="pay-periods/:id" element={<PayPeriodDetail />} />
         <Route path="payroll/run" element={<PayrollRun />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="settings/tax-config" element={<TaxConfigs />} />
       </Route>
 
       {/* Catch-all redirect */}
