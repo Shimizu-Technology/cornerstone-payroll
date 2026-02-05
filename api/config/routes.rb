@@ -8,6 +8,12 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
+      # Authentication
+      get "auth/login", to: "auth#login"
+      get "auth/callback", to: "auth#callback"
+      post "auth/logout", to: "auth#logout"
+      get "auth/me", to: "auth#me"
+
       namespace :admin do
         resources :employees, only: [ :index, :show, :create, :update, :destroy ]
         resources :departments, only: [ :index, :create, :update ]
@@ -32,6 +38,13 @@ Rails.application.routes.draw do
         get "reports/employee_pay_history", to: "reports#employee_pay_history"
         get "reports/tax_summary", to: "reports#tax_summary"
         get "reports/ytd_summary", to: "reports#ytd_summary"
+
+        # Pay Stubs
+        get "pay_stubs/:id", to: "pay_stubs#show"
+        post "pay_stubs/:id/generate", to: "pay_stubs#generate"
+        get "pay_stubs/:id/download", to: "pay_stubs#download"
+        post "pay_stubs/batch_generate", to: "pay_stubs#batch_generate"
+        get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
       end
     end
   end
