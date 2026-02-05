@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_05_100010) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_05_213657) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -231,6 +231,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_100010) do
     t.string "pay_frequency", null: false
     t.decimal "ss_rate", precision: 6, scale: 5, default: "0.062", null: false
     t.decimal "ss_wage_base", precision: 12, scale: 2, null: false
+    t.decimal "standard_deduction", precision: 10, scale: 2, default: "0.0"
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
