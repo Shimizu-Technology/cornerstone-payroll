@@ -42,7 +42,9 @@ export function EmployeeForm() {
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
   const { user } = useAuth();
-  const companyId = user?.company_id ?? parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+  // Use company_id from auth context, fall back to env var for dev mode
+  const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+  const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
