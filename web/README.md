@@ -70,6 +70,7 @@ Copy `.env.example` to `.env` and configure:
 
 ```bash
 VITE_API_URL=http://localhost:3000/api/v1
+VITE_COMPANY_ID=1
 ```
 
 ## Features

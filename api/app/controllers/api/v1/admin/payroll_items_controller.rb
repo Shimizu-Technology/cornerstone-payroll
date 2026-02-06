@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class PayrollItemsController < ApplicationController
+      class PayrollItemsController < BaseController
         before_action :set_pay_period
         before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate ]
 
@@ -154,9 +154,6 @@ module Api
           json
         end
 
-        def current_company_id
-          ENV.fetch("COMPANY_ID", 1).to_i
-        end
       end
     end
   end

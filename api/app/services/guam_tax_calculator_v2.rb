@@ -23,8 +23,9 @@ class GuamTaxCalculatorV2
   attr_reader :annual_config, :filing_status_config, :pay_frequency, :periods_per_year, :allowances
 
   def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0)
-    @annual_config = AnnualTaxConfig.current(tax_year) ||
-                     raise(ArgumentError, "No tax configuration found for year #{tax_year}")
+    @annual_config = AnnualTaxConfig.current(tax_year)
+    @annual_config = @annual_config.first if @annual_config.is_a?(ActiveRecord::Relation)
+    @annual_config ||= raise(ArgumentError, "No tax configuration found for year #{tax_year}")
     @filing_status_config = @annual_config.config_for(filing_status) ||
                             raise(ArgumentError, "No filing status config found for #{filing_status}")
     @pay_frequency = pay_frequency

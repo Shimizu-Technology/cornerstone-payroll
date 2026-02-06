@@ -7,7 +7,7 @@
 #   calculator.calculate
 #
 # This is a port from the leon-tax-calculator codebase with enhancements:
-# - Uses GuamTaxCalculator (database-driven tax tables)
+# - Uses GuamTaxCalculatorV2 (annual tax config)
 # - SS wage base cap
 # - Additional Medicare Tax
 #
@@ -38,14 +38,20 @@ class PayrollCalculator
   protected
 
   # Initialize the tax calculator with employee's info
-  # Uses V2 calculator with AnnualTaxConfig/FilingStatusConfig/TaxBracket schema
+  # Prefer V2 config; fall back to legacy tax tables if none exist
   def tax_calculator
-    @tax_calculator ||= GuamTaxCalculatorV2.new(
-      tax_year: pay_period.pay_date.year,
-      filing_status: employee.filing_status,
-      pay_frequency: employee.pay_frequency,
-      allowances: employee.allowances
-    )
+    @tax_calculator ||= begin
+      config = AnnualTaxConfig.current(pay_period.pay_date.year)
+      config = config.first if config.is_a?(ActiveRecord::Relation)
+
+      calculator_class = config.present? ? GuamTaxCalculatorV2 : GuamTaxCalculator
+      calculator_class.new(
+        tax_year: pay_period.pay_date.year,
+        filing_status: employee.filing_status,
+        pay_frequency: employee.pay_frequency,
+        allowances: employee.allowances
+      )
+    end
   end
 
   def pay_period
