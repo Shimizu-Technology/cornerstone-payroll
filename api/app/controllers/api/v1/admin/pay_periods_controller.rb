@@ -224,7 +224,6 @@ module Api
           )
           ytd.add_payroll_item!(payroll_item)
         end
-
       end
     end
   end

@@ -153,7 +153,6 @@ module Api
 
           json
         end
-
       end
     end
   end

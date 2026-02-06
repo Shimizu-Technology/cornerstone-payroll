@@ -180,7 +180,6 @@ module Api
             ENV["R2_ACCESS_KEY_ID"].present? &&
             ENV["R2_SECRET_ACCESS_KEY"].present?
         end
-
       end
     end
   end

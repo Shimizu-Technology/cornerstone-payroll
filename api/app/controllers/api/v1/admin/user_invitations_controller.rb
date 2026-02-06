@@ -24,7 +24,7 @@ module Api
           )
 
           invite_url = "#{frontend_url}/invite?token=#{invitation.token}"
-          UserInvitationMailer.invite_email(invitation, invite_url)
+          UserInvitationMailer.invite_email(invitation, invite_url).deliver_later
 
           render json: {
             data: {

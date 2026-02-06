@@ -40,7 +40,7 @@ class ApplicationController < ActionController::API
       unless workos_session_valid?(session.workos_access_token)
         session.revoke!
         render json: { error: "Unauthorized" }, status: :unauthorized
-        return
+        nil
       end
     end
   end
@@ -78,7 +78,7 @@ class ApplicationController < ActionController::API
 
     unless roles.include?(current_user_role)
       render json: { error: "Forbidden" }, status: :forbidden
-      return
+      nil
     end
   end
 
@@ -129,13 +129,18 @@ class ApplicationController < ActionController::API
   end
 
   def workos_session_valid?(access_token)
-    uri = URI("https://api.workos.com/sso/profile")
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = true
-    request = Net::HTTP::Get.new(uri)
-    request["Authorization"] = "Bearer #{access_token}"
-    response = http.request(request)
-    response.code.to_i == 200
+    cache_key = "workos_session_valid:#{Digest::SHA256.hexdigest(access_token)}"
+
+    # Cache validated sessions for 5 minutes to avoid external API call on every request
+    Rails.cache.fetch(cache_key, expires_in: 5.minutes) do
+      uri = URI("https://api.workos.com/sso/profile")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      request = Net::HTTP::Get.new(uri)
+      request["Authorization"] = "Bearer #{access_token}"
+      response = http.request(request)
+      response.code.to_i == 200
+    end
   rescue StandardError => e
     Rails.logger.error("WorkOS session validation failed: #{e.message}")
     false
