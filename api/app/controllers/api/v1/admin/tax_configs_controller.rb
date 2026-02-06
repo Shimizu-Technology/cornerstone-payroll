@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class TaxConfigsController < ApplicationController
-        before_action :set_tax_config, only: [:show, :update, :destroy, :activate, :audit_logs]
+        before_action :set_tax_config, only: [ :show, :update, :destroy, :activate, :audit_logs ]
 
         # GET /api/v1/admin/tax_configs
         def index
@@ -193,7 +193,7 @@ module Api
           changes = {}
           new_params.each do |key, value|
             old_value = record.send(key)
-            changes[key] = [old_value, value] if old_value.to_s != value.to_s
+            changes[key] = [ old_value, value ] if old_value.to_s != value.to_s
           end
           changes
         end

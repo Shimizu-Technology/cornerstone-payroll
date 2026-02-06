@@ -26,7 +26,7 @@ RSpec.describe "Tax Configs Admin API", type: :request do
       years = json["tax_configs"].map { |c| c["tax_year"] }
       # Check that these specific years are in descending order within the results
       test_years = years.select { |y| y >= 2600 }
-      expect(test_years).to eq([2602, 2601, 2600])
+      expect(test_years).to eq([ 2602, 2601, 2600 ])
     end
   end
 

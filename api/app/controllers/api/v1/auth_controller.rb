@@ -7,13 +7,13 @@ require "json"
 module Api
   module V1
     class AuthController < ApplicationController
-      skip_before_action :authenticate_user!, only: [:login, :callback, :logout], if: -> { respond_to?(:authenticate_user!) }
+      skip_before_action :authenticate_user!, only: [ :login, :callback, :logout ], if: -> { respond_to?(:authenticate_user!) }
 
       # GET /api/v1/auth/login
       # Redirects to WorkOS login page
       def login
         redirect_uri = callback_url
-        
+
         # Build WorkOS authorization URL
         auth_url = URI("https://api.workos.com/sso/authorize")
         auth_url.query = URI.encode_www_form({
@@ -116,13 +116,13 @@ module Api
 
       def exchange_code_for_token(code)
         uri = URI("https://api.workos.com/sso/token")
-        
+
         http = Net::HTTP.new(uri.host, uri.port)
         http.use_ssl = true
-        
+
         request = Net::HTTP::Post.new(uri)
         request["Content-Type"] = "application/x-www-form-urlencoded"
-        
+
         request.body = URI.encode_www_form({
           client_id: workos_client_id,
           client_secret: workos_api_key,
@@ -130,10 +130,10 @@ module Api
           code: code,
           redirect_uri: callback_url
         })
-        
+
         response = http.request(request)
         data = JSON.parse(response.body, symbolize_names: true)
-        
+
         if response.code.to_i == 200
           # WorkOS returns profile directly in the token response
           data
@@ -172,7 +172,7 @@ module Api
           role: user[:role],
           exp: 24.hours.from_now.to_i
         }
-        
+
         # Simple encoding - in production use JWT gem
         Base64.strict_encode64(payload.to_json)
       end

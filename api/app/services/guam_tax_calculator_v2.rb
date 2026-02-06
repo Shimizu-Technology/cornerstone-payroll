@@ -57,7 +57,7 @@ class GuamTaxCalculatorV2
     period_std_deduction = filing_status_config.standard_deduction / periods_per_year
 
     # Taxable income for this period (after standard deduction)
-    period_taxable = [gross_pay - period_std_deduction, 0].max
+    period_taxable = [ gross_pay - period_std_deduction, 0 ].max
 
     # Annualize the taxable income
     annual_taxable = period_taxable * periods_per_year
@@ -75,10 +75,10 @@ class GuamTaxCalculatorV2
   # Once YTD wages reach the cap, stop withholding.
   def calculate_social_security(gross_pay, ytd_gross)
     # Calculate how much room is left under the wage base cap
-    remaining_taxable = [config.ss_wage_base - ytd_gross, 0].max
+    remaining_taxable = [ config.ss_wage_base - ytd_gross, 0 ].max
 
     # Only tax up to the remaining room under the cap
-    taxable_wages = [gross_pay, remaining_taxable].min
+    taxable_wages = [ gross_pay, remaining_taxable ].min
 
     # Apply SS rate (6.2%)
     (taxable_wages * config.ss_rate).round(2)
@@ -126,7 +126,7 @@ class GuamTaxCalculatorV2
       # How much income falls in this bracket?
       bracket_max = bracket.max_income || Float::INFINITY
       bracket_range = bracket_max - bracket.min_income
-      taxable_in_bracket = [remaining, bracket_range].min
+      taxable_in_bracket = [ remaining, bracket_range ].min
 
       # Add tax for this bracket
       tax += taxable_in_bracket * bracket.rate
