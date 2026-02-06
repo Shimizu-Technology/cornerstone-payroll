@@ -15,13 +15,13 @@ require "aws-sdk-s3"
 #
 # Usage:
 #   service = R2StorageService.new
-#   
+#
 #   # Upload
 #   url = service.upload("paystubs/emp_1_2026-02-05.pdf", pdf_binary)
-#   
+#
 #   # Download
 #   data = service.download("paystubs/emp_1_2026-02-05.pdf")
-#   
+#
 #   # Signed URL (for temporary access)
 #   url = service.signed_url("paystubs/emp_1_2026-02-05.pdf", expires_in: 1.hour)
 #

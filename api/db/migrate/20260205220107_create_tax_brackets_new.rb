@@ -10,8 +10,8 @@ class CreateTaxBracketsNew < ActiveRecord::Migration[8.1]
       t.timestamps
     end
 
-    add_index :tax_brackets, [:filing_status_config_id, :bracket_order], 
-              unique: true, 
+    add_index :tax_brackets, [ :filing_status_config_id, :bracket_order ],
+              unique: true,
               name: 'idx_tax_brackets_order_unique'
   end
 end

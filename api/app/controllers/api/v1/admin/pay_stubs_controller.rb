@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PayStubsController < ApplicationController
-        before_action :set_payroll_item, only: [:show, :generate, :download]
+        before_action :set_payroll_item, only: [ :show, :generate, :download ]
 
         # GET /api/v1/admin/pay_stubs/:payroll_item_id
         # Get pay stub info (not the PDF itself)

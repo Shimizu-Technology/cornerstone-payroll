@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -46,11 +46,7 @@ export function PayPeriods() {
   });
 
   // Load pay periods
-  useEffect(() => {
-    loadPayPeriods();
-  }, [statusFilter]);
-
-  const loadPayPeriods = async () => {
+  const loadPayPeriods = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -62,7 +58,11 @@ export function PayPeriods() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  useEffect(() => {
+    loadPayPeriods();
+  }, [loadPayPeriods]);
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

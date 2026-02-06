@@ -5,7 +5,7 @@ module Api
     module Admin
       class PayrollItemsController < ApplicationController
         before_action :set_pay_period
-        before_action :set_payroll_item, only: [:show, :update, :destroy, :recalculate]
+        before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
@@ -93,7 +93,7 @@ module Api
 
         def set_pay_period
           @pay_period = PayPeriod.find(params[:pay_period_id])
-          
+
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
           end

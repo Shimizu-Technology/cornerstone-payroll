@@ -11,7 +11,7 @@ import { PayrollRun } from '@/pages/PayrollRun';
 import { Reports } from '@/pages/Reports';
 import TaxConfigs from '@/pages/TaxConfigs';
 import { Login } from '@/pages/Login';
-import { AuthCallback } from '@/pages/AuthCallback';
+import AuthCallback from '@/pages/AuthCallback';
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';

@@ -5,7 +5,7 @@
 class TaxBracket < ApplicationRecord
   belongs_to :filing_status_config
 
-  validates :bracket_order, presence: true, 
+  validates :bracket_order, presence: true,
             numericality: { only_integer: true, greater_than: 0 }
   validates :bracket_order, uniqueness: { scope: :filing_status_config_id }
   validates :min_income, presence: true, numericality: { greater_than_or_equal_to: 0 }

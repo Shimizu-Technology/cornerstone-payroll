@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PayPeriodsController < ApplicationController
-        before_action :set_pay_period, only: [:show, :update, :destroy, :run_payroll, :approve, :commit]
+        before_action :set_pay_period, only: [ :show, :update, :destroy, :run_payroll, :approve, :commit ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -89,7 +89,7 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
-              
+
               # Set defaults from employee if new record
               if payroll_item.new_record?
                 payroll_item.employment_type = employee.employment_type
@@ -142,7 +142,7 @@ module Api
 
           ActiveRecord::Base.transaction do
             @pay_period.update!(status: "committed", committed_at: Time.current)
-            
+
             # Update YTD totals for all employees
             @pay_period.payroll_items.each do |item|
               update_ytd_totals(item)
@@ -156,7 +156,7 @@ module Api
 
         def set_pay_period
           @pay_period = PayPeriod.includes(:payroll_items).find(params[:id])
-          
+
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
           end
