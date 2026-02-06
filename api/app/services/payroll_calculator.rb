@@ -42,7 +42,6 @@ class PayrollCalculator
   def tax_calculator
     @tax_calculator ||= begin
       config = AnnualTaxConfig.current(pay_period.pay_date.year)
-      config = config.first if config.is_a?(ActiveRecord::Relation)
 
       calculator_class = config.present? ? GuamTaxCalculatorV2 : GuamTaxCalculator
       calculator_class.new(
