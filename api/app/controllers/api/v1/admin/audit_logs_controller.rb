@@ -15,11 +15,11 @@ module Api
           logs = logs.where(record_type: params[:record_type]) if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
 
-          if params[:from].present?
-            logs = logs.where("created_at >= ?", Time.zone.parse(params[:from]))
-          end
-          if params[:to].present?
-            logs = logs.where("created_at <= ?", Time.zone.parse(params[:to]))
+          begin
+            logs = logs.where("created_at >= ?", Time.zone.parse(params[:from])) if params[:from].present?
+            logs = logs.where("created_at <= ?", Time.zone.parse(params[:to])) if params[:to].present?
+          rescue ArgumentError
+            return render json: { error: "Invalid date format" }, status: :unprocessable_entity
           end
 
           logs = logs.limit((params[:limit] || 200).to_i)
