@@ -16,8 +16,8 @@ import {
 import { departmentsApi, ApiError } from '@/services/api';
 import type { Department } from '@/types';
 
-// Temporary company ID until auth is integrated
-const COMPANY_ID = 1;
+// Company ID from environment variable (until auth is integrated)
+const COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
 interface DepartmentWithCount extends Department {
   employee_count: number;
