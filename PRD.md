@@ -3,9 +3,9 @@
 **Project:** Cornerstone Payroll
 **Client:** Cornerstone Tax Services (Guam)
 **Author:** Jerry (drafted), Leon Shimizu (review)
-**Status:** Draft
+**Status:** Active
 **Created:** 2026-02-04
-**Updated:** 2026-02-06 (Tax Configuration Architecture)
+**Updated:** 2026-02-06 (Tax Configuration Architecture, Auth + Audit)
 
 ---
 
@@ -73,7 +73,7 @@ Leon previously built a working tax calculator and payroll system. Before buildi
 | Component | Why |
 |-----------|-----|
 | **Frontend (complete redo)** | CRA is deprecated. Plain CSS files. React 18. No Tailwind. No component library. Must rebuild with Vite + React 19 + Tailwind following starter-app playbook. |
-| **Auth** | Basic bcrypt/JWT. Replace with WorkOS AuthKit (MFA + RBAC for payroll security). |
+| **Auth** | Basic bcrypt/JWT. Replace with WorkOS OAuth + JWT sessions (RBAC enforced). |
 | **Rails version** | 7.1 → 8.x. New project, not an upgrade-in-place. |
 
 ### Decision: Hybrid Approach
@@ -96,7 +96,7 @@ This gives us proven tax math + modern infrastructure. Estimated effort saved by
 |-------|--------|-----------|
 | **Backend** | Rails 8 API | Complex CRUD, many models/relationships, service objects, callbacks — Rails' sweet spot. Leon + team know it. Existing code is Rails. |
 | **Frontend** | React 19 + Vite + Tailwind | Modern, fast, consistent with all Shimizu Tech projects. Replaces CRA. |
-| **Auth** | WorkOS AuthKit | 1M MAU free, native Ruby SDK, RBAC built-in, MFA included. Better fit for B2B than Clerk. |
+| **Auth** | WorkOS OAuth + JWT | RBAC enforced server-side, works with WorkOS OAuth flow. |
 | **Database** | PostgreSQL | Already proven in existing app. JSONB for flexible deductions. |
 | **File Storage** | Cloudflare R2 | S3-compatible, zero egress fees, 35% cheaper storage. Works with Rails ActiveStorage. |
 | **PDF Generation** | Prawn (Ruby gem) | Industry standard for programmatic PDF in Rails. Pay stubs + checks. |
@@ -293,8 +293,15 @@ ACH direct deposit, quarterly filing reports (941-GU), W-2GU generation, bank re
 | Role | Description | Permissions |
 |------|-------------|-------------|
 | **Admin** | Cornerstone owner/CEO | Full access — manage companies, employees, run payroll, system settings |
-| **Payroll Manager** | Cornerstone staff | Run payroll, manage employees, view reports. Cannot change system settings. |
+| **Manager** | Cornerstone staff | Run payroll, manage employees, view reports. Cannot change system settings. |
 | **Employee** | Person being paid | View own pay stubs, update personal info (future: self-service portal) |
+
+### 3.1 Auth, Users, and Audit (Implemented)
+- Persisted users with roles and company scoping
+- Role enforcement for admin/manager on admin endpoints
+- User management UI (create, edit roles, activate/deactivate)
+- Invitation flow with email + invite link fallback
+- Audit log for all non-GET actions (who, what, when)
 
 ---
 
@@ -575,7 +582,7 @@ Each pay stub includes:
 
 - **Backend:** Rails 8 API (Ruby 3.3+), ported business logic from `leon-tax-calculator`
 - **Frontend:** React 19 + Vite + Tailwind CSS (new build, replaces CRA)
-- **Auth:** WorkOS AuthKit (1M MAU free, native Ruby SDK, RBAC + MFA included)
+- **Auth:** WorkOS OAuth + JWT sessions, RBAC enforced server-side
 - **Database:** PostgreSQL
 - **PDF:** Prawn gem (pay stubs + checks)
 - **Deployment:** Render (API) + Netlify (frontend)
@@ -803,7 +810,7 @@ end
 - New Rails 8 API project (not added to cornerstone-tax)
 - Port models/services from leon-tax-calculator (see Section 0)
 - New Vite + React 19 + Tailwind frontend
-- WorkOS AuthKit for auth (RBAC + MFA), Cloudflare R2 for file storage
+- WorkOS OAuth + JWT sessions (RBAC enforced), Cloudflare R2 for file storage
 - Standard Shimizu Tech deployment (Render + Netlify), separate PostgreSQL database
 
 ---
@@ -883,7 +890,7 @@ end
 ```
 Requires `ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY`, `ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY`, and `ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT` environment variables.
 
-**Access control** via WorkOS RBAC — admin, payroll_manager, and employee roles with different permission levels.
+**Access control** via persisted users and role enforcement on the API.
 
 **Audit logging** — all payroll actions (create, approve, commit, void) logged with user ID, timestamp, and action details. Immutable audit trail.
 

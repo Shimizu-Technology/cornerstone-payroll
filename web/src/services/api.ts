@@ -132,6 +132,7 @@ import type {
   TimeEntry,
   DashboardStats,
   PaginationMeta,
+  User,
 } from '@/types';
 
 // Companies
@@ -172,6 +173,137 @@ export const departmentsApi = {
     api.post<{ data: Department }>('/admin/departments', { department: data }),
   update: (id: number, data: { name?: string; active?: boolean }) =>
     api.patch<{ data: Department }>(`/admin/departments/${id}`, { department: data }),
+};
+
+// Users (Admin API)
+export const usersApi = {
+  list: (params?: { search?: string }) =>
+    api.get<{ data: User[] }>('/admin/users', params),
+  get: (id: number) =>
+    api.get<{ data: User }>(`/admin/users/${id}`),
+  create: (data: { email: string; name: string; role: User['role'] }) =>
+    api.post<{ data: User }>('/admin/users', { user: data }),
+  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>>) =>
+    api.patch<{ data: User }>(`/admin/users/${id}`, { user: data }),
+  activate: (id: number) =>
+    api.post<{ data: User }>(`/admin/users/${id}/activate`),
+  deactivate: (id: number) =>
+    api.post<{ data: User }>(`/admin/users/${id}/deactivate`),
+};
+
+export interface UserInvitationResponse {
+  id: number;
+  email: string;
+  name?: string | null;
+  role: User['role'];
+  invited_at: string;
+  expires_at: string;
+  invite_url: string;
+}
+
+export const userInvitationsApi = {
+  create: (data: { email: string; name?: string; role: User['role'] }) =>
+    api.post<{ data: UserInvitationResponse }>('/admin/user_invitations', { invitation: data }),
+};
+
+// Audit Logs (Admin API)
+export interface AuditLogEntry {
+  id: number;
+  action: string;
+  record_type: string | null;
+  record_id: number | null;
+  user_id: number | null;
+  user_name: string | null;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+export const auditLogsApi = {
+  list: (params?: {
+    user_id?: number;
+    action?: string;
+    record_type?: string;
+    record_id?: number;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }) =>
+    api.get<{ data: AuditLogEntry[] }>('/admin/audit_logs', params),
+};
+
+// Tax Configs (Admin API)
+export interface TaxConfigBracket {
+  id: number;
+  bracket_order: number;
+  min_income: number;
+  max_income: number | null;
+  rate: number;
+  rate_percent: number;
+}
+
+export interface TaxConfigFilingStatus {
+  id: number;
+  filing_status: string;
+  standard_deduction: number;
+  brackets?: TaxConfigBracket[];
+}
+
+export interface TaxConfig {
+  id: number;
+  tax_year: number;
+  ss_wage_base: number;
+  ss_rate: number;
+  medicare_rate: number;
+  additional_medicare_rate: number;
+  additional_medicare_threshold: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  filing_statuses: TaxConfigFilingStatus[];
+}
+
+export interface TaxConfigAuditLog {
+  id: number;
+  action: string;
+  field_name: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  user_id: number | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export const taxConfigsApi = {
+  list: () =>
+    api.get<{ tax_configs: TaxConfig[] }>('/admin/tax_configs'),
+  get: (id: number) =>
+    api.get<{ tax_config: TaxConfig }>(`/admin/tax_configs/${id}`),
+  auditLogs: (id: number) =>
+    api.get<{ audit_logs: TaxConfigAuditLog[] }>(`/admin/tax_configs/${id}/audit_logs`),
+  create: (data: { tax_year: number; copy_from_year?: number | null }) =>
+    api.post<{ tax_config: TaxConfig; message: string }>('/admin/tax_configs', data),
+  activate: (id: number) =>
+    api.post<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}/activate`),
+  update: (id: number, data: Partial<Pick<TaxConfig, "ss_wage_base" | "ss_rate" | "medicare_rate" | "additional_medicare_rate" | "additional_medicare_threshold">>) =>
+    api.patch<{ tax_config: TaxConfig; message: string }>(`/admin/tax_configs/${id}`, data),
+  updateFilingStatus: (id: number, filingStatus: string, data: { standard_deduction: number }) =>
+    api.patch<{ filing_status_config: TaxConfigFilingStatus; message: string }>(
+      `/admin/tax_configs/${id}/filing_status/${filingStatus}`,
+      data
+    ),
+  updateBrackets: (
+    id: number,
+    filingStatus: string,
+    data: { brackets: Array<Pick<TaxConfigBracket, "bracket_order" | "min_income" | "max_income" | "rate">> }
+  ) =>
+    api.patch<{ filing_status_config: TaxConfigFilingStatus; message: string }>(
+      `/admin/tax_configs/${id}/brackets/${filingStatus}`,
+      data
+    ),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/tax_configs/${id}`),
 };
 
 // Pay Periods (Admin API)
@@ -396,7 +528,7 @@ export const payStubsApi = {
   generate: (payrollItemId: number) =>
     api.post<{ pay_stub: PayStubInfo }>(`/admin/pay_stubs/${payrollItemId}/generate`),
   downloadUrl: (payrollItemId: number) =>
-    `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'}/admin/pay_stubs/${payrollItemId}/download`,
+    `${API_BASE_URL}/admin/pay_stubs/${payrollItemId}/download`,
   batchGenerate: (payPeriodId: number) =>
     api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
   employeeStubs: (employeeId: number, limit?: number) =>
@@ -412,7 +544,7 @@ export const dashboardApi = {
 export const authApi = {
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: { id: number; email: string; role: string } }>('/auth/me');
+    return api.get<{ user: { id: number | string; email: string; name?: string; role: string; company_id?: number } }>('/auth/me');
   },
   logout: () => {
     api.setAuthToken(null);

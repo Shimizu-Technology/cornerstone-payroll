@@ -6,6 +6,8 @@ class Company < ApplicationRecord
   has_many :pay_periods, dependent: :destroy
   has_many :deduction_types, dependent: :destroy
   has_many :company_ytd_totals, dependent: :destroy
+  has_many :users, dependent: :destroy
+  has_many :user_invitations, dependent: :destroy
 
   validates :name, presence: true
   validates :ein, uniqueness: true, allow_blank: true

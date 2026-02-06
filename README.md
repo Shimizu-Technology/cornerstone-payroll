@@ -8,22 +8,20 @@ No major payroll software (Gusto, ADP, Check.com) supports Guam. QuickBooks requ
 
 ## Status
 
-**Phase 1: Internal Payroll MVP** (In Planning)
-- 4 employees, biweekly, hourly + salary
-- Guam territorial income tax (mirrors federal brackets)
-- FICA (Social Security + Medicare)
-- Pay stub and check PDF generation
+**Phase 1: Internal Payroll MVP** (Active build)
+- Payroll engine and tax calculations in place
+- Role-based access control and audit logging added
+- Admin UI for user management, tax config, and audit logs
 
 See [PRD.md](PRD.md) for full product requirements.
 
 ## Architecture Decision
 
-This will be built as a **module within the existing Cornerstone Tax app** (`cornerstone-tax` repo), not as a standalone application. Rationale:
-- Shared auth (Clerk), shared employee/client data
-- One deployment, one database
-- Can extract later if it becomes its own SaaS product
+This is a **standalone app** in the `cornerstone-payroll` repo with:
+- Rails 8 API backend (`api/`)
+- React 19 + Vite frontend (`web/`)
 
-This repo holds planning documents (PRD, research). Code lives in `Shimizu-Technology/cornerstone-tax`.
+See [PRD.md](PRD.md) and [BUILD_PLAN.md](BUILD_PLAN.md) for details.
 
 ## Guam Tax Quick Reference
 
@@ -45,4 +43,5 @@ This repo holds planning documents (PRD, research). Code lives in `Shimizu-Techn
 ## Links
 
 - [PRD](PRD.md) — Product Requirements Document
-- [Cornerstone Tax repo](https://github.com/Shimizu-Technology/cornerstone-tax) — Where the code will live
+- [Build Plan](BUILD_PLAN.md) — Tactical plan
+- [Future Improvements](FUTURE_IMPROVEMENTS.md)

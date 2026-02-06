@@ -7,10 +7,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, ApiError } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency } from '@/types';
-
-// Temporary company ID until auth is integrated
-const COMPANY_ID = 1;
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -43,6 +41,8 @@ export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
+  const { user } = useAuth();
+  const companyId = user?.company_id ?? parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -95,12 +95,12 @@ export function EmployeeForm() {
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const response = await departmentsApi.list({ company_id: COMPANY_ID, active: true });
+      const response = await departmentsApi.list({ company_id: companyId, active: true });
       setDepartments(response.data);
     } catch (err) {
       console.error('Failed to load departments:', err);
     }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     fetchDepartments();
@@ -161,7 +161,7 @@ export function EmployeeForm() {
         }
         await employeesApi.update(parseInt(id, 10), updateData);
       } else {
-        await employeesApi.create({ ...form, company_id: COMPANY_ID });
+        await employeesApi.create({ ...form, company_id: companyId });
       }
       navigate('/employees');
     } catch (err) {
@@ -219,7 +219,7 @@ export function EmployeeForm() {
       <form onSubmit={handleSubmit} className="p-6 lg:p-8 max-w-4xl">
         {generalError && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
             <p className="text-danger-700">{generalError}</p>
           </div>
         )}

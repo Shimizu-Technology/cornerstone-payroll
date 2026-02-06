@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class EmployeesController < ApplicationController
+      class EmployeesController < BaseController
         before_action :set_employee, only: [ :show, :update, :destroy ]
 
         # GET /api/v1/admin/employees

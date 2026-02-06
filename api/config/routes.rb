@@ -15,6 +15,15 @@ Rails.application.routes.draw do
       get "auth/me", to: "auth#me"
 
       namespace :admin do
+        resources :users, only: [ :index, :show, :create, :update ] do
+          member do
+            post :activate
+            post :deactivate
+          end
+        end
+        resources :audit_logs, only: [ :index ]
+        resources :user_invitations, only: [ :create ]
+
         resources :employees, only: [ :index, :show, :create, :update, :destroy ]
         resources :departments, only: [ :index, :create, :update ]
 

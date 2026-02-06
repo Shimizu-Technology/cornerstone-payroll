@@ -1,11 +1,12 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import api from '@/services/api';
+import type { UserRole } from '@/types';
 
 interface User {
   id: number | string;
   email: string;
   name: string;
-  role: string;
+  role: UserRole;
   company_id?: number;
 }
 
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const TOKEN_KEY = 'cpr_auth_token';
 const USER_KEY = 'cpr_user';
+const INVITE_TOKEN_KEY = 'cpr_invite_token';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
@@ -75,13 +77,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const handleCallback = async (code: string, state: string) => {
     try {
       setIsLoading(true);
-      
+      const inviteToken = localStorage.getItem(INVITE_TOKEN_KEY);
+
       // Exchange code for token
-      const response = await api.get<{ token: string; user: User }>('/auth/callback', { code, state });
+      const response = await api.get<{ token: string; user: User }>('/auth/callback', {
+        code,
+        state,
+        invite_token: inviteToken || undefined,
+      });
       
       // Store token and user
       localStorage.setItem(TOKEN_KEY, response.token);
       localStorage.setItem(USER_KEY, JSON.stringify(response.user));
+      localStorage.removeItem(INVITE_TOKEN_KEY);
       api.setAuthToken(response.token);
       setUser(response.user);
     } catch (error) {
@@ -100,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
+      localStorage.removeItem(INVITE_TOKEN_KEY);
       api.setAuthToken(null);
       setUser(null);
     }

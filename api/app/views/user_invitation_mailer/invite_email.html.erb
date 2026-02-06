@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background-color:#f9fafb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f9fafb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:24px;">
+            <tr>
+              <td style="font-size:20px;font-weight:600;padding-bottom:12px;">
+                You're invited to Cornerstone Payroll
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:14px;line-height:20px;padding-bottom:16px;">
+                Hello,
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:14px;line-height:20px;padding-bottom:16px;">
+                You've been invited to Cornerstone Payroll. Click below to accept your invitation.
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:12px 0 20px;">
+                <a href="<%= @invite_url %>"
+                   style="background-color:#2563eb;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;display:inline-block;font-size:14px;">
+                  Accept invitation
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:13px;line-height:18px;color:#6b7280;padding-bottom:16px;">
+                This link expires on <%= @invitation.expires_at.strftime("%Y-%m-%d %H:%M %Z") %>.
+              </td>
+            </tr>
+            <tr>
+              <td style="font-size:12px;line-height:18px;color:#9ca3af;">
+                If you didn’t expect this invitation, you can ignore this email.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

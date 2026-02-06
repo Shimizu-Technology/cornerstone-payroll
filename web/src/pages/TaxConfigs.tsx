@@ -1,48 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
-
-interface TaxBracket {
-  id: number;
-  bracket_order: number;
-  min_income: number;
-  max_income: number | null;
-  rate: number;
-  rate_percent: number;
-}
-
-interface FilingStatusConfig {
-  id: number;
-  filing_status: string;
-  standard_deduction: number;
-  brackets?: TaxBracket[];
-}
-
-interface TaxConfig {
-  id: number;
-  tax_year: number;
-  ss_wage_base: number;
-  ss_rate: number;
-  medicare_rate: number;
-  additional_medicare_rate: number;
-  additional_medicare_threshold: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  filing_statuses: FilingStatusConfig[];
-}
-
-interface AuditLog {
-  id: number;
-  action: string;
-  field_name: string | null;
-  old_value: string | null;
-  new_value: string | null;
-  user_id: number | null;
-  ip_address: string | null;
-  created_at: string;
-}
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+import {
+  taxConfigsApi,
+  type TaxConfig,
+  type TaxConfigAuditLog,
+  type TaxConfigBracket,
+  type TaxConfigFilingStatus,
+} from '@/services/api';
 
 interface EditableConfig {
   ss_wage_base: number;
@@ -55,7 +19,7 @@ interface EditableConfig {
 export default function TaxConfigs() {
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<TaxConfigAuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
@@ -68,7 +32,7 @@ export default function TaxConfigs() {
   const [editingFilingStatus, setEditingFilingStatus] = useState<string | null>(null);
   const [editableStandardDeduction, setEditableStandardDeduction] = useState<number>(0);
   const [editingBrackets, setEditingBrackets] = useState<string | null>(null);
-  const [editableBrackets, setEditableBrackets] = useState<TaxBracket[]>([]);
+  const [editableBrackets, setEditableBrackets] = useState<TaxConfigBracket[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -77,8 +41,7 @@ export default function TaxConfigs() {
 
   const fetchConfigs = async () => {
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs`);
-      const data = await res.json();
+      const data = await taxConfigsApi.list();
       setConfigs(data.tax_configs);
     } catch (error) {
       console.error('Failed to fetch tax configs:', error);
@@ -89,8 +52,7 @@ export default function TaxConfigs() {
 
   const fetchConfigDetails = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs/${id}`);
-      const data = await res.json();
+      const data = await taxConfigsApi.get(id);
       setSelectedConfig(data.tax_config);
     } catch (error) {
       console.error('Failed to fetch config details:', error);
@@ -99,8 +61,7 @@ export default function TaxConfigs() {
 
   const fetchAuditLogs = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs/${id}/audit_logs`);
-      const data = await res.json();
+      const data = await taxConfigsApi.auditLogs(id);
       setAuditLogs(data.audit_logs);
       setShowAuditModal(true);
     } catch (error) {
@@ -110,21 +71,12 @@ export default function TaxConfigs() {
 
   const createConfig = async () => {
     try {
-      const body: Record<string, number | null> = { tax_year: newYear };
-      if (copyFromYear) {
-        body.copy_from_year = copyFromYear;
-      }
-      
-      const res = await fetch(`${API_URL}/admin/tax_configs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+      await taxConfigsApi.create({
+        tax_year: newYear,
+        copy_from_year: copyFromYear ?? undefined,
       });
-      
-      if (res.ok) {
-        setShowCreateModal(false);
-        fetchConfigs();
-      }
+      setShowCreateModal(false);
+      fetchConfigs();
     } catch (error) {
       console.error('Failed to create config:', error);
     }
@@ -132,12 +84,8 @@ export default function TaxConfigs() {
 
   const activateConfig = async (id: number) => {
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs/${id}/activate`, {
-        method: 'POST'
-      });
-      if (res.ok) {
-        fetchConfigs();
-      }
+      await taxConfigsApi.activate(id);
+      fetchConfigs();
     } catch (error) {
       console.error('Failed to activate config:', error);
     }
@@ -147,14 +95,10 @@ export default function TaxConfigs() {
     if (!confirm(`Are you sure you want to delete the ${year} tax configuration?`)) return;
     
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        fetchConfigs();
-        if (selectedConfig?.id === id) {
-          setSelectedConfig(null);
-        }
+      await taxConfigsApi.delete(id);
+      fetchConfigs();
+      if (selectedConfig?.id === id) {
+        setSelectedConfig(null);
       }
     } catch (error) {
       console.error('Failed to delete config:', error);
@@ -180,18 +124,11 @@ export default function TaxConfigs() {
     setSaving(true);
     
     try {
-      const res = await fetch(`${API_URL}/admin/tax_configs/${selectedConfig.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editableConfig)
-      });
-      
-      if (res.ok) {
-        await fetchConfigDetails(selectedConfig.id);
-        fetchConfigs();
-        setIsEditingGlobal(false);
-        setEditableConfig(null);
-      }
+      await taxConfigsApi.update(selectedConfig.id, editableConfig);
+      await fetchConfigDetails(selectedConfig.id);
+      fetchConfigs();
+      setIsEditingGlobal(false);
+      setEditableConfig(null);
     } catch (error) {
       console.error('Failed to save config:', error);
     } finally {
@@ -200,7 +137,7 @@ export default function TaxConfigs() {
   };
 
   // Start editing filing status standard deduction
-  const startEditingFilingStatus = (fs: FilingStatusConfig) => {
+  const startEditingFilingStatus = (fs: TaxConfigFilingStatus) => {
     setEditingFilingStatus(fs.filing_status);
     setEditableStandardDeduction(fs.standard_deduction);
   };
@@ -211,19 +148,11 @@ export default function TaxConfigs() {
     setSaving(true);
     
     try {
-      const res = await fetch(
-        `${API_URL}/admin/tax_configs/${selectedConfig.id}/filing_status/${editingFilingStatus}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ standard_deduction: editableStandardDeduction })
-        }
-      );
-      
-      if (res.ok) {
-        await fetchConfigDetails(selectedConfig.id);
-        setEditingFilingStatus(null);
-      }
+      await taxConfigsApi.updateFilingStatus(selectedConfig.id, editingFilingStatus, {
+        standard_deduction: editableStandardDeduction,
+      });
+      await fetchConfigDetails(selectedConfig.id);
+      setEditingFilingStatus(null);
     } catch (error) {
       console.error('Failed to save filing status:', error);
     } finally {
@@ -232,14 +161,14 @@ export default function TaxConfigs() {
   };
 
   // Start editing brackets
-  const startEditingBrackets = (fs: FilingStatusConfig) => {
+  const startEditingBrackets = (fs: TaxConfigFilingStatus) => {
     if (!fs.brackets) return;
     setEditingBrackets(fs.filing_status);
     setEditableBrackets(fs.brackets.map(b => ({ ...b })));
   };
 
   // Update a bracket in edit mode
-  const updateBracket = (order: number, field: keyof TaxBracket, value: number | null) => {
+  const updateBracket = (order: number, field: keyof TaxConfigBracket, value: number | null) => {
     setEditableBrackets(prev => 
       prev.map(b => b.bracket_order === order ? { ...b, [field]: value } : b)
     );
@@ -251,27 +180,17 @@ export default function TaxConfigs() {
     setSaving(true);
     
     try {
-      const res = await fetch(
-        `${API_URL}/admin/tax_configs/${selectedConfig.id}/brackets/${editingBrackets}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            brackets: editableBrackets.map(b => ({
-              bracket_order: b.bracket_order,
-              min_income: b.min_income,
-              max_income: b.max_income,
-              rate: b.rate
-            }))
-          })
-        }
-      );
-      
-      if (res.ok) {
-        await fetchConfigDetails(selectedConfig.id);
-        setEditingBrackets(null);
-        setEditableBrackets([]);
-      }
+      await taxConfigsApi.updateBrackets(selectedConfig.id, editingBrackets, {
+        brackets: editableBrackets.map(b => ({
+          bracket_order: b.bracket_order,
+          min_income: b.min_income,
+          max_income: b.max_income,
+          rate: b.rate,
+        })),
+      });
+      await fetchConfigDetails(selectedConfig.id);
+      setEditingBrackets(null);
+      setEditableBrackets([]);
     } catch (error) {
       console.error('Failed to save brackets:', error);
     } finally {

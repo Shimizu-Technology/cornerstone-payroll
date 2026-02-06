@@ -33,16 +33,17 @@ export interface Department {
 // User & Auth
 // ----------------
 
-export type UserRole = 'admin' | 'payroll_manager' | 'employee';
+export type UserRole = 'admin' | 'manager' | 'employee';
 
 export interface User {
   id: number;
-  workos_id: string;
+  workos_id?: string;
   email: string;
-  first_name: string;
-  last_name: string;
+  name: string;
   role: UserRole;
   company_id?: number;
+  active?: boolean;
+  last_login_at?: string | null;
   created_at: string;
   updated_at: string;
 }

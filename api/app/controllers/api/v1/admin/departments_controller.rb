@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class DepartmentsController < ApplicationController
+      class DepartmentsController < BaseController
         before_action :set_department, only: [ :update ]
 
         # GET /api/v1/admin/departments

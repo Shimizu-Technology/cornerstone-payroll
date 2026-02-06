@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class ReportsController < ApplicationController
+      class ReportsController < BaseController
         # GET /api/v1/admin/reports/dashboard
         # Dashboard stats and metrics
         def dashboard
@@ -148,10 +148,6 @@ module Api
         end
 
         private
-
-        def current_company_id
-          ENV.fetch("COMPANY_ID", 1).to_i
-        end
 
         def current_pay_period_summary
           pp = PayPeriod.where(company_id: current_company_id)
