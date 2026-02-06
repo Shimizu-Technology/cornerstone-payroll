@@ -14,16 +14,21 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { departmentsApi, ApiError } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Department } from '@/types';
 
-// Company ID from environment variable (until auth is integrated)
-const COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+// Fallback company ID for development when auth is disabled
+const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
 interface DepartmentWithCount extends Department {
   employee_count: number;
 }
 
 export function Departments() {
+  const { user } = useAuth();
+  // Use company_id from auth context, fall back to env var for dev mode
+  const companyId = user?.company_id ?? DEV_COMPANY_ID;
+
   const [departments, setDepartments] = useState<DepartmentWithCount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,14 +49,14 @@ export function Departments() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await departmentsApi.list({ company_id: COMPANY_ID });
+      const response = await departmentsApi.list({ company_id: companyId });
       setDepartments(response.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load departments');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     fetchDepartments();
@@ -67,7 +72,7 @@ export function Departments() {
     setNewDeptError(null);
 
     try {
-      await departmentsApi.create({ name: newDeptName.trim(), company_id: COMPANY_ID });
+      await departmentsApi.create({ name: newDeptName.trim(), company_id: companyId });
       setNewDeptName('');
       setIsAddingNew(false);
       fetchDepartments();
