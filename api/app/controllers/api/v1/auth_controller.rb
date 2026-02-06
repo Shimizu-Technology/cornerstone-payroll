@@ -130,7 +130,7 @@ module Api
       end
 
       def valid_state_token?(token)
-        return true if Rails.env.development? # Skip in dev for easier testing
+        return true if ENV["SKIP_STATE_VALIDATION"] == "true" # Explicit flag for testing
         Rails.cache.read("workos_state_#{token}").present?
       end
 

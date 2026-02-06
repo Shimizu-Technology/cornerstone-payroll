@@ -34,7 +34,7 @@ module Api
 
         # PATCH /api/v1/admin/users/:id
         def update
-          if @user.id == current_user_id && user_params.key?(:role)
+          if @user.id == current_user_id && user_params[:role].present? && user_params[:role] != @user.role
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
