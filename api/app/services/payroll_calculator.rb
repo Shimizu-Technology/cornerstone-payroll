@@ -38,8 +38,9 @@ class PayrollCalculator
   protected
 
   # Initialize the tax calculator with employee's info
+  # Uses V2 calculator with AnnualTaxConfig/FilingStatusConfig/TaxBracket schema
   def tax_calculator
-    @tax_calculator ||= GuamTaxCalculator.new(
+    @tax_calculator ||= GuamTaxCalculatorV2.new(
       tax_year: pay_period.pay_date.year,
       filing_status: employee.filing_status,
       pay_frequency: employee.pay_frequency,
@@ -109,11 +110,12 @@ class PayrollCalculator
   end
 
   # Calculate net pay
+  # Note: Tips and bonus are already included in gross_pay, so we don't add total_additions here.
+  # total_additions is a display field only.
   def calculate_net_pay
     payroll_item.net_pay = (
       payroll_item.gross_pay -
-      payroll_item.total_deductions +
-      payroll_item.total_additions
+      payroll_item.total_deductions
     ).round(2)
   end
 
