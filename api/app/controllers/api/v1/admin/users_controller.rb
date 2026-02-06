@@ -38,6 +38,13 @@ module Api
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
+          # Prevent demoting the last admin
+          if @user.role == "admin" && user_params[:role].present? && user_params[:role] != "admin"
+            if User.where(company_id: current_company_id, role: "admin", active: true).where.not(id: @user.id).none?
+              return render json: { error: "Cannot demote the last active admin" }, status: :unprocessable_entity
+            end
+          end
+
           @user.update!(user_params)
           render json: { data: user_json(@user) }
         rescue ActiveRecord::RecordInvalid => e
@@ -54,6 +61,13 @@ module Api
         def deactivate
           if @user.id == current_user_id
             return render json: { error: "Cannot deactivate your own account" }, status: :unprocessable_entity
+          end
+
+          # Prevent deactivating the last active admin
+          if @user.role == "admin"
+            if User.where(company_id: current_company_id, role: "admin", active: true).where.not(id: @user.id).none?
+              return render json: { error: "Cannot deactivate the last active admin" }, status: :unprocessable_entity
+            end
           end
 
           @user.update!(active: false)

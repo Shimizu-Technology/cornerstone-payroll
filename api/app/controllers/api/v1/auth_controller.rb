@@ -182,25 +182,26 @@ module Api
         user = User.find_by(workos_id: profile[:id]) || User.find_by(email: email)
 
         # Security: Only use company_id from invitation, never from WorkOS profile.
-        # Fall back to ENV default only for the very first user (bootstrap case).
-        company_id = if invitation
-                       invitation.company_id
-        elsif user&.company_id
-                       user.company_id
-        elsif User.count.zero?
-                       # First user ever - use ENV default
-                       ENV.fetch("COMPANY_ID", 1).to_i
-        else
-                       raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
+        # Validate invitation requirement BEFORE creating any user object
+        # New users require invitation unless this is the very first user in the system
+        if user.nil? && invitation.nil? && User.exists?
+          raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
         end
 
-        if user.nil?
-          # Require invitation unless this is the first user in the system
-          if invitation.nil? && User.exists?
-            raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
-          end
-          user = User.new(workos_id: profile[:id])
-        end
+        # Determine company_id (only after validation passes)
+        company_id = if invitation
+                       invitation.company_id
+                     elsif user&.company_id
+                       user.company_id
+                     elsif User.count.zero?
+                       # First user ever - use ENV default
+                       ENV.fetch("COMPANY_ID", 1).to_i
+                     else
+                       raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
+                     end
+
+        # Create new user if needed (validation already passed above)
+        user ||= User.new(workos_id: profile[:id])
 
         user.company_id ||= company_id
         user.email = email
