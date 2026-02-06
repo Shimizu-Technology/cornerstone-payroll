@@ -40,7 +40,7 @@ class ApplicationController < ActionController::API
       unless workos_session_valid?(session.workos_access_token)
         session.revoke!
         render json: { error: "Unauthorized" }, status: :unauthorized
-        nil
+        return
       end
     end
   end

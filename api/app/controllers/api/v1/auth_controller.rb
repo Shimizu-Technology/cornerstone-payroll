@@ -210,15 +210,14 @@ module Api
         user.role ||= invitation&.role || default_role_for(user.company_id)
         user.last_login_at = Time.current
         user.active = true if user.active.nil?
-        user.save!
 
-        if invitation
-          if invitation.email.casecmp(email).zero?
-            invitation.accept!
-          else
-            raise ActiveRecord::RecordInvalid.new(user), "Invitation email mismatch"
-          end
+        # Validate invitation email BEFORE saving user
+        if invitation && !invitation.email.casecmp(email).zero?
+          raise ActiveRecord::RecordInvalid.new(user), "Invitation email mismatch"
         end
+
+        user.save!
+        invitation&.accept!
 
         user
       end

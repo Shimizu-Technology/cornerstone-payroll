@@ -34,12 +34,12 @@ module Api
 
         # PATCH /api/v1/admin/users/:id
         def update
-          if @user.id == current_user_id && user_params[:role].present? && user_params[:role] != @user.role
+          if @user.id == current_user_id && user_params.key?(:role) && user_params[:role].present? && user_params[:role] != @user.role
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
           # Prevent demoting the last admin
-          if @user.role == "admin" && user_params[:role].present? && user_params[:role] != "admin"
+          if @user.role == "admin" && user_params.key?(:role) && user_params[:role].present? && user_params[:role] != "admin"
             if User.where(company_id: current_company_id, role: "admin", active: true).where.not(id: @user.id).none?
               return render json: { error: "Cannot demote the last active admin" }, status: :unprocessable_entity
             end
