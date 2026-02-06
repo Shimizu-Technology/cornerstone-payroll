@@ -28,14 +28,18 @@ import {
   getInitials,
 } from '@/lib/utils';
 import { employeesApi, departmentsApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Employee, Department, PaginationMeta } from '@/types';
 
-// Company ID from environment variable (until auth is integrated)
-const COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
+// Fallback company ID for development when auth is disabled
+const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
 export function EmployeeList() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAuth();
+  // Use company_id from auth context, fall back to env var for dev mode
+  const companyId = user?.company_id ?? DEV_COMPANY_ID;
   
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<(Department & { employee_count: number })[]>([]);
@@ -54,7 +58,7 @@ export function EmployeeList() {
     setError(null);
     try {
       const response = await employeesApi.list({
-        company_id: COMPANY_ID,
+        company_id: companyId,
         search: search || undefined,
         status: status || undefined,
         department_id: departmentId ? parseInt(departmentId, 10) : undefined,
@@ -68,16 +72,16 @@ export function EmployeeList() {
     } finally {
       setIsLoading(false);
     }
-  }, [search, status, departmentId, page]);
+  }, [companyId, search, status, departmentId, page]);
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const response = await departmentsApi.list({ company_id: COMPANY_ID, active: true });
+      const response = await departmentsApi.list({ company_id: companyId, active: true });
       setDepartments(response.data);
     } catch (err) {
       console.error('Failed to load departments:', err);
     }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     fetchEmployees();
