@@ -34,6 +34,8 @@ class EmployeeYtdTotal < ApplicationRecord
       self.medicare_tax += payroll_item.medicare_tax.to_f
       self.retirement += payroll_item.retirement_payment.to_f
       self.roth_retirement += payroll_item.roth_retirement_payment.to_f
+      self.insurance += payroll_item.insurance_payment.to_f
+      self.loans += payroll_item.loan_payment.to_f
       self.tips += payroll_item.reported_tips.to_f
       self.bonus += payroll_item.bonus.to_f
       self.overtime_pay += (payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5)

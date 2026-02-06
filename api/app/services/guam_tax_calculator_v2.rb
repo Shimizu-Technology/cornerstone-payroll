@@ -2,16 +2,14 @@
 
 # Guam Tax Calculator V2
 #
-# Uses the new normalized tax configuration schema:
-# - AnnualTaxConfig (one per year)
-# - FilingStatusConfig (standard deduction per status)
-# - TaxBracket (7 brackets per status)
+# Uses the new AnnualTaxConfig, FilingStatusConfig, and TaxBracket models
+# instead of the legacy TaxTable model.
 #
 # Key features:
-# - Stores ANNUAL values, calculates per-period amounts automatically
-# - SS wage base cap - stops withholding after cap reached
-# - Additional Medicare Tax (0.9% on wages over $200K)
-# - No allowances (modern W-4) - standard deduction only
+# - Database-driven tax tables via normalized schema
+# - SS wage base cap - stops withholding after cap
+# - Additional Medicare Tax (0.9% on wages over threshold)
+# - Standard deduction per filing status
 #
 class GuamTaxCalculatorV2
   # Pay frequency to periods per year mapping
@@ -22,21 +20,26 @@ class GuamTaxCalculatorV2
     "monthly" => 12
   }.freeze
 
-  attr_reader :config, :filing_status_config, :pay_frequency, :periods_per_year
+  attr_reader :annual_config, :filing_status_config, :pay_frequency, :periods_per_year, :allowances
 
-  def initialize(tax_year:, filing_status:, pay_frequency:)
-    @config = AnnualTaxConfig.find_by!(tax_year: tax_year)
-    @filing_status_config = @config.filing_status_configs.find_by!(filing_status: filing_status)
+  def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0)
+    @annual_config = AnnualTaxConfig.current(tax_year) ||
+                     raise(ArgumentError, "No tax configuration found for year #{tax_year}")
+    @filing_status_config = @annual_config.config_for(filing_status) ||
+                            raise(ArgumentError, "No filing status config found for #{filing_status}")
     @pay_frequency = pay_frequency
-    @periods_per_year = PAY_FREQUENCIES[pay_frequency]
+    @periods_per_year = PAY_FREQUENCIES[pay_frequency] ||
+                        raise(ArgumentError, "Unknown pay frequency: #{pay_frequency}")
+    @allowances = allowances
   end
 
   # Calculate all taxes for a pay period
   #
   # @param gross_pay [Decimal] Gross pay for this pay period
   # @param ytd_gross [Decimal] Year-to-date gross pay BEFORE this pay period
+  # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
-  def calculate(gross_pay:, ytd_gross: 0)
+  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0)
     {
       withholding: calculate_withholding(gross_pay),
       social_security: calculate_social_security(gross_pay, ytd_gross),
@@ -44,26 +47,23 @@ class GuamTaxCalculatorV2
     }
   end
 
-  # Calculate federal/Guam income tax withholding
+  # Calculate federal/Guam income tax withholding using progressive tax brackets
   #
-  # Per IRS Publication 15-T percentage method:
-  # 1. Get per-period gross pay
-  # 2. Subtract per-period standard deduction
-  # 3. Annualize the taxable amount
-  # 4. Apply annual tax brackets
-  # 5. De-annualize the tax
+  # Per IRS Publication 15-T methodology:
+  # 1. Annualize the gross pay
+  # 2. Subtract the standard deduction
+  # 3. Apply progressive tax brackets
+  # 4. De-annualize to get per-period withholding
   def calculate_withholding(gross_pay)
-    # Per-period standard deduction
-    period_std_deduction = filing_status_config.standard_deduction / periods_per_year
+    # Annualize the gross pay
+    annual_gross = gross_pay * periods_per_year
 
-    # Taxable income for this period (after standard deduction)
-    period_taxable = [ gross_pay - period_std_deduction, 0 ].max
+    # Apply standard deduction
+    standard_deduction = filing_status_config.standard_deduction
+    annual_taxable = [annual_gross - standard_deduction, 0].max
 
-    # Annualize the taxable income
-    annual_taxable = period_taxable * periods_per_year
-
-    # Calculate annual tax using brackets
-    annual_tax = calculate_from_brackets(annual_taxable)
+    # Calculate tax using progressive brackets
+    annual_tax = calculate_progressive_tax(annual_taxable)
 
     # De-annualize to get per-period withholding
     (annual_tax / periods_per_year).round(2)
@@ -74,32 +74,36 @@ class GuamTaxCalculatorV2
   # Key: Check wage base cap!
   # Once YTD wages reach the cap, stop withholding.
   def calculate_social_security(gross_pay, ytd_gross)
+    ss_wage_base = annual_config.ss_wage_base
+    ss_rate = annual_config.ss_rate
+
     # Calculate how much room is left under the wage base cap
-    remaining_taxable = [ config.ss_wage_base - ytd_gross, 0 ].max
+    remaining_taxable = [ss_wage_base - ytd_gross, 0].max
 
     # Only tax up to the remaining room under the cap
-    taxable_wages = [ gross_pay, remaining_taxable ].min
+    taxable_wages = [gross_pay, remaining_taxable].min
 
-    # Apply SS rate (6.2%)
-    (taxable_wages * config.ss_rate).round(2)
+    # Apply SS rate
+    (taxable_wages * ss_rate).round(2)
   end
 
   # Calculate Medicare tax
   #
   # Key: Additional Medicare Tax!
-  # Base rate: 1.45% on all wages
-  # Additional: 0.9% on wages over threshold
+  # Base rate on all wages
+  # Additional rate on wages over threshold
   def calculate_medicare(gross_pay, ytd_gross)
+    medicare_rate = annual_config.medicare_rate
+    additional_rate = annual_config.additional_medicare_rate
+    threshold = annual_config.additional_medicare_threshold
+
     # Base Medicare tax
-    base_medicare = (gross_pay * config.medicare_rate).round(2)
+    base_medicare = (gross_pay * medicare_rate).round(2)
 
     # Check for Additional Medicare Tax
     additional_medicare = 0.0
-    threshold = config.additional_medicare_threshold
 
     if ytd_gross + gross_pay > threshold
-      additional_rate = config.additional_medicare_rate
-
       if ytd_gross >= threshold
         # All of this paycheck is over the threshold
         additional_medicare = (gross_pay * additional_rate).round(2)
@@ -115,25 +119,29 @@ class GuamTaxCalculatorV2
 
   private
 
-  # Apply progressive tax brackets to annual taxable income
-  def calculate_from_brackets(annual_taxable)
-    tax = 0.0
-    remaining = annual_taxable
+  # Calculate progressive tax using the tax brackets
+  # This applies each bracket's rate only to the income within that bracket
+  def calculate_progressive_tax(taxable_income)
+    return 0 if taxable_income <= 0
 
-    filing_status_config.tax_brackets.each do |bracket|
-      break if remaining <= 0
+    total_tax = 0.0
+    brackets = filing_status_config.tax_brackets.order(:bracket_order)
 
-      # How much income falls in this bracket?
+    brackets.each do |bracket|
+      # Income within this bracket
+      bracket_min = bracket.min_income
       bracket_max = bracket.max_income || Float::INFINITY
-      bracket_range = bracket_max - bracket.min_income
-      taxable_in_bracket = [ remaining, bracket_range ].min
 
-      # Add tax for this bracket
-      tax += taxable_in_bracket * bracket.rate
+      # Skip if income is below this bracket
+      break if taxable_income <= bracket_min
 
-      remaining -= taxable_in_bracket
+      # Calculate income taxed at this bracket's rate
+      income_in_bracket = [taxable_income, bracket_max].min - bracket_min
+      income_in_bracket = [income_in_bracket, 0].max
+
+      total_tax += income_in_bracket * bracket.rate
     end
 
-    tax.round(2)
+    total_tax.round(2)
   end
 end

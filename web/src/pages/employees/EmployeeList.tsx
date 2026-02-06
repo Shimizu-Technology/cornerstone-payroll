@@ -30,8 +30,8 @@ import {
 import { employeesApi, departmentsApi } from '@/services/api';
 import type { Employee, Department, PaginationMeta } from '@/types';
 
-// Temporary company ID until auth is integrated
-const COMPANY_ID = 1;
+// Company ID from environment variable (until auth is integrated)
+const COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
 export function EmployeeList() {
   const navigate = useNavigate();

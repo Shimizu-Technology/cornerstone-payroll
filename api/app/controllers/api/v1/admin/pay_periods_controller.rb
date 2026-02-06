@@ -218,18 +218,11 @@ module Api
         end
 
         def update_ytd_totals(payroll_item)
-          ytd = EmployeeYtdTotal.find_or_initialize_by(
+          ytd = EmployeeYtdTotal.find_or_create_by!(
             employee_id: payroll_item.employee_id,
             year: @pay_period.pay_date.year
           )
-
-          ytd.gross_pay = (ytd.gross_pay || 0) + payroll_item.gross_pay
-          ytd.withholding_tax = (ytd.withholding_tax || 0) + payroll_item.withholding_tax
-          ytd.social_security_tax = (ytd.social_security_tax || 0) + payroll_item.social_security_tax
-          ytd.medicare_tax = (ytd.medicare_tax || 0) + payroll_item.medicare_tax
-          ytd.retirement = (ytd.retirement || 0) + payroll_item.retirement_payment
-          ytd.net_pay = (ytd.net_pay || 0) + payroll_item.net_pay
-          ytd.save!
+          ytd.add_payroll_item!(payroll_item)
         end
 
         # Temporary helpers until auth is integrated
