@@ -15,9 +15,14 @@ class AnnualTaxConfig < ApplicationRecord
   validates :additional_medicare_threshold, presence: true, numericality: { greater_than: 0 }
 
   scope :active, -> { where(is_active: true) }
-  scope :for_year, ->(year) { find_by(tax_year: year) }
+
+  # Get config for a specific year (returns single record or nil)
+  def self.for_year(year)
+    find_by(tax_year: year)
+  end
 
   # Get the active config, or fall back to the specified year
+  # Always returns a single record or nil (never a Relation)
   def self.current(year = Date.current.year)
     active.first || for_year(year)
   end

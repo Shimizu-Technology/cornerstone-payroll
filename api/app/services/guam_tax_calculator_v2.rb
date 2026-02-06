@@ -60,7 +60,7 @@ class GuamTaxCalculatorV2
 
     # Apply standard deduction
     standard_deduction = filing_status_config.standard_deduction
-    annual_taxable = [annual_gross - standard_deduction, 0].max
+    annual_taxable = [ annual_gross - standard_deduction, 0 ].max
 
     # Calculate tax using progressive brackets
     annual_tax = calculate_progressive_tax(annual_taxable)
@@ -78,10 +78,10 @@ class GuamTaxCalculatorV2
     ss_rate = annual_config.ss_rate
 
     # Calculate how much room is left under the wage base cap
-    remaining_taxable = [ss_wage_base - ytd_gross, 0].max
+    remaining_taxable = [ ss_wage_base - ytd_gross, 0 ].max
 
     # Only tax up to the remaining room under the cap
-    taxable_wages = [gross_pay, remaining_taxable].min
+    taxable_wages = [ gross_pay, remaining_taxable ].min
 
     # Apply SS rate
     (taxable_wages * ss_rate).round(2)
@@ -136,8 +136,8 @@ class GuamTaxCalculatorV2
       break if taxable_income <= bracket_min
 
       # Calculate income taxed at this bracket's rate
-      income_in_bracket = [taxable_income, bracket_max].min - bracket_min
-      income_in_bracket = [income_in_bracket, 0].max
+      income_in_bracket = [ taxable_income, bracket_max ].min - bracket_min
+      income_in_bracket = [ income_in_bracket, 0 ].max
 
       total_tax += income_in_bracket * bracket.rate
     end

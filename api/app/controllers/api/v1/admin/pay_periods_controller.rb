@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class PayPeriodsController < ApplicationController
+      class PayPeriodsController < BaseController
         before_action :set_pay_period, only: [ :show, :update, :destroy, :run_payroll, :approve, :commit ]
 
         # GET /api/v1/admin/pay_periods
@@ -223,15 +223,6 @@ module Api
             year: @pay_period.pay_date.year
           )
           ytd.add_payroll_item!(payroll_item)
-        end
-
-        # Temporary helpers until auth is integrated
-        def current_company_id
-          ENV.fetch("COMPANY_ID", 1).to_i
-        end
-
-        def current_user_id
-          ENV.fetch("USER_ID", 1).to_i
         end
       end
     end

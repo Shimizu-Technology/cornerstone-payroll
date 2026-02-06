@@ -10,8 +10,11 @@ import { PayPeriodDetail } from '@/pages/PayPeriodDetail';
 import { PayrollRun } from '@/pages/PayrollRun';
 import { Reports } from '@/pages/Reports';
 import TaxConfigs from '@/pages/TaxConfigs';
+import { Users } from '@/pages/Users';
+import { AuditLogs } from '@/pages/AuditLogs';
 import { Login } from '@/pages/Login';
 import AuthCallback from '@/pages/AuthCallback';
+import { Invite } from '@/pages/Invite';
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
@@ -51,6 +54,7 @@ function AppRoutes() {
     <Routes>
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
+      <Route path="/invite" element={<Invite />} />
       <Route path="/callback" element={<AuthCallback />} />
 
       {/* Protected routes */}
@@ -71,7 +75,9 @@ function AppRoutes() {
         <Route path="pay-periods/:id" element={<PayPeriodDetail />} />
         <Route path="payroll/run" element={<PayrollRun />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="settings/users" element={<Users />} />
         <Route path="settings/tax-config" element={<TaxConfigs />} />
+        <Route path="settings/audit-logs" element={<AuditLogs />} />
       </Route>
 
       {/* Catch-all redirect */}

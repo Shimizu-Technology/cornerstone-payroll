@@ -3,7 +3,7 @@
 **Created:** 2026-02-05
 **Updated:** 2026-02-06 (Tax Configuration Architecture)
 **Author:** Jerry
-**Status:** In Progress — Phases 1-6 Complete
+**Status:** In Progress — Core platform implemented
 
 This is the tactical execution plan for building Cornerstone Payroll. See `PRD.md` for the "what and why" — this document covers the "how and when."
 
@@ -19,6 +19,14 @@ This is the tactical execution plan for building Cornerstone Payroll. See `PRD.m
 - Pay stub format: `/Users/jerry/shimizu-technology/TaxBusiness/Sample_Check.png`
 
 **Target Repo:** `Shimizu-Technology/cornerstone-payroll`
+
+### Recent Updates (Feb 6, 2026)
+- Persisted users, sessions, and roles (`admin`, `manager`, `employee`)
+- Server-side RBAC enforced on all admin endpoints
+- User management UI and audit log UI
+- User invitations with email delivery + invite link fallback
+- Audit logging for all non-GET actions
+- JWT verification with optional WorkOS session validation
 
 ---
 
@@ -47,13 +55,12 @@ rails generate rspec:install
 ### 1.2 WorkOS Auth Setup (CPR-22)
 **Priority:** P0 | **Effort:** 1 day
 
-- [ ] Create WorkOS account and application
-- [ ] Install `workos` gem
-- [ ] Create `WorkosAuth` service class
-- [ ] Implement JWT verification middleware
-- [ ] Create `User` model with WorkOS ID
-- [ ] Set up RBAC roles: `admin`, `payroll_manager`, `employee`
-- [ ] Test login flow
+- [x] Implement WorkOS OAuth flow
+- [x] Implement JWT verification
+- [x] Persist users and sessions
+- [x] RBAC enforced for admin/manager/employee roles
+- [x] User invitation flow
+- [x] Audit logging for admin actions
 
 **Key files to create:**
 - `app/services/workos_auth.rb`

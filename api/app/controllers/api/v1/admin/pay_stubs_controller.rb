@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class PayStubsController < ApplicationController
+      class PayStubsController < BaseController
         before_action :set_payroll_item, only: [ :show, :generate, :download ]
 
         # GET /api/v1/admin/pay_stubs/:payroll_item_id
@@ -179,10 +179,6 @@ module Api
           ENV["R2_ACCOUNT_ID"].present? &&
             ENV["R2_ACCESS_KEY_ID"].present? &&
             ENV["R2_SECRET_ACCESS_KEY"].present?
-        end
-
-        def current_company_id
-          ENV.fetch("COMPANY_ID", 1).to_i
         end
       end
     end

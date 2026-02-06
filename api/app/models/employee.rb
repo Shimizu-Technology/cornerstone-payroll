@@ -57,7 +57,7 @@ class Employee < ApplicationRecord
   def calculate_ytd_gross(year)
     payroll_items
       .joins(:pay_period)
-      .where(pay_periods: { pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
+      .where(pay_periods: { status: "committed", pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
       .sum(:gross_pay)
   end
 
@@ -65,7 +65,7 @@ class Employee < ApplicationRecord
   def calculate_ytd_social_security(year)
     payroll_items
       .joins(:pay_period)
-      .where(pay_periods: { pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
+      .where(pay_periods: { status: "committed", pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
       .sum(:social_security_tax)
   end
 

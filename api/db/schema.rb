@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_05_220121) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_06_100003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -28,6 +28,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_220121) do
     t.bigint "updated_by_id"
     t.index ["is_active"], name: "index_annual_tax_configs_on_is_active"
     t.index ["tax_year"], name: "index_annual_tax_configs_on_tax_year", unique: true
+  end
+
+  create_table "audit_logs", force: :cascade do |t|
+    t.string "action", null: false
+    t.bigint "company_id"
+    t.datetime "created_at", null: false
+    t.string "ip_address"
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "record_id"
+    t.string "record_type"
+    t.string "user_agent"
+    t.bigint "user_id"
+    t.index ["company_id"], name: "index_audit_logs_on_company_id"
+    t.index ["created_at"], name: "index_audit_logs_on_created_at"
+    t.index ["record_type", "record_id"], name: "index_audit_logs_on_record_type_and_record_id"
+    t.index ["user_id"], name: "index_audit_logs_on_user_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -289,6 +305,56 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_220121) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
+  create_table "user_invitations", force: :cascade do |t|
+    t.datetime "accepted_at"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "invited_at", null: false
+    t.bigint "invited_by_id", null: false
+    t.string "name"
+    t.integer "role", default: 2, null: false
+    t.string "token", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "email", "accepted_at"], name: "idx_user_invitations_company_email"
+    t.index ["company_id"], name: "index_user_invitations_on_company_id"
+    t.index ["invited_by_id"], name: "index_user_invitations_on_invited_by_id"
+    t.index ["token"], name: "index_user_invitations_on_token", unique: true
+  end
+
+  create_table "user_sessions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "ip_address"
+    t.string "jti", null: false
+    t.datetime "revoked_at"
+    t.datetime "updated_at", null: false
+    t.string "user_agent"
+    t.bigint "user_id", null: false
+    t.text "workos_access_token"
+    t.index ["expires_at"], name: "index_user_sessions_on_expires_at"
+    t.index ["jti"], name: "index_user_sessions_on_jti", unique: true
+    t.index ["user_id"], name: "index_user_sessions_on_user_id"
+  end
+
+  create_table "users", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.datetime "last_login_at"
+    t.string "name", null: false
+    t.integer "role", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.string "workos_id"
+    t.index ["company_id"], name: "index_users_on_company_id"
+    t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
+  end
+
+  add_foreign_key "audit_logs", "companies"
+  add_foreign_key "audit_logs", "users"
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
@@ -304,4 +370,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_05_220121) do
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "user_invitations", "companies"
+  add_foreign_key "user_invitations", "users", column: "invited_by_id"
+  add_foreign_key "user_sessions", "users"
+  add_foreign_key "users", "companies"
 end

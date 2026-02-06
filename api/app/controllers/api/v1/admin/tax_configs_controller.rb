@@ -3,7 +3,7 @@
 module Api
   module V1
     module Admin
-      class TaxConfigsController < ApplicationController
+      class TaxConfigsController < BaseController
         before_action :set_tax_config, only: [ :show, :update, :destroy, :activate, :audit_logs ]
 
         # GET /api/v1/admin/tax_configs
@@ -182,11 +182,6 @@ module Api
 
         def filing_status_params
           params.permit(:standard_deduction)
-        end
-
-        def current_user_id
-          # TODO: Get from WorkOS auth
-          nil
         end
 
         def track_changes(record, new_params)
