@@ -16,12 +16,20 @@ module Api
 
         # Build WorkOS authorization URL
         auth_url = URI("https://api.workos.com/sso/authorize")
-        auth_url.query = URI.encode_www_form({
+        params = {
           client_id: workos_client_id,
           redirect_uri: redirect_uri,
           response_type: "code",
           state: generate_state_token
-        })
+        }
+
+        if workos_connection_id.present?
+          params[:connection] = workos_connection_id
+        elsif workos_organization_id.present?
+          params[:organization] = workos_organization_id
+        end
+
+        auth_url.query = URI.encode_www_form(params)
 
         render json: { authorization_url: auth_url.to_s }
       end
@@ -117,6 +125,14 @@ module Api
         ENV.fetch("WORKOS_API_KEY")
       end
 
+      def workos_connection_id
+        ENV["WORKOS_CONNECTION_ID"]
+      end
+
+      def workos_organization_id
+        ENV["WORKOS_ORGANIZATION_ID"]
+      end
+
       def callback_url
         # Use frontend callback URL for SPA flow
         ENV.fetch("WORKOS_REDIRECT_URI", "http://localhost:5173/callback")
@@ -130,7 +146,7 @@ module Api
       end
 
       def valid_state_token?(token)
-        return true if Rails.env.development? # Skip in dev for easier testing
+        return true if ENV["SKIP_STATE_VALIDATION"] == "true" # Explicit flag for testing
         Rails.cache.read("workos_state_#{token}").present?
       end
 
@@ -139,6 +155,8 @@ module Api
 
         http = Net::HTTP.new(uri.host, uri.port)
         http.use_ssl = true
+        http.verify_mode = ssl_verify_mode
+        http.cert_store = ssl_cert_store
 
         request = Net::HTTP::Post.new(uri)
         request["Content-Type"] = "application/x-www-form-urlencoded"
@@ -165,6 +183,20 @@ module Api
         { error: "Authentication failed" }
       end
 
+      def ssl_verify_mode
+        return OpenSSL::SSL::VERIFY_NONE if ENV.fetch("WORKOS_SSL_VERIFY", "true").to_s.downcase == "false"
+
+        OpenSSL::SSL::VERIFY_PEER
+      end
+
+      def ssl_cert_store
+        store = OpenSSL::X509::Store.new
+        store.set_default_paths
+        # Avoid CRL checks from host-level OpenSSL defaults; still verify chain.
+        store.flags = 0
+        store
+      end
+
       def jwt_secret
         ENV.fetch("JWT_SECRET", Rails.application.secret_key_base)
       end
@@ -179,16 +211,29 @@ module Api
 
       def find_or_create_user(profile, invitation)
         email = profile[:email]
-        company_id = invitation&.company_id || profile[:company_id] || ENV.fetch("COMPANY_ID", 1).to_i
         user = User.find_by(workos_id: profile[:id]) || User.find_by(email: email)
 
-        if user.nil?
-          # Require invitation unless this is the first user in the company
-          if invitation.nil? && User.where(company_id: company_id).exists?
-            raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
-          end
-          user = User.new(workos_id: profile[:id])
+        # Security: Only use company_id from invitation, never from WorkOS profile.
+        # Validate invitation requirement BEFORE creating any user object
+        # New users require invitation unless this is the very first user in the system
+        if user.nil? && invitation.nil? && User.exists?
+          raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
         end
+
+        # Determine company_id (only after validation passes)
+        company_id = if invitation
+                       invitation.company_id
+                     elsif user&.company_id
+                       user.company_id
+                     elsif User.count.zero?
+                       # First user ever - reuse existing company or create one
+                       default_company.id
+                     else
+                       raise ActiveRecord::RecordInvalid.new(User.new), "User not invited"
+                     end
+
+        # Create new user if needed (validation already passed above)
+        user ||= User.new(workos_id: profile[:id])
 
         user.company_id ||= company_id
         user.email = email
@@ -197,15 +242,14 @@ module Api
         user.role ||= invitation&.role || default_role_for(user.company_id)
         user.last_login_at = Time.current
         user.active = true if user.active.nil?
-        user.save!
 
-        if invitation
-          if invitation.email.casecmp(email).zero?
-            invitation.accept!
-          else
-            raise ActiveRecord::RecordInvalid.new(user), "Invitation email mismatch"
-          end
+        # Validate invitation email BEFORE saving user
+        if invitation && !invitation.email.casecmp(email).zero?
+          raise ActiveRecord::RecordInvalid.new(user), "Invitation email mismatch"
         end
+
+        user.save!
+        invitation&.accept!
 
         user
       end
@@ -213,6 +257,10 @@ module Api
       def default_role_for(company_id)
         return "admin" if User.where(company_id: company_id).count.zero?
         ENV.fetch("DEFAULT_USER_ROLE", "employee")
+      end
+
+      def default_company
+        Company.first || Company.create!(name: ENV.fetch("COMPANY_NAME", "Cornerstone Payroll"))
       end
 
       def generate_session_token(user, session)

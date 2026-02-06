@@ -31,6 +31,7 @@ bin/rails s -p 3000
 - User invitations are sent via email from `/api/v1/admin/user_invitations`
 - Set `FRONTEND_URL` for the invite link base
 - Resend email delivery uses `RESEND_API_KEY` and `MAILER_FROM_EMAIL`
+- Set `WORKOS_CONNECTION_ID` or `WORKOS_ORGANIZATION_ID` to direct SSO login
 
 ## CORS
 - Set `CORS_ORIGINS` to a comma-separated list of allowed frontend origins

@@ -188,6 +188,92 @@ if Rails.env.development?
   puts "Created Cornerstone Tax Services with #{company.employees.count} employees"
 
   # =============================================================================
+  # Seed demo payroll cycle (draft -> calculated -> approved -> committed)
+  # =============================================================================
+
+  puts "\nSeeding demo payroll cycle..."
+
+  if PayPeriod.where(company: company).none?
+    employees = company.employees.active
+
+    def build_demo_payroll_items(pay_period, employees, period_index)
+      employees.each do |employee|
+        payroll_item = pay_period.payroll_items.find_or_initialize_by(employee: employee)
+
+        payroll_item.employment_type = employee.employment_type
+        payroll_item.pay_rate = employee.pay_rate
+
+        if employee.hourly?
+          payroll_item.hours_worked = period_index.zero? ? 76 : 80
+          payroll_item.overtime_hours = period_index.zero? ? 4 : 0
+          payroll_item.holiday_hours = 0
+          payroll_item.pto_hours = period_index.zero? ? 2 : 0
+        else
+          payroll_item.hours_worked = 0
+          payroll_item.overtime_hours = 0
+          payroll_item.holiday_hours = 0
+          payroll_item.pto_hours = 0
+        end
+
+        payroll_item.bonus = employee.salary? && period_index.zero? ? 250.00 : 0.00
+        payroll_item.reported_tips = employee.hourly? && period_index.zero? ? 45.00 : 0.00
+
+        payroll_item.calculate!
+      end
+    end
+
+    def commit_pay_period!(pay_period)
+      pay_period.update!(status: "approved", approved_by_id: nil)
+      pay_period.update!(status: "committed", committed_at: Time.current)
+
+      pay_period.payroll_items.each do |item|
+        ytd = EmployeeYtdTotal.find_or_create_by!(employee: item.employee, year: pay_period.pay_date.year)
+        ytd.add_payroll_item!(item)
+      end
+    end
+
+    today = Date.current
+
+    committed_period = PayPeriod.create!(
+      company: company,
+      start_date: today - 28,
+      end_date: today - 14,
+      pay_date: today - 12,
+      status: "draft",
+      notes: "Demo committed pay period"
+    )
+
+    build_demo_payroll_items(committed_period, employees, 0)
+    committed_period.update!(status: "calculated")
+    commit_pay_period!(committed_period)
+
+    calculated_period = PayPeriod.create!(
+      company: company,
+      start_date: today - 14,
+      end_date: today - 0,
+      pay_date: today + 2,
+      status: "draft",
+      notes: "Demo calculated pay period"
+    )
+
+    build_demo_payroll_items(calculated_period, employees, 1)
+    calculated_period.update!(status: "calculated")
+
+    draft_period = PayPeriod.create!(
+      company: company,
+      start_date: today,
+      end_date: today + 14,
+      pay_date: today + 16,
+      status: "draft",
+      notes: "Demo draft pay period"
+    )
+
+    puts "Created demo pay periods: #{PayPeriod.where(company: company).count}"
+  else
+    puts "Pay periods already exist for #{company.name}, skipping demo payroll seed"
+  end
+
+  # =============================================================================
   # Seed placeholder companies for Cornerstone's clients (empty, ready to populate)
   # =============================================================================
 
