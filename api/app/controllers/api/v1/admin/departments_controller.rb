@@ -8,7 +8,7 @@ module Api
 
         # GET /api/v1/admin/departments
         def index
-          departments = Department.where(company_id: params[:company_id])
+          departments = Department.where(company_id: current_company_id)
           departments = departments.where(active: params[:active]) if params[:active].present?
           departments = departments.left_joins(:employees)
                                    .select("departments.*, COUNT(employees.id) as employee_count")
@@ -22,7 +22,7 @@ module Api
 
         # POST /api/v1/admin/departments
         def create
-          department = Department.new(department_params)
+          department = Department.new(department_params.merge(company_id: current_company_id))
 
           if department.save
             render json: { data: serialize_department(department) }, status: :created
@@ -49,13 +49,14 @@ module Api
         private
 
         def set_department
-          @department = Department.find(params[:id])
-        rescue ActiveRecord::RecordNotFound
+          @department = Department.find_by(id: params[:id], company_id: current_company_id)
+          return if @department
+
           render json: { error: "Department not found" }, status: :not_found
         end
 
         def department_params
-          params.require(:department).permit(:name, :active, :company_id)
+          params.require(:department).permit(:name, :active)
         end
 
         def serialize_department(department)

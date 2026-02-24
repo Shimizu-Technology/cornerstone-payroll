@@ -39,12 +39,13 @@ class GuamTaxCalculatorV2
   # @param ytd_gross [Decimal] Year-to-date gross pay BEFORE this pay period
   # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
-  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0)
+  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil)
+    withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
     employee_ss = calculate_social_security(gross_pay, ytd_gross)
     employee_medicare = calculate_medicare(gross_pay, ytd_gross)
 
     {
-      withholding: calculate_withholding(gross_pay),
+      withholding: calculate_withholding(withholding_wages),
       social_security: employee_ss,
       medicare: employee_medicare,
       # Employer match — same rates, same wage base cap for SS
@@ -144,7 +145,7 @@ class GuamTaxCalculatorV2
       bracket_max = bracket.max_income || Float::INFINITY
 
       # Skip if income is below this bracket
-      break if taxable_income <= bracket_min
+      break if taxable_income < bracket_min
 
       # Calculate income taxed at this bracket's rate
       income_in_bracket = [ taxable_income, bracket_max ].min - bracket_min

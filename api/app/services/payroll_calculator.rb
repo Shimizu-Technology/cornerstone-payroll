@@ -68,11 +68,12 @@ class PayrollCalculator
   end
 
   # Calculate all taxes using GuamTaxCalculator
-  def calculate_taxes
+  def calculate_taxes(withholding_gross: payroll_item.gross_pay)
     taxes = tax_calculator.calculate(
       gross_pay: payroll_item.gross_pay,
       ytd_gross: ytd_gross_before,
-      ytd_ss_tax: ytd_ss_before
+      ytd_ss_tax: ytd_ss_before,
+      withholding_gross: withholding_gross
     )
 
     payroll_item.withholding_tax = taxes[:withholding]

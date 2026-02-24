@@ -6,6 +6,10 @@ module Api
       # GET /api/v1/auth/me
       # Returns the current authenticated user
       def me
+        unless current_user
+          return render json: { error: "Not authenticated" }, status: :unauthorized
+        end
+
         render json: {
           user: {
             id: current_user.id,
