@@ -36,17 +36,29 @@ export function PayPeriodDetail() {
     try {
       setLoading(true);
       setError(null);
-      const response = await payPeriodsApi.get(periodId);
-      setPayPeriod(response.pay_period);
-      setPayrollItems(response.pay_period.payroll_items || []);
 
-      // Initialize hours from existing payroll items
+      // Load pay period and employees in parallel
+      const [ppResponse, empResponse] = await Promise.all([
+        payPeriodsApi.get(periodId),
+        employeesApi.list({ status: 'active', per_page: 100 }),
+      ]);
+
+      setPayPeriod(ppResponse.pay_period);
+      setPayrollItems(ppResponse.pay_period.payroll_items || []);
+      setEmployees(empResponse.data);
+
+      // Build hours map: use existing payroll items first, then fill defaults for remaining employees
       const hours: Record<string, HoursEntry> = {};
-      (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
         hours[String(item.employee_id)] = {
           regular: item.hours_worked || 80,
           overtime: item.overtime_hours || 0,
         };
+      });
+      empResponse.data.forEach((emp: Employee) => {
+        if (!hours[String(emp.id)]) {
+          hours[String(emp.id)] = { regular: 80, overtime: 0 };
+        }
       });
       setHoursMap(hours);
     } catch (err) {
@@ -59,20 +71,6 @@ export function PayPeriodDetail() {
   useEffect(() => {
     if (id) {
       loadPayPeriod(parseInt(id));
-      // Load active employees for hours input
-      employeesApi.list({ status: 'active', per_page: 100 }).then((res) => {
-        setEmployees(res.data);
-        // Set default hours for employees not yet in hoursMap
-        setHoursMap((prev) => {
-          const updated = { ...prev };
-          res.data.forEach((emp: Employee) => {
-            if (!updated[String(emp.id)]) {
-              updated[String(emp.id)] = { regular: 80, overtime: 0 };
-            }
-          });
-          return updated;
-        });
-      });
     }
   }, [id, loadPayPeriod]);
 
@@ -167,7 +165,7 @@ export function PayPeriodDetail() {
   const totalEmployerSS = payrollItems.reduce((s, i) => s + (i.employer_social_security_tax || 0), 0);
   const totalEmployerMedicare = payrollItems.reduce((s, i) => s + (i.employer_medicare_tax || 0), 0);
   const totalEmployerTaxes = totalEmployerSS + totalEmployerMedicare;
-  const totalDRTDeposit = totalSS + totalMedicare + totalEmployerTaxes;
+  const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
 
   return (
     <div>
@@ -284,7 +282,9 @@ export function PayPeriodDetail() {
               <TableBody>
                 {employees.map((emp) => {
                   const hours = hoursMap[String(emp.id)] || { regular: 80, overtime: 0 };
-                  const estGross = (hours.regular * (emp.pay_rate || 0)) + (hours.overtime * (emp.pay_rate || 0) * 1.5);
+                  const estGross = emp.employment_type === 'salary'
+                    ? (emp.pay_rate || 0) / 26  // Biweekly salary
+                    : (hours.regular * (emp.pay_rate || 0)) + (hours.overtime * (emp.pay_rate || 0) * 1.5);
                   return (
                     <TableRow key={emp.id}>
                       <TableCell>
@@ -293,7 +293,11 @@ export function PayPeriodDetail() {
                           <p className="text-xs text-gray-500 capitalize">{emp.employment_type}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-gray-700">${emp.pay_rate?.toFixed(2)}/hr</TableCell>
+                      <TableCell className="text-gray-700">
+                        {emp.employment_type === 'salary'
+                          ? `$${((emp.pay_rate || 0) / 26).toFixed(2)}/period`
+                          : `$${emp.pay_rate?.toFixed(2)}/hr`}
+                      </TableCell>
                       <TableCell className="text-center">
                         <input
                           type="number"
@@ -358,7 +362,11 @@ export function PayPeriodDetail() {
                           <span className="text-orange-600 ml-1">+{item.overtime_hours} OT</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-right">${item.pay_rate?.toFixed(2)}/hr</TableCell>
+                      <TableCell className="text-right">
+                        {item.employment_type === 'salary'
+                          ? `$${((item.pay_rate || 0) / 26).toFixed(2)}/period`
+                          : `$${item.pay_rate?.toFixed(2)}/hr`}
+                      </TableCell>
                       <TableCell className="text-right font-medium">{formatCurrency(item.gross_pay || 0)}</TableCell>
                       <TableCell className="text-right text-red-600">{formatCurrency(item.withholding_tax || 0)}</TableCell>
                       <TableCell className="text-right text-red-600">{formatCurrency(item.social_security_tax || 0)}</TableCell>
