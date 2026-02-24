@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_06_100003) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_24_043342) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -229,6 +229,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_06_100003) do
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
     t.bigint "employee_id", null: false
+    t.decimal "employer_medicare_tax", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "employer_social_security_tax", precision: 10, scale: 2, default: "0.0", null: false
     t.string "employment_type", null: false
     t.decimal "gross_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "holiday_hours", precision: 8, scale: 2, default: "0.0"
