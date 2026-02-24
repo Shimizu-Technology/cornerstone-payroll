@@ -124,47 +124,48 @@ if Rails.env.development?
   admin_dept = Department.find_or_create_by!(company: company, name: "Administration")
   tax_dept = Department.find_or_create_by!(company: company, name: "Tax Services")
 
-  # Cornerstone has 4 employees - using realistic but fake data
+  # Cornerstone's actual 4 employees — all hourly, biweekly
   employees_data = [
     {
-      first_name: "Maria",
-      last_name: "Santos",
-      department: admin_dept,
-      employment_type: "salary",
-      pay_rate: 52000.00,  # Annual salary
-      filing_status: "married",
-      allowances: 2,
-      hire_date: Date.new(2020, 3, 15)
-    },
-    {
-      first_name: "John",
-      last_name: "Cruz",
-      department: tax_dept,
-      employment_type: "salary",
-      pay_rate: 48000.00,
-      filing_status: "single",
-      allowances: 1,
-      hire_date: Date.new(2021, 8, 1)
-    },
-    {
-      first_name: "Ana",
-      last_name: "Reyes",
-      department: tax_dept,
-      employment_type: "hourly",
-      pay_rate: 18.50,  # Hourly rate
-      filing_status: "head_of_household",
-      allowances: 1,
-      hire_date: Date.new(2023, 1, 10)
-    },
-    {
-      first_name: "David",
-      last_name: "Perez",
+      first_name: "Audreana",
+      middle_name: "Monique P.",
+      last_name: "Lett",
       department: admin_dept,
       employment_type: "hourly",
       pay_rate: 15.00,
       filing_status: "single",
       allowances: 0,
+      hire_date: Date.new(2024, 1, 15)
+    },
+    {
+      first_name: "Kyleiah",
+      last_name: "San Nicolas",
+      department: tax_dept,
+      employment_type: "hourly",
+      pay_rate: 13.00,
+      filing_status: "single",
+      allowances: 0,
+      hire_date: Date.new(2024, 3, 1)
+    },
+    {
+      first_name: "Alanna",
+      last_name: "Cruz",
+      department: tax_dept,
+      employment_type: "hourly",
+      pay_rate: 13.00,
+      filing_status: "single",
+      allowances: 0,
       hire_date: Date.new(2024, 6, 1)
+    },
+    {
+      first_name: "Kameren",
+      last_name: "Cruz",
+      department: admin_dept,
+      employment_type: "hourly",
+      pay_rate: 18.00,
+      filing_status: "single",
+      allowances: 0,
+      hire_date: Date.new(2024, 2, 1)
     }
   ]
 
@@ -175,13 +176,14 @@ if Rails.env.development?
       last_name: emp_data[:last_name]
     ) do |e|
       e.department = emp_data[:department]
+      e.middle_name = emp_data[:middle_name]
       e.employment_type = emp_data[:employment_type]
       e.pay_rate = emp_data[:pay_rate]
+      e.pay_frequency = "biweekly"
       e.filing_status = emp_data[:filing_status]
       e.allowances = emp_data[:allowances]
       e.status = "active"
       e.hire_date = emp_data[:hire_date]
-      # SSN would be added manually by admin (encrypted)
     end
   end
 
