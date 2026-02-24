@@ -33,7 +33,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // In dev mode, just fetch /auth/me without a token
     authApi.me()
-      .then((res) => setUser(res.user))
+      .then((res) => setUser(res.user as any))
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
   }, []);
@@ -49,7 +49,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         signOut: async () => setUser(null),
         refreshUser: async () => {
           const res = await authApi.me();
-          setUser(res.user);
+          setUser(res.user as any);
         },
       }}
     >
@@ -80,7 +80,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const res = await authApi.me();
-      setUser(res.user);
+      setUser(res.user as any);
     } catch (err) {
       console.error('Failed to load user:', err);
       setUser(null);

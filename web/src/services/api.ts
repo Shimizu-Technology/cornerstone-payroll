@@ -544,10 +544,10 @@ export const dashboardApi = {
 
 // Auth
 export const authApi = {
-  me: () => api.get<{ user: { id: number | string; email: string; name?: string; role: string; company_id?: number } }>('/auth/me'),
+  me: () => api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me'),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: { id: number | string; email: string; name?: string; role: string; company_id?: number } }>('/auth/me');
+    return api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me');
   },
   logout: () => {
     api.setAuthToken(null);
