@@ -359,9 +359,15 @@ export function PayPeriodDetail() {
                         <p className="font-medium text-gray-900">{item.employee_name}</p>
                       </TableCell>
                       <TableCell className="text-right">
-                        {item.hours_worked || 0}
-                        {(item.overtime_hours || 0) > 0 && (
-                          <span className="text-orange-600 ml-1">+{item.overtime_hours} OT</span>
+                        {item.employment_type === 'salary' ? (
+                          <span className="text-gray-400">—</span>
+                        ) : (
+                          <>
+                            {item.hours_worked || 0}
+                            {(item.overtime_hours || 0) > 0 && (
+                              <span className="text-orange-600 ml-1">+{item.overtime_hours} OT</span>
+                            )}
+                          </>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
