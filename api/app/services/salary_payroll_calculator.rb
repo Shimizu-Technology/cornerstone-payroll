@@ -21,7 +21,7 @@ class SalaryPayrollCalculator < PayrollCalculator
     calculate_gross_pay
     calculate_retirement        # Pre-tax
     calculate_roth_retirement   # Post-tax (but calculated on gross)
-    taxable_for_withholding = [ payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f, 0 ].max
+    taxable_for_withholding = [ payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f, 0.0 ].max
     calculate_taxes(withholding_gross: taxable_for_withholding) # Withholding, SS, Medicare
     calculate_totals
     calculate_net_pay

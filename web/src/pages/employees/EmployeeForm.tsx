@@ -148,7 +148,7 @@ export function EmployeeForm() {
         newErrors.date_of_birth = ['Date of birth must be in the past'];
       }
     }
-    if ((form.retirement_rate + form.roth_retirement_rate) > 1) {
+    if (((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
 
