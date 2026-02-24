@@ -15,7 +15,7 @@ export function Login() {
     );
   }
 
-  // Dev mode without Clerk — show simple message
+  // Clerk not configured in frontend
   if (!clerkPubKey) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -23,7 +23,7 @@ export function Login() {
           <CardHeader className="text-center">
             <CardTitle className="text-xl">Cornerstone Payroll</CardTitle>
             <CardDescription>
-              Auth is disabled in development. You are auto-logged in as admin.
+              Clerk is not configured in `web/.env`. Add `VITE_CLERK_PUBLISHABLE_KEY` to sign in.
             </CardDescription>
           </CardHeader>
         </Card>

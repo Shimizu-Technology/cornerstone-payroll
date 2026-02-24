@@ -58,13 +58,21 @@ module ClerkAuthenticatable
 
     # Build the RSA key and verify
     key = JWT::JWK.new(jwk).public_key
-    decoded = JWT.decode(token, key, true, {
+    options = {
       algorithm: "RS256",
       verify_iss: true,
       iss: clerk_issuer,
-      verify_aud: false,  # Clerk doesn't set aud by default
       verify_expiration: true
-    })
+    }
+    if clerk_audience.present?
+      options[:verify_aud] = true
+      options[:aud] = clerk_audience
+    else
+      # Keep compatibility with Clerk setups that don't emit aud.
+      options[:verify_aud] = false
+    end
+
+    decoded = JWT.decode(token, key, true, options)
     decoded[0]
   rescue JWT::DecodeError, JWT::ExpiredSignature, JWT::InvalidIssuerError => e
     Rails.logger.warn("Clerk JWT verification failed: #{e.message}")
@@ -101,6 +109,10 @@ module ClerkAuthenticatable
     ENV.fetch("CLERK_API_BASE") { "https://#{clerk_instance_id}.clerk.accounts.dev" }
   end
 
+  def clerk_audience
+    ENV["CLERK_AUDIENCE"]
+  end
+
   def clerk_instance_id
     # Extract from publishable key or use env var
     ENV.fetch("CLERK_INSTANCE_ID") do
@@ -116,31 +128,34 @@ module ClerkAuthenticatable
     clerk_user = fetch_clerk_user(payload["sub"])
     return nil unless clerk_user
 
-    email = clerk_user.dig("email_addresses", 0, "email_address")
+    email = clerk_user.dig("email_addresses", 0, "email_address")&.strip&.downcase
     return nil unless email
 
     # Check if user exists by email (could have been invited before signing up)
     # Use transaction + retry to handle race conditions on concurrent requests
-    user = User.find_by(email: email)
+    user = User.find_by("LOWER(email) = ?", email)
     if user
       user.update!(clerk_id: payload["sub"])
       return user
     end
 
-    # Auto-create with default company (first company) and employee role
-    company = Company.first
-    return nil unless company
+    invitation = UserInvitation.active.where("LOWER(email) = ?", email).order(invited_at: :desc).first
+    return nil unless invitation
 
-    User.create!(
-      email: email,
-      name: [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" "),
-      clerk_id: payload["sub"],
-      company_id: company.id,
-      role: "employee"
-    )
+    User.transaction do
+      new_user = User.create!(
+        email: email,
+        name: [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence || invitation.name || email,
+        clerk_id: payload["sub"],
+        company_id: invitation.company_id,
+        role: invitation.role
+      )
+      invitation.accept!
+      new_user
+    end
   rescue ActiveRecord::RecordNotUnique
     # Race condition: another request created the user first, find and update
-    user = User.find_by(email: email)
+    user = User.find_by("LOWER(email) = ?", email)
     user&.update!(clerk_id: payload["sub"]) if user&.clerk_id.blank?
     user
   rescue ActiveRecord::RecordInvalid => e

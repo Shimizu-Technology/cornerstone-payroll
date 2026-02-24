@@ -103,6 +103,11 @@ module Api
 
           items = PayrollItem.joins(:pay_period)
                             .where(pay_periods: { id: pay_periods.pluck(:id) })
+          employee_ss_total = items.sum(:social_security_tax)
+          employee_medicare_total = items.sum(:medicare_tax)
+          employer_ss_total = items.sum(:employer_social_security_tax)
+          employer_medicare_total = items.sum(:employer_medicare_tax)
+          withholding_total = items.sum(:withholding_tax)
 
           render json: {
             report: {
@@ -115,12 +120,12 @@ module Api
               },
               totals: {
                 gross_wages: items.sum(:gross_pay),
-                withholding_tax: items.sum(:withholding_tax),
-                social_security_employee: items.sum(:social_security_tax),
-                social_security_employer: items.sum(:social_security_tax), # Same amount
-                medicare_employee: items.sum(:medicare_tax),
-                medicare_employer: items.sum(:medicare_tax), # Same amount
-                total_employment_taxes: items.sum(:social_security_tax) * 2 + items.sum(:medicare_tax) * 2 + items.sum(:withholding_tax)
+                withholding_tax: withholding_total,
+                social_security_employee: employee_ss_total,
+                social_security_employer: employer_ss_total,
+                medicare_employee: employee_medicare_total,
+                medicare_employer: employer_medicare_total,
+                total_employment_taxes: employee_ss_total + employer_ss_total + employee_medicare_total + employer_medicare_total + withholding_total
               },
               pay_periods_included: pay_periods.count,
               employee_count: items.distinct.count(:employee_id)

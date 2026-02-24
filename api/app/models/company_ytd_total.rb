@@ -30,8 +30,8 @@ class CompanyYtdTotal < ApplicationRecord
       self.social_security_tax += payroll_item.social_security_tax.to_f
       self.medicare_tax += payroll_item.medicare_tax.to_f
       # Employer match for SS and Medicare
-      self.employer_social_security += payroll_item.social_security_tax.to_f
-      self.employer_medicare += payroll_item.medicare_tax.to_f
+      self.employer_social_security += payroll_item.employer_social_security_tax.to_f
+      self.employer_medicare += payroll_item.employer_medicare_tax.to_f
       save!
     end
   end

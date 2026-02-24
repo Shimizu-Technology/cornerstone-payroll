@@ -21,6 +21,8 @@ interface HoursEntry {
   overtime: number;
 }
 
+const MAX_HOURS_PER_PERIOD = 200;
+
 export function PayPeriodDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -50,14 +52,16 @@ export function PayPeriodDetail() {
       // Build hours map: use existing payroll items first, then fill defaults for remaining employees
       const hours: Record<string, HoursEntry> = {};
       (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+        const employee = empResponse.data.find((emp: Employee) => emp.id === item.employee_id);
+        const isSalary = employee?.employment_type === 'salary';
         hours[String(item.employee_id)] = {
-          regular: item.hours_worked || 80,
-          overtime: item.overtime_hours || 0,
+          regular: isSalary ? 0 : (item.hours_worked || 80),
+          overtime: isSalary ? 0 : (item.overtime_hours || 0),
         };
       });
       empResponse.data.forEach((emp: Employee) => {
         if (!hours[String(emp.id)]) {
-          hours[String(emp.id)] = { regular: 80, overtime: 0 };
+          hours[String(emp.id)] = { regular: emp.employment_type === 'salary' ? 0 : 80, overtime: 0 };
         }
       });
       setHoursMap(hours);
@@ -75,11 +79,12 @@ export function PayPeriodDetail() {
   }, [id, loadPayPeriod]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
+    const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
     setHoursMap((prev) => ({
       ...prev,
       [String(employeeId)]: {
         ...prev[String(employeeId)],
-        [field]: value,
+        [field]: clampedValue,
       },
     }));
   };
@@ -89,6 +94,19 @@ export function PayPeriodDetail() {
     try {
       setProcessing(true);
       setError(null);
+
+      const invalidHours = Object.entries(hoursMap).find(([, entry]) => {
+        return (
+          entry.regular < 0 ||
+          entry.overtime < 0 ||
+          entry.regular > MAX_HOURS_PER_PERIOD ||
+          entry.overtime > MAX_HOURS_PER_PERIOD
+        );
+      });
+      if (invalidHours) {
+        setError(`Hours must be between 0 and ${MAX_HOURS_PER_PERIOD} per period`);
+        return;
+      }
 
       // Build hours payload
       const hours: Record<string, { regular?: number; overtime?: number }> = {};
