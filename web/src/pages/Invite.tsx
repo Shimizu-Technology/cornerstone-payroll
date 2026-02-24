@@ -20,7 +20,7 @@ export function Invite() {
       <div className="bg-white p-8 rounded-lg shadow-sm border border-gray-200 max-w-md w-full text-center">
         <h1 className="text-xl font-semibold text-gray-900">Accept Invitation</h1>
         <p className="text-sm text-gray-600 mt-2">
-          Continue to sign in with WorkOS to accept your invitation.
+          Continue to sign in to accept your invitation.
         </p>
         <Button className="mt-6 w-full" onClick={() => navigate('/login')}>
           Continue to Login
