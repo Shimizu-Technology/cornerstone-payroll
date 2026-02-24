@@ -1,128 +1,56 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import api from '@/services/api';
-import type { UserRole } from '@/types';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useAuth as useClerkAuth, useUser as useClerkUser } from '@clerk/clerk-react';
+import { authApi } from '@/services/api';
 
 interface User {
-  id: number | string;
+  id: number;
   email: string;
   name: string;
-  role: UserRole;
-  company_id?: number;
+  role: string;
+  company_id: number;
+  company_name: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  isAuthenticated: boolean;
   isLoading: boolean;
-  login: () => Promise<void>;
-  logout: () => Promise<void>;
-  handleCallback: (code: string, state: string) => Promise<void>;
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+  isManager: boolean;
+  signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const TOKEN_KEY = 'cpr_auth_token';
-const USER_KEY = 'cpr_user';
-const INVITE_TOKEN_KEY = 'cpr_invite_token';
+// Dev mode bypass — when VITE_CLERK_PUBLISHABLE_KEY is not set
+const isDevMode = !import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(USER_KEY);
-    return saved ? JSON.parse(saved) : null;
-  });
+function DevAuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check auth status on mount
   useEffect(() => {
-    checkAuth();
+    // In dev mode, just fetch /auth/me without a token
+    authApi.me()
+      .then((res) => setUser(res.user as any))
+      .catch(() => setUser(null))
+      .finally(() => setIsLoading(false));
   }, []);
-
-  const checkAuth = async () => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    
-    if (!token) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      api.setAuthToken(token);
-      const response = await api.get<{ user: User }>('/auth/me');
-      setUser(response.user);
-      localStorage.setItem(USER_KEY, JSON.stringify(response.user));
-    } catch {
-      // Token invalid, clear everything
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-      api.setAuthToken(null);
-      setUser(null);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const login = async () => {
-    try {
-      // Get authorization URL from backend
-      const response = await api.get<{ authorization_url: string }>('/auth/login');
-      
-      // Redirect to WorkOS
-      window.location.href = response.authorization_url;
-    } catch (error) {
-      console.error('Login failed:', error);
-      throw error;
-    }
-  };
-
-  const handleCallback = async (code: string, state: string) => {
-    try {
-      setIsLoading(true);
-      const inviteToken = localStorage.getItem(INVITE_TOKEN_KEY);
-
-      // Exchange code for token
-      const response = await api.get<{ token: string; user: User }>('/auth/callback', {
-        code,
-        state,
-        invite_token: inviteToken || undefined,
-      });
-      
-      // Store token and user
-      localStorage.setItem(TOKEN_KEY, response.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(response.user));
-      localStorage.removeItem(INVITE_TOKEN_KEY);
-      api.setAuthToken(response.token);
-      setUser(response.user);
-    } catch (error) {
-      console.error('Callback failed:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const logout = async () => {
-    try {
-      await api.post('/auth/logout');
-    } catch {
-      // Ignore errors, still clear local state
-    } finally {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-      localStorage.removeItem(INVITE_TOKEN_KEY);
-      api.setAuthToken(null);
-      setUser(null);
-    }
-  };
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user,
         isLoading,
-        login,
-        logout,
-        handleCallback,
+        isAuthenticated: !!user,
+        isAdmin: user?.role === 'admin',
+        isManager: user?.role === 'manager' || user?.role === 'admin',
+        signOut: async () => setUser(null),
+        refreshUser: async () => {
+          const res = await authApi.me();
+          setUser(res.user as any);
+        },
       }}
     >
       {children}
@@ -130,10 +58,89 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
+function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
+  const { isSignedIn, isLoaded, getToken, signOut: clerkSignOut } = useClerkAuth();
+  const { user: clerkUser } = useClerkUser();
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const refreshUser = useCallback(async () => {
+    if (!isSignedIn) {
+      setUser(null);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const token = await getToken();
+      if (token) {
+        // Set token for API calls
+        const apiModule = await import('@/services/api');
+        apiModule.setAuthToken(token);
+      }
+
+      const res = await authApi.me();
+      setUser(res.user as any);
+    } catch (err) {
+      console.error('Failed to load user:', err);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isSignedIn, getToken]);
+
+  // Refresh user when Clerk auth state changes
+  useEffect(() => {
+    if (isLoaded) {
+      refreshUser();
+    }
+  }, [isLoaded, isSignedIn, refreshUser]);
+
+  // Keep token fresh
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    const interval = setInterval(async () => {
+      const token = await getToken();
+      if (token) {
+        const apiModule = await import('@/services/api');
+        apiModule.setAuthToken(token);
+      }
+    }, 50000); // Refresh every 50s
+
+    return () => clearInterval(interval);
+  }, [isSignedIn, getToken]);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading: !isLoaded || isLoading,
+        isAuthenticated: !!user && isSignedIn === true,
+        isAdmin: user?.role === 'admin',
+        isManager: user?.role === 'manager' || user?.role === 'admin',
+        signOut: async () => {
+          setUser(null);
+          await clerkSignOut();
+        },
+        refreshUser,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  if (isDevMode) {
+    return <DevAuthProvider>{children}</DevAuthProvider>;
+  }
+  return <ClerkAuthProvider>{children}</ClerkAuthProvider>;
+}
+
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;

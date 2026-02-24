@@ -117,6 +117,8 @@ export class ApiError extends Error {
 const api = new ApiClient(API_BASE_URL);
 
 export default api;
+export { api as apiClient };
+export const setAuthToken = (token: string | null) => api.setAuthToken(token);
 
 // ========================================
 // API Endpoints
@@ -542,9 +544,10 @@ export const dashboardApi = {
 
 // Auth
 export const authApi = {
+  me: () => api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me'),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: { id: number | string; email: string; name?: string; role: string; company_id?: number } }>('/auth/me');
+    return api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me');
   },
   logout: () => {
     api.setAuthToken(null);
