@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { useAuth as useClerkAuth, useUser as useClerkUser } from '@clerk/clerk-react';
-import { authApi } from '@/services/api';
+import { useAuth as useClerkAuth } from '@clerk/clerk-react';
+import { authApi, setAuthToken } from '@/services/api';
 
 interface User {
   id: number;
@@ -60,7 +60,6 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
 
 function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded, getToken, signOut: clerkSignOut } = useClerkAuth();
-  const { user: clerkUser } = useClerkUser();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -75,8 +74,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
       const token = await getToken();
       if (token) {
         // Set token for API calls
-        const apiModule = await import('@/services/api');
-        apiModule.setAuthToken(token);
+        setAuthToken(token);
       }
 
       const res = await authApi.me();
@@ -103,8 +101,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(async () => {
       const token = await getToken();
       if (token) {
-        const apiModule = await import('@/services/api');
-        apiModule.setAuthToken(token);
+        setAuthToken(token);
       }
     }, 50000); // Refresh every 50s
 

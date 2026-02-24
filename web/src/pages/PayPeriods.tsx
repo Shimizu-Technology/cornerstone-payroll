@@ -38,6 +38,7 @@ export function PayPeriods() {
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionInFlight, setActionInFlight] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     start_date: '',
     end_date: '',
@@ -66,8 +67,18 @@ export function PayPeriods() {
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (formData.end_date <= formData.start_date) {
+      setError('End date must be after start date');
+      return;
+    }
+    if (formData.pay_date < formData.end_date) {
+      setError('Pay date must be on or after end date');
+      return;
+    }
+
     try {
       setIsSubmitting(true);
+      setError(null);
       await payPeriodsApi.create(formData);
       setIsCreateOpen(false);
       setFormData({ start_date: '', end_date: '', pay_date: '', notes: '' });
@@ -81,21 +92,27 @@ export function PayPeriods() {
 
   const handleRunPayroll = async (id: number) => {
     try {
+      setActionInFlight(`run-${id}`);
       setError(null);
       await payPeriodsApi.runPayroll(id);
       loadPayPeriods();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
+    } finally {
+      setActionInFlight(null);
     }
   };
 
   const handleApprove = async (id: number) => {
     try {
+      setActionInFlight(`approve-${id}`);
       setError(null);
       await payPeriodsApi.approve(id);
       loadPayPeriods();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve pay period');
+    } finally {
+      setActionInFlight(null);
     }
   };
 
@@ -104,11 +121,14 @@ export function PayPeriods() {
       return;
     }
     try {
+      setActionInFlight(`commit-${id}`);
       setError(null);
       await payPeriodsApi.commit(id);
       loadPayPeriods();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
+    } finally {
+      setActionInFlight(null);
     }
   };
 
@@ -117,11 +137,14 @@ export function PayPeriods() {
       return;
     }
     try {
+      setActionInFlight(`delete-${id}`);
       setError(null);
       await payPeriodsApi.delete(id);
       loadPayPeriods();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete pay period');
+    } finally {
+      setActionInFlight(null);
     }
   };
 
@@ -267,6 +290,7 @@ export function PayPeriods() {
                               <Button
                                 size="sm"
                                 onClick={() => handleRunPayroll(period.id)}
+                                disabled={actionInFlight !== null}
                               >
                                 Calculate
                               </Button>
@@ -275,6 +299,7 @@ export function PayPeriods() {
                                 size="sm"
                                 className="text-red-600 hover:text-red-700"
                                 onClick={() => handleDelete(period.id)}
+                                disabled={actionInFlight !== null}
                               >
                                 Delete
                               </Button>
@@ -285,6 +310,7 @@ export function PayPeriods() {
                               <Button
                                 size="sm"
                                 onClick={() => handleApprove(period.id)}
+                                disabled={actionInFlight !== null}
                               >
                                 Approve
                               </Button>
@@ -292,6 +318,7 @@ export function PayPeriods() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleRunPayroll(period.id)}
+                                disabled={actionInFlight !== null}
                               >
                                 Recalculate
                               </Button>
@@ -302,6 +329,7 @@ export function PayPeriods() {
                               size="sm"
                               variant="primary"
                               onClick={() => handleCommit(period.id)}
+                              disabled={actionInFlight !== null}
                             >
                               Commit
                             </Button>

@@ -140,6 +140,10 @@ module Api
             return render json: { error: "Can only commit an approved pay period" }, status: :unprocessable_entity
           end
 
+          unless @pay_period.payroll_items.exists?
+            return render json: { error: "Cannot commit pay period with no payroll items" }, status: :unprocessable_entity
+          end
+
           ActiveRecord::Base.transaction do
             @pay_period.update!(status: "committed", committed_at: Time.current)
 
@@ -222,11 +226,17 @@ module Api
         end
 
         def update_ytd_totals(payroll_item)
-          ytd = EmployeeYtdTotal.find_or_create_by!(
+          employee_ytd = EmployeeYtdTotal.find_or_create_by!(
             employee_id: payroll_item.employee_id,
             year: @pay_period.pay_date.year
           )
-          ytd.add_payroll_item!(payroll_item)
+          employee_ytd.add_payroll_item!(payroll_item)
+
+          company_ytd = CompanyYtdTotal.find_or_create_by!(
+            company_id: @pay_period.company_id,
+            year: @pay_period.pay_date.year
+          )
+          company_ytd.add_payroll_item!(payroll_item)
         end
       end
     end
