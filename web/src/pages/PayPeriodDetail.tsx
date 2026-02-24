@@ -303,9 +303,10 @@ export function PayPeriodDetail() {
                           type="number"
                           value={hours.regular}
                           onChange={(e) => updateHours(emp.id, 'regular', parseFloat(e.target.value) || 0)}
-                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                           min={0}
                           step={0.5}
+                          disabled={emp.employment_type === 'salary'}
                         />
                       </TableCell>
                       <TableCell className="text-center">
@@ -313,9 +314,10 @@ export function PayPeriodDetail() {
                           type="number"
                           value={hours.overtime}
                           onChange={(e) => updateHours(emp.id, 'overtime', parseFloat(e.target.value) || 0)}
-                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                           min={0}
                           step={0.5}
+                          disabled={emp.employment_type === 'salary'}
                         />
                       </TableCell>
                       <TableCell className="text-right font-medium text-gray-700">
