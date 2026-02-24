@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ClerkProvider, SignIn, SignUp } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
@@ -13,7 +14,7 @@ import TaxConfigs from '@/pages/TaxConfigs';
 import { Users } from '@/pages/Users';
 import { AuditLogs } from '@/pages/AuditLogs';
 import { Login } from '@/pages/Login';
-import AuthCallback from '@/pages/AuthCallback';
+// AuthCallback removed — Clerk handles auth flow
 import { Invite } from '@/pages/Invite';
 
 // Environment flag to bypass auth in development
@@ -55,7 +56,7 @@ function AppRoutes() {
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/invite" element={<Invite />} />
-      <Route path="/callback" element={<AuthCallback />} />
+      <Route path="/callback" element={<Navigate to="/" replace />} />
 
       {/* Protected routes */}
       <Route
@@ -86,12 +87,28 @@ function AppRoutes() {
   );
 }
 
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+function AppWithClerk({ children }: { children: React.ReactNode }) {
+  if (!clerkPubKey) {
+    // Dev mode — no Clerk, AuthProvider handles fallback
+    return <>{children}</>;
+  }
+  return (
+    <ClerkProvider publishableKey={clerkPubKey}>
+      {children}
+    </ClerkProvider>
+  );
+}
+
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <AppWithClerk>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </AppWithClerk>
     </BrowserRouter>
   );
 }

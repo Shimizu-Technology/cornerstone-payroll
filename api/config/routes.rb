@@ -8,10 +8,7 @@ Rails.application.routes.draw do
   # API v1 routes
   namespace :api do
     namespace :v1 do
-      # Authentication
-      get "auth/login", to: "auth#login"
-      get "auth/callback", to: "auth#callback"
-      post "auth/logout", to: "auth#logout"
+      # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
 
       namespace :admin do

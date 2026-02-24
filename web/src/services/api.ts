@@ -117,6 +117,8 @@ export class ApiError extends Error {
 const api = new ApiClient(API_BASE_URL);
 
 export default api;
+export { apiClient };
+export const setAuthToken = (token: string | null) => apiClient.setAuthToken(token);
 
 // ========================================
 // API Endpoints
