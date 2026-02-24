@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_24_043342) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_24_055207) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -342,6 +342,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_24_043342) do
 
   create_table "users", force: :cascade do |t|
     t.boolean "active", default: true, null: false
+    t.string "clerk_id"
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.string "email", null: false
@@ -350,6 +351,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_24_043342) do
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
+    t.index ["clerk_id"], name: "index_users_on_clerk_id", unique: true
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
