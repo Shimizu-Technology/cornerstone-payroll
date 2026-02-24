@@ -8,7 +8,7 @@ module Api
 
         # GET /api/v1/admin/employees
         def index
-          employees = Employee.where(company_id: params[:company_id])
+          employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
           employees = employees.includes(:department).order(:last_name, :first_name)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
@@ -28,7 +28,7 @@ module Api
 
         # POST /api/v1/admin/employees
         def create
-          employee = Employee.new(employee_params)
+          employee = Employee.new(employee_params.merge(company_id: current_company_id))
 
           if employee.save
             render json: { data: serialize_employee(employee) }, status: :created
@@ -61,8 +61,9 @@ module Api
         private
 
         def set_employee
-          @employee = Employee.find(params[:id])
-        rescue ActiveRecord::RecordNotFound
+          @employee = Employee.find_by(id: params[:id], company_id: current_company_id)
+          return if @employee
+
           render json: { error: "Employee not found" }, status: :not_found
         end
 
@@ -92,8 +93,7 @@ module Api
             :state,
             :zip,
             :phone,
-            :status,
-            :company_id
+            :status
           ).tap do |permitted|
             # Map :ssn to :ssn_encrypted for the encrypted field
             if permitted[:ssn].present?

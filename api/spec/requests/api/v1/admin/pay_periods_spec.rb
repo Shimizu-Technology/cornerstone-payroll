@@ -5,6 +5,15 @@ require "rails_helper"
 RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   let!(:company) { Company.create!(name: "Test Company") }
   let!(:department) { Department.create!(name: "Engineering", company: company) }
+  let!(:admin_user) do
+    User.create!(
+      company: company,
+      email: "admin-pay-periods-#{company.id}@example.com",
+      name: "Pay Period Admin",
+      role: "admin",
+      active: true
+    )
+  end
   let!(:employee) do
     Employee.create!(
       company: company,
@@ -34,6 +43,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   before do
     # Stub company_id for tests
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(admin_user)
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user_id).and_return(1)
   end
 
@@ -231,6 +241,19 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       ytd = EmployeeYtdTotal.find_by(employee: employee, year: pay_period.pay_date.year)
       expect(ytd).to be_present
       expect(ytd.gross_pay).to eq(1200.00)
+
+      company_ytd = CompanyYtdTotal.find_by(company: company, year: pay_period.pay_date.year)
+      expect(company_ytd).to be_present
+      expect(company_ytd.gross_pay).to eq(1200.00)
+    end
+
+    it "cannot commit when no payroll items exist" do
+      pay_period.payroll_items.destroy_all
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to include("no payroll items")
     end
   end
 end

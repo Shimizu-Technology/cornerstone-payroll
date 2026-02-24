@@ -138,8 +138,18 @@ export function EmployeeForm() {
     if (form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
-    if (!isEditing && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
+    if (form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
+    }
+    if (form.date_of_birth) {
+      const dob = new Date(form.date_of_birth);
+      const today = new Date();
+      if (dob >= today) {
+        newErrors.date_of_birth = ['Date of birth must be in the past'];
+      }
+    }
+    if ((form.retirement_rate + form.roth_retirement_rate) > 1) {
+      newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
 
     setErrors(newErrors);

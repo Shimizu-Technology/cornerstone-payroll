@@ -180,5 +180,30 @@ RSpec.describe HourlyPayrollCalculator do
       expect(payroll_item.retirement_payment).to eq(64.00)
       expect(payroll_item.roth_retirement_payment).to eq(48.00)
     end
+
+    it "applies pre-tax retirement to withholding wages" do
+      no_retirement_employee = create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single",
+        retirement_rate: 0.0
+      )
+      no_retirement_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: no_retirement_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80
+      )
+      no_retirement_calculator = described_class.new(no_retirement_employee, no_retirement_item)
+      no_retirement_calculator.calculate
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.withholding_tax).to be < no_retirement_item.withholding_tax
+    end
   end
 end

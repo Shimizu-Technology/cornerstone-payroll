@@ -6,6 +6,9 @@ class PayrollItem < ApplicationRecord
 
   validates :employment_type, inclusion: { in: %w[hourly salary] }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
+            numericality: { greater_than_or_equal_to: 0 },
+            allow_nil: true
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }

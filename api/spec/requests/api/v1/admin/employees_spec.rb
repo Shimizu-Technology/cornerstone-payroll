@@ -5,6 +5,20 @@ require "rails_helper"
 RSpec.describe "Api::V1::Admin::Employees", type: :request do
   let!(:company) { create(:company) }
   let!(:department) { create(:department, company: company) }
+  let!(:admin_user) do
+    User.create!(
+      company: company,
+      email: "admin-#{company.id}@example.com",
+      name: "Admin User",
+      role: "admin",
+      active: true
+    )
+  end
+
+  before do
+    allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(admin_user)
+  end
 
   describe "GET /api/v1/admin/employees" do
     context "with employees" do
@@ -109,6 +123,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(response).to have_http_status(:not_found)
       json = response.parsed_body
       expect(json["error"]).to eq("Employee not found")
+    end
+
+    it "returns 404 for employee in another company" do
+      other_company = create(:company)
+      other_employee = create(:employee, company: other_company)
+
+      get "/api/v1/admin/employees/#{other_employee.id}"
+
+      expect(response).to have_http_status(:not_found)
     end
   end
 

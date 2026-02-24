@@ -39,11 +39,15 @@ class GuamTaxCalculator
   # @param ytd_gross [Decimal] Year-to-date gross pay BEFORE this pay period
   # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
-  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0)
+  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil)
+    withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
+    employee_ss = calculate_social_security(gross_pay, ytd_gross)
     {
-      withholding: calculate_withholding(gross_pay),
-      social_security: calculate_social_security(gross_pay, ytd_gross),
-      medicare: calculate_medicare(gross_pay, ytd_gross)
+      withholding: calculate_withholding(withholding_wages),
+      social_security: employee_ss,
+      medicare: calculate_medicare(gross_pay, ytd_gross),
+      employer_social_security: employee_ss,
+      employer_medicare: calculate_employer_medicare(gross_pay)
     }
   end
 
@@ -114,6 +118,11 @@ class GuamTaxCalculator
     end
 
     base_medicare + additional_medicare
+  end
+
+  # Employer Medicare does not include additional medicare surcharge
+  def calculate_employer_medicare(gross_pay)
+    (gross_pay * tax_table.medicare_rate).round(2)
   end
 
   private

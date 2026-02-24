@@ -4,6 +4,20 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::Departments", type: :request do
   let!(:company) { create(:company) }
+  let!(:admin_user) do
+    User.create!(
+      company: company,
+      email: "admin-dept-#{company.id}@example.com",
+      name: "Admin User",
+      role: "admin",
+      active: true
+    )
+  end
+
+  before do
+    allow_any_instance_of(Api::V1::Admin::DepartmentsController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::DepartmentsController).to receive(:current_user).and_return(admin_user)
+  end
 
   describe "GET /api/v1/admin/departments" do
     context "with departments" do
@@ -139,6 +153,17 @@ RSpec.describe "Api::V1::Admin::Departments", type: :request do
     it "returns 404 for non-existent department" do
       patch "/api/v1/admin/departments/99999", params: {
         department: { name: "Test" }
+      }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "returns 404 for department in another company" do
+      other_company = create(:company)
+      other_department = create(:department, company: other_company)
+
+      patch "/api/v1/admin/departments/#{other_department.id}", params: {
+        department: { name: "Blocked" }
       }
 
       expect(response).to have_http_status(:not_found)
