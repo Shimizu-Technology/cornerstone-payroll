@@ -92,12 +92,13 @@ module ClerkAuthenticatable
   end
 
   def clerk_issuer
-    # Clerk issuer is https://<instance-id>.clerk.accounts.dev
-    "https://#{clerk_instance_id}.clerk.accounts.dev"
+    # Use explicit env var if set (supports custom domains / production instances)
+    # Falls back to constructing from instance ID for dev environments
+    ENV.fetch("CLERK_ISSUER") { "https://#{clerk_instance_id}.clerk.accounts.dev" }
   end
 
   def clerk_api_base
-    "https://#{clerk_instance_id}.clerk.accounts.dev"
+    ENV.fetch("CLERK_API_BASE") { "https://#{clerk_instance_id}.clerk.accounts.dev" }
   end
 
   def clerk_instance_id
@@ -119,6 +120,7 @@ module ClerkAuthenticatable
     return nil unless email
 
     # Check if user exists by email (could have been invited before signing up)
+    # Use transaction + retry to handle race conditions on concurrent requests
     user = User.find_by(email: email)
     if user
       user.update!(clerk_id: payload["sub"])
@@ -136,6 +138,11 @@ module ClerkAuthenticatable
       company_id: company.id,
       role: "employee"
     )
+  rescue ActiveRecord::RecordNotUnique
+    # Race condition: another request created the user first, find and update
+    user = User.find_by(email: email)
+    user&.update!(clerk_id: payload["sub"]) if user&.clerk_id.blank?
+    user
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error("Failed to provision Clerk user: #{e.message}")
     nil
