@@ -178,6 +178,8 @@ module Api
             employee_count: pay_period.payroll_items.count,
             total_gross: pay_period.payroll_items.sum(:gross_pay),
             total_net: pay_period.payroll_items.sum(:net_pay),
+            total_employer_ss: pay_period.payroll_items.sum(:employer_social_security_tax),
+            total_employer_medicare: pay_period.payroll_items.sum(:employer_medicare_tax),
             committed_at: pay_period.committed_at,
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
@@ -211,6 +213,8 @@ module Api
             retirement_payment: item.retirement_payment,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
+            employer_social_security_tax: item.employer_social_security_tax,
+            employer_medicare_tax: item.employer_medicare_tax,
             check_number: item.check_number,
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net

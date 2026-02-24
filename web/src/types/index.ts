@@ -164,6 +164,8 @@ export interface PayrollItem {
   // Calculated pay
   gross_pay?: number;
   net_pay?: number;
+  employer_social_security_tax?: number;
+  employer_medicare_tax?: number;
   // Tax withholdings
   withholding_tax?: number; // Guam Territorial Income Tax (same as federal)
   social_security_tax?: number;
