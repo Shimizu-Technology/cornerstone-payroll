@@ -72,16 +72,22 @@ module ClerkAuthenticatable
   end
 
   def fetch_jwks
-    # Cache JWKS for 1 hour to avoid hitting Clerk on every request
     Rails.cache.fetch("clerk_jwks", expires_in: 1.hour) do
       uri = URI("#{clerk_api_base}/.well-known/jwks.json")
-      response = Net::HTTP.get_response(uri)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      http.open_timeout = 5
+      http.read_timeout = 5
+      response = http.get(uri.path)
       if response.is_a?(Net::HTTPSuccess)
         JSON.parse(response.body)["keys"]
       else
         Rails.logger.error("Failed to fetch Clerk JWKS: #{response.code}")
         nil
       end
+    rescue Timeout::Error, Errno::ECONNREFUSED => e
+      Rails.logger.error("Network error fetching Clerk JWKS: #{e.message}")
+      nil
     end
   end
 
@@ -137,12 +143,14 @@ module ClerkAuthenticatable
 
   def fetch_clerk_user(clerk_id)
     uri = URI("https://api.clerk.com/v1/users/#{clerk_id}")
+    http = Net::HTTP.new(uri.hostname, uri.port)
+    http.use_ssl = true
+    http.open_timeout = 5
+    http.read_timeout = 5
     req = Net::HTTP::Get.new(uri)
     req["Authorization"] = "Bearer #{ENV['CLERK_SECRET_KEY']}"
 
-    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
-      http.request(req)
-    end
+    response = http.request(req)
 
     if response.is_a?(Net::HTTPSuccess)
       JSON.parse(response.body)
@@ -150,6 +158,9 @@ module ClerkAuthenticatable
       Rails.logger.error("Failed to fetch Clerk user: #{response.code}")
       nil
     end
+  rescue Timeout::Error, Errno::ECONNREFUSED => e
+    Rails.logger.error("Network error fetching Clerk user: #{e.message}")
+    nil
   end
 
   def current_user

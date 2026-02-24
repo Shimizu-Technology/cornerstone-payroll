@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ClerkProvider, SignIn, SignUp } from '@clerk/clerk-react';
+import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
