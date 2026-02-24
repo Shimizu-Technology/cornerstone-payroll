@@ -20,6 +20,10 @@ module Api
               total_medicare: @payroll_items.sum(:medicare_tax),
               total_deductions: @payroll_items.sum(:total_deductions),
               total_net: @payroll_items.sum(:net_pay),
+              # Employer obligations (what Cornerstone deposits with Guam DRT)
+              total_employer_social_security: @payroll_items.sum(:employer_social_security_tax),
+              total_employer_medicare: @payroll_items.sum(:employer_medicare_tax),
+              total_employer_taxes: @payroll_items.sum(:employer_social_security_tax) + @payroll_items.sum(:employer_medicare_tax),
               employee_count: @payroll_items.count
             }
           }
@@ -133,6 +137,8 @@ module Api
             additional_withholding: item.additional_withholding,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
+            employer_social_security_tax: item.employer_social_security_tax,
+            employer_medicare_tax: item.employer_medicare_tax,
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
             ytd_gross: item.ytd_gross,

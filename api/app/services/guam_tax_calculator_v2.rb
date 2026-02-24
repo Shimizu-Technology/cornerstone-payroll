@@ -40,10 +40,16 @@ class GuamTaxCalculatorV2
   # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
   def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0)
+    employee_ss = calculate_social_security(gross_pay, ytd_gross)
+    employee_medicare = calculate_medicare(gross_pay, ytd_gross)
+
     {
       withholding: calculate_withholding(gross_pay),
-      social_security: calculate_social_security(gross_pay, ytd_gross),
-      medicare: calculate_medicare(gross_pay, ytd_gross)
+      social_security: employee_ss,
+      medicare: employee_medicare,
+      # Employer match — same rates, same wage base cap for SS
+      employer_social_security: employee_ss,  # Same calculation (6.2% capped)
+      employer_medicare: calculate_employer_medicare(gross_pay)  # 1.45% no cap, no Additional Medicare
     }
   end
 
@@ -115,6 +121,11 @@ class GuamTaxCalculatorV2
     end
 
     base_medicare + additional_medicare
+  end
+
+  # Employer Medicare — flat 1.45% on ALL wages (no Additional Medicare Tax for employer)
+  def calculate_employer_medicare(gross_pay)
+    (gross_pay * annual_config.medicare_rate).round(2)
   end
 
   private

@@ -79,6 +79,10 @@ class PayrollCalculator
     payroll_item.social_security_tax = taxes[:social_security]
     payroll_item.medicare_tax = taxes[:medicare]
 
+    # Employer match taxes
+    payroll_item.employer_social_security_tax = taxes[:employer_social_security]
+    payroll_item.employer_medicare_tax = taxes[:employer_medicare]
+
     # Add any additional withholding requested by employee
     payroll_item.additional_withholding = employee.additional_withholding.to_f
   end
