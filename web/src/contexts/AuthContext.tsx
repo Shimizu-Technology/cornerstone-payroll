@@ -74,14 +74,14 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const [backendUnauthorized, setBackendUnauthorized] = useState(false);
 
   const refreshUser = useCallback(async () => {
-    if (backendUnauthorized) {
+    if (!isSignedIn) {
+      setUser(null);
+      setBackendUnauthorized(false);
       setIsLoading(false);
       return;
     }
 
-    if (!isSignedIn) {
-      setUser(null);
-      setBackendUnauthorized(false);
+    if (backendUnauthorized) {
       setIsLoading(false);
       return;
     }
