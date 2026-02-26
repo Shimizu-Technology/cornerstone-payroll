@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
-import { ApiError, authApi, setAuthToken } from '@/services/api';
+import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
 
 interface User {
   id: number;
@@ -30,6 +30,12 @@ const authEnabled = import.meta.env.VITE_AUTH_ENABLED === 'true';
 function DevAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Dev mode does not rely on Clerk token provider.
+    setAuthTokenProvider(null);
+    setAuthToken(null);
+  }, []);
 
   useEffect(() => {
     // If auth is enabled but Clerk is not configured, don't hammer /auth/me.
@@ -72,6 +78,17 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [backendUnauthorized, setBackendUnauthorized] = useState(false);
+
+  useEffect(() => {
+    if (!isSignedIn) {
+      setAuthTokenProvider(null);
+      setAuthToken(null);
+      return;
+    }
+
+    // Always fetch a fresh Clerk token before API requests.
+    setAuthTokenProvider(() => getToken());
+  }, [isSignedIn, getToken]);
 
   const refreshUser = useCallback(async () => {
     if (!isSignedIn) {

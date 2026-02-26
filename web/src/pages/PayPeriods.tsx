@@ -37,9 +37,18 @@ export function PayPeriods() {
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
+  const [editingPayPeriod, setEditingPayPeriod] = useState<PayPeriod | null>(null);
   const [formData, setFormData] = useState({
+    start_date: '',
+    end_date: '',
+    pay_date: '',
+    notes: '',
+  });
+  const [editFormData, setEditFormData] = useState({
     start_date: '',
     end_date: '',
     pay_date: '',
@@ -100,6 +109,44 @@ export function PayPeriods() {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
       setActionInFlight(null);
+    }
+  };
+
+  const openEditModal = (period: PayPeriod) => {
+    setEditingPayPeriod(period);
+    setEditFormData({
+      start_date: period.start_date,
+      end_date: period.end_date,
+      pay_date: period.pay_date,
+      notes: period.notes || '',
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleEdit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingPayPeriod) return;
+
+    if (editFormData.end_date <= editFormData.start_date) {
+      setError('End date must be after start date');
+      return;
+    }
+    if (editFormData.pay_date < editFormData.end_date) {
+      setError('Pay date must be on or after end date');
+      return;
+    }
+
+    try {
+      setIsEditSubmitting(true);
+      setError(null);
+      await payPeriodsApi.update(editingPayPeriod.id, editFormData);
+      setIsEditOpen(false);
+      setEditingPayPeriod(null);
+      loadPayPeriods();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update pay period');
+    } finally {
+      setIsEditSubmitting(false);
     }
   };
 
@@ -285,14 +332,23 @@ export function PayPeriods() {
                           >
                             View
                           </Button>
+                          {period.status !== 'committed' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEditModal(period)}
+                            >
+                              Edit
+                            </Button>
+                          )}
                           {period.status === 'draft' && (
                             <>
                               <Button
+                                variant="outline"
                                 size="sm"
-                                onClick={() => handleRunPayroll(period.id)}
-                                disabled={actionInFlight !== null}
+                                onClick={() => navigate(`/pay-periods/${period.id}`)}
                               >
-                                Calculate
+                                Enter Hours
                               </Button>
                               <Button
                                 variant="ghost"
@@ -452,6 +508,77 @@ export function PayPeriods() {
               </Button>
               <Button type="submit" disabled={isSubmitting}>
                 {isSubmitting ? 'Creating...' : 'Create Pay Period'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Pay Period Modal */}
+      <Dialog
+        open={isEditOpen}
+        onOpenChange={(open) => {
+          setIsEditOpen(open);
+          if (!open) setEditingPayPeriod(null);
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={handleEdit}>
+            <DialogHeader>
+              <DialogTitle>Edit Pay Period</DialogTitle>
+              <DialogDescription>
+                Update pay period dates and notes before commit.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit_start_date">Start Date</Label>
+                  <Input
+                    id="edit_start_date"
+                    type="date"
+                    value={editFormData.start_date}
+                    onChange={(e) => setEditFormData({ ...editFormData, start_date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit_end_date">End Date</Label>
+                  <Input
+                    id="edit_end_date"
+                    type="date"
+                    value={editFormData.end_date}
+                    onChange={(e) => setEditFormData({ ...editFormData, end_date: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_pay_date">Pay Date</Label>
+                <Input
+                  id="edit_pay_date"
+                  type="date"
+                  value={editFormData.pay_date}
+                  onChange={(e) => setEditFormData({ ...editFormData, pay_date: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_notes">Notes (optional)</Label>
+                <Textarea
+                  id="edit_notes"
+                  value={editFormData.notes}
+                  onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+                  placeholder="Any notes about this pay period..."
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isEditSubmitting}>
+                {isEditSubmitting ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
           </form>

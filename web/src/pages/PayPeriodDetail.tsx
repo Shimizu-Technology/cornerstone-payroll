@@ -22,6 +22,10 @@ interface HoursEntry {
 }
 
 const MAX_HOURS_PER_PERIOD = 200;
+const toNumber = (value: unknown): number => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 export function PayPeriodDetail() {
   const { id } = useParams<{ id: string }>();
@@ -174,14 +178,14 @@ export function PayPeriodDetail() {
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
 
   // Summaries
-  const totalGross = payrollItems.reduce((s, i) => s + (i.gross_pay || 0), 0);
-  const totalWithholding = payrollItems.reduce((s, i) => s + (i.withholding_tax || 0), 0);
-  const totalSS = payrollItems.reduce((s, i) => s + (i.social_security_tax || 0), 0);
-  const totalMedicare = payrollItems.reduce((s, i) => s + (i.medicare_tax || 0), 0);
-  const totalDeductions = payrollItems.reduce((s, i) => s + (i.total_deductions || 0), 0);
-  const totalNet = payrollItems.reduce((s, i) => s + (i.net_pay || 0), 0);
-  const totalEmployerSS = payrollItems.reduce((s, i) => s + (i.employer_social_security_tax || 0), 0);
-  const totalEmployerMedicare = payrollItems.reduce((s, i) => s + (i.employer_medicare_tax || 0), 0);
+  const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
+  const totalWithholding = payrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
+  const totalSS = payrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
+  const totalMedicare = payrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
+  const totalDeductions = payrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
+  const totalNet = payrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
+  const totalEmployerSS = payrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
+  const totalEmployerMedicare = payrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
   const totalEmployerTaxes = totalEmployerSS + totalEmployerMedicare;
   const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
 
@@ -191,7 +195,7 @@ export function PayPeriodDetail() {
         title={`Pay Period: ${formatDateRange(payPeriod.start_date, payPeriod.end_date)}`}
         description={`Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
             <Button variant="outline" onClick={() => navigate('/pay-periods')}>
               Back to List
             </Button>
@@ -219,7 +223,7 @@ export function PayPeriodDetail() {
         }
       />
 
-      <div className="p-8 space-y-6">
+      <div className="p-4 space-y-6 sm:p-6 lg:p-8">
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
@@ -227,7 +231,7 @@ export function PayPeriodDetail() {
         )}
 
         {/* Status Bar */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Badge
             variant={
               isCommitted ? 'success' : isApproved ? 'info' : isCalculated ? 'warning' : 'default'
@@ -244,7 +248,7 @@ export function PayPeriodDetail() {
 
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:gap-4">
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
@@ -254,98 +258,105 @@ export function PayPeriodDetail() {
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Gross Pay</p>
-                <p className="mt-1 text-2xl font-semibold text-gray-900">{formatCurrency(totalGross)}</p>
+                <p className="mt-1 wrap-break-word text-xl font-semibold text-gray-900 sm:text-2xl">{formatCurrency(totalGross)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Taxes</p>
-                <p className="mt-1 text-2xl font-semibold text-red-600">{formatCurrency(totalDeductions)}</p>
+                <p className="mt-1 wrap-break-word text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Net Pay</p>
-                <p className="mt-1 text-2xl font-semibold text-green-600">{formatCurrency(totalNet)}</p>
+                <p className="mt-1 wrap-break-word text-xl font-semibold text-green-600 sm:text-2xl">{formatCurrency(totalNet)}</p>
               </CardContent>
             </Card>
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="pt-5 pb-4">
                 <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">DRT Deposit</p>
-                <p className="mt-1 text-2xl font-semibold text-amber-800">{formatCurrency(totalDRTDeposit)}</p>
+                <p className="mt-1 wrap-break-word text-xl font-semibold text-amber-800 sm:text-2xl">{formatCurrency(totalDRTDeposit)}</p>
               </CardContent>
             </Card>
           </div>
         )}
 
         {/* Hours Input (Draft Mode) */}
-        {isDraft && (
+        {(isDraft || isCalculated) && (
           <Card>
             <div className="p-4 border-b">
-              <h3 className="font-semibold text-gray-900">Enter Hours</h3>
+              <h3 className="font-semibold text-gray-900">
+                {isCalculated ? 'Adjust Hours' : 'Enter Hours'}
+              </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Enter hours for each employee for this pay period. Default is 80 hours (biweekly).
+                {isCalculated
+                  ? 'Update hours and click Recalculate to refresh payroll amounts.'
+                  : 'Enter hours for each employee for this pay period. Default is 80 hours (biweekly).'}
               </p>
             </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Rate</TableHead>
-                  <TableHead className="text-center">Regular Hours</TableHead>
-                  <TableHead className="text-center">Overtime Hours</TableHead>
-                  <TableHead className="text-right">Est. Gross</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {employees.map((emp) => {
-                  const hours = hoursMap[String(emp.id)] || { regular: 80, overtime: 0 };
-                  const estGross = emp.employment_type === 'salary'
-                    ? (emp.pay_rate || 0) / 26  // Biweekly salary
-                    : (hours.regular * (emp.pay_rate || 0)) + (hours.overtime * (emp.pay_rate || 0) * 1.5);
-                  return (
-                    <TableRow key={emp.id}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
-                          <p className="text-xs text-gray-500 capitalize">{emp.employment_type}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-gray-700">
-                        {emp.employment_type === 'salary'
-                          ? `$${((emp.pay_rate || 0) / 26).toFixed(2)}/period`
-                          : `$${emp.pay_rate?.toFixed(2)}/hr`}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <input
-                          type="number"
-                          value={hours.regular}
-                          onChange={(e) => updateHours(emp.id, 'regular', parseFloat(e.target.value) || 0)}
-                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-                          min={0}
-                          step={0.5}
-                          disabled={emp.employment_type === 'salary'}
-                        />
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <input
-                          type="number"
-                          value={hours.overtime}
-                          onChange={(e) => updateHours(emp.id, 'overtime', parseFloat(e.target.value) || 0)}
-                          className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-                          min={0}
-                          step={0.5}
-                          disabled={emp.employment_type === 'salary'}
-                        />
-                      </TableCell>
-                      <TableCell className="text-right font-medium text-gray-700">
-                        {formatCurrency(estGross)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Rate</TableHead>
+                    <TableHead className="text-center">Regular Hours</TableHead>
+                    <TableHead className="text-center">Overtime Hours</TableHead>
+                    <TableHead className="text-right">Est. Gross</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {employees.map((emp) => {
+                    const hours = hoursMap[String(emp.id)] || { regular: 80, overtime: 0 };
+                    const payRate = toNumber(emp.pay_rate);
+                    const estGross = emp.employment_type === 'salary'
+                      ? payRate / 26  // Biweekly salary
+                      : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
+                    return (
+                      <TableRow key={emp.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
+                            <p className="text-xs text-gray-500 capitalize">{emp.employment_type}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-gray-700">
+                          {emp.employment_type === 'salary'
+                            ? `$${(payRate / 26).toFixed(2)}/period`
+                            : `$${payRate.toFixed(2)}/hr`}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <input
+                            type="number"
+                            value={hours.regular}
+                            onChange={(e) => updateHours(emp.id, 'regular', parseFloat(e.target.value) || 0)}
+                            className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                            min={0}
+                            step={0.5}
+                            disabled={emp.employment_type === 'salary'}
+                          />
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <input
+                            type="number"
+                            value={hours.overtime}
+                            onChange={(e) => updateHours(emp.id, 'overtime', parseFloat(e.target.value) || 0)}
+                            className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                            min={0}
+                            step={0.5}
+                            disabled={emp.employment_type === 'salary'}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-gray-700">
+                          {formatCurrency(estGross)}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           </Card>
         )}
 
@@ -389,16 +400,19 @@ export function PayPeriodDetail() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        {item.employment_type === 'salary'
-                          ? `$${((item.pay_rate || 0) / 26).toFixed(2)}/period`
-                          : `$${item.pay_rate?.toFixed(2)}/hr`}
+                        {(() => {
+                          const payRate = toNumber(item.pay_rate);
+                          return item.employment_type === 'salary'
+                            ? `$${(payRate / 26).toFixed(2)}/period`
+                            : `$${payRate.toFixed(2)}/hr`;
+                        })()}
                       </TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(item.gross_pay || 0)}</TableCell>
-                      <TableCell className="text-right text-red-600">{formatCurrency(item.withholding_tax || 0)}</TableCell>
-                      <TableCell className="text-right text-red-600">{formatCurrency(item.social_security_tax || 0)}</TableCell>
-                      <TableCell className="text-right text-red-600">{formatCurrency(item.medicare_tax || 0)}</TableCell>
-                      <TableCell className="text-right text-red-600 font-medium">{formatCurrency(item.total_deductions || 0)}</TableCell>
-                      <TableCell className="text-right font-bold text-green-600">{formatCurrency(item.net_pay || 0)}</TableCell>
+                      <TableCell className="text-right font-medium">{formatCurrency(toNumber(item.gross_pay))}</TableCell>
+                      <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.withholding_tax))}</TableCell>
+                      <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
+                      <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
+                      <TableCell className="text-right text-red-600 font-medium">{formatCurrency(toNumber(item.total_deductions))}</TableCell>
+                      <TableCell className="text-right font-bold text-green-600">{formatCurrency(toNumber(item.net_pay))}</TableCell>
                     </TableRow>
                   ))}
                   {/* Totals */}
@@ -470,12 +484,12 @@ export function PayPeriodDetail() {
                 </div>
               </div>
               {/* Grand total */}
-              <div className="mt-6 pt-4 border-t-2 border-amber-300 flex justify-between items-center">
+              <div className="mt-6 flex flex-col gap-3 border-t-2 border-amber-300 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-lg font-bold text-amber-900">Total DRT Deposit</p>
                   <p className="text-sm text-amber-700">Employee withholdings + Employer SS & Medicare</p>
                 </div>
-                <p className="text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
+                <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
             </div>
           </Card>
