@@ -11,6 +11,7 @@ interface RequestOptions extends RequestInit {
 class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
+  private authTokenProvider: (() => Promise<string | null>) | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -20,8 +21,26 @@ class ApiClient {
     this.authToken = token;
   }
 
+  setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
+    this.authTokenProvider = provider;
+  }
+
   getAuthToken(): string | null {
     return this.authToken;
+  }
+
+  private async resolveAuthToken(): Promise<string | null> {
+    if (!this.authTokenProvider) return this.authToken;
+
+    try {
+      const freshToken = await this.authTokenProvider();
+      if (freshToken) {
+        this.authToken = freshToken;
+      }
+      return freshToken || this.authToken;
+    } catch {
+      return this.authToken;
+    }
   }
 
   private buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
@@ -45,8 +64,9 @@ class ApiClient {
       ...options.headers,
     };
 
-    if (this.authToken) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${this.authToken}`;
+    const token = await this.resolveAuthToken();
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
     const response = await fetch(url, {
@@ -119,6 +139,8 @@ const api = new ApiClient(API_BASE_URL);
 export default api;
 export { api as apiClient };
 export const setAuthToken = (token: string | null) => api.setAuthToken(token);
+export const setAuthTokenProvider = (provider: (() => Promise<string | null>) | null) =>
+  api.setAuthTokenProvider(provider);
 
 // ========================================
 // API Endpoints
