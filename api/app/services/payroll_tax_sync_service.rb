@@ -55,6 +55,7 @@ class PayrollTaxSyncService
     request["Content-Type"] = "application/json"
     request["Idempotency-Key"] = @pay_period.tax_sync_idempotency_key
     request["Authorization"] = "Bearer #{api_token}" if api_token.present?
+    request["X-Shared-Secret"] = shared_secret if shared_secret.present?
     request["X-Source"] = "cornerstone-payroll"
     request.body = payload.to_json
 
@@ -83,5 +84,9 @@ class PayrollTaxSyncService
 
   def api_token
     ENV["CST_API_TOKEN"]
+  end
+
+  def shared_secret
+    ENV["CST_SHARED_SECRET"].presence || ENV["CST_API_TOKEN"].presence
   end
 end

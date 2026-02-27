@@ -33,6 +33,7 @@ RSpec.describe PayrollTaxSyncService, type: :service do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://cst.example.com/api/v1/ingest")
     allow(ENV).to receive(:[]).with("CST_API_TOKEN").and_return("test-token")
+    allow(ENV).to receive(:[]).with("CST_SHARED_SECRET").and_return("shared-test-secret")
   end
 
   describe "#sync!" do
@@ -97,6 +98,12 @@ RSpec.describe PayrollTaxSyncService, type: :service do
         service.sync!
         expect(WebMock).to have_requested(:post, "https://cst.example.com/api/v1/ingest")
           .with(headers: { "Authorization" => "Bearer test-token" })
+      end
+
+      it "sends shared-secret header" do
+        service.sync!
+        expect(WebMock).to have_requested(:post, "https://cst.example.com/api/v1/ingest")
+          .with(headers: { "X-Shared-Secret" => "shared-test-secret" })
       end
     end
 
