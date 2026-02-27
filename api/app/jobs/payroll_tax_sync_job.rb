@@ -3,7 +3,7 @@
 class PayrollTaxSyncJob < ApplicationJob
   queue_as :default
 
-  # Exponential backoff: 30s, 2m, 8m, 32m, ~2h
+  # Polynomial backoff: 3s, 18s, 83s (~1.4m), 258s (~4.3m), 627s (~10.5m)
   retry_on PayrollTaxSyncService::SyncError,
            wait: :polynomially_longer,
            attempts: PayPeriod::MAX_SYNC_ATTEMPTS

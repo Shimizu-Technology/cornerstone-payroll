@@ -201,6 +201,7 @@ export function PayPeriodDetail() {
 
   const syncStatus = payPeriod.tax_sync_status as TaxSyncStatus | null | undefined;
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
+  const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
 
   // Summaries
@@ -295,9 +296,9 @@ export function PayPeriodDetail() {
                   {retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}
                 </Button>
               )}
-              {payPeriod.tax_sync_attempts != null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
+              {payPeriod.tax_sync_attempts !== null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
                 <span className="text-xs text-gray-400">
-                  Attempt {payPeriod.tax_sync_attempts}/{5}
+                  Attempt {payPeriod.tax_sync_attempts}/{MAX_SYNC_ATTEMPTS}
                 </span>
               )}
             </>
