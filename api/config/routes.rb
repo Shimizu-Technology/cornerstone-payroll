@@ -29,6 +29,7 @@ Rails.application.routes.draw do
             post :run_payroll
             post :approve
             post :commit
+            post :retry_tax_sync
           end
 
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
