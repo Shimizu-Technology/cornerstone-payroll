@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_24_055207) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -213,12 +213,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_24_055207) do
     t.date "pay_date", null: false
     t.date "start_date", null: false
     t.string "status", default: "draft"
+    t.integer "tax_sync_attempts", default: 0, null: false
+    t.string "tax_sync_idempotency_key"
+    t.text "tax_sync_last_error"
+    t.string "tax_sync_status", default: "pending"
+    t.datetime "tax_synced_at"
     t.datetime "updated_at", null: false
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
     t.index ["status"], name: "index_pay_periods_on_status"
+    t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
+    t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
   end
 
   create_table "payroll_items", force: :cascade do |t|

@@ -117,6 +117,7 @@ export interface EmployeeFormData {
 // ----------------
 
 export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed';
+export type TaxSyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
 
 export interface PayPeriod {
   id: number;
@@ -132,6 +133,11 @@ export interface PayPeriod {
   committed_at?: string;
   created_at?: string;
   updated_at?: string;
+  // Tax sync fields (CPR-53)
+  tax_sync_status?: TaxSyncStatus | null;
+  tax_sync_attempts?: number;
+  tax_sync_last_error?: string | null;
+  tax_synced_at?: string | null;
   // Computed/included
   employee_count?: number;
   payroll_items_count?: number;

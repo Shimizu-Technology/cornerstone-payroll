@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
-import type { PayPeriod, PayrollItem, Employee } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, TaxSyncStatus } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -27,6 +27,13 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
+  pending: { label: 'Tax Sync Pending', variant: 'default' },
+  syncing: { label: 'Tax Syncing...', variant: 'info' },
+  synced: { label: 'Tax Synced', variant: 'success' },
+  failed: { label: 'Tax Sync Failed', variant: 'danger' },
+};
+
 export function PayPeriodDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -37,6 +44,7 @@ export function PayPeriodDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [retryingSyncTax, setRetryingSyncTax] = useState(false);
 
   const loadPayPeriod = useCallback(async (periodId: number) => {
     try {
@@ -163,6 +171,20 @@ export function PayPeriodDetail() {
     }
   };
 
+  const handleRetryTaxSync = async () => {
+    if (!payPeriod) return;
+    try {
+      setRetryingSyncTax(true);
+      setError(null);
+      const response = await payPeriodsApi.retryTaxSync(payPeriod.id);
+      setPayPeriod(response.pay_period);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to retry tax sync');
+    } finally {
+      setRetryingSyncTax(false);
+    }
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Loading...</div>;
   }
@@ -176,6 +198,11 @@ export function PayPeriodDetail() {
   const isApproved = payPeriod.status === 'approved';
   const isCommitted = payPeriod.status === 'committed';
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
+
+  const syncStatus = payPeriod.tax_sync_status as TaxSyncStatus | null | undefined;
+  const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
+  const MAX_SYNC_ATTEMPTS = 5;
+  const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
 
   // Summaries
   const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
@@ -243,6 +270,38 @@ export function PayPeriodDetail() {
             <span className="text-sm text-gray-500">
               Committed {new Date(payPeriod.committed_at).toLocaleString()}
             </span>
+          )}
+          {isCommitted && syncConfig && (
+            <>
+              <Badge variant={syncConfig.variant}>
+                {syncConfig.label}
+              </Badge>
+              {syncStatus === 'synced' && payPeriod.tax_synced_at && (
+                <span className="text-sm text-gray-500">
+                  Synced {new Date(payPeriod.tax_synced_at).toLocaleString()}
+                </span>
+              )}
+              {syncStatus === 'failed' && payPeriod.tax_sync_last_error && (
+                <span className="text-sm text-red-600 max-w-md truncate" title={payPeriod.tax_sync_last_error}>
+                  {payPeriod.tax_sync_last_error}
+                </span>
+              )}
+              {canRetrySyncTax && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRetryTaxSync}
+                  disabled={retryingSyncTax}
+                >
+                  {retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}
+                </Button>
+              )}
+              {payPeriod.tax_sync_attempts !== null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
+                <span className="text-xs text-gray-400">
+                  Attempt {payPeriod.tax_sync_attempts}/{MAX_SYNC_ATTEMPTS}
+                </span>
+              )}
+            </>
           )}
         </div>
 

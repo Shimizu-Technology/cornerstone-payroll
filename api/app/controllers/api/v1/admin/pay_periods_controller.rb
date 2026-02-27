@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class PayPeriodsController < BaseController
-        before_action :set_pay_period, only: [ :show, :update, :destroy, :run_payroll, :approve, :commit ]
+        before_action :set_pay_period, only: [ :show, :update, :destroy, :run_payroll, :approve, :commit, :retry_tax_sync ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -151,7 +151,26 @@ module Api
             @pay_period.payroll_items.each do |item|
               update_ytd_totals(item)
             end
+
+            # Prepare tax sync (generate idempotency key inside transaction)
+            @pay_period.generate_idempotency_key!
+            @pay_period.update!(tax_sync_status: "pending")
           end
+
+          # Enqueue async tax sync — never block commit
+          PayrollTaxSyncJob.perform_later(@pay_period.id)
+
+          render json: { pay_period: pay_period_json(@pay_period) }
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
+        def retry_tax_sync
+          unless @pay_period.can_retry_sync?
+            return render json: { error: "Tax sync cannot be retried for this pay period" }, status: :unprocessable_entity
+          end
+
+          @pay_period.update!(tax_sync_status: "pending", tax_sync_last_error: nil)
+          PayrollTaxSyncJob.perform_later(@pay_period.id)
 
           render json: { pay_period: pay_period_json(@pay_period) }
         end
@@ -185,6 +204,10 @@ module Api
             total_employer_ss: pay_period.payroll_items.sum(:employer_social_security_tax),
             total_employer_medicare: pay_period.payroll_items.sum(:employer_medicare_tax),
             committed_at: pay_period.committed_at,
+            tax_sync_status: pay_period.tax_sync_status,
+            tax_sync_attempts: pay_period.tax_sync_attempts,
+            tax_sync_last_error: pay_period.tax_sync_last_error,
+            tax_synced_at: pay_period.tax_synced_at,
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }

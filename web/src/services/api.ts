@@ -368,6 +368,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
   commit: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  retryTaxSync: (id: number) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
 };
 
 // Payroll Items (Admin API)
