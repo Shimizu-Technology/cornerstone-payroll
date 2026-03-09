@@ -34,8 +34,9 @@ class SalaryPayrollCalculator < PayrollCalculator
     periods = PERIODS_PER_YEAR[employee.pay_frequency] || 26
     base_pay = payroll_item.pay_rate / periods.to_f
 
-    # Tips are taxable income — include in gross pay before tax calculation
-    tips = payroll_item.reported_tips.to_f + payroll_item.tips.to_f
+    # Tips are taxable income — preserve legacy behavior by using reported_tips only.
+    # (import flow writes MoSa tips into reported_tips and zeroes tips to avoid double counting)
+    tips = payroll_item.reported_tips.to_f
 
     # Salary employees can still have tips and bonuses
     payroll_item.gross_pay = (

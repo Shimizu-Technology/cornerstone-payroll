@@ -27,8 +27,9 @@ class HourlyPayrollCalculator < PayrollCalculator
     holiday_pay = BigDecimal(payroll_item.holiday_hours.to_s) * rate
     pto_pay = BigDecimal(payroll_item.pto_hours.to_s) * rate
 
-    # Tips are taxable income — include in gross pay before tax calculation
-    tips = BigDecimal(payroll_item.reported_tips.to_s) + BigDecimal(payroll_item.tips.to_s)
+    # Tips are taxable income — preserve legacy behavior by using reported_tips only.
+    # (import flow writes MoSa tips into reported_tips and zeroes tips to avoid double counting)
+    tips = BigDecimal(payroll_item.reported_tips.to_s)
 
     # Gross pay includes all pay plus tips and bonus
     total = regular_pay + overtime_pay + holiday_pay + pto_pay + tips + BigDecimal(payroll_item.bonus.to_s)
