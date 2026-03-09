@@ -10,8 +10,8 @@ import os
 import subprocess
 import sys
 
-GOG_ACCOUNT = "jerry.shimizutechnology@gmail.com"
-GOG_PASSWORD = "clawdbot"
+GOG_ACCOUNT = os.environ.get("GOG_ACCOUNT")
+GOG_PASSWORD = os.environ.get("GOG_KEYRING_PASSWORD")
 OUT_DIR = os.path.expanduser("~/work/cornerstone-payroll/data/mosa-2025/raw")
 MANIFEST_PATH = os.path.expanduser("~/work/cornerstone-payroll/data/mosa-2025/manifest.json")
 
@@ -75,8 +75,16 @@ def download_attachment(msg_id, att_id, out_path):
     return result.returncode == 0 or os.path.exists(out_path)
 
 def main():
+    if not GOG_ACCOUNT:
+        print("ERROR: GOG_ACCOUNT is not set. Example: export GOG_ACCOUNT='you@example.com'")
+        sys.exit(1)
+    if not GOG_PASSWORD:
+        print("ERROR: GOG_KEYRING_PASSWORD is not set.")
+        print("Example: export GOG_KEYRING_PASSWORD='...'")
+        sys.exit(1)
+
     os.makedirs(OUT_DIR, exist_ok=True)
-    
+
     manifest = []
     stats = {"total": 0, "pdfs": 0, "excels": 0, "errors": 0}
     

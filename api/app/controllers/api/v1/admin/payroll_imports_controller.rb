@@ -92,7 +92,7 @@ module Api
           @pay_period = PayPeriod.includes(:payroll_items).find(params[:pay_period_id])
 
           unless @pay_period.company_id == current_company_id
-            render json: { error: "Pay period not found" }, status: :not_found
+            render json: { error: "Pay period not found" }, status: :not_found and return
           end
         end
 
