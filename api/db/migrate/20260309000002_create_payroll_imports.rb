@@ -8,7 +8,7 @@ class CreatePayrollImports < ActiveRecord::Migration[8.1]
       t.string :pdf_filename
       t.string :excel_filename
       t.jsonb :raw_data, default: {}
-      t.jsonb :matched_data, default: {}
+      t.jsonb :matched_data, default: []
       t.jsonb :unmatched_pdf_names, default: []
       t.jsonb :validation_errors, default: []
 

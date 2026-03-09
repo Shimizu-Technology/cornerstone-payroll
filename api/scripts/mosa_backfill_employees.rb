@@ -71,24 +71,22 @@ end
 created = 0
 errors = []
 
-Employee.transaction do
-  missing.each do |r|
-    begin
-      Employee.create!(
-        company_id: company.id,
-        first_name: r[:first_name],
-        last_name: r[:last_name],
-        pay_rate: 0,
-        employment_type: "hourly",
-        pay_frequency: "biweekly",
-        status: "active",
-        filing_status: "single",
-        allowances: 0
-      )
-      created += 1
-    rescue => e
-      errors << "#{r[:source_name]} => #{e.message}"
-    end
+missing.each do |r|
+  begin
+    Employee.create!(
+      company_id: company.id,
+      first_name: r[:first_name],
+      last_name: r[:last_name],
+      pay_rate: 0,
+      employment_type: "hourly",
+      pay_frequency: "biweekly",
+      status: "active",
+      filing_status: "single",
+      allowances: 0
+    )
+    created += 1
+  rescue => e
+    errors << "#{r[:source_name]} => #{e.message}"
   end
 end
 

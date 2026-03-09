@@ -83,7 +83,8 @@ module PayrollImport
             # Fall back to employee.pay_rate if PDF data is insufficient
             pdf_rate = if row[:regular_hours].to_f > 0 && row[:regular_pay].to_f > 0
               BigDecimal(row[:regular_pay].to_s) / BigDecimal(row[:regular_hours].to_s)
-            elsif row[:total_hours].to_f > 0 && row[:total_pay].to_f > 0
+            elsif row[:total_hours].to_f > 0 && row[:total_pay].to_f > 0 &&
+                  row[:overtime_hours].to_f.zero? && row[:overtime_pay].to_f.zero?
               BigDecimal(row[:total_pay].to_s) / BigDecimal(row[:total_hours].to_s)
             end
 
