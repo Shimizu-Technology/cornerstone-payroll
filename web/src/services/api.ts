@@ -102,6 +102,31 @@ class ApiClient {
     });
   }
 
+  async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
+    const token = await this.resolveAuthToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
+
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
@@ -374,19 +399,7 @@ export const payPeriodsApi = {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);
     if (excelFile) formData.append('excel_file', excelFile);
-    const token = api.getAuthToken();
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${API_BASE_URL}/admin/pay_periods/${id}/preview_import`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(errorData.error || `HTTP ${response.status}`, response.status, errorData.details);
-    }
-    return response.json() as Promise<ImportPreviewResponse>;
+    return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
   applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[] }) =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),

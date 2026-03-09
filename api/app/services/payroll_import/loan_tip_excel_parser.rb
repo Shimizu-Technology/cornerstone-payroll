@@ -29,8 +29,14 @@ module PayrollImport
       end
 
       def parse_file(file)
-        temp_path = file.respond_to?(:path) ? file.path : save_to_temp(file)
-        parse(temp_path)
+        return parse(file.path) if file.respond_to?(:path)
+
+        tempfile = save_to_temp(file)
+        begin
+          parse(tempfile.path)
+        ensure
+          tempfile.unlink if tempfile
+        end
       end
 
       private
@@ -40,7 +46,7 @@ module PayrollImport
         tempfile.binmode
         tempfile.write(file.read)
         tempfile.close
-        tempfile.path
+        tempfile
       end
     end
 

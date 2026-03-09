@@ -47,8 +47,14 @@ module PayrollImport
       # @param file [File, Tempfile, ActionDispatch::Http::UploadedFile]
       # @return [Array<Hash>] parsed employee records
       def parse_file(file)
-        temp_path = file.respond_to?(:path) ? file.path : save_to_temp(file)
-        parse(temp_path)
+        return parse(file.path) if file.respond_to?(:path)
+
+        tempfile = save_to_temp(file)
+        begin
+          parse(tempfile.path)
+        ensure
+          tempfile.unlink if tempfile
+        end
       end
 
       private
@@ -58,7 +64,7 @@ module PayrollImport
         tempfile.binmode
         tempfile.write(file.read)
         tempfile.close
-        tempfile.path
+        tempfile
       end
     end
 
@@ -82,7 +88,7 @@ module PayrollImport
 
     def validate_file!
       raise ArgumentError, "File not found: #{file_path}" unless File.exist?(file_path)
-      raise ArgumentError, "File is not a PDF" unless file_path.end_with?(".pdf")
+      raise ArgumentError, "File is not a PDF" unless file_path.match?(/\.pdf\z/i)
     end
 
     def extract_text

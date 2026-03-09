@@ -107,7 +107,10 @@ class PayrollCalculator
     ).round(2)
 
     # Loan deduction is a post-tax deduction (subtracted after tax calculation)
-    payroll_item.loan_payment = payroll_item.loan_deduction.to_f if payroll_item.respond_to?(:loan_deduction)
+    # Only sync from import metadata for imported rows to avoid clobbering legacy/manual loan_payment.
+    if payroll_item.respond_to?(:loan_deduction) && payroll_item.import_source.present?
+      payroll_item.loan_payment = payroll_item.loan_deduction.to_f
+    end
 
     # Total deductions
     payroll_item.total_deductions = (

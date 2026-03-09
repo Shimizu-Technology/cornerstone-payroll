@@ -88,13 +88,10 @@ module PayrollImport
             end
 
             if pdf_rate
-              # Round to 6 decimal places for storage
+              # Round to 6 decimal places for storage on payroll item only.
+              # Do NOT mutate canonical Employee pay_rate from a single import run.
               rounded_rate = pdf_rate.round(6)
               payroll_item.pay_rate = rounded_rate
-              # Update employee if rate differs significantly (> 0.0001)
-              if (rounded_rate - BigDecimal(employee.pay_rate.to_s)).abs > BigDecimal('0.0001')
-                employee.update_column(:pay_rate, rounded_rate)
-              end
             else
               payroll_item.pay_rate = employee.pay_rate
             end
@@ -115,6 +112,8 @@ module PayrollImport
             payroll_item.calculate!
 
             results[:success] << { employee_id: employee.id, name: employee.full_name }
+          rescue ActiveRecord::Rollback
+            raise
           rescue StandardError => e
             results[:errors] << { employee_id: employee.id, name: employee&.full_name, error: e.message }
           end

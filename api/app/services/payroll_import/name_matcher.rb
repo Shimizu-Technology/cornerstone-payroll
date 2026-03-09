@@ -83,7 +83,8 @@ module PayrollImport
         emp_first = normalize_first_name(emp.first_name)
 
         emp_last == normalize_token(last_name) &&
-          (first_name.blank? || emp_first == normalize_first_name(first_name))
+          first_name.present? &&
+          emp_first == normalize_first_name(first_name)
       end
 
       return nil unless match
