@@ -53,16 +53,18 @@ cmd_backfill() {
 }
 
 cmd_import() {
-  log "=== Step 3/4: Import Payroll (dry-run preview) ==="
-  # The validation script uses apply_preview which is non-destructive by default.
-  # To push to production, pass MOSA_APPLY=1.
+  log "=== Step 3/4: Import Payroll ==="
   local apply_flag="${MOSA_APPLY:-0}"
   if [[ "$apply_flag" == "1" ]]; then
     log "WARNING: MOSA_APPLY=1 — will WRITE payroll items to database."
     read -r -p "Type 'yes' to confirm live import: " confirm
     [[ "$confirm" == "yes" ]] || die "Aborted by user."
+    (cd "$API_DIR" && MOSA_APPLY=1 bundle exec rails runner scripts/mosa_full_year_validation.rb)
+  else
+    log "Dry-run mode (MOSA_APPLY=0). Running validation/import preview workflow."
+    (cd "$API_DIR" && bundle exec rails runner scripts/mosa_full_year_validation.rb)
   fi
-  log "Import/preview done (MOSA_APPLY=${apply_flag})"
+  log "Import step complete (MOSA_APPLY=${apply_flag})"
 }
 
 cmd_validate() {

@@ -47,7 +47,7 @@ gem "matrix" # Required by prawn in Ruby 3.1+
 gem "pdf-reader"
 gem "roo"
 gem "fuzzy_match"
-gem "levenshtein-ffi", require: false
+gem "levenshtein-ffi"
 
 # S3-compatible storage (for Cloudflare R2)
 gem "aws-sdk-s3"

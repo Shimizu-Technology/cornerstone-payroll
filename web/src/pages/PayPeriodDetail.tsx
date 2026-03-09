@@ -210,6 +210,8 @@ export function PayPeriodDetail() {
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
+  const MOSA_COMPANY_ID = 475;
+  const canImportMosa = isDraft && payPeriod.company_id === MOSA_COMPANY_ID;
 
   // Summaries
   const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
@@ -235,9 +237,11 @@ export function PayPeriodDetail() {
             </Button>
             {isDraft && (
               <>
-                <Button variant="outline" onClick={() => setImportModalOpen(true)}>
-                  Import (MoSa)
-                </Button>
+                {canImportMosa && (
+                  <Button variant="outline" onClick={() => setImportModalOpen(true)}>
+                    Import (MoSa)
+                  </Button>
+                )}
                 <Button onClick={handleRunPayroll} disabled={processing}>
                   {processing ? 'Calculating...' : 'Calculate Payroll'}
                 </Button>

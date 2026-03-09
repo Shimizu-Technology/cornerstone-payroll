@@ -207,15 +207,9 @@ module PayrollImport
       # Fix double commas: "Likiaksa, Stephanie, Iuver" -> "Likiaksa, Stephanie Iuver"
       # Actually this might be "Last, First Middle" which is fine
       
-      # Ensure proper format: "Last, First" or "Last, First M."
-      # Some names might be missing comma - try to fix
-      unless name.include?(",")
-        # If no comma but has space, assume "First Last" -> "Last, First"
-        parts = name.split(" ")
-        if parts.length >= 2
-          name = "#{parts.last}, #{parts[0..-2].join(" ")}"
-        end
-      end
+      # Revel payroll rows are in "Last, First" format.
+      # If comma is missing due to extraction noise, do NOT invert tokens here;
+      # leave as-is and let NameMatcher fuzzy logic resolve safely.
       
       name
     end
