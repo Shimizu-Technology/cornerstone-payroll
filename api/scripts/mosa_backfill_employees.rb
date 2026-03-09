@@ -11,6 +11,11 @@ COMPANY_NAME = "MoSa's Joint"
 DATA_DIR = File.expand_path("../../data/mosa-2025/raw", __dir__)
 APPLY = ENV["APPLY"] == "1"
 
+if Rails.env.production?
+  puts "ERROR: This script cannot be run in production (creates skeleton employee records)."
+  exit 1
+end
+
 PAYROLL_PDFS = Dir.glob(File.join(DATA_DIR, "payroll_*.pdf")).sort
 
 company = Company.find_by(name: COMPANY_NAME)

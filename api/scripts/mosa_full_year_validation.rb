@@ -267,15 +267,16 @@ PAY_PERIODS.each_with_index do |pp_config, idx|
 
     # Run preview + apply
     service = PayrollImport::ImportService.new(pay_period)
-    pdf_file_obj = File.open(pdf_path)
-    excel_file_obj = File.open(excel_path)
 
-    # Mock file objects that respond to .path
-    preview = service.preview(pdf_file: pdf_file_obj, excel_file: excel_file_obj)
-    apply_result = service.apply!(preview)
-
-    pdf_file_obj.close
-    excel_file_obj.close
+    # Use block form to guarantee file handles are closed on exceptions.
+    apply_result = nil
+    File.open(pdf_path) do |pdf_file_obj|
+      File.open(excel_path) do |excel_file_obj|
+        # Mock file objects that respond to .path
+        preview = service.preview(pdf_file: pdf_file_obj, excel_file: excel_file_obj)
+        apply_result = service.apply!(preview)
+      end
+    end
 
     # Collect totals from payroll items
     items = pay_period.payroll_items.reload
