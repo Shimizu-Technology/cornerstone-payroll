@@ -231,7 +231,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
   create_table "payroll_imports", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "excel_filename"
-    t.jsonb "matched_data", default: {}
+    t.jsonb "matched_data", default: []
     t.bigint "pay_period_id", null: false
     t.string "pdf_filename"
     t.jsonb "raw_data", default: {}
