@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
+import { ImportModal } from '@/components/import/ImportModal';
 import type { PayPeriod, PayrollItem, Employee, TaxSyncStatus } from '@/types';
 
 interface HoursEntry {
@@ -45,6 +46,7 @@ export function PayPeriodDetail() {
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
 
   const loadPayPeriod = useCallback(async (periodId: number) => {
     try {
@@ -185,6 +187,11 @@ export function PayPeriodDetail() {
     }
   };
 
+  const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
+    setPayPeriod(updatedPayPeriod);
+    setPayrollItems(updatedPayPeriod.payroll_items || []);
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Loading...</div>;
   }
@@ -227,9 +234,14 @@ export function PayPeriodDetail() {
               Back to List
             </Button>
             {isDraft && (
-              <Button onClick={handleRunPayroll} disabled={processing}>
-                {processing ? 'Calculating...' : 'Calculate Payroll'}
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => setImportModalOpen(true)}>
+                  Import (MoSa)
+                </Button>
+                <Button onClick={handleRunPayroll} disabled={processing}>
+                  {processing ? 'Calculating...' : 'Calculate Payroll'}
+                </Button>
+              </>
             )}
             {isCalculated && (
               <>
@@ -570,6 +582,14 @@ export function PayPeriodDetail() {
           </Card>
         )}
       </div>
+
+      {/* Import Modal */}
+      <ImportModal
+        open={importModalOpen}
+        onOpenChange={setImportModalOpen}
+        payPeriodId={payPeriod.id}
+        onImportComplete={handleImportComplete}
+      />
     </div>
   );
 }

@@ -24,13 +24,16 @@ class HourlyPayrollCalculator < PayrollCalculator
     holiday_pay = payroll_item.holiday_hours.to_f * payroll_item.pay_rate
     pto_pay = payroll_item.pto_hours.to_f * payroll_item.pay_rate
 
+    # Tips are taxable income — include in gross pay before tax calculation
+    tips = payroll_item.reported_tips.to_f + payroll_item.tips.to_f
+
     # Gross pay includes all pay plus tips and bonus
     payroll_item.gross_pay = (
       regular_pay +
       overtime_pay +
       holiday_pay +
       pto_pay +
-      payroll_item.reported_tips.to_f +
+      tips +
       payroll_item.bonus.to_f
     ).round(2)
   end

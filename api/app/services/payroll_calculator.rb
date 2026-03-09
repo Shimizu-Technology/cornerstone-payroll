@@ -106,6 +106,9 @@ class PayrollCalculator
       payroll_item.bonus.to_f
     ).round(2)
 
+    # Loan deduction is a post-tax deduction (subtracted after tax calculation)
+    payroll_item.loan_payment = payroll_item.loan_deduction.to_f if payroll_item.respond_to?(:loan_deduction)
+
     # Total deductions
     payroll_item.total_deductions = (
       payroll_item.withholding_tax.to_f +

@@ -34,10 +34,13 @@ class SalaryPayrollCalculator < PayrollCalculator
     periods = PERIODS_PER_YEAR[employee.pay_frequency] || 26
     base_pay = payroll_item.pay_rate / periods.to_f
 
+    # Tips are taxable income — include in gross pay before tax calculation
+    tips = payroll_item.reported_tips.to_f + payroll_item.tips.to_f
+
     # Salary employees can still have tips and bonuses
     payroll_item.gross_pay = (
       base_pay +
-      payroll_item.reported_tips.to_f +
+      tips +
       payroll_item.bonus.to_f
     ).round(2)
   end

@@ -43,6 +43,12 @@ gem "prawn"
 gem "prawn-table"
 gem "matrix" # Required by prawn in Ruby 3.1+
 
+# PDF + Excel parsing for payroll imports
+gem "pdf-reader"
+gem "roo"
+gem "fuzzy_match"
+gem "levenshtein-ffi", require: false
+
 # S3-compatible storage (for Cloudflare R2)
 gem "aws-sdk-s3"
 

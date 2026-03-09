@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_09_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -228,6 +228,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
   end
 
+  create_table "payroll_imports", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "excel_filename"
+    t.jsonb "matched_data", default: {}
+    t.bigint "pay_period_id", null: false
+    t.string "pdf_filename"
+    t.jsonb "raw_data", default: {}
+    t.string "status", default: "pending", null: false
+    t.jsonb "unmatched_pdf_names", default: []
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: []
+    t.index ["pay_period_id", "status"], name: "index_payroll_imports_on_pay_period_id_and_status"
+    t.index ["pay_period_id"], name: "index_payroll_imports_on_pay_period_id"
+  end
+
   create_table "payroll_items", force: :cascade do |t|
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
@@ -242,7 +257,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
     t.decimal "gross_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "holiday_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "hours_worked", precision: 8, scale: 2, default: "0.0"
+    t.string "import_source"
     t.decimal "insurance_payment", precision: 10, scale: 2, default: "0.0"
+    t.decimal "loan_deduction", precision: 10, scale: 2, default: "0.0"
     t.decimal "loan_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "medicare_tax", precision: 10, scale: 2, default: "0.0"
     t.decimal "net_pay", precision: 12, scale: 2, default: "0.0"
@@ -254,6 +271,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
+    t.string "tip_pool"
+    t.decimal "tips", precision: 10, scale: 2, default: "0.0"
     t.decimal "total_additions", precision: 12, scale: 2, default: "0.0"
     t.decimal "total_deductions", precision: 12, scale: 2, default: "0.0"
     t.datetime "updated_at", null: false
@@ -377,6 +396,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_27_103057) do
   add_foreign_key "employees", "departments"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
   add_foreign_key "pay_periods", "companies"
+  add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "tax_brackets", "filing_status_configs"
