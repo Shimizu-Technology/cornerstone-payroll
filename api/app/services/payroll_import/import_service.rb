@@ -79,19 +79,24 @@ module PayrollImport
             # Set employment info
             payroll_item.employment_type = employee.employment_type
 
-            # Derive pay rate from PDF: regular_pay / regular_hours (most accurate)
+            # Derive pay rate from PDF using BigDecimal for precision (scale: 6)
             # Fall back to employee.pay_rate if PDF data is insufficient
             pdf_rate = if row[:regular_hours].to_f > 0 && row[:regular_pay].to_f > 0
-              (row[:regular_pay].to_f / row[:regular_hours].to_f).round(4)
+              BigDecimal(row[:regular_pay].to_s) / BigDecimal(row[:regular_hours].to_s)
             elsif row[:total_hours].to_f > 0 && row[:total_pay].to_f > 0
-              (row[:total_pay].to_f / row[:total_hours].to_f).round(4)
+              BigDecimal(row[:total_pay].to_s) / BigDecimal(row[:total_hours].to_s)
             end
 
-            payroll_item.pay_rate = pdf_rate || employee.pay_rate
-
-            # Update employee's stored pay rate if we derived a better one
-            if pdf_rate && (pdf_rate - employee.pay_rate.to_f).abs > 0.01
-              employee.update_column(:pay_rate, pdf_rate)
+            if pdf_rate
+              # Round to 6 decimal places for storage
+              rounded_rate = pdf_rate.round(6)
+              payroll_item.pay_rate = rounded_rate
+              # Update employee if rate differs significantly (> 0.0001)
+              if (rounded_rate - BigDecimal(employee.pay_rate.to_s)).abs > BigDecimal('0.0001')
+                employee.update_column(:pay_rate, rounded_rate)
+              end
+            else
+              payroll_item.pay_rate = employee.pay_rate
             end
 
             # Set hours from PDF

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_09_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -175,7 +175,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_000002) do
     t.string "last_name", null: false
     t.string "middle_name"
     t.string "pay_frequency", default: "biweekly"
-    t.decimal "pay_rate", precision: 10, scale: 2, null: false
+    t.decimal "pay_rate", precision: 12, scale: 6, null: false
     t.string "phone"
     t.decimal "retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "roth_retirement_rate", precision: 5, scale: 4, default: "0.0"
@@ -265,7 +265,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_000002) do
     t.decimal "net_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
     t.bigint "pay_period_id", null: false
-    t.decimal "pay_rate", precision: 10, scale: 2, null: false
+    t.decimal "pay_rate", precision: 12, scale: 6, null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"

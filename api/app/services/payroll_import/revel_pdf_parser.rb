@@ -215,27 +215,18 @@ module PayrollImport
     end
 
     def parse_employee_line(line)
-      values = {}
-      COLUMNS.each do |field, range|
-        raw = line[range]&.strip
-        values[field] = convert_value(field, raw)
-      end
+      values = parse_fixed_columns(line)
+      values = parse_flexible_columns(line) if implausible_fixed_parse?(values)
 
-      # Clean up employee name
-      if values[:employee]
-        values[:employee] = normalize_name(values[:employee])
-      end
+      values[:employee] = normalize_name(values[:employee]) if values[:employee]
 
-      # Skip rows that are clearly not employees
       return nil if values[:employee].to_s.match?(/total/i)
       return nil if values[:regular_hours].nil? && values[:total_pay].nil?
-      
-      # Skip rows with no name or bad names
       return nil if values[:employee].to_s.strip.empty?
       return nil if values[:employee].to_s.split(",").length < 2 && !values[:employee].to_s.include?(" ")
 
       hourly_rate = calculate_hourly_rate(values)
-      
+
       {
         employee_name: values[:employee],
         regular_hours: values[:regular_hours] || 0.0,
@@ -246,6 +237,42 @@ module PayrollImport
         total_pay: values[:total_pay] || 0.0,
         hourly_rate: hourly_rate
       }
+    end
+
+    def parse_fixed_columns(line)
+      values = {}
+      COLUMNS.each do |field, range|
+        raw = line[range]&.strip
+        values[field] = convert_value(field, raw)
+      end
+      values
+    end
+
+    def implausible_fixed_parse?(values)
+      # 200h ceiling matches MAX_REALISTIC_HOURS in validation script (14 days * ~14h max).
+      # Catches compressed-layout lines like PP09 Thomas/Natalie where fixed columns
+      # misread regular_pay (224.41) as total_hours; fallback flexible parser resolves correctly.
+      values[:employee].to_s.strip.empty? || values[:total_hours].to_f > 200.0 || (values[:total_pay].to_f > 0 && values[:total_hours].to_f.zero?)
+    end
+
+    def parse_flexible_columns(line)
+      tokens = line.scan(/-|\d[\d,]*\.\d{2}/)
+      numeric = tokens.last(9)
+
+      values = {
+        employee: line[0..39]&.strip,
+        regular_hours: convert_value(:regular_hours, numeric[0]),
+        overtime_hours: convert_value(:overtime_hours, numeric[1]),
+        doubletime_hours: convert_value(:doubletime_hours, numeric[2]),
+        regular_pay: convert_value(:regular_pay, numeric[3]),
+        overtime_pay: convert_value(:overtime_pay, numeric[4]),
+        doubletime_pay: convert_value(:doubletime_pay, numeric[5]),
+        total_hours: convert_value(:total_hours, numeric[6]),
+        total_pay: convert_value(:total_pay, numeric[7]),
+        fees: convert_value(:fees, numeric[8])
+      }
+
+      values
     end
 
     def convert_value(field, raw)

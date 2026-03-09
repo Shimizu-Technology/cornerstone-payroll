@@ -13,6 +13,13 @@ module PayrollImport
     CONFIDENCE_EXACT = 1.0
     CONFIDENCE_THRESHOLD = 0.6
 
+    FIRST_NAME_ALIASES = {
+      "kyle a." => "kyle",
+      "kyle richard" => "kyle",
+      "jayden m." => "jayden",
+      "maria carmella" => "maria"
+    }.freeze
+
     attr_reader :employees
 
     def initialize(employees)
@@ -27,7 +34,7 @@ module PayrollImport
       parsed = parse_pdf_name(full_name)
       return nil unless parsed
 
-      match_name(parsed[:last_name], parsed[:first_name])
+      match_name(parsed[:last_name], parsed[:first_name], parsed[:first_token])
     end
 
     # Match separate last/first name from Excel
@@ -35,7 +42,7 @@ module PayrollImport
     # @param first_name [String]
     # @return [Hash, nil] { employee_id:, confidence:, matched_name: } or nil
     def match_excel_name(last_name, first_name)
-      match_name(last_name&.strip, first_name&.strip)
+      match_name(normalize_token(last_name), normalize_first_name(first_name))
     end
 
     private
@@ -43,22 +50,24 @@ module PayrollImport
     def parse_pdf_name(full_name)
       return nil if full_name.blank?
 
-      # Expected format: "Last, First M." or "Last, First"
       parts = full_name.split(",", 2)
       return nil if parts.length < 2
 
-      last_name = parts[0].strip
-      # Remove middle initial/name suffix
-      first_name = parts[1].strip.split(/\s+/).first
-
-      { last_name: last_name, first_name: first_name }
-    end
-
-    def match_name(last_name, first_name)
+      last_name = normalize_token(parts[0])
+      first_segment = normalize_token(parts[1])
       return nil if last_name.blank?
 
-      # Try exact match first
-      exact = find_exact_match(last_name, first_name)
+      full_first = normalize_first_name(first_segment)
+      first_token = normalize_first_name(first_segment.split(/\s+/).first)
+
+      { last_name: last_name, first_name: full_first, first_token: first_token }
+    end
+
+    def match_name(last_name, first_name, first_token = nil)
+      return nil if last_name.blank?
+
+      # Try exact match first (full first name then first token fallback)
+      exact = find_exact_match(last_name, first_name) || find_exact_match(last_name, first_token)
       return exact if exact
 
       # Try fuzzy match
@@ -70,8 +79,11 @@ module PayrollImport
 
     def find_exact_match(last_name, first_name)
       match = employees.find do |emp|
-        emp.last_name.downcase == last_name.downcase &&
-          (first_name.blank? || emp.first_name.downcase == first_name.downcase)
+        emp_last = normalize_token(emp.last_name)
+        emp_first = normalize_first_name(emp.first_name)
+
+        emp_last == normalize_token(last_name) &&
+          (first_name.blank? || emp_first == normalize_first_name(first_name))
       end
 
       return nil unless match
@@ -84,12 +96,12 @@ module PayrollImport
     end
 
     def find_fuzzy_match(last_name, first_name)
-      search_name = "#{last_name} #{first_name}".strip.downcase
+      search_name = "#{normalize_token(last_name)} #{normalize_first_name(first_name)}".strip
       result = @matcher.find(search_name)
       return nil unless result
 
       # Find the employee that matches
-      match = employees.find { |emp| "#{emp.last_name} #{emp.first_name}".downcase == result }
+      match = employees.find { |emp| "#{normalize_token(emp.last_name)} #{normalize_first_name(emp.first_name)}".strip == result }
       return nil unless match
 
       # Calculate confidence based on Levenshtein distance
@@ -107,8 +119,17 @@ module PayrollImport
     end
 
     def build_fuzzy_matcher
-      candidates = employees.map { |emp| "#{emp.last_name} #{emp.first_name}".downcase }
+      candidates = employees.map { |emp| "#{normalize_token(emp.last_name)} #{normalize_first_name(emp.first_name)}".strip }
       FuzzyMatch.new(candidates)
+    end
+
+    def normalize_token(value)
+      value.to_s.downcase.gsub(/[^a-z0-9\s]/, " ").squeeze(" ").strip
+    end
+
+    def normalize_first_name(value)
+      normalized = normalize_token(value)
+      FIRST_NAME_ALIASES.fetch(normalized, normalized)
     end
 
     # Pure Ruby Levenshtein distance (fallback if levenshtein-ffi native ext unavailable)

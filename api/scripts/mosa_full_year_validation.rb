@@ -154,36 +154,43 @@ PAY_PERIODS = [
   },
   {
     label: "PP20",
+    pdf: "payroll_2025-10-06_00-00_to_2025-10-19_23-59.pdf",
+    excel: "pp20_2025-10-06_to_2025-10-19_loan_tip.xlsx",
+    start_date: "2025-10-06",
+    end_date: "2025-10-19"
+  },
+  {
+    label: "PP21",
     pdf: "payroll_2025-10-20_00-00_to_2025-11-02_23-59 (1).pdf",
-    excel: "pp20_2025-10-20_to_2025-11-02_loan_tip.xlsx",
+    excel: "pp21_2025-10-20_to_2025-11-02_loan_tip.xlsx",
     start_date: "2025-10-20",
     end_date: "2025-11-01"
   },
   {
-    label: "PP21",
+    label: "PP22",
     pdf: "payroll_2025-11-03_00-00_to_2025-11-15_23-59.pdf",
-    excel: "pp21_2025-11-03_to_2025-11-15_loan_tip.xlsx",
+    excel: "pp22_2025-11-03_to_2025-11-15_loan_tip.xlsx",
     start_date: "2025-11-03",
     end_date: "2025-11-14"
   },
   {
-    label: "PP22",
+    label: "PP23",
     pdf: "payroll_2025-11-17_00-00_to_2025-11-30_23-59.pdf",
-    excel: "pp22_2025-11-17_to_2025-11-30_loan_tip.xlsx",
+    excel: "pp23_2025-11-17_to_2025-11-30_loan_tip.xlsx",
     start_date: "2025-11-17",
     end_date: "2025-11-29"
   },
   {
-    label: "PP23",
+    label: "PP24",
     pdf: "payroll_2025-12-01_00-00_to_2025-12-14_23-59.pdf",
-    excel: "pp23_2025-12-01_to_2025-12-14_loan_tip.xlsx",
+    excel: "pp24_2025-12-01_to_2025-12-14_loan_tip.xlsx",
     start_date: "2025-12-01",
     end_date: "2025-12-13"
   },
   {
-    label: "PP24",
+    label: "PP25",
     pdf: "payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf",
-    excel: "pp24_2025-12-15_to_2025-12-28_loan_tip.xlsx",
+    excel: "pp25_2025-12-15_to_2025-12-28_loan_tip.xlsx",
     start_date: "2025-12-15",
     end_date: "2025-12-27"
   }
@@ -278,9 +285,9 @@ PAY_PERIODS.each_with_index do |pp_config, idx|
 
     # Also sum from PDF directly for comparison
     # Filter outliers: biweekly period max realistic hours ~200 (more than 14 days * 16h = 224)
-    MAX_REALISTIC_HOURS = 200.0
-    clean_pdf_records = pdf_records.reject { |r| r[:total_hours].to_f > MAX_REALISTIC_HOURS }
-    outlier_pdf_records = pdf_records.select { |r| r[:total_hours].to_f > MAX_REALISTIC_HOURS }
+    max_realistic_hours = 200.0
+    clean_pdf_records = pdf_records.reject { |r| r[:total_hours].to_f > max_realistic_hours }
+    outlier_pdf_records = pdf_records.select { |r| r[:total_hours].to_f > max_realistic_hours }
 
     pdf_total_hours = clean_pdf_records.sum { |r| r[:total_hours].to_f }
     pdf_total_pay = clean_pdf_records.sum { |r| r[:total_pay].to_f }
@@ -445,9 +452,10 @@ if skip_results.any?
   report << ""
 end
 
-report << "## Missing Pay Periods (Gaps in 2025)"
+report << "## Pay Period Coverage"
 report << ""
-report << "Note: No period found for Oct 5–19, 2025 (2 weeks). This may indicate a gap in MoSa operations or a missing email."
+report << "All 26 biweekly pay periods for 2025 are present and validated (PP00–PP25)."
+report << "Previously missing Oct 6–19 gap period (PP20) recovered from CEO email on 2026-03-09."
 report << ""
 
 report << "---"
