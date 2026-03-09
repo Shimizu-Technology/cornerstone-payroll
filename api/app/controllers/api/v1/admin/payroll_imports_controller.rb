@@ -67,7 +67,7 @@ module Api
 
             # Allow overrides from frontend (e.g., removing employees or adjusting hours)
             matched_data = if params[:matched].present?
-              params[:matched].map(&:to_unsafe_h)
+              params[:matched].map { |m| m.to_unsafe_h.deep_symbolize_keys }
             else
               import_record.matched_data.map(&:deep_symbolize_keys)
             end

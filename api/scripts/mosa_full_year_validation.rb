@@ -9,6 +9,11 @@ DATA_DIR = File.expand_path("../../data/mosa-2025/raw", __dir__)
 COMPANY_NAME = "MoSa's Joint"
 REPORT_PATH = File.expand_path("../../data/mosa-2025/validation_report.md", __dir__)
 
+if Rails.env.production?
+  puts "ERROR: This script cannot be run in production (destructive re-import)."
+  exit 1
+end
+
 # Pay periods: [label, pdf_filename, excel_prefix]
 # PDF end date in filename = actual_end + 1 day
 PAY_PERIODS = [
@@ -106,14 +111,14 @@ PAY_PERIODS = [
   {
     label: "PP13",
     pdf: "payroll_2025-06-30_00-00_to_2025-07-13_23-59 (1).pdf",
-    excel: "pp14_2025-06-30_to_2025-07-13_loan_tip.xlsx",
+    excel: "pp13_2025-06-30_to_2025-07-13_loan_tip.xlsx",
     start_date: "2025-06-30",
     end_date: "2025-07-12"
   },
   {
     label: "PP14",
     pdf: "payroll_2025-07-14_00-00_to_2025-07-27_23-59.pdf",
-    excel: "pp13_2025-07-14_to_2025-07-27_loan_tip.xlsx",
+    excel: "pp14_2025-07-14_to_2025-07-27_loan_tip.xlsx",
     start_date: "2025-07-14",
     end_date: "2025-07-26"
   },
