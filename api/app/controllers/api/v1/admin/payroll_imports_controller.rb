@@ -74,7 +74,11 @@ module Api
 
             results = service.apply!(matched: matched_data)
 
-            import_record.update!(status: "applied")
+            final_status = results[:errors].any? ? "partially_applied" : "applied"
+            import_record.update!(
+              status: final_status,
+              validation_errors: results[:errors].map { |e| e[:error] }
+            )
 
             render json: {
               results: results,

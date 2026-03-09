@@ -309,10 +309,10 @@ PAY_PERIODS.each_with_index do |pp_config, idx|
     end
 
     # Discrepancies: compare clean PDF records to matched calc items only
-    # hours_diff = hours from unmatched+excluded PDF employees (expected from missing DB employees)
-    # gross_diff = not meaningful (period_gross includes tips; pdf_total_pay excludes unmatched)
+    # period_gross includes imported tips, while PDF total_pay does not.
+    # Normalize by subtracting imported tips from computed gross before comparing to PDF gross.
     hours_diff = (period_hours - pdf_total_hours).abs
-    gross_diff_from_tips = 0.0  # placeholder; tracked separately
+    gross_diff_from_tips = ((period_gross - period_tips) - pdf_total_pay).abs
 
     result = {
       label: label,

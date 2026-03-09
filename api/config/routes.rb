@@ -30,6 +30,9 @@ Rails.application.routes.draw do
             post :approve
             post :commit
             post :retry_tax_sync
+            # Payroll import (MoSa Revel PDF + Excel)
+            post :preview_import, to: "payroll_imports#preview"
+            post :apply_import, to: "payroll_imports#apply"
           end
 
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
@@ -37,10 +40,6 @@ Rails.application.routes.draw do
               post :recalculate
             end
           end
-
-          # Payroll import (MoSa Revel PDF + Excel)
-          post :preview_import, to: "payroll_imports#preview"
-          post :apply_import, to: "payroll_imports#apply"
         end
 
         # Reports
