@@ -104,6 +104,8 @@ module Api
           }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Failed to record audit events: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -138,6 +140,10 @@ module Api
         def show
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          if @payroll_item.check_number.blank?
+            return render json: { error: "No check number assigned to this payroll item" }, status: :unprocessable_entity
           end
 
           generator = CheckGenerator.new(@payroll_item)

@@ -381,7 +381,7 @@ class CheckGenerator
 
     # ---- Amount in words ----
     words_y = payee_label_y - 36
-    words_text = NumberToWords.convert(payroll_item.net_pay.to_f)
+    words_text = NumberToWords.convert(payroll_item.net_pay)
     pdf.bounding_box([ m + ox, words_y ], width: PAGE_WIDTH - m * 2 - 10) do
       pdf.font_size(9) { pdf.text "#{words_text} *** DOLLARS" }
     end
