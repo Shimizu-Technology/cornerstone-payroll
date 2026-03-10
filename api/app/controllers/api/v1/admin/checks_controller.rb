@@ -134,6 +134,8 @@ module Api
           render json: { marked_printed: count }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
