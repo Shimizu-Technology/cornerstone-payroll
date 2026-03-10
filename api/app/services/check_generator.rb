@@ -77,8 +77,8 @@ class CheckGenerator
 
   # Suggested filename for storage / download headers.
   def filename
-    "check_#{payroll_item.check_number || 'UNASSIGNED'}_#{employee.id}_" \
-      "#{pay_period.pay_date.strftime('%Y%m%d')}.pdf"
+    pay_date_token = pay_period.pay_date&.strftime('%Y%m%d') || "undated"
+    "check_#{payroll_item.check_number || 'UNASSIGNED'}_#{employee.id}_#{pay_date_token}.pdf"
   end
 
   private
@@ -371,7 +371,7 @@ class CheckGenerator
     pdf.bounding_box([ amount_box_x, amount_box_y ], width: 122) do
       pdf.font_size(7.5) { pdf.text "Amount", color: "666666", align: :right }
       pdf.font_size(12) do
-        pdf.text "$ #{fmt_cur_no_dollar(payroll_item.net_pay)}", align: :right, style: :bold
+        pdf.text fmt_cur(payroll_item.net_pay), align: :right, style: :bold
       end
     end
     # Draw box border
@@ -539,6 +539,8 @@ class CheckGenerator
   end
 
   def format_date(date)
+    return "N/A" if date.nil?
+
     date.strftime("%m/%d/%Y")
   end
 end
