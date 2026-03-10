@@ -61,16 +61,17 @@ class Form941GuAggregator
     # --- Line 2 breakdowns ---
     total_gross          = sum(items, :gross_pay)
     total_reported_tips  = sum(items, :reported_tips)
+    # Line 2 is wages + tips + other compensation.
+    line2_total_compensation = (total_gross + total_reported_tips).round(2)
 
     # --- Line 3 ---
     total_fit_withheld   = sum(items, :withholding_tax)
 
-    # --- Line 5a: SS wages (gross_pay is already capped per employee per pay period
-    #     by the calculator; employer_social_security_tax mirrors the employee side) ---
-    taxable_ss_wages     = sum(items, :gross_pay)   # wages that had SS applied
+    # --- Line 5a: taxable SS wages derived from correctly-computed SS taxes ---
     ss_employee_total    = sum(items, :social_security_tax)
     ss_employer_total    = sum(items, :employer_social_security_tax)
     ss_combined_total    = ss_employee_total + ss_employer_total
+    taxable_ss_wages     = (ss_combined_total / SS_RATE_COMBINED).round(2)
 
     # --- Line 5b: SS tips ---
     taxable_ss_tips      = sum(items, :reported_tips)
@@ -132,7 +133,7 @@ class Form941GuAggregator
       },
       lines: {
         line1_employee_count:              employee_count,
-        line2_wages_tips_other:            total_gross.to_f,
+        line2_wages_tips_other:            line2_total_compensation.to_f,
         line3_fit_withheld:                total_fit_withheld.to_f,
 
         line5a_ss_wages:                   taxable_ss_wages.to_f,
@@ -204,7 +205,11 @@ class Form941GuAggregator
   end
 
   def sum(items, column)
-    items.sum(column) || 0
+    if items.is_a?(ActiveRecord::Relation)
+      items.sum(column) || 0
+    else
+      items.sum { |item| item.public_send(column).to_f }
+    end
   end
 
   # Estimate Additional Medicare Tax wages per-employee.
@@ -223,18 +228,20 @@ class Form941GuAggregator
   # Must reconcile to line 6 total (FIT + line 5e), including SS tips and Additional Medicare.
   def monthly_liability_breakdown(items)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
-    monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(items)
+    records = items.to_a
+    month_map = records.group_by { |item| item.pay_period.pay_date.beginning_of_month.to_date }
+    monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(records)
 
     months.map do |month_start|
       month_end = month_start.end_of_month
-      month_items = items.where("pay_periods.pay_date BETWEEN ? AND ?", month_start, month_end)
-      month_fit     = month_items.sum(:withholding_tax)
-      month_ss_emp  = month_items.sum(:social_security_tax)
-      month_ss_er   = month_items.sum(:employer_social_security_tax)
-      month_med_emp = month_items.sum(:medicare_tax)
-      month_med_er  = month_items.sum(:employer_medicare_tax)
+      month_items = month_map[month_start] || []
+      month_fit     = sum(month_items, :withholding_tax)
+      month_ss_emp  = sum(month_items, :social_security_tax)
+      month_ss_er   = sum(month_items, :employer_social_security_tax)
+      month_med_emp = sum(month_items, :medicare_tax)
+      month_med_er  = sum(month_items, :employer_medicare_tax)
 
-      month_ss_tips = (month_items.sum(:reported_tips) * SS_RATE_COMBINED).round(2)
+      month_ss_tips = (sum(month_items, :reported_tips) * SS_RATE_COMBINED).round(2)
       month_add_med = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
 
       total = (month_fit + month_ss_emp + month_ss_er + month_med_emp + month_med_er + month_ss_tips + month_add_med).round(2)
@@ -258,8 +265,7 @@ class Form941GuAggregator
   def additional_medicare_taxable_wages_by_month(items)
     allocations = Hash.new(0.0)
 
-    items.includes(:pay_period)
-         .group_by(&:employee_id)
+    items.group_by(&:employee_id)
          .each_value do |employee_items|
       running_wages = 0.0
 

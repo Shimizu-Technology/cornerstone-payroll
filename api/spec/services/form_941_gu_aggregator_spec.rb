@@ -120,9 +120,9 @@ RSpec.describe Form941GuAggregator do
         expect(lines[:line1_employee_count]).to eq(2)
       end
 
-      it "line2: sums total gross wages" do
-        # 2000 + 1500 + 2000 = 5500
-        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
+      it "line2: sums wages + tips + other compensation" do
+        # gross: 5500 + reported_tips: 75 = 5575
+        expect(lines[:line2_wages_tips_other]).to eq(5575.0)
       end
 
       it "line3: sums FIT withheld" do
@@ -271,7 +271,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include draft pay period wages in line2" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
       end
     end
 
@@ -293,7 +293,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include Q1 wages in Q2 report" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
       end
     end
   end
