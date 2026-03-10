@@ -40,6 +40,9 @@ class PayrollItem < ApplicationRecord
     raise ArgumentError, "No check number assigned" if check_number.blank?
 
     ApplicationRecord.transaction do
+      lock! # SELECT ... FOR UPDATE — prevents concurrent print-count undercount
+      raise ArgumentError, "Cannot mark a voided check as printed" if voided? # re-check under lock
+
       update!(
         check_printed_at: check_printed_at || Time.current,
         check_print_count: check_print_count + 1

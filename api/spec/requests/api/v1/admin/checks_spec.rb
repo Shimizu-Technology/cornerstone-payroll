@@ -152,6 +152,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       get "/api/v1/admin/payroll_items/#{item_a.id}/check"
       expect(response).to have_http_status(:ok)
     end
+
+    it "creates a downloaded check_event" do
+      expect {
+        get "/api/v1/admin/payroll_items/#{item_a.id}/check"
+      }.to change { CheckEvent.where(event_type: "downloaded", payroll_item_id: item_a.id).count }.by(1)
+    end
   end
 
   # -----------------------------------------------------------------------

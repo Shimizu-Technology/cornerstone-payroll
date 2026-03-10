@@ -143,6 +143,13 @@ module Api
           generator = CheckGenerator.new(@payroll_item)
           pdf_data  = @payroll_item.voided? ? generator.generate_voided : generator.generate
 
+          @payroll_item.check_events.create!(
+            user_id: current_user_id,
+            event_type: "downloaded",
+            check_number: @payroll_item.check_number,
+            ip_address: request.remote_ip
+          )
+
           send_data pdf_data,
             type: "application/pdf",
             disposition: "attachment",
