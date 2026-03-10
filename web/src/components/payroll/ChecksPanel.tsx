@@ -68,7 +68,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       a.href = url;
       a.download = `checks_${payPeriod.pay_date}_batch.pdf`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download PDF');
     } finally {
@@ -103,7 +103,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       a.href = url;
       a.download = `check_${item.check_number || item.id}.pdf`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download check PDF');
     } finally {

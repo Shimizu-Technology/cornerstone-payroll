@@ -432,7 +432,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
-  add_foreign_key "payroll_items", "users", column: "voided_by_user_id"
+  add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
   add_foreign_key "user_invitations", "companies"

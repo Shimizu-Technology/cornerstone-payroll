@@ -100,7 +100,7 @@ export function CheckSettingsPage() {
       a.href = url;
       a.download = 'alignment_test.pdf';
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download alignment test PDF');
     }
