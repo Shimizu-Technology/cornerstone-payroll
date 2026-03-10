@@ -133,6 +133,9 @@ module PayrollImport
             results[:success] << { employee_id: employee.id, name: employee.full_name }
           rescue ActiveRecord::Rollback
             raise
+          rescue ActiveRecord::StatementInvalid
+            # Let DB-level transaction errors abort cleanly; avoid PG::InFailedSqlTransaction cascades.
+            raise
           rescue StandardError => e
             results[:errors] << { employee_id: employee.id, name: employee&.full_name, error: e.message }
           end
