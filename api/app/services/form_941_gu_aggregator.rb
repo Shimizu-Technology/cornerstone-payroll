@@ -59,6 +59,9 @@ class Form941GuAggregator
 
   # Returns the full 941-GU structured report hash.
   def generate
+    # Fail fast for unsupported SS wage-base years.
+    ss_wage_base
+
     items = qualifying_payroll_items
     records = items.to_a
 
@@ -263,7 +266,8 @@ class Form941GuAggregator
       running_wages_only = 0.0
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        wages_only = [ item.gross_pay.to_f - item.reported_tips.to_f, 0.0 ].max
+        # In this schema, gross_pay excludes reported_tips (tips are a separate column).
+        wages_only = item.gross_pay.to_f
         remaining_headroom_after_wages = [ ss_wage_base - (running_wages_only + wages_only), 0.0 ].max
 
         taxable_tips = [ item.reported_tips.to_f, remaining_headroom_after_wages ].min.round(2)
@@ -272,7 +276,8 @@ class Form941GuAggregator
           allocations[month_key] += taxable_tips
         end
 
-        running_wages_only += wages_only
+        # Both wages and any SS-taxable tips consume remaining SS wage-base headroom.
+        running_wages_only += wages_only + taxable_tips
       end
     end
 
@@ -289,7 +294,8 @@ class Form941GuAggregator
       running_wages = 0.0
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        gross = item.gross_pay.to_f
+        # Additional Medicare threshold applies to Medicare wages (wages + tips).
+        gross = item.gross_pay.to_f + item.reported_tips.to_f
         prev_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
         running_wages += gross
         new_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
@@ -306,6 +312,8 @@ class Form941GuAggregator
   end
 
   def ss_wage_base
-    SS_WAGE_BASE_BY_YEAR.fetch(year, SS_WAGE_BASE_BY_YEAR.values.max)
+    SS_WAGE_BASE_BY_YEAR.fetch(year) do
+      raise ArgumentError, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
+    end
   end
 end

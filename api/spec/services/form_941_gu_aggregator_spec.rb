@@ -353,4 +353,30 @@ RSpec.describe Form941GuAggregator do
       expect(report[:lines][:line5b_ss_tips]).to eq(baseline[:lines][:line5b_ss_tips])
     end
   end
+
+  describe "Additional Medicare tips inclusion" do
+    it "counts reported tips toward the $200K threshold" do
+      high_earner = create(:employee, company: company, department: department)
+      pp = create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 4, 1),
+        end_date:   Date.new(2025, 4, 14),
+        pay_date:   Date.new(2025, 4, 18))
+
+      create(:payroll_item,
+        pay_period:                   pp,
+        employee:                     high_earner,
+        gross_pay:                    198_000.00,
+        reported_tips:                5_000.00,
+        withholding_tax:              0.0,
+        social_security_tax:          0.0,
+        employer_social_security_tax: 0.0,
+        medicare_tax:                 0.0,
+        employer_medicare_tax:        0.0)
+
+      report = described_class.new(company, 2025, 2).generate
+      expect(report[:lines][:line5d_add_medicare_wages]).to be >= 3_000.0
+      expect(report[:lines][:line5d_add_medicare_tax]).to be >= 27.0
+    end
+  end
 end

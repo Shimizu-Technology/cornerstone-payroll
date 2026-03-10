@@ -167,6 +167,8 @@ module Api
           report  = Form941GuAggregator.new(company, year, quarter).generate
 
           render json: { report: report }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/reports/ytd_summary
