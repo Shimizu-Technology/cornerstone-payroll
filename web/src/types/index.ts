@@ -312,7 +312,7 @@ export interface ApiError {
 
 export interface CheckEvent {
   id: number;
-  event_type: 'printed' | 'voided' | 'reprinted' | 'batch_downloaded' | 'alignment_test';
+  event_type: 'printed' | 'voided' | 'reprinted' | 'batch_downloaded';
   check_number: string | null;
   reason: string | null;
   user_id: number;

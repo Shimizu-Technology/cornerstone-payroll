@@ -241,7 +241,7 @@ class CheckGenerator
       end
     else
       rows << [ "Salary", "N/A", "#{fmt_cur(payroll_item.pay_rate)}/yr",
-                fmt_cur(payroll_item.gross_pay - payroll_item.bonus - payroll_item.reported_tips) ]
+                fmt_cur(payroll_item.gross_pay.to_d - payroll_item.bonus.to_d - payroll_item.reported_tips.to_d) ]
     end
     rows << [ "Bonus", "N/A", "N/A", fmt_cur(payroll_item.bonus) ] if payroll_item.bonus.to_f > 0
     rows << [ "Reported Tips", "N/A", "N/A", fmt_cur(payroll_item.reported_tips) ] if payroll_item.reported_tips.to_f > 0
