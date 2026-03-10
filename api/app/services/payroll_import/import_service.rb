@@ -66,13 +66,13 @@ module PayrollImport
     end
 
     # Apply: persist matched import data to PayrollItems
-    # @param preview_data [Hash] from preview method or from controller params
+    # @param matched [Array<Hash>] preview rows to apply
     # @return [Hash] results with success/error counts
-    def apply!(preview_data)
+    def apply!(matched:)
       results = { success: [], errors: [] }
 
       ActiveRecord::Base.transaction do
-        preview_data[:matched].each do |row|
+        matched.each do |row|
           employee_id = row[:employee_id]
           employee = Employee.find_by(id: employee_id, company_id: company_id)
           next unless employee

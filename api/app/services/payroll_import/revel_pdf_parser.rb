@@ -257,7 +257,12 @@ module PayrollImport
 
     def parse_flexible_columns(line)
       tokens = line.scan(/-|\d[\d,]*\.\d{2}/)
-      numeric = tokens.last(9)
+
+      # Right-align to payroll tail columns; optionally skip explicit wage token if present.
+      wage_raw = line[COLUMNS[:wage]]&.strip.to_s
+      has_explicit_wage = wage_raw.match?(/\d[\d,]*\.\d{2}/)
+      tail = has_explicit_wage ? tokens.last(10)&.drop(1) : tokens.last(9)
+      numeric = (tail || []).fill(nil, tail&.length.to_i...9)
 
       values = {
         employee: line[0..39]&.strip,

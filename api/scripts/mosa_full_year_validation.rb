@@ -269,12 +269,13 @@ PAY_PERIODS.each_with_index do |pp_config, idx|
     service = PayrollImport::ImportService.new(pay_period)
 
     # Use block form to guarantee file handles are closed on exceptions.
+    preview = nil
     apply_result = nil
     File.open(pdf_path) do |pdf_file_obj|
       File.open(excel_path) do |excel_file_obj|
         # Mock file objects that respond to .path
         preview = service.preview(pdf_file: pdf_file_obj, excel_file: excel_file_obj)
-        apply_result = service.apply!(preview)
+        apply_result = service.apply!(matched: preview[:matched])
       end
     end
 
