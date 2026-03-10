@@ -74,7 +74,7 @@ class Form941GuAggregator
     taxable_ss_wages     = (ss_combined_total / SS_RATE_COMBINED).round(2)
 
     # --- Line 5b: SS tips ---
-    taxable_ss_tips      = sum(items, :reported_tips)
+    taxable_ss_tips      = total_reported_tips
     ss_tips_combined     = (taxable_ss_tips * SS_RATE_COMBINED).round(2)
 
     # --- Line 5c: Medicare wages derived from computed Medicare tax totals ---
@@ -103,7 +103,7 @@ class Form941GuAggregator
     line10 = line6  # Adjustments default to 0 when nil (not yet entered)
 
     # --- Employee breakdown for per-period schedule ---
-    employee_count    = items.select("DISTINCT employee_id").count
+    employee_count    = items.distinct.count(:employee_id)
 
     {
       meta: {
@@ -199,9 +199,8 @@ class Form941GuAggregator
   end
 
   def qualifying_payroll_items
-    PayrollItem.joins(:pay_period)
-               .includes(:pay_period)
-               .where(pay_periods: { id: committed_pay_periods.select(:id) })
+    PayrollItem.includes(:pay_period)
+               .where(pay_period_id: committed_pay_periods.select(:id))
   end
 
   def sum(items, column)

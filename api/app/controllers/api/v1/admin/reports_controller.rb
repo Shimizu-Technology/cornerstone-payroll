@@ -143,8 +143,19 @@ module Api
         # Response: structured JSON mirroring 941-GU line items.
         # Placeholders (nil values) indicate fields requiring manual entry before filing.
         def form_941_gu
-          year    = params[:year]&.to_i    || Date.today.year
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.today.year
+          end
           quarter = params[:quarter]&.to_i
+
+          unless year && year > 2000 && year <= Date.today.year + 1
+            return render json: {
+              error: "year must be a valid 4-digit tax year"
+            }, status: :unprocessable_entity
+          end
 
           unless quarter && (1..4).cover?(quarter)
             return render json: {

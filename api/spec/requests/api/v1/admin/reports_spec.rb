@@ -95,6 +95,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(body["monthly_liability"].length).to eq(3)
     end
 
+    it "returns 422 when year is non-numeric" do
+      get "/api/v1/admin/reports/form_941_gu", params: { year: "abc", quarter: 1 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/)
+    end
+
     it "returns 422 when quarter param is missing" do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
