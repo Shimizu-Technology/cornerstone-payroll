@@ -135,10 +135,10 @@ class CheckGenerator
       draw_perforations(pdf)
 
       # Stub 1 - employee copy
-      draw_stub(pdf, section_bottom: employee_stub_y, label: "Employee Copy - Keep for Your Records")
+      draw_stub(pdf, section_bottom: employee_stub_y, label: "Employee Copy - Keep for Your Records", voided: voided)
 
       # Stub 2 - employer copy
-      draw_stub(pdf, section_bottom: employer_stub_y, label: "Employer Copy")
+      draw_stub(pdf, section_bottom: employer_stub_y, label: "Employer Copy", voided: voided)
 
       # Check face
       draw_check_face(pdf, section_bottom: check_section_y, voided: voided)
@@ -167,7 +167,7 @@ class CheckGenerator
   # Stub section
   # -----------------------------------------------------------------------
 
-  def draw_stub(pdf, section_bottom:, label:)
+  def draw_stub(pdf, section_bottom:, label:, voided: false)
     m   = STUB_INNER_MARGIN
     ox  = offset_x
     oy  = offset_y
@@ -179,6 +179,12 @@ class CheckGenerator
     # --- Section label (tiny, centered) ---
     pdf.bounding_box([ m + ox, top - 6 + oy ], width: PAGE_WIDTH - m * 2) do
       pdf.font_size(6) { pdf.text label.upcase, color: "999999", align: :center }
+    end
+
+    if voided
+      pdf.bounding_box([ PAGE_WIDTH / 2 + ox, top - 6 + oy ], width: 120) do
+        pdf.font_size(8) { pdf.text "*** VOID ***", color: "CC0000", align: :right, style: :bold }
+      end
     end
 
     # --- Company header ---
@@ -235,7 +241,7 @@ class CheckGenerator
       end
     else
       rows << [ "Salary", "N/A", "#{fmt_cur(payroll_item.pay_rate)}/yr",
-                fmt_cur(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f) ]
+                fmt_cur(payroll_item.gross_pay - payroll_item.bonus - payroll_item.reported_tips) ]
     end
     rows << [ "Bonus", "N/A", "N/A", fmt_cur(payroll_item.bonus) ] if payroll_item.bonus.to_f > 0
     rows << [ "Reported Tips", "N/A", "N/A", fmt_cur(payroll_item.reported_tips) ] if payroll_item.reported_tips.to_f > 0

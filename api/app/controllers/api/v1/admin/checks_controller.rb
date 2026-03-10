@@ -81,10 +81,11 @@ module Api
           )
 
           # Log batch download event for each item (all-or-nothing)
+          user = User.find(current_user_id)
           ActiveRecord::Base.transaction do
             items.each do |item|
               item.check_events.create!(
-                user_id: current_user_id,
+                user: user,
                 event_type: "batch_downloaded",
                 check_number: item.check_number,
                 ip_address: request.remote_ip
@@ -102,6 +103,8 @@ module Api
           render json: {
             error: "Batch PDF requires the combine_pdf gem. Please install it or contact your administrator."
           }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
