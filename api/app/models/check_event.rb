@@ -2,7 +2,7 @@
 
 class CheckEvent < ApplicationRecord
   belongs_to :payroll_item
-  belongs_to :user
+  belongs_to :user, optional: true
 
   VALID_EVENT_TYPES = %w[printed voided reprinted batch_downloaded].freeze
 

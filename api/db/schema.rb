@@ -54,7 +54,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
     t.bigint "payroll_item_id", null: false
     t.string "reason"
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
+    t.bigint "user_id"
     t.index ["check_number"], name: "index_check_events_on_check_number"
     t.index ["event_type"], name: "index_check_events_on_event_type"
     t.index ["payroll_item_id", "event_type"], name: "index_check_events_on_payroll_item_id_and_event_type"
@@ -253,7 +253,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
   create_table "payroll_imports", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "excel_filename"
-    t.jsonb "matched_data", default: {}
+    t.jsonb "matched_data", default: []
     t.bigint "pay_period_id", null: false
     t.string "pdf_filename"
     t.jsonb "raw_data", default: {}
@@ -417,7 +417,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "users"
   add_foreign_key "check_events", "payroll_items"
-  add_foreign_key "check_events", "users"
+  add_foreign_key "check_events", "users", on_delete: :nullify
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"

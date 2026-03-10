@@ -4,8 +4,8 @@ class CreateCheckEvents < ActiveRecord::Migration[8.0]
   def change
     create_table :check_events do |t|
       t.references :payroll_item, null: false, foreign_key: true
-      t.references :user, null: false, foreign_key: true
-      # Event types: printed | voided | reprinted | batch_downloaded | alignment_test
+      t.references :user, null: true, foreign_key: { on_delete: :nullify }
+      # Event types: printed | voided | reprinted | batch_downloaded
       t.string :event_type, null: false
       t.string :check_number
       t.string :reason
