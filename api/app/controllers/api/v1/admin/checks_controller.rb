@@ -324,6 +324,8 @@ module Api
 
           @company.update!(next_check_number: new_number)
           render json: { check_settings: company_check_settings_json(@company) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -352,6 +354,8 @@ module Api
             type: "application/pdf",
             disposition: "attachment",
             filename: "alignment_test_#{@company.name.parameterize}_#{Date.current}.pdf"
+        rescue StandardError => e
+          render json: { error: "Failed to generate alignment test: #{e.message}" }, status: :unprocessable_entity
         end
 
         private
