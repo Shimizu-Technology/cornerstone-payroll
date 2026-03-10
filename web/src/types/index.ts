@@ -315,7 +315,7 @@ export interface CheckEvent {
   event_type: 'printed' | 'voided' | 'reprinted' | 'batch_downloaded';
   check_number: string | null;
   reason: string | null;
-  user_id: number;
+  user_id: number | null;
   ip_address: string | null;
   created_at: string;
 }

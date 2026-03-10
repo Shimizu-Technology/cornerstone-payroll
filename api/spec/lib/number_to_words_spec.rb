@@ -39,5 +39,10 @@ RSpec.describe NumberToWords do
     it "pads single-digit cents with leading zero" do
       expect(described_class.convert(5.09)).to eq("Five and 09/100")
     end
+
+    it "raises ArgumentError for negative amounts" do
+      expect { described_class.convert(-1.00) }
+        .to raise_error(ArgumentError, /cannot be negative/i)
+    end
   end
 end

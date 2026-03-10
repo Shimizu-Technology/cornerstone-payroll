@@ -132,6 +132,8 @@ module Api
           end
 
           render json: { marked_printed: count }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -179,6 +181,8 @@ module Api
             payroll_item: check_item_json(@payroll_item.reload),
             already_printed: already_printed
           }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -201,6 +205,8 @@ module Api
           @payroll_item.void!(user: user, reason: reason, ip_address: request.remote_ip)
 
           render json: { payroll_item: check_item_json(@payroll_item.reload) }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -273,6 +279,8 @@ module Api
             original_check_number: original_check_number,
             reprint: check_item_json(@payroll_item.reload)
           }, status: :created
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
