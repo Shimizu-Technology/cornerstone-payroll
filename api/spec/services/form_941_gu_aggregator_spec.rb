@@ -220,25 +220,35 @@ RSpec.describe Form941GuAggregator do
 
       it "calculates April liability" do
         april = breakdown[0]
-        # FIT: 100+75=175, SS combined: (124+124)+(93+93)=434, Medicare combined: (29+29)+(21.75+21.75)=101.5
+        # FIT: 100+75=175, SS combined: (124+124)+(93+93)=434,
+        # SS tips: 50*12.4%=6.2, Medicare combined: (29+29)+(21.75+21.75)=101.5
         expect(april[:fit_withheld].to_f).to eq(175.0)
         expect(april[:ss_combined].to_f).to eq(434.0)
+        expect(april[:ss_tips_combined].to_f).to eq(6.2)
         expect(april[:medicare_combined].to_f).to eq(101.5)
-        expect(april[:total_liability].to_f).to eq(710.5)
+        expect(april[:add_medicare_tax].to_f).to eq(0.0)
+        expect(april[:total_liability].to_f).to eq(716.7)
       end
 
       it "calculates May liability" do
         may = breakdown[1]
-        # FIT: 100, SS combined: 248, Medicare combined: 58
+        # FIT: 100, SS combined: 248, SS tips: 25*12.4%=3.1, Medicare combined: 58
         expect(may[:fit_withheld].to_f).to eq(100.0)
         expect(may[:ss_combined].to_f).to eq(248.0)
+        expect(may[:ss_tips_combined].to_f).to eq(3.1)
         expect(may[:medicare_combined].to_f).to eq(58.0)
-        expect(may[:total_liability].to_f).to eq(406.0)
+        expect(may[:add_medicare_tax].to_f).to eq(0.0)
+        expect(may[:total_liability].to_f).to eq(409.1)
       end
 
       it "June has zero liability (no committed pay periods)" do
         june = breakdown[2]
         expect(june[:total_liability].to_f).to eq(0.0)
+      end
+
+      it "reconciles monthly liabilities to line6 total" do
+        monthly_total = breakdown.sum { |m| m[:total_liability].to_f }.round(2)
+        expect(monthly_total).to eq(report[:lines][:line6_total_taxes_before_adj].to_f)
       end
     end
 

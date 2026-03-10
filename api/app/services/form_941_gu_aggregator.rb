@@ -199,6 +199,7 @@ class Form941GuAggregator
 
   def qualifying_payroll_items
     PayrollItem.joins(:pay_period)
+               .includes(:pay_period)
                .where(pay_periods: { id: committed_pay_periods.select(:id) })
   end
 
@@ -219,17 +220,24 @@ class Form941GuAggregator
 
   # Monthly breakdown: total tax liability per calendar month in the quarter.
   # Useful for determining whether the company is a monthly or semiweekly depositor.
+  # Must reconcile to line 6 total (FIT + line 5e), including SS tips and Additional Medicare.
   def monthly_liability_breakdown(items)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
+    monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(items)
+
     months.map do |month_start|
       month_end = month_start.end_of_month
       month_items = items.where("pay_periods.pay_date BETWEEN ? AND ?", month_start, month_end)
-      month_fit    = month_items.sum(:withholding_tax)
-      month_ss_emp = month_items.sum(:social_security_tax)
-      month_ss_er  = month_items.sum(:employer_social_security_tax)
+      month_fit     = month_items.sum(:withholding_tax)
+      month_ss_emp  = month_items.sum(:social_security_tax)
+      month_ss_er   = month_items.sum(:employer_social_security_tax)
       month_med_emp = month_items.sum(:medicare_tax)
       month_med_er  = month_items.sum(:employer_medicare_tax)
-      total = (month_fit + month_ss_emp + month_ss_er + month_med_emp + month_med_er).round(2)
+
+      month_ss_tips = (month_items.sum(:reported_tips) * SS_RATE_COMBINED).round(2)
+      month_add_med = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
+
+      total = (month_fit + month_ss_emp + month_ss_er + month_med_emp + month_med_er + month_ss_tips + month_add_med).round(2)
 
       {
         month:        month_start.strftime("%B %Y"),
@@ -237,9 +245,38 @@ class Form941GuAggregator
         month_end:    month_end.iso8601,
         fit_withheld: month_fit.to_f,
         ss_combined:  (month_ss_emp + month_ss_er).round(2).to_f,
+        ss_tips_combined: month_ss_tips.to_f,
         medicare_combined: (month_med_emp + month_med_er).round(2).to_f,
+        add_medicare_tax: month_add_med.to_f,
         total_liability: total.to_f
       }
     end
+  end
+
+  # Allocate Additional Medicare taxable wages into calendar months based on
+  # when each employee crosses the $200K threshold within the quarter.
+  def additional_medicare_taxable_wages_by_month(items)
+    allocations = Hash.new(0.0)
+
+    items.includes(:pay_period)
+         .group_by(&:employee_id)
+         .each_value do |employee_items|
+      running_wages = 0.0
+
+      employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
+        gross = item.gross_pay.to_f
+        prev_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
+        running_wages += gross
+        new_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
+
+        delta_excess = (new_excess - prev_excess).round(2)
+        next unless delta_excess.positive?
+
+        month_key = item.pay_period.pay_date.beginning_of_month.to_date
+        allocations[month_key] += delta_excess
+      end
+    end
+
+    allocations
   end
 end
