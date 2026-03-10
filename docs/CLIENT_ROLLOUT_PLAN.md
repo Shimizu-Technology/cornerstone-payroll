@@ -111,7 +111,7 @@
 
 #### Cutover review
 - Final go/no-go for each active client based on prior gates.
-- Verify each client meets exit criteria: **2 consecutive PASS cycles** (or 1 PASS + explicit Leon override) before moving to Cornerstone-primary mode.
+- Verify each client meets exit criteria: **2 consecutive PASS cycles** (or 1 PASS + explicit Leon override) **and explicit Leon + Cornerstone Ops signoff** before moving to Cornerstone-primary mode.
 - Move clients from parallel mode to Cornerstone-primary mode.
 
 #### AIRE prep
