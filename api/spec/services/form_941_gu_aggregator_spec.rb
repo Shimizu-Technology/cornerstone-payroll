@@ -379,4 +379,48 @@ RSpec.describe Form941GuAggregator do
       expect(report[:lines][:line5d_add_medicare_tax]).to be >= 27.0
     end
   end
+
+  describe "cross-quarter SS wage base headroom" do
+    it "does not over-count Q2 taxable tips when SS cap was consumed in Q1" do
+      tipped_employee = create(:employee, company: company, department: department)
+
+      q1_pp = create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 1, 1),
+        end_date:   Date.new(2025, 1, 14),
+        pay_date:   Date.new(2025, 3, 31))
+
+      # Simulate SS wage base already consumed in Q1 via combined SS tax postings.
+      create(:payroll_item,
+        pay_period:                   q1_pp,
+        employee:                     tipped_employee,
+        gross_pay:                    176_100.00,
+        reported_tips:                0.0,
+        withholding_tax:              0.0,
+        social_security_tax:          10_918.2,
+        employer_social_security_tax: 10_918.2,
+        medicare_tax:                 0.0,
+        employer_medicare_tax:        0.0)
+
+      q2_pp = create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 4, 1),
+        end_date:   Date.new(2025, 4, 14),
+        pay_date:   Date.new(2025, 4, 18))
+
+      create(:payroll_item,
+        pay_period:                   q2_pp,
+        employee:                     tipped_employee,
+        gross_pay:                    1_000.00,
+        reported_tips:                5_000.00,
+        withholding_tax:              0.0,
+        social_security_tax:          0.0,
+        employer_social_security_tax: 0.0,
+        medicare_tax:                 0.0,
+        employer_medicare_tax:        0.0)
+
+      report = described_class.new(company, 2025, 2).generate
+      expect(report[:lines][:line5b_ss_tips]).to eq(75.0)
+    end
+  end
 end

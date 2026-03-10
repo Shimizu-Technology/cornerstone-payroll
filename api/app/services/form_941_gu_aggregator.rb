@@ -81,7 +81,8 @@ class Form941GuAggregator
     taxable_ss_wages     = (ss_combined_total / SS_RATE_COMBINED).round(2)
 
     # --- Line 5b: SS tips (capped per employee remaining SS headroom) ---
-    monthly_ss_tips_wages = ss_taxable_tips_wages_by_month(records)
+    prior_ss_taxable_wages = prior_ss_taxable_wages_by_employee
+    monthly_ss_tips_wages = ss_taxable_tips_wages_by_month(records, prior_ss_taxable_wages)
     taxable_ss_tips      = monthly_ss_tips_wages.values.sum.round(2)
     ss_tips_combined     = (taxable_ss_tips * SS_RATE_COMBINED).round(2)
 
@@ -258,12 +259,12 @@ class Form941GuAggregator
 
   # Allocate SS-taxable tips wages into calendar months after applying per-employee
   # SS wage-base headroom (wages consume headroom before tips).
-  def ss_taxable_tips_wages_by_month(items)
+  def ss_taxable_tips_wages_by_month(items, prior_ss_taxable_wages = {})
     allocations = Hash.new(0.0)
 
     items.group_by(&:employee_id)
-         .each_value do |employee_items|
-      running_wages_only = 0.0
+         .each do |employee_id, employee_items|
+      running_wages_only = prior_ss_taxable_wages[employee_id].to_f
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
         # In this schema, gross_pay excludes reported_tips (tips are a separate column).
@@ -309,6 +310,21 @@ class Form941GuAggregator
     end
 
     allocations
+  end
+
+  # SS-taxable wages already consumed before this quarter, by employee.
+  # Derived from posted SS taxes to preserve historical cap behavior across prior quarters.
+  def prior_ss_taxable_wages_by_employee
+    prior_items = PayrollItem.joins(:pay_period)
+                             .where(pay_periods: {
+                               company_id: company.id,
+                               status: "committed",
+                               pay_date: Date.new(year, 1, 1)...quarter_start_date
+                             })
+
+    prior_items.group(:employee_id)
+               .sum("social_security_tax + employer_social_security_tax")
+               .transform_values { |combined_tax| (combined_tax.to_f / SS_RATE_COMBINED).round(2) }
   end
 
   def ss_wage_base
