@@ -48,6 +48,7 @@ Rails.application.routes.draw do
         get "reports/employee_pay_history", to: "reports#employee_pay_history"
         get "reports/tax_summary", to: "reports#tax_summary"
         get "reports/ytd_summary", to: "reports#ytd_summary"
+        get "reports/form_941_gu", to: "reports#form_941_gu"
 
         # Pay Stubs
         get "pay_stubs/:id", to: "pay_stubs#show"

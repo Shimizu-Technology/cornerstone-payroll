@@ -195,4 +195,113 @@ GOG_KEYRING_PASSWORD=clawdbot gog gmail search "test" \
 
 ---
 
-*Last updated: 2026-03-09*
+---
+
+## 941-GU Quarterly Tax Report (CPR-59)
+
+### Overview
+
+The 941-GU report generates a structured JSON summary of payroll tax data for the Guam Department of Revenue and Taxation (DoRT) quarterly filing. It mirrors the federal Form 941 line structure.
+
+**Endpoint:**
+```
+GET /api/v1/admin/reports/form_941_gu?year=2025&quarter=1
+```
+
+**Parameters:**
+| Param | Type | Required | Notes |
+|-------|------|----------|-------|
+| `year` | integer | No (defaults to current year) | Tax year |
+| `quarter` | integer | **Yes** | 1, 2, 3, or 4 |
+
+**Example curl:**
+```bash
+curl -H "Authorization: Bearer <token>" \
+  "https://api.cornerstone.example.com/api/v1/admin/reports/form_941_gu?year=2025&quarter=1"
+```
+
+### Response Structure
+
+```json
+{
+  "report": {
+    "meta": { "report_type": "form_941_gu", "year": 2025, "quarter": 1, ... },
+    "employer_info": { "name": "...", "ein": "...", "address": "..." },
+    "lines": {
+      "line1_employee_count": 12,
+      "line2_wages_tips_other": 150000.00,
+      "line3_fit_withheld": 18500.00,
+      "line5a_ss_wages": 150000.00,
+      "line5a_ss_combined_tax": 18600.00,
+      "line5b_ss_tips": 0.00,
+      "line5b_ss_tips_combined_tax": 0.00,
+      "line5c_medicare_wages": 150000.00,
+      "line5c_medicare_combined_tax": 4350.00,
+      "line5d_add_medicare_wages": 0.00,
+      "line5d_add_medicare_tax": 0.00,
+      "line5e_total_ss_medicare": 22950.00,
+      "line6_total_taxes_before_adj": 41450.00,
+      "line7_adj_fractions_cents": null,
+      "line8_adj_sick_pay": null,
+      "line9_adj_tips_group_life": null,
+      "line10_total_taxes_after_adj": 41450.00,
+      "line11_nonrefundable_credits": null,
+      "line12_total_after_credits": 41450.00,
+      "line13_total_deposits": null,
+      "line14_balance_due_or_overpayment": null
+    },
+    "tax_detail": { "ss_employee": ..., "ss_employer": ..., ... },
+    "monthly_liability": [
+      { "month": "January 2025", "total_liability": 13816.67 },
+      ...
+    ]
+  }
+}
+```
+
+### Placeholder Fields
+
+Fields returning `null` require **manual entry before filing**:
+
+| Line | Field | Notes |
+|------|-------|-------|
+| 7 | `line7_adj_fractions_cents` | Rounding adjustment; typically small |
+| 8 | `line8_adj_sick_pay` | Sick pay from third-party payers; not tracked in payroll_items |
+| 9 | `line9_adj_tips_group_life` | Group-term life > $50K; not tracked |
+| 11 | `line11_nonrefundable_credits` | Small business payroll tax credit |
+| 13 | `line13_total_deposits` | Verify against EFTPS / DoRT deposit records |
+| 14 | `line14_balance_due_or_overpayment` | Derived from 12 - 13 |
+
+### Filing Workflow
+
+1. **Generate report** via the API for the target year/quarter.
+2. **Review `meta.caveats`** — read all caveats before filing.
+3. **Verify pay period count** — `meta.pay_periods_included` should match expected payrolls.
+4. **Complete placeholder lines manually** — consult your accountant for lines 7–14.
+5. **Cross-reference monthly_liability** — use for Schedule B (semiweekly depositor worksheet).
+6. **File** the completed 941-GU with Guam DoRT.
+
+### Key Caveats
+
+- **Only committed pay periods** (status = "committed") with `pay_date` in the quarter are included.
+- **SS wages (line 5a)** uses `gross_pay`; the per-item calculator enforces the SS wage base cap ($176,100 for 2025). Verify capping is active for high earners.
+- **Additional Medicare Tax (line 5d)** is estimated per-quarter per-employee against the $200K threshold. This may understate if an employee earned <$200K in this quarter but exceeded $200K YTD across quarters. A full-year YTD calculation is more accurate.
+- **Tips (line 5b)** use `reported_tips` from payroll_items. If tip pools are allocated differently, reconcile before filing.
+- **Adjustments (lines 7–9)** are always `null` from the API; these require manual computation.
+
+### Service Location
+
+```
+api/app/services/form_941_gu_aggregator.rb
+```
+
+### Tests
+
+```bash
+cd ~/work/cornerstone-payroll/api
+bundle exec rspec spec/services/form_941_gu_aggregator_spec.rb spec/requests/api/v1/admin/reports_spec.rb
+```
+
+---
+
+*Last updated: 2026-03-10*

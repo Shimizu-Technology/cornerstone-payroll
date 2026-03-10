@@ -133,6 +133,31 @@ module Api
           }
         end
 
+        # GET /api/v1/admin/reports/form_941_gu
+        # Quarterly 941-GU style payroll tax report for Guam DoRT filing.
+        #
+        # Params:
+        #   year    [Integer] – tax year (defaults to current year)
+        #   quarter [Integer] – 1, 2, 3, or 4 (required)
+        #
+        # Response: structured JSON mirroring 941-GU line items.
+        # Placeholders (nil values) indicate fields requiring manual entry before filing.
+        def form_941_gu
+          year    = params[:year]&.to_i    || Date.today.year
+          quarter = params[:quarter]&.to_i
+
+          unless quarter && (1..4).cover?(quarter)
+            return render json: {
+              error: "quarter is required and must be 1, 2, 3, or 4"
+            }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          report  = Form941GuAggregator.new(company, year, quarter).generate
+
+          render json: { report: report }
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
