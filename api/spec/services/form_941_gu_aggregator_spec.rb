@@ -325,4 +325,32 @@ RSpec.describe Form941GuAggregator do
       expect(report[:lines][:line5d_add_medicare_tax]).to be >= 90.0  # 10_000 * 0.009
     end
   end
+
+  describe "SS tips wage-base cap" do
+    it "caps taxable ss tips when employee wages already exceed SS wage base" do
+      baseline = described_class.new(company, 2025, 2).generate
+
+      high_wage = create(:employee, company: company, department: department)
+      pp = create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 4, 1),
+        end_date:   Date.new(2025, 4, 14),
+        pay_date:   Date.new(2025, 4, 18))
+
+      create(:payroll_item,
+        pay_period:                   pp,
+        employee:                     high_wage,
+        gross_pay:                    200_000.00,
+        reported_tips:                10_000.00,
+        withholding_tax:              0.0,
+        social_security_tax:          0.0,
+        employer_social_security_tax: 0.0,
+        medicare_tax:                 0.0,
+        employer_medicare_tax:        0.0)
+
+      report = described_class.new(company, 2025, 2).generate
+      # Added employee has no SS headroom left for tips, so line5b should not increase.
+      expect(report[:lines][:line5b_ss_tips]).to eq(baseline[:lines][:line5b_ss_tips])
+    end
+  end
 end
