@@ -66,7 +66,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `checks_${payPeriod.pay_date}_batch.pdf`;
+      a.download = `checks_${payPeriod.pay_date ?? 'undated'}_batch.pdf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
