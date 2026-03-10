@@ -113,12 +113,16 @@ module Api
           items = @pay_period.payroll_items.unprinted.with_check_number
           count = 0
 
-          items.each do |item|
-            item.mark_printed!(user: user, ip_address: request.remote_ip)
-            count += 1
+          ActiveRecord::Base.transaction do
+            items.each do |item|
+              item.mark_printed!(user: user, ip_address: request.remote_ip)
+              count += 1
+            end
           end
 
           render json: { marked_printed: count }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -126,6 +130,10 @@ module Api
         # Download a single check PDF.
         # -----------------------------------------------------------------------
         def show
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
           generator = CheckGenerator.new(@payroll_item)
           pdf_data  = @payroll_item.voided? ? generator.generate_voided : generator.generate
 
@@ -186,12 +194,15 @@ module Api
           user    = User.find(current_user_id)
           company = @payroll_item.pay_period.company
 
-          raise ArgumentError, "Cannot reprint: check is already voided" if @payroll_item.voided?
-          raise ArgumentError, "Cannot reprint: no check number assigned" if @payroll_item.check_number.blank?
-
-          original_check_number = @payroll_item.check_number
+          original_check_number = nil
 
           ActiveRecord::Base.transaction do
+            @payroll_item.lock!
+            raise ArgumentError, "Cannot reprint: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reprint: no check number assigned" if @payroll_item.check_number.blank?
+
+            original_check_number = @payroll_item.check_number
+
             # Step 1: Void the old physical check (audit trail only — item itself stays active)
             void_reason = params[:reason].presence || "Reprint requested — physical check damaged/lost"
             @payroll_item.check_events.create!(
@@ -354,7 +365,7 @@ module Api
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
-            events: item.check_events.order(:created_at).map { |e| check_event_json(e) }
+            events: item.check_events.to_a.sort_by(&:created_at).map { |e| check_event_json(e) }
           }
         end
 

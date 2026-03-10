@@ -166,6 +166,8 @@ module Api
           PayrollTaxSyncJob.perform_later(@pay_period.id)
 
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync

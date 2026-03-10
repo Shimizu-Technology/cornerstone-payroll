@@ -39,6 +39,11 @@ class Company < ApplicationRecord
       update_column(:next_check_number, starting + assigned)
     end
     assigned
+  rescue ActiveRecord::StatementInvalid => e
+    if e.message.include?("index_payroll_items_on_check_number") || e.message.downcase.include?("unique")
+      raise ArgumentError, "Check number collision detected while assigning checks. Please verify company check settings and retry."
+    end
+    raise
   end
 
   # Reserve exactly one check number (for reprint flow).
