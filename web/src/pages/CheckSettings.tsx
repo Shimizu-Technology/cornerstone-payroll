@@ -57,8 +57,8 @@ export function CheckSettingsPage() {
         check_stock_type: stockType,
         check_offset_x: parseFloat(offsetX),
         check_offset_y: parseFloat(offsetY),
-        bank_name: bankName.trim() || undefined,
-        bank_address: bankAddress.trim() || undefined,
+        bank_name: bankName.trim() || null,
+        bank_address: bankAddress.trim() || null,
       });
       setSettings(data.check_settings);
       setSuccess('Settings saved.');

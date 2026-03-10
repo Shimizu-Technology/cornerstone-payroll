@@ -244,16 +244,16 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
-                      {/* Download single check PDF */}
-                      {!item.voided && (
+                      {/* Download single check PDF (including voided for audit/archival) */}
+                      {item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
                           onClick={() => handleDownloadPdf(item)}
                           disabled={actionLoading === item.id}
-                          className="text-xs px-2 py-1"
+                          className={`text-xs px-2 py-1 ${item.voided ? 'text-gray-500' : ''}`}
                         >
-                          {actionLoading === item.id ? '…' : 'PDF'}
+                          {actionLoading === item.id ? '…' : item.voided ? 'VOID PDF' : 'PDF'}
                         </Button>
                       )}
 
