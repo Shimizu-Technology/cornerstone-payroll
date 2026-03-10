@@ -7,7 +7,7 @@ class CreateCheckEvents < ActiveRecord::Migration[8.0]
       t.references :user, null: true, foreign_key: { on_delete: :nullify }
       # Event types: printed | voided | reprinted | batch_downloaded
       t.string :event_type, null: false
-      t.string :check_number
+      t.string :check_number, null: false
       t.string :reason
       t.string :ip_address
       t.timestamps

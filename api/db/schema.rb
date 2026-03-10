@@ -47,7 +47,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
   end
 
   create_table "check_events", force: :cascade do |t|
-    t.string "check_number"
+    t.string "check_number", null: false
     t.datetime "created_at", null: false
     t.string "event_type", null: false
     t.string "ip_address"
