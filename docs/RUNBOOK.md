@@ -305,3 +305,142 @@ bundle exec rspec spec/services/form_941_gu_aggregator_spec.rb spec/requests/api
 ---
 
 *Last updated: 2026-03-10*
+
+---
+
+## Check Printing (CPR-66)
+
+### Overview
+
+Cornerstone Payroll generates 3-part check PDFs for pre-printed check stock (letter size, 8.5" × 11").
+- **Bottom-check** layout (default): Employee stub (top) → Employer stub (middle) → Check face (bottom).
+- **Top-check** layout: reversed.
+
+Check numbers are assigned automatically when a pay period is committed.
+
+---
+
+### Operator Workflow
+
+#### Normal Print Run
+
+1. Run and commit a payroll — check numbers are auto-assigned sequentially.
+2. Navigate to **Pay Period detail** → **Checks** section.
+3. Click **"Download All Checks PDF"** → combined PDF, one page per employee.
+4. Load pre-printed check stock into printer (verify orientation with alignment test first).
+5. Print the PDF.
+6. Click **"Mark All Printed"** in the UI → records print events in audit trail.
+
+#### Alignment Calibration (first run on new stock)
+
+1. Go to **Settings → Check Settings**.
+2. Click **"Download Alignment Test PDF"**.
+3. Print on **plain paper**.
+4. Hold the printout behind a sheet of check stock and hold to light.
+5. Verify all labeled boxes (PAYEE, AMOUNT BOX, SIGNATURE LINE, etc.) align with pre-printed fields.
+6. If not aligned, adjust X/Y offsets:
+   - **X Offset**: positive shifts all fields RIGHT (inches). Try 0.05 increments.
+   - **Y Offset**: positive shifts all fields UP (inches). Try 0.05 increments.
+7. Save settings, regenerate alignment test, repeat until aligned.
+8. Print final test on plain paper + compare to live stock before using real checks.
+
+**Typical offset range:** ±0.25 inches. Values outside ±0.5" indicate a stock measurement issue.
+
+#### Void a Check
+
+Use when a physical check is damaged, destroyed, or the payee has changed.
+
+1. On the Checks panel, click **"Void"** next to the check.
+2. Enter a written reason (required, ≥ 10 characters).
+   - e.g., "Paper jam — check damaged during print run"
+   - e.g., "Check lost in mail — employee confirmed not received"
+3. Confirm. The check is recorded as voided in the audit log.
+
+**The payroll obligation remains.** The employee still gets paid — issue a reprint.
+
+#### Reprint a Check
+
+Use when a physical check was damaged, lost, or misprinted.
+
+1. On the Checks panel, click **"Reprint"** next to the check.
+2. Optionally enter a reason (e.g., "Check lost in mail").
+3. Confirm. The old check number is audit-logged as voided; a new number is assigned.
+4. Download the new check PDF and print on fresh stock.
+5. Mark as printed after physical printing.
+
+**Safety:** The reprint uses the same net pay amount. The next sequential company check number is reserved.
+
+---
+
+### Configuration (Rails console)
+
+```ruby
+# View current settings for a company
+company = Company.find_by(name: "MoSa's Restaurant")
+puts company.next_check_number    # e.g., 1042
+puts company.check_stock_type     # "bottom_check" or "top_check"
+puts company.check_offset_x       # e.g., 0.05 (inches)
+puts company.check_offset_y       # e.g., -0.025
+
+# Manually set next check number (use only if no checks issued this year)
+company.update!(next_check_number: 2000)
+
+# Preview a check without printing
+item = PayrollItem.includes(:employee, :pay_period).find(123)
+gen = CheckGenerator.new(item)
+File.write('/tmp/preview_check.pdf', gen.generate)
+# scp /tmp/preview_check.pdf to your machine and open
+```
+
+---
+
+### Audit Trail
+
+All check events are stored in the `check_events` table:
+
+```ruby
+# All events for a specific check number
+CheckEvent.where(check_number: "1042").order(:created_at).each do |e|
+  puts "#{e.created_at.strftime('%Y-%m-%d %H:%M')} | #{e.event_type} | #{e.reason}"
+end
+
+# All events for a pay period
+PayrollItem
+  .includes(:check_events, :employee)
+  .joins(:pay_period)
+  .where(pay_periods: { id: 7 })
+  .each do |item|
+    puts "#{item.employee.full_name} | Check #{item.check_number} | #{item.check_status}"
+    item.check_events.order(:created_at).each do |e|
+      puts "  → #{e.event_type} at #{e.created_at}"
+    end
+  end
+```
+
+---
+
+### Check Stock Notes (MoSa Production)
+
+- **Stock brand:** TBD — confirm with MoSa before first print run
+- **Starting check number:** TBD — set via Settings → Check Settings or Rails console
+- **Bank info:** Set via Settings → Check Settings (displayed on check face)
+- **MICR line:** Pre-printed on stock — Cornerstone does NOT generate MICR
+
+---
+
+### Tests
+
+```bash
+cd ~/work/cornerstone-payroll/api
+bundle exec rspec spec/lib/number_to_words_spec.rb \
+                  spec/services/check_generator_spec.rb \
+                  spec/models/payroll_item_check_spec.rb \
+                  spec/models/company_check_spec.rb \
+                  spec/requests/api/v1/admin/checks_spec.rb
+```
+
+Expected: **105 examples, 0 failures**
+
+---
+
+*Check Printing section added: CPR-66 (2026-03-10)*

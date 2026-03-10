@@ -127,6 +127,30 @@ class ApiClient {
     return response.json() as Promise<T>;
   }
 
+  // CPR-66: Post and receive a raw Blob (for PDF download)
+  async postBlob(endpoint: string, data?: unknown): Promise<Blob> {
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: data ? JSON.stringify(data) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details
+      );
+    }
+
+    return response.blob();
+  }
+
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
@@ -182,6 +206,9 @@ import type {
   DashboardStats,
   PaginationMeta,
   User,
+  CheckListResponse,
+  CheckItem,
+  CheckSettings,
 } from '@/types';
 
 // Companies
@@ -631,6 +658,57 @@ export const payStubsApi = {
     api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
   employeeStubs: (employeeId: number, limit?: number) =>
     api.get<{ employee: { id: number; name: string }; pay_stubs: PayStubInfo[] }>(`/admin/pay_stubs/employee/${employeeId}`, { limit }),
+};
+
+// ============================================================
+// CPR-66: Check Printing API
+// ============================================================
+export const checksApi = {
+  // List all checks for a committed pay period
+  list: (payPeriodId: number) =>
+    api.get<CheckListResponse>(`/admin/pay_periods/${payPeriodId}/checks`),
+
+  // Batch PDF download URL (direct link, opens in new tab)
+  batchPdfUrl: (payPeriodId: number) =>
+    `${API_BASE_URL}/admin/pay_periods/${payPeriodId}/checks/batch_pdf`,
+
+  // POST to generate batch PDF (returns blob)
+  batchPdf: (payPeriodId: number) =>
+    api.postBlob(`/admin/pay_periods/${payPeriodId}/checks/batch_pdf`),
+
+  // Mark all unprinted checks in a period as printed
+  markAllPrinted: (payPeriodId: number) =>
+    api.post<{ marked_printed: number }>(`/admin/pay_periods/${payPeriodId}/checks/mark_all_printed`),
+
+  // Single check PDF URL
+  checkPdfUrl: (payrollItemId: number) =>
+    `${API_BASE_URL}/admin/payroll_items/${payrollItemId}/check`,
+
+  // Mark a single check as printed
+  markPrinted: (payrollItemId: number) =>
+    api.post<{ payroll_item: CheckItem; already_printed: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_printed`),
+
+  // Void a check
+  void: (payrollItemId: number, reason: string) =>
+    api.post<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/void`, { reason }),
+
+  // Reprint a check (in-place reassignment)
+  reprint: (payrollItemId: number, reason?: string) =>
+    api.post<{ original_check_number: string; reprint: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reprint`, { reason }),
+
+  // Company check settings
+  getSettings: () =>
+    api.get<{ check_settings: CheckSettings }>('/admin/companies/check_settings'),
+
+  updateSettings: (settings: Partial<CheckSettings>) =>
+    api.patch<{ check_settings: CheckSettings }>('/admin/companies/check_settings', settings),
+
+  updateNextCheckNumber: (next_check_number: number) =>
+    api.patch<{ check_settings: CheckSettings }>('/admin/companies/next_check_number', { next_check_number }),
+
+  // Alignment test PDF URL
+  alignmentTestPdfUrl: () =>
+    `${API_BASE_URL}/admin/companies/alignment_test_pdf`,
 };
 
 // Legacy dashboard (for migration)

@@ -15,6 +15,7 @@ import {
 import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
+import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, TaxSyncStatus } from '@/types';
 
 interface HoursEntry {
@@ -312,7 +313,7 @@ export function PayPeriodDetail() {
                   {retryingSyncTax ? 'Retrying...' : 'Retry Tax Sync'}
                 </Button>
               )}
-              {payPeriod.tax_sync_attempts !== null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
+              {payPeriod.tax_sync_attempts != null && payPeriod.tax_sync_attempts > 0 && syncStatus !== 'synced' && (
                 <span className="text-xs text-gray-400">
                   Attempt {payPeriod.tax_sync_attempts}/{MAX_SYNC_ATTEMPTS}
                 </span>
@@ -575,6 +576,24 @@ export function PayPeriodDetail() {
           <div className="p-12 text-center text-gray-500">
             No active employees found. Add employees first before running payroll.
           </div>
+        )}
+
+        {/* CPR-66: Checks Panel — only for committed pay periods */}
+        {isCommitted && (
+          <Card>
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">Checks</h3>
+              <a
+                href={`/settings/checks`}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Check Settings ›
+              </a>
+            </div>
+            <div className="p-4">
+              <ChecksPanel payPeriod={payPeriod} />
+            </div>
+          </Card>
         )}
 
         {payPeriod.notes && (

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -46,15 +46,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
     t.index ["user_id"], name: "index_audit_logs_on_user_id"
   end
 
+  create_table "check_events", force: :cascade do |t|
+    t.string "check_number"
+    t.datetime "created_at", null: false
+    t.string "event_type", null: false
+    t.string "ip_address"
+    t.bigint "payroll_item_id", null: false
+    t.string "reason"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["check_number"], name: "index_check_events_on_check_number"
+    t.index ["event_type"], name: "index_check_events_on_event_type"
+    t.index ["payroll_item_id", "event_type"], name: "index_check_events_on_payroll_item_id_and_event_type"
+    t.index ["payroll_item_id"], name: "index_check_events_on_payroll_item_id"
+    t.index ["user_id"], name: "index_check_events_on_user_id"
+  end
+
   create_table "companies", force: :cascade do |t|
     t.boolean "active", default: true
     t.string "address_line1"
     t.string "address_line2"
+    t.string "bank_address"
+    t.string "bank_name"
+    t.decimal "check_offset_x", precision: 5, scale: 3, default: "0.0", null: false
+    t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
+    t.string "check_stock_type", default: "bottom_check", null: false
     t.string "city"
     t.datetime "created_at", null: false
     t.string "ein"
     t.string "email"
     t.string "name", null: false
+    t.integer "next_check_number", default: 1001, null: false
     t.string "pay_frequency", default: "biweekly"
     t.string "phone"
     t.string "state"
@@ -231,7 +253,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
   create_table "payroll_imports", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "excel_filename"
-    t.jsonb "matched_data", default: []
+    t.jsonb "matched_data", default: {}
     t.bigint "pay_period_id", null: false
     t.string "pdf_filename"
     t.jsonb "raw_data", default: {}
@@ -247,6 +269,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
     t.string "check_number"
+    t.integer "check_print_count", default: 0, null: false
     t.datetime "check_printed_at"
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
@@ -268,6 +291,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
     t.decimal "pay_rate", precision: 12, scale: 6, null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
+    t.string "reprint_of_check_number"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
@@ -276,6 +300,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
     t.decimal "total_additions", precision: 12, scale: 2, default: "0.0"
     t.decimal "total_deductions", precision: 12, scale: 2, default: "0.0"
     t.datetime "updated_at", null: false
+    t.string "void_reason"
+    t.boolean "voided", default: false, null: false
+    t.datetime "voided_at"
+    t.bigint "voided_by_user_id"
     t.decimal "withholding_tax", precision: 10, scale: 2, default: "0.0"
     t.decimal "ytd_gross", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_medicare_tax", precision: 14, scale: 2, default: "0.0"
@@ -285,9 +313,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
     t.decimal "ytd_social_security_tax", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_withholding_tax", precision: 14, scale: 2, default: "0.0"
     t.index ["check_number"], name: "index_payroll_items_on_check_number"
+    t.index ["check_number"], name: "index_payroll_items_on_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["employee_id"], name: "index_payroll_items_on_employee_id"
     t.index ["pay_period_id", "employee_id"], name: "index_payroll_items_on_pay_period_id_and_employee_id", unique: true
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
+    t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
+    t.index ["voided"], name: "index_payroll_items_on_voided"
   end
 
   create_table "tax_brackets", force: :cascade do |t|
@@ -385,6 +416,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
 
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "users"
+  add_foreign_key "check_events", "payroll_items"
+  add_foreign_key "check_events", "users"
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
@@ -399,6 +432,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_044903) do
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
+  add_foreign_key "payroll_items", "users", column: "voided_by_user_id"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
   add_foreign_key "user_invitations", "companies"

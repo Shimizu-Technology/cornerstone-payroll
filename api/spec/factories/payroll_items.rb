@@ -31,5 +31,30 @@ FactoryBot.define do
       pay_rate { 52_000.00 }
       hours_worked { 0 }
     end
+
+    trait :with_check do
+      sequence(:check_number) { |n| (1000 + n).to_s }
+      gross_pay { 1200.00 }
+      net_pay    { 960.00 }
+      withholding_tax { 120.00 }
+      social_security_tax { 74.40 }
+      medicare_tax { 17.40 }
+      total_deductions { 211.80 }
+      check_print_count { 0 }
+      voided { false }
+    end
+
+    trait :printed do
+      with_check
+      check_printed_at { Time.current }
+      check_print_count { 1 }
+    end
+
+    trait :voided do
+      with_check
+      voided { true }
+      voided_at { Time.current }
+      void_reason { "Test void — physical check destroyed" }
+    end
   end
 end
