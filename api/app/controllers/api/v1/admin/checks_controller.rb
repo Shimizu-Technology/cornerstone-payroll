@@ -92,7 +92,8 @@ module Api
             end
           end
 
-          filename = "checks_#{@pay_period.pay_date.strftime('%Y-%m-%d')}_batch.pdf"
+          pay_date_token = @pay_period.pay_date&.strftime('%Y-%m-%d') || "undated"
+          filename = "checks_#{pay_date_token}_batch.pdf"
           send_data combined_pdf,
             type: "application/pdf",
             disposition: "attachment",
@@ -204,6 +205,10 @@ module Api
         # The voided=true flag is NOT set — the payroll obligation is still valid.
         # -----------------------------------------------------------------------
         def reprint
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
           user    = User.find(current_user_id)
           company = @payroll_item.pay_period.company
 
