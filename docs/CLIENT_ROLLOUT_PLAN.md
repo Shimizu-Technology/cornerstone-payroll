@@ -216,7 +216,7 @@ Checks:
 - Tax totals: PASS/FAIL
 - Approval/commit flow: PASS/FAIL
 - Exceptions resolved (import mode only — N/A for manual): PASS/FAIL/N/A
-- Reviewer signoff: <Name> | Complete _(must be Complete for PASS; Pending only valid for in-progress/FAIL records)_
+- Reviewer signoff: <Name> | Complete _(must be Complete for PASS; Pending only valid for FAIL/open remediation records)_
 
 Notes:
 - <key findings>
