@@ -149,6 +149,10 @@ module Api
         # POST /api/v1/admin/payroll_items/:payroll_item_id/check/mark_printed
         # -----------------------------------------------------------------------
         def mark_printed
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
           user = User.find(current_user_id)
           already_printed = @payroll_item.check_printed_at.present?
 
@@ -168,6 +172,10 @@ module Api
         # Body: { reason: "..." }
         # -----------------------------------------------------------------------
         def void
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
           reason = params[:reason].to_s.strip
           user   = User.find(current_user_id)
 

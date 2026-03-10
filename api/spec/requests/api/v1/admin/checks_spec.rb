@@ -51,6 +51,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
   end
 
   let(:draft_period) { create(:pay_period, company: company, status: "draft") }
+  let!(:draft_item) do
+    create(:payroll_item, :with_check,
+      pay_period: draft_period,
+      employee: employee_a,
+      check_number: "3999",
+      net_pay: 500.00,
+      gross_pay: 700.00,
+      total_deductions: 200.00)
+  end
 
   # -----------------------------------------------------------------------
   # GET /checks (index)
@@ -171,6 +180,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       post "/api/v1/admin/payroll_items/#{item_a.id}/check/mark_printed"
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "returns 422 for uncommitted pay periods" do
+      post "/api/v1/admin/payroll_items/#{draft_item.id}/check/mark_printed"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/committed pay periods/)
+    end
   end
 
   # -----------------------------------------------------------------------
@@ -210,6 +225,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect {
         post "/api/v1/admin/payroll_items/#{item_a.id}/void", params: { reason: valid_reason }
       }.to change { CheckEvent.where(event_type: "voided").count }.by(1)
+    end
+
+    it "returns 422 for uncommitted pay periods" do
+      post "/api/v1/admin/payroll_items/#{draft_item.id}/void", params: { reason: valid_reason }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/committed pay periods/)
     end
 
     it "records IP address on voided audit event" do

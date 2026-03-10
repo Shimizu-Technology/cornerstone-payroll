@@ -64,6 +64,9 @@ class PayrollItem < ApplicationRecord
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
 
     ApplicationRecord.transaction do
+      lock! # SELECT ... FOR UPDATE to prevent concurrent double-void
+      raise ArgumentError, "Already voided" if voided? # re-check under lock
+
       update!(
         voided: true,
         voided_at: Time.current,

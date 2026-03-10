@@ -273,7 +273,11 @@ class CheckGenerator
         end
       end
     rescue Prawn::Errors::CannotFit
-      # Gracefully skip table if not enough space
+      # Fallback: render a plain-text notice so the stub is visibly incomplete
+      # rather than silently blank.
+      pdf.bounding_box([ x, y ], width: table_width, height: available_height) do
+        pdf.font_size(7) { pdf.text "[EARNINGS TABLE TOO LARGE - SEE PAYROLL SYSTEM]", color: "CC0000" }
+      end
     end
 
     # Right table: Deductions + Net Pay
@@ -297,7 +301,11 @@ class CheckGenerator
         end
       end
     rescue Prawn::Errors::CannotFit
-      # Gracefully skip
+      # Fallback: render a plain-text notice so the stub is visibly incomplete
+      # rather than silently blank.
+      pdf.bounding_box([ right_x, y ], width: table_width, height: available_height) do
+        pdf.font_size(7) { pdf.text "[DEDUCTIONS TABLE TOO LARGE - SEE PAYROLL SYSTEM]", color: "CC0000" }
+      end
     end
   end
 
