@@ -179,6 +179,8 @@ module Api
           }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -199,6 +201,8 @@ module Api
           render json: { payroll_item: check_item_json(@payroll_item.reload) }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -269,6 +273,8 @@ module Api
           }, status: :created
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
