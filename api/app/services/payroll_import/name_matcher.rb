@@ -14,9 +14,9 @@ module PayrollImport
     CONFIDENCE_THRESHOLD = 0.6
 
     FIRST_NAME_ALIASES = {
-      "kyle a." => "kyle",
+      "kyle a" => "kyle",
       "kyle richard" => "kyle",
-      "jayden m." => "jayden",
+      "jayden m" => "jayden",
       "maria carmella" => "maria"
     }.freeze
 

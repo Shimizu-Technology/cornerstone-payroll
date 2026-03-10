@@ -21,6 +21,7 @@ module PayrollImport
     # @return [Hash] preview data with matched employees
     def preview(pdf_file:, excel_file: nil)
       employees = Employee.active.where(company_id: company_id)
+      employees_by_id = employees.index_by(&:id)
       matcher = NameMatcher.new(employees)
 
       pdf_records = pdf_file ? RevelPdfParser.parse_file(pdf_file) : []
@@ -33,9 +34,10 @@ module PayrollImport
         match = matcher.match_pdf_name(pdf_row[:employee_name])
 
         if match
-          employee = employees.find { |e| e.id == match[:employee_id] }
-          excel_data = find_excel_data(excel_records, employee)
+          employee = employees_by_id[match[:employee_id]]
+          next unless employee
 
+          excel_data = find_excel_data(excel_records, employee)
           matched << build_preview_row(pdf_row, employee, match, excel_data)
         else
           unmatched << pdf_row[:employee_name]
@@ -48,7 +50,9 @@ module PayrollImport
         next unless excel_match
         next if matched.any? { |m| m[:employee_id] == excel_match[:employee_id] }
 
-        employee = employees.find { |e| e.id == excel_match[:employee_id] }
+        employee = employees_by_id[excel_match[:employee_id]]
+        next unless employee
+
         matched << build_preview_row(nil, employee, excel_match, excel_row)
       end
 

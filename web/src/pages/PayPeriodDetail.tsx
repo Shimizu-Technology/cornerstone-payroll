@@ -23,6 +23,7 @@ interface HoursEntry {
 }
 
 const MAX_HOURS_PER_PERIOD = 200;
+const MOSA_COMPANY_ID = 475;
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -210,7 +211,6 @@ export function PayPeriodDetail() {
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const MOSA_COMPANY_ID = 475;
   const canImportMosa = isDraft && payPeriod.company_id === MOSA_COMPANY_ID;
 
   // Summaries

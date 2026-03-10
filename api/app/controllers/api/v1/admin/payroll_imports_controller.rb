@@ -103,6 +103,7 @@ module Api
         def pay_period_json(pay_period)
           {
             id: pay_period.id,
+            company_id: pay_period.company_id,
             start_date: pay_period.start_date,
             end_date: pay_period.end_date,
             pay_date: pay_period.pay_date,
