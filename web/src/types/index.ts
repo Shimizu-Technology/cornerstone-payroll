@@ -183,6 +183,11 @@ export interface PayrollItem {
   loan_payment?: number;
   insurance_payment?: number;
   total_deductions?: number;
+  // Import fields (MoSa)
+  tips?: number;
+  loan_deduction?: number;
+  tip_pool?: 'boh' | 'foh' | null;
+  import_source?: string | null;
   // Custom/flexible deductions
   custom_columns_data?: Record<string, number>;
   // YTD totals (snapshot at time of calculation)

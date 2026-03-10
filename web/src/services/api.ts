@@ -102,6 +102,31 @@ class ApiClient {
     });
   }
 
+  async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
+    const token = await this.resolveAuthToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details
+      );
+    }
+
+    return response.json() as Promise<T>;
+  }
+
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: 'PUT',
@@ -370,7 +395,54 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
   retryTaxSync: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
+  previewImport: async (id: number, pdfFile: File, excelFile?: File) => {
+    const formData = new FormData();
+    formData.append('pdf_file', pdfFile);
+    if (excelFile) formData.append('excel_file', excelFile);
+    return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
+  },
+  applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[] }) =>
+    api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
 };
+
+// Import types
+export interface ImportPreviewRow {
+  employee_id: number;
+  employee_name: string;
+  employment_type: string;
+  pay_rate: number;
+  confidence: number;
+  matched_name: string;
+  regular_hours: number;
+  overtime_hours: number;
+  regular_pay: number;
+  overtime_pay: number;
+  total_hours: number;
+  total_pay: number;
+  pdf_employee_name: string | null;
+  total_tips: number;
+  tip_pool: string | null;
+  loan_deduction: number;
+}
+
+export interface ImportPreviewResponse {
+  import_id: number;
+  preview: {
+    matched: ImportPreviewRow[];
+    unmatched_pdf_names: string[];
+    pdf_count: number;
+    excel_count: number;
+    matched_count: number;
+  };
+}
+
+export interface ImportApplyResponse {
+  results: {
+    success: { employee_id: number; name: string }[];
+    errors: { employee_id: number; name: string; error: string }[];
+  };
+  pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
+}
 
 // Payroll Items (Admin API)
 export interface PayrollItemsListResponse {
