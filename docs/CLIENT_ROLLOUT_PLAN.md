@@ -27,7 +27,7 @@
 ### D) Operating mode definitions
 - **Parallel mode:** Run payroll in both Cornerstone Payroll and QuickBooks for the same pay period.
   - **Authoritative output in parallel mode:** QuickBooks remains official for payout/filing until the client passes cutover gates.
-  - **Exit criteria:** Client exits parallel mode only after required PASS cycles and explicit Leon + Cornerstone Ops signoff.
+  - **Exit criteria:** Client exits parallel mode only after **2 consecutive PASS cycles** (or 1 PASS cycle + explicit Leon override) and explicit Leon + Cornerstone Ops signoff.
 - **Cornerstone-primary mode:** Cornerstone Payroll becomes the system of record; QuickBooks is fallback/read-only.
 
 ---
@@ -152,6 +152,7 @@ A payroll cycle is **PASS** only if:
 - Gross/net totals are within thresholds above
 - Tax totals are within thresholds above
 - No unresolved import/parser exceptions (MoSa)
+- Approval/commit flow completed without errors
 - Reviewer signoff captured
 
 A cycle is **FAIL** if:
@@ -205,7 +206,7 @@ Checks:
 - Gross/net totals: PASS/FAIL
 - Tax totals: PASS/FAIL
 - Approval/commit flow: PASS/FAIL
-- Exceptions resolved: PASS/FAIL
+- Exceptions resolved (import mode only — N/A for manual): PASS/FAIL/N/A
 
 Notes:
 - <key findings>
