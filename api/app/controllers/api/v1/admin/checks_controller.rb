@@ -147,6 +147,8 @@ module Api
             type: "application/pdf",
             disposition: "attachment",
             filename: generator.filename
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
