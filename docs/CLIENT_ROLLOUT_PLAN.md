@@ -1,6 +1,7 @@
 # Cornerstone Payroll — Client-by-Client Rollout Plan (Week 1–4)
 
 **Last updated:** 2026-03-10  
+**Execution start (Week 1):** TBD — set before kickoff meeting  
 **Owner:** Leon + Cornerstone Ops + Dev Team  
 **Objective:** Safely transition payroll operations from QuickBooks to Cornerstone Payroll using a phased, low-risk rollout.
 
@@ -93,7 +94,7 @@
 
 ### Week 3 — SPR + second-cycle regression checks
 
-#### SPR (10–15 employees, possible tips)
+#### SPR (10–15 employees, tips expected)
 - Start manual entry flow for first cycle.
 - Validate tips handling and supervisor review process.
 
@@ -137,16 +138,25 @@
 
 ## 5) Validation & Signoff Rules
 
+### Quantitative thresholds (operator use)
+- **Employee count:** exact match required (**0 tolerance**).
+- **Gross total variance:**
+  - **MoSa import cycles:** **$0.00 required** (after parser/unmatched checks).
+  - **Manual-entry cycles:** up to **$1.00 absolute variance per pay period** (rounding/data-entry tolerance only).
+- **Net pay variance:** up to **$0.01 per employee** (rounding tolerance only).
+- **Tax total variance (withholding + SS + Medicare):** up to **$0.01 per employee** and **$0.50 per pay period aggregate**.
+- Any variance above thresholds requires FAIL + remediation path.
+
 A payroll cycle is **PASS** only if:
 - Employee count is correct
-- Gross/net totals align with expected source data
-- Tax totals are within expected tolerance
+- Gross/net totals are within thresholds above
+- Tax totals are within thresholds above
 - No unresolved import/parser exceptions (MoSa)
 - Reviewer signoff captured
 
 A cycle is **FAIL** if:
 - Missing employees or unmatched records unresolved
-- Material gross/tax mismatch unexplained
+- Gross/net/tax variance exceeds thresholds above
 - Approval/commit flow blocked
 
 ### FAIL-cycle remediation path (mandatory)
@@ -167,7 +177,7 @@ If a cycle is **FAIL**:
 | Shimizu Technology | 2 employees | Manual | Ready now | Great low-risk pilot |
 | Cornerstone (internal) | ~3–4 employees | Manual (+ future Cornerstone Tax timesheet sync) | Ready now | Start in Week 2 |
 | DDG | 3 employees (2 hourly, 1 salary) | Manual (timesheet) | Ready now | Straightforward mixed-type validation |
-| SPR | 10–15 employees | Manual (email/timesheet source) | Ready with minor setup | Tips validation important |
+| SPR | 10–15 employees | Manual (email/timesheet source) | Ready with minor setup | Tips expected; validate tip handling in first cycle |
 | AIRE | 10–15 (future) | TBD | Deferred | Decide after first real cycle |
 
 ---
