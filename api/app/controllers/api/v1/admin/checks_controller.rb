@@ -256,6 +256,16 @@ module Api
         # -----------------------------------------------------------------------
         def update_check_settings
           permitted = params.permit(:check_stock_type, :check_offset_x, :check_offset_y, :bank_name, :bank_address)
+
+          [ :check_offset_x, :check_offset_y ].each do |key|
+            next unless permitted.key?(key)
+            value = permitted[key]
+            next if value.is_a?(Numeric)
+            next if value.to_s.match?(/\A-?\d+(\.\d+)?\z/)
+
+            return render json: { errors: [ "#{key} must be a number" ] }, status: :unprocessable_entity
+          end
+
           if @company.update(permitted)
             render json: { check_settings: company_check_settings_json(@company) }
           else

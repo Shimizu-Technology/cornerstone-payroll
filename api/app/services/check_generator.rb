@@ -494,9 +494,9 @@ class CheckGenerator
       { label: "DATE",                  x: PAGE_WIDTH - 146, y: sect_top - 30, w: 128, h: 16 },
       { label: "PAY TO THE ORDER OF (Payee Name)", x: 18, y: sect_top - 70, w: 300, h: 30 },
       { label: "$ AMOUNT BOX",          x: PAGE_WIDTH - 140, y: sect_top - 70, w: 122, h: 32 },
-      { label: "AMOUNT IN WORDS ----- DOLLARS", x: 18, y: sect_top - 108, w: PAGE_WIDTH - 36, h: 20 },
-      { label: "MEMO LINE",             x: 18,  y: sect_bottom + 30, w: 260, h: 28 },
-      { label: "AUTHORIZED SIGNATURE LINE", x: PAGE_WIDTH / 2 + 20, y: sect_bottom + 30, w: 200, h: 24 },
+      { label: "AMOUNT IN WORDS ----- DOLLARS", x: 18, y: sect_top - 106, w: PAGE_WIDTH - 36, h: 20 },
+      { label: "MEMO LINE",             x: 18,  y: sect_bottom + 42, w: 260, h: 28 },
+      { label: "AUTHORIZED SIGNATURE LINE", x: PAGE_WIDTH / 2 + 20, y: sect_bottom + 40, w: 200, h: 24 },
     ]
 
     field_specs.each do |f|
