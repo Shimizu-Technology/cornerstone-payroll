@@ -72,10 +72,13 @@ module PayrollImport
     def apply!(matched:, force_overwrite: false)
       results = { success: [], errors: [] }
 
+      employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
+      employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
+
       ActiveRecord::Base.transaction do
         matched.each do |row|
           employee_id = row[:employee_id]
-          employee = Employee.find_by(id: employee_id, company_id: company_id)
+          employee = employees_by_id[employee_id]
           next unless employee
 
           begin
@@ -149,9 +152,13 @@ module PayrollImport
     def find_excel_data(excel_records, employee)
       return nil if excel_records.empty?
 
+      employee_last = employee.last_name&.downcase
+      employee_first = employee.first_name&.downcase
+      return nil if employee_last.blank? || employee_first.blank?
+
       excel_records.find do |row|
-        row[:last_name]&.strip&.downcase == employee.last_name.downcase &&
-          row[:first_name]&.strip&.downcase == employee.first_name.downcase
+        row[:last_name]&.strip&.downcase == employee_last &&
+          row[:first_name]&.strip&.downcase == employee_first
       end
     end
 
