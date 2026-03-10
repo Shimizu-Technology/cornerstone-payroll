@@ -197,7 +197,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
           <Button
             size="sm"
             onClick={handleBatchDownload}
-            disabled={batchLoading || checks.filter(c => !c.voided).length === 0}
+            disabled={batchLoading || checks.length === 0}
           >
             {batchLoading ? 'Generating…' : '⬇ Download All Checks PDF'}
           </Button>

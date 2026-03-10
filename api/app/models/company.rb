@@ -13,6 +13,8 @@ class Company < ApplicationRecord
   validates :ein, uniqueness: true, allow_blank: true
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :check_stock_type, inclusion: { in: %w[bottom_check top_check] }
+  validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
+  validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
 
   scope :active, -> { where(active: true) }
 

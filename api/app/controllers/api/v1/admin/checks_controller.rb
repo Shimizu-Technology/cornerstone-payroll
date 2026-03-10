@@ -38,7 +38,7 @@ module Api
           items = @pay_period.payroll_items
                              .includes(:employee, :check_events)
                              .with_check_number
-                             .order(:check_number)
+                             .order(Arel.sql("check_number::integer ASC"))
 
           loaded_items = items.to_a
 
@@ -65,7 +65,7 @@ module Api
           items = @pay_period.payroll_items
                              .includes(:employee, :pay_period)
                              .with_check_number
-                             .order(:check_number)
+                             .order(Arel.sql("check_number::integer ASC"))
 
           if items.empty?
             return render json: { error: "No checks to print for this pay period" }, status: :unprocessable_entity
@@ -79,14 +79,16 @@ module Api
             end
           )
 
-          # Log batch download event for each item
-          items.each do |item|
-            item.check_events.create!(
-              user_id: current_user_id,
-              event_type: "batch_downloaded",
-              check_number: item.check_number,
-              ip_address: request.remote_ip
-            )
+          # Log batch download event for each item (all-or-nothing)
+          ActiveRecord::Base.transaction do
+            items.each do |item|
+              item.check_events.create!(
+                user_id: current_user_id,
+                event_type: "batch_downloaded",
+                check_number: item.check_number,
+                ip_address: request.remote_ip
+              )
+            end
           end
 
           filename = "checks_#{@pay_period.pay_date.strftime('%Y-%m-%d')}_batch.pdf"

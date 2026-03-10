@@ -4,7 +4,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :pay_period
   belongs_to :employee
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
-  has_many :check_events, dependent: :destroy
+  has_many :check_events, dependent: :restrict_with_error
 
   validates :employment_type, inclusion: { in: %w[hourly salary] }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
