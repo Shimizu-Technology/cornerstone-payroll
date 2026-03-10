@@ -23,6 +23,12 @@
 - **AIRE Services**
 - Start when first real payroll cycle details arrive.
 
+### D) Operating mode definitions
+- **Parallel mode:** Run payroll in both Cornerstone Payroll and QuickBooks for the same pay period.
+  - **Authoritative output in parallel mode:** QuickBooks remains official for payout/filing until the client passes cutover gates.
+  - **Exit criteria:** Client exits parallel mode only after required PASS cycles and explicit Leon + Cornerstone Ops signoff.
+- **Cornerstone-primary mode:** Cornerstone Payroll becomes the system of record; QuickBooks is fallback/read-only.
+
 ---
 
 ## 2) Current Capability Snapshot
@@ -143,6 +149,14 @@ A cycle is **FAIL** if:
 - Material gross/tax mismatch unexplained
 - Approval/commit flow blocked
 
+### FAIL-cycle remediation path (mandatory)
+If a cycle is **FAIL**:
+1. **Do not commit/finalize** that cycle in Cornerstone Payroll.
+2. **Keep/revert to QuickBooks authoritative** for that client’s active pay period (parallel mode).
+3. **Log failure in Plane** using PASS/FAIL template with root cause + impact.
+4. **Open follow-up fix ticket** and assign owner + target date before next cycle.
+5. **Do not advance rollout gate** for that client until a clean re-run is achieved.
+
 ---
 
 ## 6) Client Readiness Matrix
@@ -151,7 +165,7 @@ A cycle is **FAIL** if:
 |---|---|---|---|---|
 | MoSa's Joint | Large restaurant, tips, hourly+salary | Automated import | Ready now | Keep parallel confidence checks in early cycles |
 | Shimizu Technology | 2 employees | Manual | Ready now | Great low-risk pilot |
-| Cornerstone (internal) | ~3–4 employees | Manual (+ future CST sync) | Ready now | Start in Week 2 |
+| Cornerstone (internal) | ~3–4 employees | Manual (+ future Cornerstone Tax timesheet sync) | Ready now | Start in Week 2 |
 | DDG | 3 employees (2 hourly, 1 salary) | Manual (timesheet) | Ready now | Straightforward mixed-type validation |
 | SPR | 10–15 employees | Manual (email/timesheet source) | Ready with minor setup | Tips validation important |
 | AIRE | 10–15 (future) | TBD | Deferred | Decide after first real cycle |
