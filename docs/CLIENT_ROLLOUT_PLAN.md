@@ -111,7 +111,6 @@
 
 #### Cutover review
 - Final go/no-go for each active client based on prior gates.
-- Verify each client meets exit criteria: **2 consecutive PASS cycles** (or 1 PASS + explicit Leon override) **and explicit Leon + Cornerstone Ops signoff** before moving to Cornerstone-primary mode.
 - Move clients from parallel mode to Cornerstone-primary mode.
 
 #### AIRE prep
@@ -169,14 +168,6 @@ If a cycle is **FAIL**:
 4. **Open follow-up fix ticket** and assign owner + target date before next cycle.
 5. **Do not advance rollout gate** for that client until a clean re-run is achieved.
 
-### Post-commit error path (until void/adjust/re-run is implemented)
-If an error is discovered **after PASS + commit**:
-1. Escalate immediately to Leon + Dev Team.
-2. Do not attempt ad-hoc in-system reprocessing for that committed cycle.
-3. **If still in parallel mode:** revert to QuickBooks as source of record for correction payroll handling.
-4. **If in Cornerstone-primary mode:** Leon + Dev Team define the correction path case-by-case and document decision in the P1 ticket.
-5. Open a P1 ticket before the next client pay date and document incident impact.
-
 ---
 
 ## 6) Client Readiness Matrix
@@ -216,7 +207,6 @@ Checks:
 - Tax totals: PASS/FAIL
 - Approval/commit flow: PASS/FAIL
 - Exceptions resolved (import mode only — N/A for manual): PASS/FAIL/N/A
-- Reviewer signoff: <Name> | Complete _(must be Complete for PASS; Pending only valid for FAIL/open remediation records)_
 
 Notes:
 - <key findings>
