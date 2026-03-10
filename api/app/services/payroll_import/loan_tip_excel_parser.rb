@@ -113,7 +113,13 @@ module PayrollImport
 
         emp = find_or_init(employees, last_name, first_name)
         emp[:total_tips] += amount
-        emp[:tip_pool] = pool
+
+        # Preserve dual-pool visibility when an employee appears in both BOH and FOH sheets.
+        if emp[:tip_pool].nil?
+          emp[:tip_pool] = pool
+        elsif emp[:tip_pool] != pool
+          emp[:tip_pool] = "mixed"
+        end
       end
     end
 

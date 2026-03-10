@@ -72,7 +72,8 @@ module Api
               import_record.matched_data.map(&:deep_symbolize_keys)
             end
 
-            results = service.apply!(matched: matched_data)
+            force_overwrite = params[:force_overwrite].to_s == "true"
+            results = service.apply!(matched: matched_data, force_overwrite: force_overwrite)
 
             final_status = results[:errors].any? ? "partially_applied" : "applied"
             import_record.update!(
@@ -85,8 +86,9 @@ module Api
               pay_period: pay_period_json(@pay_period.reload)
             }
           rescue StandardError => e
-            import_record&.update(status: "failed", validation_errors: [ e.message ])
-            render json: { error: "Import failed: #{e.message}" }, status: :unprocessable_entity
+            # Keep record previewed so operator can retry apply without re-uploading.
+            import_record&.update(status: "previewed", validation_errors: [ e.message ])
+            render json: { error: "Import apply failed. Import session is still previewed — retry apply or re-preview files. Details: #{e.message}" }, status: :unprocessable_entity
           end
         end
 

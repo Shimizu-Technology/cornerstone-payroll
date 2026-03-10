@@ -67,8 +67,9 @@ module PayrollImport
 
     # Apply: persist matched import data to PayrollItems
     # @param matched [Array<Hash>] preview rows to apply
+    # @param force_overwrite [Boolean] allow overwriting non-import existing payroll items
     # @return [Hash] results with success/error counts
-    def apply!(matched:)
+    def apply!(matched:, force_overwrite: false)
       results = { success: [], errors: [] }
 
       ActiveRecord::Base.transaction do
@@ -79,6 +80,16 @@ module PayrollImport
 
           begin
             payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+
+            # Prevent silent overwrite of manual/non-import entries unless explicitly forced.
+            if payroll_item.persisted? && payroll_item.import_source != "mosa_revel" && !force_overwrite
+              results[:errors] << {
+                employee_id: employee.id,
+                name: employee.full_name,
+                error: "Payroll item already exists (manual/non-import). Pass force_overwrite to replace."
+              }
+              next
+            end
 
             # Set employment info
             payroll_item.employment_type = employee.employment_type
@@ -124,9 +135,11 @@ module PayrollImport
           end
         end
 
-        # Update pay period status
-        pay_period.update!(status: "calculated") if results[:errors].empty? && results[:success].any?
       end
+
+      # Update pay period status outside row-write transaction so status transition
+      # failures don't roll back successful payroll item writes.
+      pay_period.update!(status: "calculated") if results[:errors].empty? && results[:success].any?
 
       results
     end
