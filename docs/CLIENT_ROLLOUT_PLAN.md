@@ -27,7 +27,7 @@
 
 ## 2) Current Capability Snapshot
 
-## Ready now
+### Ready now
 - Company/client setup
 - Employee setup (hourly/salary, pay frequency, pay rate, filing fields)
 - Pay period creation
@@ -36,10 +36,10 @@
 - Tax summary/reporting endpoints
 - MoSa import workflow (scoped to MoSa)
 
-## In progress / partial
+### In progress / partial
 - 941-GU report service (CPR-59 in progress, PR #10 open)
 
-## Not complete for full QB parity
+### Not complete for full QB parity
 - W-2GU generation/export
 - 941-GU credits/deposit integration
 - ACH/NACHA export
@@ -50,9 +50,9 @@
 
 ## 3) Week-by-Week Execution Plan
 
-## Week 1 — MoSa + ST pilot
+### Week 1 — MoSa + ST pilot
 
-### MoSa (parallel confidence run)
+#### MoSa (parallel confidence run)
 - Run full MoSa cycle using import flow.
 - Verify:
   - unmatched names = 0
@@ -60,7 +60,7 @@
   - gross discrepancy = 0
 - Ops signoff: Cornerstone confirms period output matches expected totals.
 
-### Shimizu Technology (manual-first pilot)
+#### Shimizu Technology (manual-first pilot)
 - Set up/verify client profile + employees.
 - Run one complete payroll cycle manually.
 - Verify tax and net pay accuracy against expected baseline.
@@ -70,13 +70,13 @@
 
 ---
 
-## Week 2 — Cornerstone internal + DDG
+### Week 2 — Cornerstone internal + DDG
 
-### Cornerstone internal
+#### Cornerstone internal
 - Run payroll from current staff hours and salary setup.
 - Validate approval/commit flow with internal reviewer.
 
-### DDG (3 employees: 2 hourly, 1 salary)
+#### DDG (3 employees: 2 hourly, 1 salary)
 - Input hours from biweekly timesheet process.
 - Validate mixed hourly/salary handling and totals.
 
@@ -85,28 +85,28 @@
 
 ---
 
-## Week 3 — SPR + second-cycle regression checks
+### Week 3 — SPR + second-cycle regression checks
 
-### SPR (10–15 employees, possible tips)
+#### SPR (10–15 employees, possible tips)
 - Start manual entry flow for first cycle.
 - Validate tips handling and supervisor review process.
 
-### Regression pass
-- Re-run MoSa + ST + DDG for second cycle.
+#### Regression pass
+- Re-run MoSa + ST + Cornerstone + DDG for second cycle.
 - Confirm no drift in calculations and no workflow friction regressions.
 
 **Gate to pass Week 3:**
-- 4 clients successfully processed in Cornerstone Payroll with repeatable operator flow.
+- 5 clients successfully processed in Cornerstone Payroll with repeatable operator flow.
 
 ---
 
-## Week 4 — Cutover readiness + AIRE intake
+### Week 4 — Cutover readiness + AIRE intake
 
-### Cutover review
+#### Cutover review
 - Final go/no-go for each active client based on prior gates.
 - Move clients from parallel mode to Cornerstone-primary mode.
 
-### AIRE prep
+#### AIRE prep
 - Gather first real payroll source format for AIRE.
 - Decide manual-only vs automation profile work.
 
