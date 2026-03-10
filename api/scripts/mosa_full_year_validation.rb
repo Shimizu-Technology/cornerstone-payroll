@@ -265,19 +265,10 @@ PAY_PERIODS.each_with_index do |pp_config, idx|
     pdf_records = PayrollImport::RevelPdfParser.parse(pdf_path)
     excel_records = PayrollImport::LoanTipExcelParser.parse(excel_path)
 
-    # Run preview + apply
+    # Run preview + apply using already-parsed records (single parse per period).
     service = PayrollImport::ImportService.new(pay_period)
-
-    # Use block form to guarantee file handles are closed on exceptions.
-    preview = nil
-    apply_result = nil
-    File.open(pdf_path) do |pdf_file_obj|
-      File.open(excel_path) do |excel_file_obj|
-        # Mock file objects that respond to .path
-        preview = service.preview(pdf_file: pdf_file_obj, excel_file: excel_file_obj)
-        apply_result = service.apply!(matched: preview[:matched])
-      end
-    end
+    preview = service.preview(pdf_records: pdf_records, excel_records: excel_records)
+    apply_result = service.apply!(matched: preview[:matched])
 
     # Collect totals from payroll items
     items = pay_period.payroll_items.reload
@@ -419,7 +410,7 @@ report << ""
 report << "## Discrepancies"
 report << ""
 
-discrepancies = ok_results.select { |r| r[:hours_diff] > 0.01 || r[:unmatched] > 0 || r[:parser_issue] }
+discrepancies = ok_results.select { |r| r[:hours_diff] > 0.01 || r[:gross_diff] > 0.01 || r[:unmatched] > 0 || r[:parser_issue] }
 
 if discrepancies.empty?
   report << "✅ No significant discrepancies found."
@@ -435,6 +426,10 @@ else
     end
     if r[:hours_diff] > 0.01
       report << "- **Hours diff (unmatched employees):** PDF-clean=#{r[:pdf_hours]}h, Calc=#{r[:calc_hours]}h, Diff=#{r[:hours_diff]}h — accounts for unmatched+parser-excluded rows"
+    end
+    if r[:gross_diff] > 0.01
+      calc_excl_tips = (r[:calc_gross] - r[:calc_tips]).round(2)
+      report << "- **Gross diff (excluding tips):** PDF-clean=$#{r[:pdf_gross]}, Calc_excl_tips=$#{calc_excl_tips}, Diff=$#{r[:gross_diff]}"
     end
 
     report << ""

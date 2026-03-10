@@ -18,14 +18,16 @@ module PayrollImport
     # Preview: parse files and match names without persisting
     # @param pdf_file [File, nil] Revel POS PDF
     # @param excel_file [File, nil] Tips/Loans Excel
+    # @param pdf_records [Array<Hash>, nil] pre-parsed PDF rows (optional)
+    # @param excel_records [Array<Hash>, nil] pre-parsed Excel rows (optional)
     # @return [Hash] preview data with matched employees
-    def preview(pdf_file:, excel_file: nil)
+    def preview(pdf_file: nil, excel_file: nil, pdf_records: nil, excel_records: nil)
       employees = Employee.active.where(company_id: company_id)
       employees_by_id = employees.index_by(&:id)
       matcher = NameMatcher.new(employees)
 
-      pdf_records = pdf_file ? RevelPdfParser.parse_file(pdf_file) : []
-      excel_records = excel_file ? LoanTipExcelParser.parse_file(excel_file) : []
+      pdf_records ||= (pdf_file ? RevelPdfParser.parse_file(pdf_file) : [])
+      excel_records ||= (excel_file ? LoanTipExcelParser.parse_file(excel_file) : [])
 
       matched = []
       unmatched = []
