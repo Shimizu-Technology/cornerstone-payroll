@@ -77,11 +77,11 @@ class Form941GuAggregator
     taxable_ss_tips      = sum(items, :reported_tips)
     ss_tips_combined     = (taxable_ss_tips * SS_RATE_COMBINED).round(2)
 
-    # --- Line 5c: Medicare wages ---
-    taxable_medicare_wages  = sum(items, :gross_pay)
+    # --- Line 5c: Medicare wages derived from computed Medicare tax totals ---
     medicare_employee_total = sum(items, :medicare_tax)
     medicare_employer_total = sum(items, :employer_medicare_tax)
     medicare_combined_total = medicare_employee_total + medicare_employer_total
+    taxable_medicare_wages  = (medicare_combined_total / MEDICARE_RATE_COMBINED).round(2)
 
     # --- Line 5d: Additional Medicare Tax ---
     # Estimated per-employee: wages above $200K threshold within the quarter

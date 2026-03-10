@@ -68,6 +68,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(lines["line5c_medicare_combined_tax"].to_f).to eq(87.0) # 43.5 + 43.5
     end
 
+    it "includes reported tips in line2_wages_tips_other" do
+      create(:payroll_item,
+        pay_period:                   pay_period_q1,
+        employee:                     create(:employee, company: company, department: department),
+        gross_pay:                    1000.00,
+        withholding_tax:              75.00,
+        social_security_tax:          62.00,
+        employer_social_security_tax: 62.00,
+        medicare_tax:                 14.50,
+        employer_medicare_tax:        14.50,
+        reported_tips:                100.00)
+
+      get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 1 }
+
+      lines = response.parsed_body.dig("report", "lines")
+      expect(lines["line2_wages_tips_other"].to_f).to eq(4100.0) # 3000 + 1000 + 100 tips
+    end
+
     it "includes tax_detail and monthly_liability" do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 1 }
 
