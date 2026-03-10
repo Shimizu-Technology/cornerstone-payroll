@@ -162,7 +162,7 @@ PAY_PERIODS = [
     pdf: "payroll_2025-10-06_00-00_to_2025-10-19_23-59.pdf",
     excel: "pp20_2025-10-06_to_2025-10-19_loan_tip.xlsx",
     start_date: "2025-10-06",
-    end_date: "2025-10-19"
+    end_date: "2025-10-18"
   },
   {
     label: "PP21",
