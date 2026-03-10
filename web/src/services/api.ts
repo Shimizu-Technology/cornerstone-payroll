@@ -127,6 +127,29 @@ class ApiClient {
     return response.json() as Promise<T>;
   }
 
+  // CPR-66: GET raw Blob (for authenticated PDF download)
+  async getBlob(endpoint: string): Promise<Blob> {
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details
+      );
+    }
+
+    return response.blob();
+  }
+
   // CPR-66: Post and receive a raw Blob (for PDF download)
   async postBlob(endpoint: string, data?: unknown): Promise<Blob> {
     const token = await this.resolveAuthToken();
@@ -680,9 +703,9 @@ export const checksApi = {
   markAllPrinted: (payPeriodId: number) =>
     api.post<{ marked_printed: number }>(`/admin/pay_periods/${payPeriodId}/checks/mark_all_printed`),
 
-  // Single check PDF URL
-  checkPdfUrl: (payrollItemId: number) =>
-    `${API_BASE_URL}/admin/payroll_items/${payrollItemId}/check`,
+  // Download a single check PDF through authenticated API client
+  checkPdf: (payrollItemId: number) =>
+    api.getBlob(`/admin/payroll_items/${payrollItemId}/check`),
 
   // Mark a single check as printed
   markPrinted: (payrollItemId: number) =>
@@ -706,9 +729,9 @@ export const checksApi = {
   updateNextCheckNumber: (next_check_number: number) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/next_check_number', { next_check_number }),
 
-  // Alignment test PDF URL
-  alignmentTestPdfUrl: () =>
-    `${API_BASE_URL}/admin/companies/alignment_test_pdf`,
+  // Download alignment test PDF through authenticated API client
+  alignmentTestPdf: () =>
+    api.getBlob('/admin/companies/alignment_test_pdf'),
 };
 
 // Legacy dashboard (for migration)

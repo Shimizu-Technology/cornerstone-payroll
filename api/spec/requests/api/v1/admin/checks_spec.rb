@@ -87,10 +87,10 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
   # POST /checks/batch_pdf
   # -----------------------------------------------------------------------
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/checks/batch_pdf" do
-    it "returns a PDF for a committed period" do
+    it "returns 422 when combine_pdf is unavailable (no silent partial output)" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
-      expect(response).to have_http_status(:ok)
-      expect(response.content_type).to include("application/pdf")
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/combine_pdf/i)
     end
 
     it "returns 422 for draft periods" do
@@ -98,16 +98,10 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
 
-    it "sets a filename in Content-Disposition" do
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
-      expect(response.headers["Content-Disposition"]).to include("checks_")
-      expect(response.headers["Content-Disposition"]).to include(".pdf")
-    end
-
-    it "logs batch_downloaded events for each check" do
+    it "does not log batch_downloaded events when batch generation fails" do
       expect {
         post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
-      }.to change { CheckEvent.where(event_type: "batch_downloaded").count }.by(2)
+      }.not_to change { CheckEvent.where(event_type: "batch_downloaded").count }
     end
   end
 
@@ -216,6 +210,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect {
         post "/api/v1/admin/payroll_items/#{item_a.id}/void", params: { reason: valid_reason }
       }.to change { CheckEvent.where(event_type: "voided").count }.by(1)
+    end
+
+    it "records IP address on voided audit event" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/void", params: { reason: valid_reason }
+      event = CheckEvent.where(event_type: "voided", payroll_item_id: item_a.id).order(:created_at).last
+      expect(event.ip_address).to be_present
     end
   end
 

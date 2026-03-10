@@ -93,6 +93,24 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
     }
   };
 
+  // ---- Download single check PDF (authenticated) ----
+  const handleDownloadPdf = async (item: CheckItem) => {
+    setActionLoading(item.id);
+    try {
+      const blob = await checksApi.checkPdf(item.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `check_${item.check_number || item.id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download check PDF');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // ---- Mark single printed ----
   const handleMarkPrinted = async (item: CheckItem) => {
     setActionLoading(item.id);
@@ -228,14 +246,15 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
                     <div className="flex justify-end gap-1">
                       {/* Download single check PDF */}
                       {!item.voided && (
-                        <a
-                          href={checksApi.checkPdfUrl(item.id)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center px-2 py-1 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-100"
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDownloadPdf(item)}
+                          disabled={actionLoading === item.id}
+                          className="text-xs px-2 py-1"
                         >
-                          PDF
-                        </a>
+                          {actionLoading === item.id ? '…' : 'PDF'}
+                        </Button>
                       )}
 
                       {/* Mark printed */}

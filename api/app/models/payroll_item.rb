@@ -56,8 +56,9 @@ class PayrollItem < ApplicationRecord
   # Void this check.  Does NOT delete the record.
   # @param user [User]   the admin performing the void
   # @param reason [String] required written reason (min 10 chars)
+  # @param ip_address [String, nil]
   # @return [CheckEvent]
-  def void!(user:, reason:)
+  def void!(user:, reason:, ip_address: nil)
     raise ArgumentError, "Already voided" if voided?
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
 
@@ -72,7 +73,8 @@ class PayrollItem < ApplicationRecord
         user: user,
         event_type: "voided",
         check_number: check_number,
-        reason: reason
+        reason: reason,
+        ip_address: ip_address
       )
     end
   end

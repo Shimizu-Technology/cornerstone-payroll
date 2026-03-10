@@ -91,8 +91,19 @@ export function CheckSettingsPage() {
     }
   };
 
-  const handleAlignmentTest = () => {
-    window.open(checksApi.alignmentTestPdfUrl(), '_blank');
+  const handleAlignmentTest = async () => {
+    setError(null);
+    try {
+      const blob = await checksApi.alignmentTestPdf();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'alignment_test.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download alignment test PDF');
+    }
   };
 
   if (loading) {

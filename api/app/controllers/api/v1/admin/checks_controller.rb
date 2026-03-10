@@ -40,13 +40,15 @@ module Api
                              .with_check_number
                              .order(:check_number)
 
+          loaded_items = items.to_a
+
           render json: {
-            checks: items.map { |item| check_item_json(item) },
+            checks: loaded_items.map { |item| check_item_json(item) },
             meta: {
-              total: items.count,
-              printed: items.printed.count,
-              unprinted: items.unprinted.count,
-              voided: items.voided_checks.count
+              total: loaded_items.size,
+              printed: loaded_items.count { |i| i.check_printed_at.present? && !i.voided },
+              unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
+              voided: loaded_items.count(&:voided)
             }
           }
         end
@@ -87,6 +89,10 @@ module Api
             type: "application/pdf",
             disposition: "attachment",
             filename: filename
+        rescue LoadError
+          render json: {
+            error: "Batch PDF requires the combine_pdf gem. Please install it or contact your administrator."
+          }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -150,7 +156,7 @@ module Api
           reason = params[:reason].to_s.strip
           user   = User.find(current_user_id)
 
-          @payroll_item.void!(user: user, reason: reason)
+          @payroll_item.void!(user: user, reason: reason, ip_address: request.remote_ip)
 
           render json: { payroll_item: check_item_json(@payroll_item.reload) }
         rescue ArgumentError => e
@@ -307,20 +313,20 @@ module Api
         def set_pay_period
           @pay_period = PayPeriod.find(params[:pay_period_id])
           unless @pay_period.company_id == current_company_id
-            render json: { error: "Pay period not found" }, status: :not_found
+            render json: { error: "Pay period not found" }, status: :not_found and return
           end
         end
 
         def set_payroll_item
           @payroll_item = PayrollItem.includes(:employee, :pay_period, :check_events).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id
-            render json: { error: "Payroll item not found" }, status: :not_found
+            render json: { error: "Payroll item not found" }, status: :not_found and return
           end
         end
 
         def set_company
           @company = Company.find_by(id: current_company_id)
-          render json: { error: "Company not found" }, status: :not_found unless @company
+          render json: { error: "Company not found" }, status: :not_found and return unless @company
         end
 
         # -----------------------------------------------------------------------
@@ -389,16 +395,10 @@ module Api
           # Re-generate using a fresh shared Prawn doc — not possible to merge binary PDFs
           # without an external library. Use combine_pdf if available; otherwise return
           # a single-blob response and note in header.
-          begin
-            require "combine_pdf"
-            combined = CombinePDF.new
-            pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
-            combined.to_pdf
-          rescue LoadError
-            # combine_pdf not installed — return first PDF only and set a warning header
-            response.set_header("X-Cornerstone-Warning", "combine_pdf gem not installed; only first check returned")
-            pdf_binaries.first
-          end
+          require "combine_pdf"
+          combined = CombinePDF.new
+          pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
+          combined.to_pdf
         end
 
         # -----------------------------------------------------------------------

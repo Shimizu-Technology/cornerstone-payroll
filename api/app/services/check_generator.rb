@@ -113,7 +113,7 @@ class CheckGenerator
   end
 
   def employer_stub_y
-    top_check? ? SECTION_HEIGHT : SECTION_HEIGHT
+    SECTION_HEIGHT
   end
 
   def employee_stub_y
