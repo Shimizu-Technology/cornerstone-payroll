@@ -64,15 +64,20 @@ module Api
 
           items = @pay_period.payroll_items
                              .includes(:employee, :pay_period)
-                             .checks_only
+                             .with_check_number
                              .order(:check_number)
 
           if items.empty?
             return render json: { error: "No checks to print for this pay period" }, status: :unprocessable_entity
           end
 
-          # Build combined PDF: each item is one page (3-part layout)
-          combined_pdf = combine_pdfs(items.map { |item| CheckGenerator.new(item).generate })
+          # Build combined PDF: include voided checks with VOID watermark for traceability.
+          combined_pdf = combine_pdfs(
+            items.map do |item|
+              generator = CheckGenerator.new(item)
+              item.voided? ? generator.generate_voided : generator.generate
+            end
+          )
 
           # Log batch download event for each item
           items.each do |item|

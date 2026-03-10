@@ -2,6 +2,7 @@
 
 require "prawn"
 require "prawn/table"
+require "active_support/number_helper"
 require_relative "../../lib/number_to_words"
 
 # Generates a 3-part letter-size PDF for pre-printed payroll check stock.
@@ -516,14 +517,12 @@ class CheckGenerator
 
   def fmt_cur(amount)
     return "$0.00" if amount.nil?
-    n = amount.to_f
-    "$#{format('%.2f', n).reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    "$#{ActiveSupport::NumberHelper.number_to_delimited(format('%.2f', amount.to_f))}"
   end
 
   def fmt_cur_no_dollar(amount)
     return "0.00" if amount.nil?
-    n = amount.to_f
-    format('%.2f', n).reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+    ActiveSupport::NumberHelper.number_to_delimited(format('%.2f', amount.to_f))
   end
 
   def fmt_hrs(hours)

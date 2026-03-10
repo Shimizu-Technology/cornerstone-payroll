@@ -691,9 +691,6 @@ export const checksApi = {
   list: (payPeriodId: number) =>
     api.get<CheckListResponse>(`/admin/pay_periods/${payPeriodId}/checks`),
 
-  // Batch PDF download URL (direct link, opens in new tab)
-  batchPdfUrl: (payPeriodId: number) =>
-    `${API_BASE_URL}/admin/pay_periods/${payPeriodId}/checks/batch_pdf`,
 
   // POST to generate batch PDF (returns blob)
   batchPdf: (payPeriodId: number) =>

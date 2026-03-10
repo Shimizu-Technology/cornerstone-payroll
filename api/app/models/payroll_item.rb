@@ -60,6 +60,7 @@ class PayrollItem < ApplicationRecord
   # @return [CheckEvent]
   def void!(user:, reason:, ip_address: nil)
     raise ArgumentError, "Already voided" if voided?
+    raise ArgumentError, "No check number assigned" if check_number.blank?
     raise ArgumentError, "Void reason is required (minimum 10 characters)" if reason.blank? || reason.length < 10
 
     ApplicationRecord.transaction do

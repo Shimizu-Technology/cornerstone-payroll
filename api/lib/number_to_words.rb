@@ -31,8 +31,10 @@ module NumberToWords
   # @return [String] – e.g., "One thousand two hundred eighteen and 91/100"
   def self.convert(amount)
     amount = BigDecimal(amount.to_s)
-    dollars = amount.to_i.abs
-    cents   = ((amount - dollars) * 100).round.to_i.abs
+    raise ArgumentError, "Amount cannot be negative (got #{amount.to_s('F')})" if amount.negative?
+
+    dollars = amount.to_i
+    cents   = ((amount - dollars) * 100).round.to_i
 
     word_part  = dollars.zero? ? "zero" : integer_to_words(dollars)
     cents_part = cents.to_s.rjust(2, "0")
