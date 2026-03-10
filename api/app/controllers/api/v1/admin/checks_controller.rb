@@ -66,6 +66,7 @@ module Api
                              .includes(:employee, :pay_period)
                              .with_check_number
                              .order(Arel.sql("check_number::integer ASC"))
+                             .to_a
 
           if items.empty?
             return render json: { error: "No checks to print for this pay period" }, status: :unprocessable_entity
@@ -100,6 +101,8 @@ module Api
           render json: {
             error: "Batch PDF requires the combine_pdf gem. Please install it or contact your administrator."
           }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -292,6 +295,10 @@ module Api
             return render json: { error: "Check number must be a positive integer" }, status: :unprocessable_entity
           end
 
+          if new_number > 9_999_999
+            return render json: { error: "Check number cannot exceed 9,999,999" }, status: :unprocessable_entity
+          end
+
           # Safety guard: disallow if checks already issued this year
           current_year = Date.current.year
           checks_this_year = PayrollItem
@@ -435,6 +442,10 @@ module Api
           combined = CombinePDF.new
           pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
           combined.to_pdf
+        rescue LoadError
+          raise
+        rescue StandardError => e
+          raise ArgumentError, "Failed to merge check PDFs: #{e.message}"
         end
 
         # -----------------------------------------------------------------------

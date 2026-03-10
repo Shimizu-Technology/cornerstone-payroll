@@ -354,6 +354,12 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 0 }
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "rejects values above the integer safety bound" do
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 10_000_000 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("cannot exceed")
+    end
   end
 
   describe "GET /api/v1/admin/companies/alignment_test_pdf" do
