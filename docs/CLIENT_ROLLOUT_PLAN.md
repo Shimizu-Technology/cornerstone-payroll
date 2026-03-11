@@ -1,6 +1,6 @@
 # Cornerstone Payroll — Client-by-Client Rollout Plan (Week 1–4)
 
-**Last updated:** 2026-03-10  
+**Last updated:** 2026-03-11  
 **Execution start (Week 1):** TBD — set before kickoff meeting  
 **Owner:** Leon + Cornerstone Ops + Dev Team  
 **Objective:** Safely transition payroll operations from QuickBooks to Cornerstone Payroll using a phased, low-risk rollout.
@@ -41,16 +41,23 @@
 - Payroll item entry/edit
 - Payroll calculation → approve → commit
 - Tax summary/reporting endpoints
+- 941-GU report endpoint (CPR-59)
 - MoSa import workflow (scoped to MoSa)
+- Check printing workflow (CPR-66):
+  - check number assignment sequence
+  - single/batch check PDF generation
+  - mark printed / void / reprint actions
+  - alignment test PDF + check settings calibration
+  - check event audit trail
 
 ### In progress / partial
-- 941-GU report service (CPR-59 in progress, PR #10 open)
+- Rollout execution + per-client PASS/FAIL evidence capture
 
 ### Not complete for full QB parity
 - W-2GU generation/export
 - 941-GU credits/deposit integration
 - ACH/NACHA export
-- Void/adjust/re-run workflow
+- Payroll-level void/adjust/re-run workflow
 - Final payroll register PDF/export package
 
 ---
@@ -194,12 +201,15 @@ If an error is discovered **after PASS + commit**:
 
 ## 7) Immediate Next Actions
 
-1. Finish CPR-59 review/merge.
-2. Run Week 1 pilots:
+1. Execute Week 1 pilots in **parallel mode**:
    - MoSa
    - Shimizu Technology
-3. Capture results in Plane comments using PASS/FAIL template.
-4. Open follow-up parity tickets for any discovered gaps.
+2. Capture results in Plane comments using PASS/FAIL template.
+3. Run first live check-printing validation cycle on pre-printed stock (alignment + one real period).
+4. Open/implement next parity deliverables:
+   - W-2GU generation/export
+   - Payroll register PDF/CSV export package
+   - Payroll-level void/adjust/re-run workflow
 
 ---
 
