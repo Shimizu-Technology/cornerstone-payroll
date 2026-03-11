@@ -145,6 +145,20 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
         expect(response).to have_http_status(:not_found)
       end
+
+      it "returns 422 when void flow raises RecordInvalid" do
+        bad_record = PayPeriodCorrectionEvent.new
+        bad_record.validate
+
+        allow(PayPeriodCorrectionService).to receive(:void!)
+          .and_raise(ActiveRecord::RecordInvalid.new(bad_record))
+
+        post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+             params: { reason: "trigger invalid" }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body)["error"]).to be_present
+      end
     end
   end
 

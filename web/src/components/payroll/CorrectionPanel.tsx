@@ -75,8 +75,6 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
       setShowVoidModal(false);
       setVoidReason('');
       setVoidConfirmText('');
-      // Auto-load history after void
-      loadHistory();
     } catch (err) {
       setVoidError(err instanceof Error ? err.message : 'Failed to void pay period.');
     } finally {
@@ -493,8 +491,17 @@ function CorrectionModal({
         tabIndex={-1}
         className="w-full max-w-md rounded-xl bg-white shadow-2xl"
       >
-        <div className="border-b px-6 py-4">
+        <div className="border-b px-6 py-4 flex items-center justify-between gap-3">
           <h3 id={titleId} className="text-lg font-semibold text-gray-900">{title}</h3>
+          <button
+            type="button"
+            aria-label="Close dialog"
+            className="text-gray-500 hover:text-gray-700 rounded p-1"
+            onClick={onCancel}
+            disabled={loading}
+          >
+            ×
+          </button>
         </div>
         <div className="px-6 py-4">
           <div id={descriptionId}>{description}</div>
