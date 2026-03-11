@@ -79,6 +79,10 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
       setShowVoidModal(false);
       setVoidReason('');
       setVoidConfirmText('');
+      // Reset potentially stale history panel state after mutation.
+      setHistoryEvents(null);
+      setHistoryOpen(false);
+      setHistoryError(null);
     } catch (err) {
       setVoidError(err instanceof Error ? err.message : 'Failed to void pay period.');
     } finally {

@@ -167,6 +167,7 @@ export interface PayPeriod {
   correction_status?: CorrectionStatus | null;
   voided_at?: string | null;
   voided_by_id?: number | null;
+  voided_by_name?: string | null;
   void_reason?: string | null;
   source_pay_period_id?: number | null;
   superseded_by_id?: number | null;

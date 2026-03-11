@@ -230,12 +230,6 @@ module Api
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)
             }
-          rescue PayPeriodCorrectionService::AlreadyVoidedError => e
-            render json: { error: e.message }, status: :unprocessable_entity
-          rescue PayPeriodCorrectionService::AlreadySupersededError => e
-            render json: { error: e.message }, status: :unprocessable_entity
-          rescue PayPeriodCorrectionService::InvalidStateError => e
-            render json: { error: e.message }, status: :unprocessable_entity
           rescue PayPeriodCorrectionService::CorrectionError => e
             render json: { error: e.message }, status: :unprocessable_entity
           rescue ActiveRecord::RecordInvalid => e
