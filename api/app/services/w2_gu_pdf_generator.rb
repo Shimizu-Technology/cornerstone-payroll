@@ -206,7 +206,7 @@ class W2GuPdfGenerator
   # ─── Employee Table ─────────────────────────────────────────────────────────
 
   def render_employee_table(pdf)
-    employees = report[:employees]
+    employees = report[:employees] || []
 
     pdf.start_new_page if pdf.cursor < 120
     pdf.font_size(11) { pdf.text "Employee Detail", style: :bold }
