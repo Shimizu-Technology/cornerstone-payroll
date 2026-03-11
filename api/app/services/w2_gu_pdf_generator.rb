@@ -183,19 +183,24 @@ class W2GuPdfGenerator
     pdf.font_size(11) { pdf.text "Notes & Caveats", style: :bold }
     pdf.move_down 4
 
-    pdf.fill_color ALERT_BG
-    pdf.fill_rectangle [ pdf.bounds.left, pdf.cursor ], pdf.bounds.width, (caveats.length * 16) + 10
-    pdf.fill_color "7D6608"
-
-    pdf.bounding_box([ pdf.bounds.left + 8, pdf.cursor - 5 ], width: pdf.bounds.width - 16) do
-      caveats.each do |caveat|
-        pdf.font_size(8) { pdf.text "- #{caveat}" }
-        pdf.move_down 4
-      end
+    caveats.each do |caveat|
+      pdf.table(
+        [[ "- #{caveat}" ]],
+        width: pdf.bounds.width,
+        cell_style: {
+          background_color: ALERT_BG,
+          text_color: "7D6608",
+          size: 8,
+          padding: [ 4, 8 ],
+          border_width: 0,
+          inline_format: false
+        }
+      )
+      pdf.move_down 2
     end
 
     pdf.fill_color TEXT_DARK
-    pdf.move_down (caveats.length * 16) + 16
+    pdf.move_down 8
   end
 
   # ─── Employee Table ─────────────────────────────────────────────────────────

@@ -8,6 +8,11 @@ interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
+export interface BlobDownload {
+  blob: Blob;
+  filename?: string;
+}
+
 class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -154,7 +159,7 @@ class ApiClient {
   async getBlobWithParams(
     endpoint: string,
     params?: Record<string, string | number | boolean | undefined>
-  ): Promise<Blob> {
+  ): Promise<BlobDownload> {
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -173,7 +178,11 @@ class ApiClient {
       );
     }
 
-    return response.blob();
+    const contentDisposition = response.headers.get('content-disposition') || '';
+    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i);
+    const filename = match ? decodeURIComponent(match[1].replace(/\"/g, '').trim()) : undefined;
+
+    return { blob: await response.blob(), filename };
   }
 
   // CPR-66: Post and receive a raw Blob (for PDF download)

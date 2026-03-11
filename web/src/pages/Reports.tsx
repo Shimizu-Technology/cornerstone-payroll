@@ -67,8 +67,8 @@ function W2GuPanel() {
     setExportingCsv(true);
     setError(null);
     try {
-      const blob = await reportsApi.w2GuCsv(year);
-      triggerDownload(blob, `w2gu_${year}.csv`);
+      const { blob, filename } = await reportsApi.w2GuCsv(year);
+      triggerDownload(blob, filename || `w2gu_${year}.csv`);
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
     } finally {
@@ -80,8 +80,8 @@ function W2GuPanel() {
     setExportingPdf(true);
     setError(null);
     try {
-      const blob = await reportsApi.w2GuPdf(year);
-      triggerDownload(blob, `w2gu_${year}.pdf`);
+      const { blob, filename } = await reportsApi.w2GuPdf(year);
+      triggerDownload(blob, filename || `w2gu_${year}.pdf`);
     } catch (err: unknown) {
       setError(extractErrorMessage(err));
     } finally {
