@@ -376,6 +376,7 @@ export interface W2GuEmployeeRow {
   box6_medicare_tax_withheld: number;
   box7_social_security_tips: number;
   has_missing_ssn: boolean;
+  has_missing_address: boolean;
 }
 
 export interface W2GuReport {
