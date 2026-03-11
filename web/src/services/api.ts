@@ -8,6 +8,11 @@ interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
 }
 
+export interface BlobDownload {
+  blob: Blob;
+  filename?: string;
+}
+
 class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -148,6 +153,36 @@ class ApiClient {
     }
 
     return response.blob();
+  }
+
+  // GET raw Blob with query params (for authenticated file downloads with year/filters)
+  async getBlobWithParams(
+    endpoint: string,
+    params?: Record<string, string | number | boolean | undefined>
+  ): Promise<BlobDownload> {
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(this.buildUrl(endpoint, params), {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details
+      );
+    }
+
+    const contentDisposition = response.headers.get('content-disposition') || '';
+    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i);
+    const filename = match ? decodeURIComponent(match[1].replace(/\"/g, '').trim()) : undefined;
+
+    return { blob: await response.blob(), filename };
   }
 
   // CPR-66: Post and receive a raw Blob (for PDF download)
@@ -661,6 +696,10 @@ export const reportsApi = {
   // CPR-68: W-2GU Annual Report
   w2Gu: (year: number) =>
     api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),
+  w2GuCsv: (year: number) =>
+    api.getBlobWithParams('/admin/reports/w2_gu_csv', { year }),
+  w2GuPdf: (year: number) =>
+    api.getBlobWithParams('/admin/reports/w2_gu_pdf', { year }),
 };
 
 // Pay Stubs (Admin API)
