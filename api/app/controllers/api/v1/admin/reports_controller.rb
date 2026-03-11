@@ -176,21 +176,10 @@ module Api
         # Params:
         #   year [Integer] – tax year (defaults to current year)
         def w2_gu
-          raw_year = params[:year]
-          year = if raw_year.present?
-            Integer(raw_year, exception: false)
-          else
-            Date.today.year
-          end
+          report_data, error_response = build_w2_gu_report_data
+          return error_response if error_response
 
-          unless year && year > 2000 && year <= Date.today.year + 1
-            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
-          end
-
-          company = Company.find(current_company_id)
-          report = W2GuAggregator.new(company, year).generate
-
-          render json: { report: report }
+          render json: { report: report_data }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e

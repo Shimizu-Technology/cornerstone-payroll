@@ -248,18 +248,19 @@ class W2GuPdfGenerator
     table_data = [ header ] + rows + [ totals_row ]
 
     page_width = pdf.bounds.width
-    col_widths = [
-      page_width * 0.17,  # Employee
-      page_width * 0.09,  # SSN
-      page_width * 0.09,  # Box 1
-      page_width * 0.09,  # Box 2
-      page_width * 0.09,  # Box 3
-      page_width * 0.09,  # Box 4
-      page_width * 0.10,  # Box 5
-      page_width * 0.09,  # Box 6
-      page_width * 0.09   # Box 7
+    width_fractions = [
+      0.18,      # Employee
+      0.08,      # SSN
+      0.105714,  # Box 1
+      0.105714,  # Box 2
+      0.105714,  # Box 3
+      0.105714,  # Box 4
+      0.105714,  # Box 5
+      0.105714,  # Box 6
+      0.105714   # Box 7
     ]
-    # Adjust last column to fill remaining width
+    col_widths = width_fractions.map { |fraction| page_width * fraction }
+    # Keep full-width exact in case of floating point drift.
     col_widths[-1] = page_width - col_widths[0..-2].sum
 
     pdf.table(
