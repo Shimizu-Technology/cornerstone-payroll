@@ -124,7 +124,7 @@ export type CorrectionStatus = 'voided' | 'correction';
 
 export interface PayPeriodCorrectionEvent {
   id: number;
-  action_type: 'void_initiated' | 'correction_run_created' | 'correction_run_committed';
+  action_type: 'void_initiated' | 'correction_run_created' | 'correction_run_committed' | 'correction_run_deleted';
   pay_period_id: number;
   resulting_pay_period_id?: number | null;
   actor_id?: number | null;

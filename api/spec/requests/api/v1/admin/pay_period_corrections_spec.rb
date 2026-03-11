@@ -259,7 +259,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       end
 
       it "returns 422 if source already has a correction run" do
-        existing_run = create(:pay_period, :correction_run, company: company)
+        existing_run = create(:pay_period, :correction_run, company: company, source_pay_period: voided_period)
         voided_period.update!(superseded_by_id: existing_run.id)
 
         post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",

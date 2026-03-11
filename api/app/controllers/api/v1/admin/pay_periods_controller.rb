@@ -256,6 +256,8 @@ module Api
             render json: { error: e.message }, status: :unprocessable_entity
           rescue ActiveRecord::RecordInvalid => e
             render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+          rescue ArgumentError => e
+            render json: { error: e.message }, status: :unprocessable_entity
           end
         end
 

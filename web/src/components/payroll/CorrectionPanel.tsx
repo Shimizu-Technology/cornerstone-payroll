@@ -23,12 +23,14 @@ const ACTION_LABELS: Record<string, string> = {
   void_initiated:            'Period Voided',
   correction_run_created:    'Correction Run Created',
   correction_run_committed:  'Correction Run Committed',
+  correction_run_deleted:    'Correction Run Deleted',
 };
 
 const ACTION_BADGE_VARIANTS: Record<string, 'default' | 'danger' | 'warning' | 'success' | 'info'> = {
   void_initiated:            'danger',
   correction_run_created:    'warning',
   correction_run_committed:  'success',
+  correction_run_deleted:    'info',
 };
 
 export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPanelProps) {
