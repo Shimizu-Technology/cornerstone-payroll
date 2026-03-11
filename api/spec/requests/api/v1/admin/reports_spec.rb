@@ -468,4 +468,331 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(totals["total_employment_taxes"].to_f).to eq(261.5)
     end
   end
+
+  # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/payroll_register_csv" do
+    let!(:pay_period) do
+      create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 3, 1),
+        end_date:   Date.new(2025, 3, 14),
+        pay_date:   Date.new(2025, 3, 19))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period:          pay_period,
+        employee:            employee,
+        gross_pay:           2000.00,
+        withholding_tax:     150.00,
+        social_security_tax: 124.00,
+        medicare_tax:        29.00,
+        retirement_payment:  80.00,
+        total_deductions:    383.00,
+        net_pay:             1617.00)
+    end
+
+    it "returns 200 with CSV content-type" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("text/csv")
+    end
+
+    it "includes a Content-Disposition attachment header with .csv filename" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      disposition = response.headers["Content-Disposition"]
+      expect(disposition).to include("attachment")
+      expect(disposition).to include(".csv")
+    end
+
+    it "includes CSV header row with expected columns" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      first_line = response.body.lines.first
+      expect(first_line).to include("Employee Name")
+      expect(first_line).to include("Gross Pay")
+      expect(first_line).to include("Net Pay")
+    end
+
+    it "includes employee data row" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      expect(response.body).to include(employee.full_name)
+      expect(response.body).to include("2000.00")
+    end
+
+    it "includes TOTALS summary row" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      expect(response.body).to include("TOTALS")
+    end
+
+    it "returns 422 when pay_period_id is missing" do
+      get "/api/v1/admin/reports/payroll_register_csv"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/pay_period_id/)
+    end
+
+    it "returns 404 for a pay period belonging to another company" do
+      other_company  = create(:company)
+      other_period   = create(:pay_period, :committed, company: other_company)
+
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: other_period.id }
+
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "returns 404 for a non-existent pay period id" do
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: 999_999 }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  # ─── CPR-70: Payroll Register PDF Export ────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/payroll_register_pdf" do
+    let!(:pay_period) do
+      create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 3, 1),
+        end_date:   Date.new(2025, 3, 14),
+        pay_date:   Date.new(2025, 3, 19))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period:          pay_period,
+        employee:            employee,
+        gross_pay:           2000.00,
+        withholding_tax:     150.00,
+        social_security_tax: 124.00,
+        medicare_tax:        29.00,
+        retirement_payment:  80.00,
+        total_deductions:    383.00,
+        net_pay:             1617.00)
+    end
+
+    it "returns 200 with PDF content-type" do
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+    end
+
+    it "includes a Content-Disposition attachment header with .pdf filename" do
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+
+      disposition = response.headers["Content-Disposition"]
+      expect(disposition).to include("attachment")
+      expect(disposition).to include(".pdf")
+    end
+
+    it "returns binary data starting with PDF magic bytes" do
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ]) # %PDF
+    end
+
+    it "generates PDF even with no payroll items (empty period)" do
+      empty_period = create(:pay_period, :committed, company: company,
+        start_date: Date.new(2025, 4, 1), end_date: Date.new(2025, 4, 14), pay_date: Date.new(2025, 4, 19))
+
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: empty_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+
+    it "returns 422 when pay_period_id is missing" do
+      get "/api/v1/admin/reports/payroll_register_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/pay_period_id/)
+    end
+
+    it "returns 404 for a pay period belonging to another company" do
+      other_company = create(:company)
+      other_period  = create(:pay_period, :committed, company: other_company)
+
+      get "/api/v1/admin/reports/payroll_register_pdf", params: { pay_period_id: other_period.id }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  # ─── CPR-70: Tax Summary CSV Export ─────────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/tax_summary_csv" do
+    let!(:pay_period_q1) do
+      create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 2, 1),
+        end_date:   Date.new(2025, 2, 14),
+        pay_date:   Date.new(2025, 2, 19))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period:                   pay_period_q1,
+        employee:                     employee,
+        gross_pay:                    3000.00,
+        withholding_tax:              200.00,
+        social_security_tax:          186.00,
+        employer_social_security_tax: 186.00,
+        medicare_tax:                  43.50,
+        employer_medicare_tax:         43.50)
+    end
+
+    it "returns 200 with CSV content-type" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("text/csv")
+    end
+
+    it "includes a Content-Disposition attachment header with .csv filename" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025 }
+
+      disposition = response.headers["Content-Disposition"]
+      expect(disposition).to include("attachment")
+      expect(disposition).to include(".csv")
+    end
+
+    it "includes period metadata in the CSV body" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025 }
+
+      expect(response.body).to include("Tax Summary Report")
+      expect(response.body).to include("2025")
+    end
+
+    it "includes Gross Wages total line" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025 }
+
+      expect(response.body).to include("Gross Wages")
+      expect(response.body).to include("3000.00")
+    end
+
+    it "filters by quarter when provided" do
+      q3_period = create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 7, 1),
+        end_date:   Date.new(2025, 7, 14),
+        pay_date:   Date.new(2025, 7, 19))
+      create(:payroll_item,
+        pay_period:                   q3_period,
+        employee:                     employee,
+        gross_pay:                    5000.00,
+        withholding_tax:              300.00,
+        social_security_tax:          310.00,
+        employer_social_security_tax: 310.00,
+        medicare_tax:                  72.50,
+        employer_medicare_tax:         72.50)
+
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025, quarter: 1 }
+
+      # Q1 only — should show Q1 gross, not Q3
+      expect(response.body).to include("3000.00")
+      expect(response.body).not_to include("5000.00")
+    end
+
+    it "returns 422 for an invalid quarter" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025, quarter: 5 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/quarter/)
+    end
+
+    it "defaults to current year when year param is omitted" do
+      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+
+      get "/api/v1/admin/reports/tax_summary_csv"
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "includes Q label when quarter is provided" do
+      get "/api/v1/admin/reports/tax_summary_csv", params: { year: 2025, quarter: 1 }
+
+      expect(response.body).to include("Q1")
+    end
+  end
+
+  # ─── CPR-70: Tax Summary PDF Export ─────────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/tax_summary_pdf" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company:    company,
+        start_date: Date.new(2025, 2, 1),
+        end_date:   Date.new(2025, 2, 14),
+        pay_date:   Date.new(2025, 2, 19))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period:                   pay_period_2025,
+        employee:                     employee,
+        gross_pay:                    3000.00,
+        withholding_tax:              200.00,
+        social_security_tax:          186.00,
+        employer_social_security_tax: 186.00,
+        medicare_tax:                  43.50,
+        employer_medicare_tax:         43.50)
+    end
+
+    it "returns 200 with PDF content-type" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+    end
+
+    it "includes a Content-Disposition attachment header with .pdf filename" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025 }
+
+      disposition = response.headers["Content-Disposition"]
+      expect(disposition).to include("attachment")
+      expect(disposition).to include(".pdf")
+    end
+
+    it "returns binary data starting with PDF magic bytes" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025 }
+
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+
+    it "generates PDF for a quarter with no payroll (empty totals)" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025, quarter: 4 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+
+    it "returns 422 for an invalid quarter" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025, quarter: 0 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/quarter/)
+    end
+
+    it "defaults to current year when year param is omitted" do
+      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+
+      get "/api/v1/admin/reports/tax_summary_pdf"
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "includes quarter filter in filename when quarter is provided" do
+      get "/api/v1/admin/reports/tax_summary_pdf", params: { year: 2025, quarter: 2 }
+
+      disposition = response.headers["Content-Disposition"]
+      expect(disposition).to include("q2")
+    end
+  end
 end

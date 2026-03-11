@@ -1,15 +1,419 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { reportsApi } from '@/services/api';
-import type { W2GuReport, W2GuEmployeeRow } from '@/types';
+import { reportsApi, payPeriodsApi } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
+import type { PayPeriod, W2GuReport, W2GuEmployeeRow } from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'object' && err !== null) {
+    const maybeErr = err as { message?: unknown; error?: unknown };
+    if (typeof maybeErr.message === 'string' && maybeErr.message.length > 0) return maybeErr.message;
+    if (typeof maybeErr.error === 'string' && maybeErr.error.length > 0) return maybeErr.error;
+  }
+  return 'An error occurred';
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+// ─── Payroll Register Panel ───────────────────────────────────────────────────
+
+function PayrollRegisterPanel() {
+  const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
+  const [loadingPeriods, setLoadingPeriods] = useState(true);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<PayrollRegisterReport['report'] | null>(null);
+
+  useEffect(() => {
+    payPeriodsApi.list({ status: 'committed' })
+      .then((res) => {
+        const periods = res.pay_periods ?? [];
+        const sorted = [...periods].sort((a, b) => {
+          const aDate = Date.parse(a.pay_date || '');
+          const bDate = Date.parse(b.pay_date || '');
+          if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return bDate - aDate;
+          return b.id - a.id;
+        });
+        setPayPeriods(sorted);
+        if (sorted.length > 0) setSelectedPeriodId(sorted[0].id);
+      })
+      .catch(() => setError('Failed to load pay periods'))
+      .finally(() => setLoadingPeriods(false));
+  }, []);
+
+  const busy = loading || exportingCsv || exportingPdf;
+
+  async function loadReport() {
+    if (!selectedPeriodId) return;
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.payrollRegister(selectedPeriodId);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadCsv() {
+    if (!selectedPeriodId) return;
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.payrollRegisterCsv(selectedPeriodId);
+      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.csv`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  async function downloadPdf() {
+    if (!selectedPeriodId) return;
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.payrollRegisterPdf(selectedPeriodId);
+      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Payroll Register</CardTitle>
+          <CardDescription>
+            Complete payroll details for a selected pay period — all employees, hours, taxes, and net pay.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="pr-period" className="text-sm font-medium text-gray-700">
+                Pay Period
+              </label>
+              {loadingPeriods ? (
+                <span className="text-sm text-gray-400">Loading…</span>
+              ) : (
+                <select
+                  id="pr-period"
+                  value={selectedPeriodId ?? ''}
+                  onChange={(e) => {
+                    setSelectedPeriodId(Number(e.target.value));
+                    setReport(null);
+                    setError(null);
+                  }}
+                  disabled={busy}
+                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                >
+                  {payPeriods.length === 0 && <option value="">No committed pay periods</option>}
+                  {payPeriods.map((pp) => (
+                    <option key={pp.id} value={pp.id}>
+                      {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <Button onClick={loadReport} disabled={busy || !selectedPeriodId}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadCsv}
+                disabled={busy || !selectedPeriodId}
+                title="Download Payroll Register as CSV"
+              >
+                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadPdf}
+                disabled={busy || !selectedPeriodId}
+                title="Download Payroll Register as PDF"
+              >
+                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+              </Button>
+            </div>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                Payroll Register — {report.pay_period.start_date} to {report.pay_period.end_date}
+              </CardTitle>
+              <CardDescription>
+                Pay Date: {report.pay_period.pay_date} &bull; {report.summary.employee_count} employee{report.summary.employee_count !== 1 ? 's' : ''}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <TotalBox label="Total Gross Pay" value={report.summary.total_gross} />
+                <TotalBox label="Total Withholding" value={report.summary.total_withholding} />
+                <TotalBox label="Total Deductions" value={report.summary.total_deductions} />
+                <TotalBox label="Total Net Pay" value={report.summary.total_net} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Employee Detail</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500">
+                    <th className="pb-2 pr-4 font-medium">Employee</th>
+                    <th className="pb-2 pr-4 font-medium">Type</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
+                    <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
+                    <th className="pb-2 font-medium">Check #</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.employees.map((emp) => (
+                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="py-2 pr-4 font-medium">{emp.employee_name}</td>
+                      <td className="py-2 pr-4 capitalize text-gray-500">{emp.employment_type}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{emp.hours_worked ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement_payment ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(emp.net_pay ?? 0)}</td>
+                      <td className="py-2 font-mono text-gray-500">{emp.check_number ?? '—'}</td>
+                    </tr>
+                  ))}
+                  {report.employees.length === 0 && (
+                    <tr>
+                      <td colSpan={10} className="py-6 text-center text-gray-400">
+                        No payroll items found for this pay period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Tax Summary Panel ────────────────────────────────────────────────────────
+
+function TaxSummaryPanel() {
+  const currentYear = new Date().getFullYear();
+  const earliestSupportedYear = 2020;
+  const yearOptions = Array.from(
+    { length: currentYear - earliestSupportedYear + 1 },
+    (_, i) => currentYear - i
+  );
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState<number | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
+
+  const busy = loading || exportingCsv || exportingPdf;
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.taxSummary(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadCsv() {
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryCsv(year, quarter);
+      triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.csv`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryPdf(year, quarter);
+      triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  const periodLabel = quarter ? `Q${quarter} ${year}` : `${year} Full Year`;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Tax Withholding Summary</CardTitle>
+          <CardDescription>
+            Quarterly tax withholding totals for filing preparation — all committed pay periods in range.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="ts-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="ts-year"
+                value={year}
+                onChange={(e) => {
+                  setYear(Number(e.target.value));
+                  setReport(null);
+                  setError(null);
+                }}
+                disabled={busy}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <select
+                id="ts-quarter"
+                value={quarter ?? ''}
+                onChange={(e) => {
+                  setQuarter(e.target.value ? Number(e.target.value) : undefined);
+                  setReport(null);
+                  setError(null);
+                }}
+                disabled={busy}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="">Full Year</option>
+                <option value="1">Q1 (Jan–Mar)</option>
+                <option value="2">Q2 (Apr–Jun)</option>
+                <option value="3">Q3 (Jul–Sep)</option>
+                <option value="4">Q4 (Oct–Dec)</option>
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={busy}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadCsv}
+                disabled={busy}
+                title={`Download Tax Summary CSV for ${periodLabel}`}
+              >
+                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadPdf}
+                disabled={busy}
+                title={`Download Tax Summary PDF for ${periodLabel}`}
+              >
+                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+              </Button>
+            </div>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Tax Summary — {periodLabel}
+            </CardTitle>
+            <CardDescription>
+              {report.pay_periods_included} pay period{report.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
+              {report.employee_count} employee{report.employee_count !== 1 ? 's' : ''}
+              {report.period.start_date && (
+                <> &bull; {report.period.start_date} – {report.period.end_date}</>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <TotalBox label="Gross Wages" value={report.totals.gross_wages} />
+              <TotalBox label="Withholding Tax" value={report.totals.withholding_tax} />
+              <TotalBox label="SS Tax (Employee)" value={report.totals.social_security_employee} />
+              <TotalBox label="SS Tax (Employer)" value={report.totals.social_security_employer} />
+              <TotalBox label="Medicare (Employee)" value={report.totals.medicare_employee} />
+              <TotalBox label="Medicare (Employer)" value={report.totals.medicare_employer} />
+              <TotalBox label="Total Employment Taxes" value={report.totals.total_employment_taxes} />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
 }
 
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
@@ -28,16 +432,6 @@ function W2GuPanel() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
 
-  const extractErrorMessage = (err: unknown): string => {
-    if (err instanceof Error && err.message) return err.message;
-    if (typeof err === 'object' && err !== null) {
-      const maybeErr = err as { message?: unknown; error?: unknown };
-      if (typeof maybeErr.message === 'string' && maybeErr.message.length > 0) return maybeErr.message;
-      if (typeof maybeErr.error === 'string' && maybeErr.error.length > 0) return maybeErr.error;
-    }
-    return 'Failed to load report';
-  };
-
   async function loadReport() {
     setLoading(true);
     setError(null);
@@ -50,17 +444,6 @@ function W2GuPanel() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function triggerDownload(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   }
 
   async function downloadCsv() {
@@ -291,6 +674,8 @@ function TotalBox({ label, value }: { label: string; value: number }) {
 
 type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu';
 
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'tax-withholding-summary', 'w2-gu'];
+
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
     id: 'payroll-register',
@@ -407,10 +792,12 @@ export function Reports() {
         </div>
 
         {/* Active report panel */}
+        {activeReport === 'payroll-register' && <PayrollRegisterPanel />}
+        {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
         {activeReport === 'w2-gu' && <W2GuPanel />}
 
         {/* Placeholder for other reports not yet wired */}
-        {activeReport && activeReport !== 'w2-gu' && (
+        {activeReport && !PANELS_WITH_UI.includes(activeReport) && (
           <Card>
             <CardHeader>
               <CardTitle>{reports.find((r) => r.id === activeReport)?.title}</CardTitle>
