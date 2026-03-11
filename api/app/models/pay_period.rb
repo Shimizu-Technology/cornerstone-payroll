@@ -43,6 +43,9 @@ class PayPeriod < ApplicationRecord
   validates :correction_status,
             inclusion: { in: CORRECTION_STATUSES },
             allow_nil: true
+  validates :source_pay_period_id,
+            presence: true,
+            if: :correction_run?
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
 

@@ -172,6 +172,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:no_content)
       expect(PayPeriod.exists?(pay_period.id)).to eq(false)
       expect(source.reload.superseded_by_id).to be_nil
+
+      deletion_event = PayPeriodCorrectionEvent.where(action_type: "correction_run_deleted")
+                                               .order(:id)
+                                               .last
+      expect(deletion_event).to be_present
+      expect(deletion_event.pay_period_id).to eq(source.id)
+      expect(deletion_event.reason).to eq("Draft correction run deleted by operator")
     end
 
     it "returns correction-run delete message even when correction run is committed" do

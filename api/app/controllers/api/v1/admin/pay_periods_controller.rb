@@ -71,10 +71,19 @@ module Api
             end
 
             ActiveRecord::Base.transaction do
+              source = nil
               if @pay_period.source_pay_period_id.present?
                 source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
               end
+
+              PayPeriodCorrectionEvent.record!(
+                action_type: "correction_run_deleted",
+                pay_period: source || @pay_period,
+                resulting_pay_period: @pay_period,
+                actor: current_user,
+                reason: "Draft correction run deleted by operator"
+              )
 
               @pay_period.destroy!
             end

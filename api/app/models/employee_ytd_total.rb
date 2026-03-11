@@ -38,7 +38,7 @@ class EmployeeYtdTotal < ApplicationRecord
       self.loans += payroll_item.loan_payment.to_f
       self.tips += payroll_item.reported_tips.to_f
       self.bonus += payroll_item.bonus.to_f
-      self.overtime_pay += (payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5)
+      self.overtime_pay += payroll_item.overtime_pay.to_f
       save!
     end
   end
@@ -58,7 +58,7 @@ class EmployeeYtdTotal < ApplicationRecord
       self.loans              = [ loans - payroll_item.loan_payment.to_f, 0 ].max
       self.tips               = [ tips - payroll_item.reported_tips.to_f, 0 ].max
       self.bonus              = [ bonus - payroll_item.bonus.to_f, 0 ].max
-      self.overtime_pay       = [ overtime_pay - (payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5), 0 ].max
+      self.overtime_pay       = [ overtime_pay - payroll_item.overtime_pay.to_f, 0 ].max
       save!
     end
   end

@@ -10,6 +10,7 @@ class PayPeriodCorrectionEvent < ApplicationRecord
     void_initiated
     correction_run_created
     correction_run_committed
+    correction_run_deleted
   ].freeze
 
   belongs_to :pay_period
