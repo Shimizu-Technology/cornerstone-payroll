@@ -22,11 +22,13 @@ class W2GuAggregator
         company_name: company.name,
         year: year,
         generated_at: Time.current.iso8601,
+        # W-2GU count should reflect only employees with committed payroll in year.
         employee_count: rows.length,
         caveats: [
           "This report is a preparation summary and should be reviewed before filing.",
           "Employees missing SSN are flagged in compliance_issues.",
-          "Box labels map to W-2GU concepts but final filing format/export is separate."
+          "Box labels map to W-2GU concepts but final filing format/export is separate.",
+          "Box 5 is derived from gross wages + reported tips (pre-tax exclusions not modeled yet)."
         ]
       },
       employer: {
@@ -49,34 +51,51 @@ class W2GuAggregator
 
   private
 
-  def employees
-    @employees ||= Employee.where(company_id: company.id).order(:last_name, :first_name)
+  def year_range
+    Date.new(year, 1, 1)..Date.new(year, 12, 31)
   end
 
-  def employee_items(employee)
-    PayrollItem.joins(:pay_period)
-               .where(employee_id: employee.id)
-               .where(pay_periods: {
-                 status: "committed",
-                 pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)
-               })
+  # Pre-aggregate payroll sums by employee to avoid N+1 SUM queries.
+  def aggregated_items
+    @aggregated_items ||= PayrollItem
+      .joins(:pay_period)
+      .where(pay_periods: { company_id: company.id, status: "committed", pay_date: year_range })
+      .group(:employee_id)
+      .select(
+        :employee_id,
+        "SUM(gross_pay) AS gross_pay",
+        "SUM(reported_tips) AS reported_tips",
+        "SUM(withholding_tax) AS withholding_tax",
+        "SUM(social_security_tax) AS ss_tax",
+        "SUM(medicare_tax) AS medicare_tax"
+      )
+      .index_by(&:employee_id)
+  end
+
+  def employees
+    @employees ||= Employee
+      .where(company_id: company.id, id: aggregated_items.keys)
+      .order(:last_name, :first_name)
   end
 
   def employee_row(employee)
-    items = employee_items(employee)
+    sums = aggregated_items[employee.id]
 
-    gross_pay = items.sum(:gross_pay).to_f
-    reported_tips = items.sum(:reported_tips).to_f
-    withholding_tax = items.sum(:withholding_tax).to_f
-    ss_tax = items.sum(:social_security_tax).to_f
-    medicare_tax = items.sum(:medicare_tax).to_f
+    gross_pay = sums&.gross_pay.to_f
+    reported_tips = sums&.reported_tips.to_f
+    withholding_tax = sums&.withholding_tax.to_f
+    ss_tax = sums&.ss_tax.to_f
+    medicare_tax = sums&.medicare_tax.to_f
 
     # Approximation for box 1 until pre-tax exclusions are fully modeled.
     box1 = (gross_pay + reported_tips).round(2)
 
-    # Derive wages from withheld tax rates where possible to avoid drift.
+    # Box 3 can still be derived from SS tax (flat 6.2% employee-side withholding).
     box3 = (ss_tax / 0.062).round(2)
-    box5 = (medicare_tax / 0.0145).round(2)
+
+    # Box 5 should be wage-based, not back-calculated from medicare tax,
+    # because Additional Medicare Tax (> $200K) distorts the effective rate.
+    box5 = (gross_pay + reported_tips).round(2)
 
     {
       employee_id: employee.id,
@@ -101,9 +120,7 @@ class W2GuAggregator
     issues << "Employer EIN is missing" if company.ein.blank?
 
     missing_ssn = rows.select { |r| r[:has_missing_ssn] }
-    if missing_ssn.any?
-      issues << "#{missing_ssn.count} employee(s) missing SSN"
-    end
+    issues << "#{missing_ssn.count} employee(s) missing SSN" if missing_ssn.any?
 
     issues
   end

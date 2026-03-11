@@ -187,6 +187,33 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(issues.join(" ")).to match(/missing SSN/)
     end
 
+    it "counts only employees with committed payroll in the year" do
+      create(:employee, company: company, department: department, ssn_encrypted: "987-65-4321")
+
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      meta = response.parsed_body.dig("report", "meta")
+      expect(meta["employee_count"]).to eq(1)
+      expect(response.parsed_body.dig("report", "employees").length).to eq(1)
+    end
+
+    it "does not back-calculate box5 from medicare tax when additional medicare applies" do
+      high_earner = create(:employee, company: company, department: department, ssn_encrypted: "555-55-5555")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: high_earner,
+        gross_pay: 250_000.00,
+        reported_tips: 0.00,
+        withholding_tax: 20_000.00,
+        social_security_tax: 9_932.20,
+        medicare_tax: 4_075.00)
+
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == high_earner.id }
+      expect(row["box5_medicare_wages_tips"].to_f).to eq(250_000.0)
+    end
+
     it "returns 422 for invalid year" do
       get "/api/v1/admin/reports/w2_gu", params: { year: "abc" }
       expect(response).to have_http_status(:unprocessable_entity)
