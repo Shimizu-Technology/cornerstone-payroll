@@ -104,9 +104,11 @@ class W2GuAggregator
     # Approximation for box 1 until pre-tax exclusions are fully modeled.
     box1 = (gross_pay + reported_tips).round(2)
 
-    # Box 3 is SS wages excluding tips (tips are reported separately in Box 7).
-    # Cap non-tip wages after reserving SS wage-base room for Box 7 tips.
-    remaining_ss_base = [ ss_wage_base - reported_tips, 0.0 ].max
+    # Box 7 (Social Security tips) must be capped at SS wage base.
+    box7 = [ reported_tips, ss_wage_base ].min.round(2)
+
+    # Box 3 is SS wages excluding tips. Remaining base is after capped Box 7.
+    remaining_ss_base = [ ss_wage_base - box7, 0.0 ].max
     box3 = [ gross_pay, remaining_ss_base ].min.round(2)
 
     # Box 5 should be wage-based, not back-calculated from medicare tax,
@@ -125,7 +127,7 @@ class W2GuAggregator
       box4_social_security_tax_withheld: ss_tax.round(2),
       box5_medicare_wages_tips: box5,
       box6_medicare_tax_withheld: medicare_tax.round(2),
-      box7_social_security_tips: reported_tips.round(2),
+      box7_social_security_tips: box7,
 
       has_missing_ssn: employee.ssn_last_four.blank?
     }

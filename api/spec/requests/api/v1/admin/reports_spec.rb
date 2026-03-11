@@ -224,6 +224,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(row["box3_social_security_wages"].to_f).to eq(176_100.0)
     end
 
+    it "caps box7 at SS wage base and reduces box3 remaining base" do
+      tipped_high_earner = create(:employee, company: company, department: department, ssn_encrypted: "444-44-4444")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: tipped_high_earner,
+        gross_pay: 50_000.00,
+        reported_tips: 200_000.00,
+        withholding_tax: 10_000.00,
+        social_security_tax: 9_932.20,
+        medicare_tax: 3_625.00)
+
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == tipped_high_earner.id }
+      expect(row["box7_social_security_tips"].to_f).to eq(176_100.0)
+      expect(row["box3_social_security_wages"].to_f).to eq(0.0)
+    end
+
     it "returns 422 for invalid year" do
       get "/api/v1/admin/reports/w2_gu", params: { year: "abc" }
       expect(response).to have_http_status(:unprocessable_entity)
