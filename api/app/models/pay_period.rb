@@ -88,7 +88,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def can_void?
-    committed? && !voided? && !correction_run? && superseded_by_id.nil?
+    committed? && !voided? && superseded_by_id.nil?
   end
 
   def can_create_correction_run?

@@ -143,12 +143,17 @@ class PayPeriodCorrectionService
   # Called from PayPeriodsController#commit for correction-run periods.
   # ----------------------------------------------------------------
   def self.record_correction_committed!(pay_period:, actor:, reason: "Correction run committed")
+    source = pay_period.source_pay_period || pay_period
+
     PayPeriodCorrectionEvent.record!(
-      action_type:   "correction_run_committed",
-      pay_period:    pay_period.source_pay_period || pay_period,
-      resulting_pay_period: pay_period,
-      actor:         actor,
-      reason:        reason
+      action_type:           "correction_run_committed",
+      pay_period:            source,
+      resulting_pay_period:  pay_period,
+      actor:                 actor,
+      reason:                reason,
+      # Keep the canonical source-period linkage while capturing the
+      # newly committed correction-run totals for audit completeness.
+      financial_snapshot_from: :resulting_pay_period
     )
   end
 

@@ -48,9 +48,17 @@ class PayPeriodCorrectionEvent < ApplicationRecord
     actor:,
     reason:,
     resulting_pay_period: nil,
-    extra_metadata: {}
+    extra_metadata: {},
+    financial_snapshot_from: :pay_period
   )
-    snapshot = build_financial_snapshot(pay_period)
+    snapshot_source =
+      if financial_snapshot_from == :resulting_pay_period && resulting_pay_period.present?
+        resulting_pay_period
+      else
+        pay_period
+      end
+
+    snapshot = build_financial_snapshot(snapshot_source)
 
     create!(
       action_type:             action_type,
