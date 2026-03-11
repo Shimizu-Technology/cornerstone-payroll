@@ -152,6 +152,11 @@ module Api
               update_ytd_totals(item)
             end
 
+            # Auto-assign check numbers to payroll items that don't have one yet.
+            # Uses company-level row lock to prevent collisions across concurrent commits.
+            unassigned = @pay_period.payroll_items.where(check_number: nil)
+            @pay_period.company.assign_check_numbers!(unassigned) if unassigned.exists?
+
             # Prepare tax sync (generate idempotency key inside transaction)
             @pay_period.generate_idempotency_key!
             @pay_period.update!(tax_sync_status: "pending")
@@ -161,6 +166,8 @@ module Api
           PayrollTaxSyncJob.perform_later(@pay_period.id)
 
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
@@ -243,6 +250,13 @@ module Api
             employer_social_security_tax: item.employer_social_security_tax,
             employer_medicare_tax: item.employer_medicare_tax,
             check_number: item.check_number,
+            check_printed_at: item.check_printed_at,
+            check_print_count: item.check_print_count,
+            check_status: item.check_status,
+            voided: item.voided,
+            voided_at: item.voided_at,
+            void_reason: item.void_reason,
+            reprint_of_check_number: item.reprint_of_check_number,
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net
           }

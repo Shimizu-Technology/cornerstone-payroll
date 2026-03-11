@@ -19,7 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
-import type { ImportPreviewRow, ImportPreviewResponse } from '@/services/api';
+import type { ImportPreviewResponse } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
 interface ImportModalProps {
@@ -243,7 +243,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                           )}
                         </TableCell>
                         <TableCell className="text-center">
-                          <Badge variant={row.confidence >= 1.0 ? 'default' : row.confidence >= 0.8 ? 'secondary' : 'destructive'}>
+                          <Badge variant={row.confidence >= 1.0 ? 'default' : row.confidence >= 0.8 ? 'warning' : 'danger'}>
                             {Math.round(row.confidence * 100)}%
                           </Badge>
                         </TableCell>
