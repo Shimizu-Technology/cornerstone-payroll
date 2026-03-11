@@ -404,6 +404,7 @@ export interface W2GuReport {
     box5_medicare_wages_tips: number;
     box6_medicare_tax_withheld: number;
     box7_social_security_tips: number;
+    reported_tips_total: number;
   };
   compliance_issues: string[];
   employees: W2GuEmployeeRow[];

@@ -35,13 +35,14 @@ class W2GuAggregator
         company_name: company.name,
         year: year,
         generated_at: Time.current.iso8601,
-        # W-2GU count should reflect only employees with committed payroll in year.
+        # W-2GU count reflects only employees with committed payroll in year.
         employee_count: rows.length,
         caveats: [
           "This report is a preparation summary and should be reviewed before filing.",
           "Employees missing SSN are flagged in compliance_issues.",
           "Box labels map to W-2GU concepts but final filing format/export is separate.",
-          "Box 5 is derived from gross wages + reported tips (pre-tax exclusions not modeled yet)."
+          "Box 5 is derived from gross wages + reported tips (pre-tax exclusions not modeled yet).",
+          "Box 1 and Box 5 can match in this initial pass when no pre-tax exclusions are modeled."
         ]
       },
       employer: {
@@ -56,7 +57,8 @@ class W2GuAggregator
         box4_social_security_tax_withheld: rows.sum { |r| r[:box4_social_security_tax_withheld].to_f }.round(2),
         box5_medicare_wages_tips: rows.sum { |r| r[:box5_medicare_wages_tips].to_f }.round(2),
         box6_medicare_tax_withheld: rows.sum { |r| r[:box6_medicare_tax_withheld].to_f }.round(2),
-        box7_social_security_tips: rows.sum { |r| r[:box7_social_security_tips].to_f }.round(2)
+        box7_social_security_tips: rows.sum { |r| r[:box7_social_security_tips].to_f }.round(2),
+        reported_tips_total: rows.sum { |r| r[:reported_tips_total].to_f }.round(2)
       },
       compliance_issues: compliance_issues(rows),
       employees: rows

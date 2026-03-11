@@ -189,6 +189,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(totals["box5_medicare_wages_tips"].to_f).to eq(3100.0)
       expect(totals["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(totals["box7_social_security_tips"].to_f).to eq(100.0)
+      expect(totals["reported_tips_total"].to_f).to eq(100.0)
     end
 
     it "flags missing SSN as compliance issue" do
@@ -258,6 +259,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(row["box7_social_security_tips"].to_f).to eq(126_100.0)
       expect(row["reported_tips_total"].to_f).to eq(200_000.0)
       expect(row["box7_limited_by_wage_base"]).to eq(true)
+    end
+
+    it "defaults to current year when year param is omitted" do
+      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+
+      get "/api/v1/admin/reports/w2_gu"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "meta", "year")).to eq(2025)
     end
 
     it "returns 422 for invalid year" do
