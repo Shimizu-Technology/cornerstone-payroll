@@ -171,6 +171,32 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/w2_gu
+        # Annual W-2GU summary data for filing preparation.
+        # Params:
+        #   year [Integer] – tax year (defaults to current year)
+        def w2_gu
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.today.year
+          end
+
+          unless year && year > 2000 && year <= Date.today.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          report = W2GuAggregator.new(company, year).generate
+
+          render json: { report: report }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary

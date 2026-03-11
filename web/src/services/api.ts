@@ -232,6 +232,7 @@ import type {
   CheckListResponse,
   CheckItem,
   CheckSettings,
+  W2GuReportResponse,
 } from '@/types';
 
 // Companies
@@ -657,6 +658,9 @@ export const reportsApi = {
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
   ytdSummary: (year?: number) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
+  // CPR-68: W-2GU Annual Report
+  w2Gu: (year: number) =>
+    api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),
 };
 
 // Pay Stubs (Admin API)

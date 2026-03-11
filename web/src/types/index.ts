@@ -360,6 +360,61 @@ export interface CheckSettings {
 }
 
 // ----------------
+// W-2GU Report (CPR-68)
+// ----------------
+
+export interface W2GuEmployeeRow {
+  employee_id: number;
+  employee_name: string;
+  employee_ssn_last4: string | null;
+  employee_address: string | null;
+  box1_wages_tips_other_comp: number;
+  box2_federal_income_tax_withheld: number;
+  box3_social_security_wages: number;
+  box4_social_security_tax_withheld: number;
+  box5_medicare_wages_tips: number;
+  box6_medicare_tax_withheld: number;
+  box7_social_security_tips: number;
+  reported_tips_total: number;
+  box7_limited_by_wage_base: boolean;
+  has_missing_ssn: boolean;
+  has_missing_address: boolean;
+}
+
+export interface W2GuReport {
+  meta: {
+    report_type: string;
+    company_id: number;
+    company_name: string;
+    year: number;
+    generated_at: string;
+    employee_count: number;
+    caveats: string[];
+  };
+  employer: {
+    name: string;
+    ein: string | null;
+    address: string | null;
+  };
+  totals: {
+    box1_wages_tips_other_comp: number;
+    box2_federal_income_tax_withheld: number;
+    box3_social_security_wages: number;
+    box4_social_security_tax_withheld: number;
+    box5_medicare_wages_tips: number;
+    box6_medicare_tax_withheld: number;
+    box7_social_security_tips: number;
+    reported_tips_total: number;
+  };
+  compliance_issues: string[];
+  employees: W2GuEmployeeRow[];
+}
+
+export interface W2GuReportResponse {
+  report: W2GuReport;
+}
+
+// ----------------
 // Dashboard Stats
 // ----------------
 
