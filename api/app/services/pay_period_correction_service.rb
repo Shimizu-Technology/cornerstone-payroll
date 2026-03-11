@@ -49,21 +49,26 @@ class PayPeriodCorrectionService
       raise AlreadyVoidedError, "This pay period has already been voided" if locked.voided?
       raise AlreadySupersededError, "This pay period already has a correction run" if locked.superseded_by_id.present?
 
-      # Snapshot financials before mutation
+      was_correction_run = locked.correction_run?
+      source_pay_period_id = locked.source_pay_period_id
+      source_period = source_pay_period_id.present? ? PayPeriod.lock("FOR UPDATE").find(source_pay_period_id) : nil
+
+      # Snapshot financials before mutation.
+      # For a correction-run void, link the event to the source period while
+      # snapshotting financials from the correction run being voided.
       event = PayPeriodCorrectionEvent.record!(
         action_type:    "void_initiated",
-        pay_period:     locked,
+        pay_period:     source_period || locked,
+        resulting_pay_period: (was_correction_run ? locked : nil),
         actor:          actor,
-        reason:         reason
+        reason:         reason,
+        financial_snapshot_from: (was_correction_run ? :resulting_pay_period : :pay_period)
       )
 
       # Reverse YTD totals for every non-voided payroll item
       locked.payroll_items.where(voided: false).each do |item|
         reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
       end
-
-      was_correction_run = locked.correction_run?
-      source_pay_period_id = locked.source_pay_period_id
 
       # Mark the pay period voided
       locked.update!(
@@ -75,10 +80,9 @@ class PayPeriodCorrectionService
 
       # If a committed correction run is being voided, release source linkage so
       # operators can create another correction run from the original source.
-      if was_correction_run && source_pay_period_id.present?
-        source = PayPeriod.lock("FOR UPDATE").find(source_pay_period_id)
-        if source.superseded_by_id == locked.id
-          source.update!(superseded_by_id: nil)
+      if was_correction_run && source_period.present?
+        if source_period.superseded_by_id == locked.id
+          source_period.update!(superseded_by_id: nil)
         end
       end
 
@@ -155,7 +159,8 @@ class PayPeriodCorrectionService
   # Called from PayPeriodsController#commit for correction-run periods.
   # ----------------------------------------------------------------
   def self.record_correction_committed!(pay_period:, actor:, reason: "Correction run committed")
-    source = pay_period.source_pay_period || pay_period
+    source = pay_period.source_pay_period
+    raise InvalidStateError, "Correction run is missing source pay period linkage" if source.nil?
 
     PayPeriodCorrectionEvent.record!(
       action_type:           "correction_run_committed",

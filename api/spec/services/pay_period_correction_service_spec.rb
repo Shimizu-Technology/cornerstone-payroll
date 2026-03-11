@@ -383,6 +383,20 @@ RSpec.describe PayPeriodCorrectionService do
   # ----------------------------------------------------------------
   # audit_trail
   # ----------------------------------------------------------------
+  describe ".record_correction_committed!" do
+    it "raises when correction run is missing source linkage" do
+      orphan_correction = create(:pay_period, :correction_run, company: company,
+                                 status: "committed", source_pay_period_id: nil)
+
+      expect {
+        PayPeriodCorrectionService.record_correction_committed!(
+          pay_period: orphan_correction,
+          actor: actor
+        )
+      }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /missing source pay period linkage/)
+    end
+  end
+
   describe ".audit_trail" do
     before { setup_ytd_totals }
 
@@ -396,6 +410,35 @@ RSpec.describe PayPeriodCorrectionService do
       trail = PayPeriodCorrectionService.audit_trail(committed_period)
       expect(trail.count).to eq(1)
       expect(trail.first.action_type).to eq("void_initiated")
+    end
+
+    it "includes correction-run void event in source period trail" do
+      source = create(:pay_period, :voided, company: company,
+                      start_date: Date.new(2024, 1, 1),
+                      end_date: Date.new(2024, 1, 14),
+                      pay_date: Date.new(2024, 1, 19),
+                      status: "committed")
+      correction_run = create(:pay_period, :correction_run, company: company,
+                              start_date: Date.new(2024, 1, 1),
+                              end_date: Date.new(2024, 1, 14),
+                              pay_date: Date.new(2024, 1, 26),
+                              status: "committed",
+                              source_pay_period: source)
+      source.update!(superseded_by_id: correction_run.id)
+      create(:payroll_item, pay_period: correction_run, employee: employee,
+             gross_pay: 100.0, net_pay: 80.0, voided: false)
+
+      PayPeriodCorrectionService.void!(
+        pay_period: correction_run,
+        actor: actor,
+        reason: "Void incorrect correction run"
+      )
+
+      trail = PayPeriodCorrectionService.audit_trail(source)
+      void_event = trail.find { |e| e.action_type == "void_initiated" }
+      expect(void_event).to be_present
+      expect(void_event.pay_period_id).to eq(source.id)
+      expect(void_event.resulting_pay_period_id).to eq(correction_run.id)
     end
 
     it "includes events where the period is the resulting period" do
