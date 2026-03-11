@@ -217,6 +217,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == high_earner.id }
       expect(row["box5_medicare_wages_tips"].to_f).to eq(250_000.0)
+      expect(row["box3_social_security_wages"].to_f).to be < 250_000.0
+      expect(row["box3_social_security_wages"].to_f).to eq(176_100.0)
     end
 
     it "returns 422 for invalid year" do

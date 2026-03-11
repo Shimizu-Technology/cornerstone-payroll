@@ -5,6 +5,10 @@
 # Produces annual W-2GU summary data from committed payroll for a company.
 # This is a filing-prep dataset (JSON-first) for review/export.
 class W2GuAggregator
+  SS_WAGE_BASE_BY_YEAR = {
+    2025 => 176_100.00
+  }.freeze
+
   attr_reader :company, :year
 
   def initialize(company, year)
@@ -91,8 +95,8 @@ class W2GuAggregator
     # Approximation for box 1 until pre-tax exclusions are fully modeled.
     box1 = (gross_pay + reported_tips).round(2)
 
-    # Box 3 can still be derived from SS tax (flat 6.2% employee-side withholding).
-    box3 = (ss_tax / 0.062).round(2)
+    # Box 3 (Social Security wages) should be wage-based and capped by SS wage base.
+    box3 = [ (gross_pay + reported_tips), ss_wage_base ].min.round(2)
 
     # Box 5 should be wage-based, not back-calculated from medicare tax,
     # because Additional Medicare Tax (> $200K) distorts the effective rate.
@@ -124,5 +128,9 @@ class W2GuAggregator
     issues << "#{missing_ssn.count} employee(s) missing SSN" if missing_ssn.any?
 
     issues
+  end
+
+  def ss_wage_base
+    SS_WAGE_BASE_BY_YEAR[year] || 176_100.00
   end
 end

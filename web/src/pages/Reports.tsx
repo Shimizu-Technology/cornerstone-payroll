@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,12 +12,11 @@ function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
-const currentYear = new Date().getFullYear();
-const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
-
 // ─── W-2GU Panel ─────────────────────────────────────────────────────────────
 
 function W2GuPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear - 1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -198,7 +197,7 @@ function TotalBox({ label, value }: { label: string; value: number }) {
 
 type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu';
 
-const reports: { id: ReportId; title: string; description: string; icon: React.ReactNode }[] = [
+const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
     id: 'payroll-register',
     title: 'Payroll Register',
