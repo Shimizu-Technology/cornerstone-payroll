@@ -173,13 +173,11 @@ module Api
           end
 
           user = User.find(current_user_id)
-          already_printed = @payroll_item.check_printed_at.present?
-
-          @payroll_item.mark_printed!(user: user, ip_address: request.remote_ip)
+          result = @payroll_item.mark_printed!(user: user, ip_address: request.remote_ip)
 
           render json: {
             payroll_item: check_item_json(@payroll_item.reload),
-            already_printed: already_printed
+            already_printed: result[:already_printed]
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "User not found" }, status: :unprocessable_entity
@@ -397,7 +395,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:employee, :pay_period, :check_events).find(params[:payroll_item_id])
+          @payroll_item = PayrollItem.includes(:employee, :check_events, pay_period: :company).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found and return
           end

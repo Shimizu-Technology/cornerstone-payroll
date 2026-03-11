@@ -34,7 +34,7 @@ class PayrollItem < ApplicationRecord
   # Mark this check as printed and log the event.
   # @param user [User]  the operator performing the print action
   # @param ip_address [String, nil]
-  # @return [CheckEvent]
+  # @return [Hash] { already_printed: Boolean, event: CheckEvent }
   def mark_printed!(user:, ip_address: nil)
     raise ArgumentError, "Cannot mark a voided check as printed" if voided?
     raise ArgumentError, "No check number assigned" if check_number.blank?
@@ -44,16 +44,20 @@ class PayrollItem < ApplicationRecord
       raise ArgumentError, "Cannot mark a voided check as printed" if voided? # re-check under lock
       raise ArgumentError, "No check number assigned" if check_number.blank? # re-check under lock
 
+      already_printed = check_printed_at.present?
+
       update!(
         check_printed_at: check_printed_at || Time.current,
         check_print_count: check_print_count + 1
       )
-      check_events.create!(
+      event = check_events.create!(
         user: user,
         event_type: "printed",
         check_number: check_number,
         ip_address: ip_address
       )
+
+      { already_printed: already_printed, event: event }
     end
   end
 

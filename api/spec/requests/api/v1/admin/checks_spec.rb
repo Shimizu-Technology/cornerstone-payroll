@@ -153,7 +153,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
-
+    it "returns 422 for an uncommitted pay period" do
+      get "/api/v1/admin/payroll_items/#{draft_item.id}/check"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/committed pay periods/)
+    end
   end
 
   # -----------------------------------------------------------------------
