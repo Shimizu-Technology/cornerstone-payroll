@@ -33,7 +33,8 @@ class CreatePayPeriodCorrectionEvents < ActiveRecord::Migration[8.1]
 
       # Immutable financial snapshot at the moment of the action
       # Keys: gross_pay, net_pay, employee_count, total_withholding,
-      #       total_social_security, total_medicare, total_employer_taxes
+      #       total_social_security, total_medicare,
+      #       total_employer_ss, total_employer_medicare
       t.jsonb   :financial_snapshot, default: {}, null: false
 
       # Arbitrary additional context

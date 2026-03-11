@@ -428,6 +428,7 @@ function CorrectionModal({
   onCancel,
 }: CorrectionModalProps) {
   const titleId = useId();
+  const descriptionId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
@@ -488,6 +489,7 @@ function CorrectionModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         tabIndex={-1}
         className="w-full max-w-md rounded-xl bg-white shadow-2xl"
       >
@@ -495,7 +497,7 @@ function CorrectionModal({
           <h3 id={titleId} className="text-lg font-semibold text-gray-900">{title}</h3>
         </div>
         <div className="px-6 py-4">
-          {description}
+          <div id={descriptionId}>{description}</div>
           {errorMessage && (
             <p className="mt-3 text-sm text-red-600 rounded-md bg-red-50 border border-red-200 px-3 py-2">
               {errorMessage}
