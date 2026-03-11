@@ -69,6 +69,10 @@ module Api
             return render json: { error: "Cannot delete a committed pay period" }, status: :unprocessable_entity
           end
 
+          if @pay_period.correction_run?
+            return render json: { error: "Cannot delete a correction run pay period" }, status: :unprocessable_entity
+          end
+
           @pay_period.destroy
           head :no_content
         end

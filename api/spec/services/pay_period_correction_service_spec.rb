@@ -204,6 +204,32 @@ RSpec.describe PayPeriodCorrectionService do
       end
     end
 
+    context "when voiding a committed correction run" do
+      it "clears source superseded_by_id so another correction run can be created" do
+        source = create(:pay_period, :voided, company: company,
+                        start_date: Date.new(2024, 1, 1),
+                        end_date: Date.new(2024, 1, 14),
+                        pay_date: Date.new(2024, 1, 19),
+                        status: "committed")
+        correction_run = create(:pay_period, :correction_run, company: company,
+                                start_date: Date.new(2024, 1, 1),
+                                end_date: Date.new(2024, 1, 14),
+                                pay_date: Date.new(2024, 1, 26),
+                                status: "committed",
+                                source_pay_period: source)
+        source.update!(superseded_by_id: correction_run.id)
+
+        PayPeriodCorrectionService.void!(
+          pay_period: correction_run,
+          actor: actor,
+          reason: "Correction run had wrong pay date"
+        )
+
+        source.reload
+        expect(source.superseded_by_id).to be_nil
+      end
+    end
+
     context "atomicity" do
       before { setup_ytd_totals }
 

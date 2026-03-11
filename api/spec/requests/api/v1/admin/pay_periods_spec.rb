@@ -150,6 +150,28 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
     end
+
+    it "cannot delete a draft correction-run pay period" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(
+        correction_status: "correction",
+        source_pay_period_id: source.id,
+        status: "draft"
+      )
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/Cannot delete a correction run/i)
+      expect(PayPeriod.exists?(pay_period.id)).to eq(true)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do
