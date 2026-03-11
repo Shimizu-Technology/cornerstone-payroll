@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_11_000008) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -273,7 +273,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000008) do
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
     t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
-    t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "(source_pay_period_id IS NOT NULL)"
+    t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true

@@ -324,7 +324,7 @@ module Api
         private
 
         def set_pay_period
-          @pay_period = PayPeriod.includes(:payroll_items, :voided_by).find(params[:id])
+          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period).find(params[:id])
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found

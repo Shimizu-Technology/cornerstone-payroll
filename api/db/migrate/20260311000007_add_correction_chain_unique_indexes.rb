@@ -7,7 +7,7 @@ class AddCorrectionChainUniqueIndexes < ActiveRecord::Migration[8.1]
     add_index :pay_periods,
       :source_pay_period_id,
       unique: true,
-      where: "source_pay_period_id IS NOT NULL",
+      where: "source_pay_period_id IS NOT NULL AND correction_status <> 'voided'",
       name: "idx_pay_periods_unique_source_correction_run" unless index_exists?(:pay_periods, :source_pay_period_id, unique: true, name: "idx_pay_periods_unique_source_correction_run")
 
     # A voided/source period may be superseded by at most one correction run.
