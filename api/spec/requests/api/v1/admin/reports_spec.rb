@@ -136,6 +136,64 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/reports/w2_gu" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      employee.update!(ssn_encrypted: "123-45-6789")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns 200 with W-2GU structure" do
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body["report"]
+      expect(report.dig("meta", "report_type")).to eq("w2_gu")
+      expect(report.dig("meta", "year")).to eq(2025)
+      expect(report["employees"]).to be_an(Array)
+      expect(report["totals"]).to be_a(Hash)
+    end
+
+    it "returns expected employee totals" do
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      employee_row = response.parsed_body.dig("report", "employees", 0)
+      expect(employee_row["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
+      expect(employee_row["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
+      expect(employee_row["box4_social_security_tax_withheld"].to_f).to eq(186.0)
+      expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
+    end
+
+    it "flags missing SSN as compliance issue" do
+      employee.update!(ssn_encrypted: nil)
+
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      issues = response.parsed_body.dig("report", "compliance_issues")
+      expect(issues.join(" ")).to match(/missing SSN/)
+    end
+
+    it "returns 422 for invalid year" do
+      get "/api/v1/admin/reports/w2_gu", params: { year: "abc" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/)
+    end
+  end
+
   describe "GET /api/v1/admin/reports/tax_summary" do
     it "uses dedicated employer tax fields in totals" do
       pay_period = create(:pay_period, company: company, status: "committed", pay_date: Date.new(2026, 2, 13))
