@@ -50,8 +50,14 @@ function PayrollRegisterPanel() {
     payPeriodsApi.list({ status: 'committed' })
       .then((res) => {
         const periods = res.pay_periods ?? [];
-        setPayPeriods(periods);
-        if (periods.length > 0) setSelectedPeriodId(periods[0].id);
+        const sorted = [...periods].sort((a, b) => {
+          const aDate = Date.parse(a.pay_date || '');
+          const bDate = Date.parse(b.pay_date || '');
+          if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return bDate - aDate;
+          return b.id - a.id;
+        });
+        setPayPeriods(sorted);
+        if (sorted.length > 0) setSelectedPeriodId(sorted[0].id);
       })
       .catch(() => setError('Failed to load pay periods'))
       .finally(() => setLoadingPeriods(false));
