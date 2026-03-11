@@ -176,6 +176,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(employee_row["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
       expect(employee_row["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
+      expect(employee_row["box3_social_security_wages"].to_f).to eq(3000.0)
       expect(employee_row["box4_social_security_tax_withheld"].to_f).to eq(186.0)
       expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(employee_row["box7_social_security_tips"].to_f).to eq(100.0)
@@ -227,8 +228,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to match(/year/)
     end
 
-    it "returns 422 when SS wage base is not configured for year" do
+    it "returns 200 for configured current-year wage base" do
       get "/api/v1/admin/reports/w2_gu", params: { year: 2026 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "meta", "year")).to eq(2026)
+    end
+
+    it "returns 422 when SS wage base is not configured for year" do
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2027 }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/SS wage base not configured/)
     end

@@ -11,7 +11,8 @@ class W2GuAggregator
     2022 => 147_000.00,
     2023 => 160_200.00,
     2024 => 168_600.00,
-    2025 => 176_100.00
+    2025 => 176_100.00,
+    2026 => 176_100.00
   }.freeze
 
   attr_reader :company, :year
@@ -103,8 +104,10 @@ class W2GuAggregator
     # Approximation for box 1 until pre-tax exclusions are fully modeled.
     box1 = (gross_pay + reported_tips).round(2)
 
-    # Box 3 (Social Security wages) should be wage-based and capped by SS wage base.
-    box3 = [ (gross_pay + reported_tips), ss_wage_base ].min.round(2)
+    # Box 3 is SS wages excluding tips (tips are reported separately in Box 7).
+    # Cap non-tip wages after reserving SS wage-base room for Box 7 tips.
+    remaining_ss_base = [ ss_wage_base - reported_tips, 0.0 ].max
+    box3 = [ gross_pay, remaining_ss_base ].min.round(2)
 
     # Box 5 should be wage-based, not back-calculated from medicare tax,
     # because Additional Medicare Tax (> $200K) distorts the effective rate.
