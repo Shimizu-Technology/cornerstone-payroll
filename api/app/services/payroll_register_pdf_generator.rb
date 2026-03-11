@@ -194,21 +194,22 @@ class PayrollRegisterPdfGenerator
     table_data = [ header ] + rows + [ totals_row ]
 
     page_width = pdf.bounds.width
-    col_widths = [
-      page_width * 0.17,  # Employee
-      page_width * 0.07,  # Type
-      page_width * 0.06,  # Hours
-      page_width * 0.06,  # OT Hrs
-      page_width * 0.09,  # Gross
-      page_width * 0.09,  # Withholding
-      page_width * 0.09,  # Soc Sec
-      page_width * 0.08,  # Medicare
-      page_width * 0.09,  # Retirement
-      page_width * 0.09,  # Deductions
-      page_width * 0.09,  # Net Pay
-      page_width * 0.08   # Check #
+    width_fractions = [
+      0.16,      # Employee
+      0.06,      # Type
+      0.055,     # Hours
+      0.055,     # OT Hrs
+      0.095,     # Gross
+      0.095,     # Withholding
+      0.09,      # Soc Sec
+      0.085,     # Medicare
+      0.09,      # Retirement
+      0.09,      # Deductions
+      0.09,      # Net Pay
+      0.095      # Check #
     ]
-    # Ensure widths sum to exactly page_width
+    col_widths = width_fractions.map { |fraction| page_width * fraction }
+    # Ensure widths sum to exactly page_width (float drift safety)
     col_widths[-1] = page_width - col_widths[0..-2].sum
 
     pdf.table(

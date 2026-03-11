@@ -636,8 +636,8 @@ export interface TaxSummaryReport {
     period: {
       year: number;
       quarter?: number;
-      start_date: string;
-      end_date: string;
+      start_date: string | null;
+      end_date: string | null;
     };
     totals: {
       gross_wages: number;

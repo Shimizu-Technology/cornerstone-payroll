@@ -274,8 +274,6 @@ module Api
           }
 
           [ report_data, nil ]
-        rescue ActiveRecord::RecordNotFound
-          [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
         end
 
         # Shared data builder for tax summary (JSON + CSV + PDF).
