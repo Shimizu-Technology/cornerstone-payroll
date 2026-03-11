@@ -6,7 +6,7 @@
  *   - Create correction run action (with required reason)
  *   - Correction history / audit trail display
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -146,6 +146,9 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
   const isCorrection = payPeriod.correction_status === 'correction';
   const canVoid      = payPeriod.can_void === true;
   const canCorrect   = payPeriod.can_create_correction_run === true;
+
+  const closeVoidModal = useCallback(() => setShowVoidModal(false), []);
+  const closeCorrectionModal = useCallback(() => setShowCorrectionModal(false), []);
 
   return (
     <div className="space-y-4">
@@ -301,7 +304,7 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
           confirmClassName="bg-red-600 hover:bg-red-700 text-white"
           loading={voidLoading}
           onConfirm={handleVoidSubmit}
-          onCancel={() => setShowVoidModal(false)}
+          onCancel={closeVoidModal}
         />
       )}
 
@@ -341,7 +344,7 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
           confirmClassName="bg-amber-600 hover:bg-amber-700 text-white"
           loading={correctionLoading}
           onConfirm={handleCorrectionSubmit}
-          onCancel={() => setShowCorrectionModal(false)}
+          onCancel={closeCorrectionModal}
         />
       )}
     </div>
@@ -424,6 +427,13 @@ function CorrectionModal({
   onConfirm,
   onCancel,
 }: CorrectionModalProps) {
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !loading) onCancel();
@@ -439,9 +449,16 @@ function CorrectionModal({
         if (e.target === e.currentTarget && !loading) onCancel();
       }}
     >
-      <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="w-full max-w-md rounded-xl bg-white shadow-2xl"
+      >
         <div className="border-b px-6 py-4">
-          <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+          <h3 id={titleId} className="text-lg font-semibold text-gray-900">{title}</h3>
         </div>
         <div className="px-6 py-4">
           {description}

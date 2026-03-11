@@ -202,16 +202,20 @@ module Api
               reason:     reason
             )
 
-            AuditLog.record!(
-              user:        current_user,
-              company_id:  current_company_id,
-              action:      "void_pay_period",
-              record_type: "PayPeriod",
-              record_id:   @pay_period.id,
-              metadata:    { reason: reason, voided_at: event.created_at },
-              ip_address:  request.remote_ip,
-              user_agent:  request.user_agent
-            )
+            begin
+              AuditLog.record!(
+                user:        current_user,
+                company_id:  current_company_id,
+                action:      "void_pay_period",
+                record_type: "PayPeriod",
+                record_id:   @pay_period.id,
+                metadata:    { reason: reason, voided_at: event.created_at },
+                ip_address:  request.remote_ip,
+                user_agent:  request.user_agent
+              )
+            rescue StandardError => e
+              Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
+            end
 
             @pay_period.reload
             render json: {
@@ -255,16 +259,20 @@ module Api
               notes:             params[:notes]
             )
 
-            AuditLog.record!(
-              user:        current_user,
-              company_id:  current_company_id,
-              action:      "create_correction_run",
-              record_type: "PayPeriod",
-              record_id:   @pay_period.id,
-              metadata:    { reason: reason, correction_run_id: correction_run.id },
-              ip_address:  request.remote_ip,
-              user_agent:  request.user_agent
-            )
+            begin
+              AuditLog.record!(
+                user:        current_user,
+                company_id:  current_company_id,
+                action:      "create_correction_run",
+                record_type: "PayPeriod",
+                record_id:   @pay_period.id,
+                metadata:    { reason: reason, correction_run_id: correction_run.id },
+                ip_address:  request.remote_ip,
+                user_agent:  request.user_agent
+              )
+            rescue StandardError => e
+              Rails.logger.error("[CPR-71] AuditLog create_correction_run failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
+            end
 
             @pay_period.reload
             render json: {

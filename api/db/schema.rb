@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_11_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_11_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -459,7 +459,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000005) do
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
+  add_foreign_key "pay_period_correction_events", "companies", on_delete: :restrict
+  add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
+  add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
+  add_foreign_key "pay_period_correction_events", "users", column: "actor_id", on_delete: :nullify
   add_foreign_key "pay_periods", "companies"
+  add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
+  add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
+  add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
