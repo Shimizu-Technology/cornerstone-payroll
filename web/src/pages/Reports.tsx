@@ -59,7 +59,8 @@ function W2GuPanel() {
                   setYear(Number(e.target.value));
                   setReport(null);
                 }}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
                 {yearOptions.map((y) => (
                   <option key={y} value={y}>{y}</option>
@@ -115,6 +116,7 @@ function W2GuPanel() {
                 <TotalBox label="Box 4 — SS Tax Withheld" value={report.totals.box4_social_security_tax_withheld} />
                 <TotalBox label="Box 5 — Medicare Wages & Tips" value={report.totals.box5_medicare_wages_tips} />
                 <TotalBox label="Box 6 — Medicare Tax Withheld" value={report.totals.box6_medicare_tax_withheld} />
+                <TotalBox label="Box 7 — Social Security Tips" value={report.totals.box7_social_security_tips} />
               </div>
 
               {/* Caveats */}

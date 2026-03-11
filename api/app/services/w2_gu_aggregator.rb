@@ -42,7 +42,8 @@ class W2GuAggregator
         box3_social_security_wages: rows.sum { |r| r[:box3_social_security_wages].to_f }.round(2),
         box4_social_security_tax_withheld: rows.sum { |r| r[:box4_social_security_tax_withheld].to_f }.round(2),
         box5_medicare_wages_tips: rows.sum { |r| r[:box5_medicare_wages_tips].to_f }.round(2),
-        box6_medicare_tax_withheld: rows.sum { |r| r[:box6_medicare_tax_withheld].to_f }.round(2)
+        box6_medicare_tax_withheld: rows.sum { |r| r[:box6_medicare_tax_withheld].to_f }.round(2),
+        box7_social_security_tips: rows.sum { |r| r[:box7_social_security_tips].to_f }.round(2)
       },
       compliance_issues: compliance_issues(rows),
       employees: rows

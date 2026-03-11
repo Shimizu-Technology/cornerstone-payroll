@@ -172,10 +172,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
 
       employee_row = response.parsed_body.dig("report", "employees", 0)
+      totals = response.parsed_body.dig("report", "totals")
+
       expect(employee_row["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
       expect(employee_row["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
       expect(employee_row["box4_social_security_tax_withheld"].to_f).to eq(186.0)
       expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
+      expect(employee_row["box7_social_security_tips"].to_f).to eq(100.0)
+
+      expect(totals["box7_social_security_tips"].to_f).to eq(100.0)
     end
 
     it "flags missing SSN as compliance issue" do

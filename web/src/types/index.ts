@@ -400,6 +400,7 @@ export interface W2GuReport {
     box4_social_security_tax_withheld: number;
     box5_medicare_wages_tips: number;
     box6_medicare_tax_withheld: number;
+    box7_social_security_tips: number;
   };
   compliance_issues: string[];
   employees: W2GuEmployeeRow[];
