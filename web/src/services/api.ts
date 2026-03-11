@@ -489,7 +489,49 @@ export const payPeriodsApi = {
   },
   applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[] }) =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
+
+  // CPR-71: Payroll correction workflow
+  void: (id: number, data: { reason: string }) =>
+    api.post<VoidPayPeriodResponse>(`/admin/pay_periods/${id}/void`, data),
+  createCorrectionRun: (
+    id: number,
+    data: {
+      reason: string;
+      start_date?: string;
+      end_date?: string;
+      pay_date?: string;
+      notes?: string;
+    }
+  ) =>
+    api.post<CorrectionRunResponse>(`/admin/pay_periods/${id}/create_correction_run`, data),
+  correctionHistory: (id: number) =>
+    api.get<CorrectionHistoryResponse>(`/admin/pay_periods/${id}/correction_history`),
 };
+
+// CPR-71: Correction response types
+export interface VoidPayPeriodResponse {
+  pay_period: import('@/types').PayPeriod;
+  correction_event: import('@/types').PayPeriodCorrectionEvent;
+}
+
+export interface CorrectionRunResponse {
+  source_pay_period: import('@/types').PayPeriod;
+  correction_run: import('@/types').PayPeriod;
+}
+
+export interface CorrectionHistoryResponse {
+  pay_period: {
+    id: number;
+    period_description: string;
+    status: string;
+    correction_status: string | null;
+    voided_at: string | null;
+    void_reason: string | null;
+    source_pay_period_id: number | null;
+    superseded_by_id: number | null;
+  };
+  correction_events: import('@/types').PayPeriodCorrectionEvent[];
+}
 
 // Import types
 export interface ImportPreviewRow {

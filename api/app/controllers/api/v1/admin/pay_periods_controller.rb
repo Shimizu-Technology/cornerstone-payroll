@@ -4,7 +4,10 @@ module Api
   module V1
     module Admin
       class PayPeriodsController < BaseController
-        before_action :set_pay_period, only: [ :show, :update, :destroy, :run_payroll, :approve, :commit, :retry_tax_sync ]
+        before_action :set_pay_period, only: [
+          :show, :update, :destroy, :run_payroll, :approve, :commit, :retry_tax_sync,
+          :void, :create_correction_run, :correction_history
+        ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -165,9 +168,131 @@ module Api
           # Enqueue async tax sync — never block commit
           PayrollTaxSyncJob.perform_later(@pay_period.id)
 
+          # CPR-71: if this is a correction run, write a committed audit event
+          if @pay_period.correction_run?
+            PayPeriodCorrectionService.record_correction_committed!(
+              pay_period: @pay_period,
+              actor:      current_user
+            )
+          end
+
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # ----------------------------------------------------------------
+        # CPR-71: Payroll Correction Workflow
+        # ----------------------------------------------------------------
+
+        # POST /api/v1/admin/pay_periods/:id/void
+        #
+        # Voids a committed pay period. Reverses YTD totals and writes an
+        # immutable correction audit event. Requires a mandatory reason.
+        def void
+          reason = params[:reason].to_s.strip
+          if reason.blank?
+            return render json: { error: "A reason is required to void a pay period" }, status: :unprocessable_entity
+          end
+
+          begin
+            event = PayPeriodCorrectionService.void!(
+              pay_period: @pay_period,
+              actor:      current_user,
+              reason:     reason
+            )
+
+            AuditLog.record!(
+              user:        current_user,
+              company_id:  current_company_id,
+              action:      "void_pay_period",
+              record_type: "PayPeriod",
+              record_id:   @pay_period.id,
+              metadata:    { reason: reason, voided_at: event.created_at },
+              ip_address:  request.remote_ip,
+              user_agent:  request.user_agent
+            )
+
+            @pay_period.reload
+            render json: {
+              pay_period: pay_period_json(@pay_period),
+              correction_event: correction_event_json(event)
+            }
+          rescue PayPeriodCorrectionService::AlreadyVoidedError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue PayPeriodCorrectionService::AlreadySupersededError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue PayPeriodCorrectionService::InvalidStateError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue PayPeriodCorrectionService::CorrectionError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          end
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/create_correction_run
+        #
+        # Creates a new draft pay period that corrects a voided period.
+        # The source period must be voided and not already superseded.
+        # The new period copies employee list from source for easy adjustment.
+        def create_correction_run
+          reason = params[:reason].to_s.strip
+          if reason.blank?
+            return render json: { error: "A reason is required to create a correction run" }, status: :unprocessable_entity
+          end
+
+          new_start_date = params[:start_date].present? ? Date.parse(params[:start_date]) : nil
+          new_end_date   = params[:end_date].present?   ? Date.parse(params[:end_date])   : nil
+          new_pay_date   = params[:pay_date].present?   ? Date.parse(params[:pay_date])   : nil
+
+          begin
+            correction_run = PayPeriodCorrectionService.create_correction_run!(
+              source_pay_period: @pay_period,
+              actor:             current_user,
+              reason:            reason,
+              new_start_date:    new_start_date,
+              new_end_date:      new_end_date,
+              new_pay_date:      new_pay_date,
+              notes:             params[:notes]
+            )
+
+            AuditLog.record!(
+              user:        current_user,
+              company_id:  current_company_id,
+              action:      "create_correction_run",
+              record_type: "PayPeriod",
+              record_id:   @pay_period.id,
+              metadata:    { reason: reason, correction_run_id: correction_run.id },
+              ip_address:  request.remote_ip,
+              user_agent:  request.user_agent
+            )
+
+            @pay_period.reload
+            render json: {
+              source_pay_period: pay_period_json(@pay_period),
+              correction_run:    pay_period_json(correction_run)
+            }, status: :created
+          rescue PayPeriodCorrectionService::NotVoidedError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue PayPeriodCorrectionService::AlreadySupersededError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue PayPeriodCorrectionService::CorrectionError => e
+            render json: { error: e.message }, status: :unprocessable_entity
+          rescue ArgumentError => e
+            render json: { error: "Invalid date: #{e.message}" }, status: :unprocessable_entity
+          end
+        end
+
+        # GET /api/v1/admin/pay_periods/:id/correction_history
+        #
+        # Returns the full correction audit trail for a pay period:
+        # events where it is the source and events where it is the result.
+        def correction_history
+          events = PayPeriodCorrectionService.audit_trail(@pay_period)
+
+          render json: {
+            pay_period:        pay_period_correction_summary_json(@pay_period),
+            correction_events: events.map { |e| correction_event_json(e) }
+          }
         end
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
@@ -215,6 +340,15 @@ module Api
             tax_sync_attempts: pay_period.tax_sync_attempts,
             tax_sync_last_error: pay_period.tax_sync_last_error,
             tax_synced_at: pay_period.tax_synced_at,
+            # CPR-71: correction fields
+            correction_status:        pay_period.correction_status,
+            voided_at:                pay_period.voided_at,
+            voided_by_id:             pay_period.voided_by_id,
+            void_reason:              pay_period.void_reason,
+            source_pay_period_id:     pay_period.source_pay_period_id,
+            superseded_by_id:         pay_period.superseded_by_id,
+            can_void:                 pay_period.can_void?,
+            can_create_correction_run: pay_period.can_create_correction_run?,
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }
@@ -259,6 +393,34 @@ module Api
             reprint_of_check_number: item.reprint_of_check_number,
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net
+          }
+        end
+
+        def correction_event_json(event)
+          {
+            id:                       event.id,
+            action_type:              event.action_type,
+            pay_period_id:            event.pay_period_id,
+            resulting_pay_period_id:  event.resulting_pay_period_id,
+            actor_id:                 event.actor_id,
+            actor_name:               event.actor_name,
+            reason:                   event.reason,
+            financial_snapshot:       event.financial_snapshot,
+            metadata:                 event.metadata,
+            created_at:               event.created_at
+          }
+        end
+
+        def pay_period_correction_summary_json(pay_period)
+          {
+            id:                pay_period.id,
+            period_description: pay_period.period_description,
+            status:            pay_period.status,
+            correction_status: pay_period.correction_status,
+            voided_at:         pay_period.voided_at,
+            void_reason:       pay_period.void_reason,
+            source_pay_period_id: pay_period.source_pay_period_id,
+            superseded_by_id:     pay_period.superseded_by_id
           }
         end
 

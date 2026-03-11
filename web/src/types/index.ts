@@ -119,6 +119,31 @@ export interface EmployeeFormData {
 export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed';
 export type TaxSyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
 
+// CPR-71: Payroll correction lifecycle
+export type CorrectionStatus = 'voided' | 'correction';
+
+export interface PayPeriodCorrectionEvent {
+  id: number;
+  action_type: 'void_initiated' | 'correction_run_created' | 'correction_run_committed';
+  pay_period_id: number;
+  resulting_pay_period_id?: number | null;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  reason: string;
+  financial_snapshot: {
+    gross_pay?: number;
+    net_pay?: number;
+    employee_count?: number;
+    total_withholding?: number;
+    total_social_security?: number;
+    total_medicare?: number;
+    total_employer_ss?: number;
+    total_employer_medicare?: number;
+  };
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface PayPeriod {
   id: number;
   company_id?: number;
@@ -138,6 +163,15 @@ export interface PayPeriod {
   tax_sync_attempts?: number;
   tax_sync_last_error?: string | null;
   tax_synced_at?: string | null;
+  // CPR-71: correction lifecycle fields
+  correction_status?: CorrectionStatus | null;
+  voided_at?: string | null;
+  voided_by_id?: number | null;
+  void_reason?: string | null;
+  source_pay_period_id?: number | null;
+  superseded_by_id?: number | null;
+  can_void?: boolean;
+  can_create_correction_run?: boolean;
   // Computed/included
   employee_count?: number;
   payroll_items_count?: number;
