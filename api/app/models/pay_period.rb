@@ -33,7 +33,7 @@ class PayPeriod < ApplicationRecord
   # CPR-71: correction audit trail
   has_many :correction_events,
            class_name: "PayPeriodCorrectionEvent",
-           dependent: :destroy
+           dependent: :restrict_with_error
 
   validates :start_date, presence: true
   validates :end_date, presence: true
@@ -88,7 +88,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def can_void?
-    committed? && !voided? && superseded_by_id.nil?
+    committed? && !voided? && !correction_run? && superseded_by_id.nil?
   end
 
   def can_create_correction_run?

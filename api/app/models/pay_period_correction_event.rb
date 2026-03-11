@@ -28,7 +28,7 @@ class PayPeriodCorrectionEvent < ApplicationRecord
   # Build a financial snapshot hash from a pay period and its items.
   # Called before any mutation so the snapshot reflects state at time of action.
   def self.build_financial_snapshot(pay_period)
-    items = pay_period.payroll_items.to_a
+    items = pay_period.payroll_items.where(voided: false).to_a
     {
       "gross_pay"            => items.sum { |i| i.gross_pay.to_f }.round(2),
       "net_pay"              => items.sum { |i| i.net_pay.to_f }.round(2),
