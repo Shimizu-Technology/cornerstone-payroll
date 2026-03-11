@@ -514,7 +514,11 @@ function CorrectionModal({
         <div className="px-6 py-4">
           <div id={descriptionId}>{description}</div>
           {errorMessage && (
-            <p className="mt-3 text-sm text-red-600 rounded-md bg-red-50 border border-red-200 px-3 py-2">
+            <p
+              role="alert"
+              aria-live="assertive"
+              className="mt-3 text-sm text-red-600 rounded-md bg-red-50 border border-red-200 px-3 py-2"
+            >
               {errorMessage}
             </p>
           )}

@@ -66,7 +66,20 @@ module Api
         # DELETE /api/v1/admin/pay_periods/:id
         def destroy
           if @pay_period.correction_run?
-            return render json: { error: "Cannot delete a correction run pay period" }, status: :unprocessable_entity
+            if @pay_period.committed?
+              return render json: { error: "Cannot delete a correction run pay period" }, status: :unprocessable_entity
+            end
+
+            ActiveRecord::Base.transaction do
+              if @pay_period.source_pay_period_id.present?
+                source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
+                source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
+              end
+
+              @pay_period.destroy!
+            end
+
+            return head :no_content
           end
 
           if @pay_period.committed?

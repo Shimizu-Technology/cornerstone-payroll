@@ -151,7 +151,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
     end
 
-    it "cannot delete a draft correction-run pay period" do
+    it "deletes a draft correction-run pay period and clears source superseded link" do
       source = PayPeriod.create!(
         company: company,
         start_date: Date.today - 28.days,
@@ -165,12 +165,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         source_pay_period_id: source.id,
         status: "draft"
       )
+      source.update!(superseded_by_id: pay_period.id)
 
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
 
-      expect(response).to have_http_status(:unprocessable_content)
-      expect(JSON.parse(response.body)["error"]).to match(/Cannot delete a correction run/i)
-      expect(PayPeriod.exists?(pay_period.id)).to eq(true)
+      expect(response).to have_http_status(:no_content)
+      expect(PayPeriod.exists?(pay_period.id)).to eq(false)
+      expect(source.reload.superseded_by_id).to be_nil
     end
 
     it "returns correction-run delete message even when correction run is committed" do
