@@ -128,16 +128,21 @@ class W2GuAggregator
       box6_medicare_tax_withheld: medicare_tax.round(2),
       box7_social_security_tips: box7,
 
-      has_missing_ssn: employee.ssn_last_four.blank?
+      has_missing_ssn: employee.ssn_last_four.blank?,
+      has_missing_address: missing_employee_address?(employee)
     }
   end
 
   def compliance_issues(rows)
     issues = []
     issues << "Employer EIN is missing" if company.ein.blank?
+    issues << "Employer address is missing" if missing_employer_address?
 
     missing_ssn = rows.select { |r| r[:has_missing_ssn] }
     issues << "#{missing_ssn.count} employee(s) missing SSN" if missing_ssn.any?
+
+    missing_employee_address = rows.count { |r| r[:has_missing_address] }
+    issues << "#{missing_employee_address} employee(s) missing address" if missing_employee_address.positive?
 
     issues
   end
@@ -146,5 +151,13 @@ class W2GuAggregator
     @ss_wage_base ||= SS_WAGE_BASE_BY_YEAR.fetch(year)
   rescue KeyError
     raise ArgumentError, "SS wage base not configured for #{year}"
+  end
+
+  def missing_employer_address?
+    company.address_line1.blank? || company.city.blank? || company.state.blank? || company.zip.blank?
+  end
+
+  def missing_employee_address?(employee)
+    employee.address_line1.blank? || employee.city.blank? || employee.state.blank? || employee.zip.blank?
   end
 end

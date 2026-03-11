@@ -35,6 +35,7 @@ function W2GuPanel() {
   async function loadReport() {
     setLoading(true);
     setError(null);
+    setReport(null);
     try {
       const res = await reportsApi.w2Gu(year);
       setReport(res.report);

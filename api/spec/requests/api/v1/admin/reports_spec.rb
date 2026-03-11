@@ -195,6 +195,17 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(issues.join(" ")).to match(/missing SSN/)
     end
 
+    it "flags missing employer and employee addresses as compliance issues" do
+      company.update!(address_line1: nil, city: nil, state: nil, zip: nil)
+      employee.update!(address_line1: nil, city: nil, state: nil, zip: nil)
+
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
+
+      issues = response.parsed_body.dig("report", "compliance_issues")
+      expect(issues.join(" ")).to match(/Employer address is missing/)
+      expect(issues.join(" ")).to match(/employee\(s\) missing address/)
+    end
+
     it "counts only employees with committed payroll in the year" do
       create(:employee, company: company, department: department, ssn_encrypted: "987-65-4321")
 
