@@ -54,6 +54,10 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
+  useEffect(() => {
+    setCorrectionPayDate(payPeriod.pay_date ?? '');
+  }, [payPeriod.id, payPeriod.pay_date]);
+
   // ----------------------------------------------------------------
   // Void
   // ----------------------------------------------------------------
