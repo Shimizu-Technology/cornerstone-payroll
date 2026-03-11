@@ -178,9 +178,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(employee_row["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
       expect(employee_row["box3_social_security_wages"].to_f).to eq(3000.0)
       expect(employee_row["box4_social_security_tax_withheld"].to_f).to eq(186.0)
+      expect(employee_row["box5_medicare_wages_tips"].to_f).to eq(3100.0)
       expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(employee_row["box7_social_security_tips"].to_f).to eq(100.0)
 
+      expect(totals["box5_medicare_wages_tips"].to_f).to eq(3100.0)
       expect(totals["box7_social_security_tips"].to_f).to eq(100.0)
     end
 
