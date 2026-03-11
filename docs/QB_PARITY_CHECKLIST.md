@@ -8,7 +8,7 @@
 - 🟡 **Partial** — Core exists but gaps remain (see "Next Actions")
 - ❌ **Missing** — Not yet implemented
 
-**Last updated:** 2026-03-09
+**Last updated:** 2026-03-11
 
 ---
 
@@ -86,12 +86,12 @@
 | Employer Medicare match (1.45%) | ✅ | ✅ **Done** | `employer_medicare_tax` on `PayrollItem` | — |
 | Annualized withholding method (IRS Pub 15-T) | ✅ | ❌ **Missing** | Current: tax brackets applied to per-period gross, not annualized | Implement annualize → apply bracket → de-annualize in `GuamTaxCalculator`; prevents systematic under-withholding |
 | Tax table as database-driven data | ✅ | 🟡 **Partial** | `TaxBracket`, `TaxTable`, `AnnualTaxConfig` models exist; `FilingStatusConfig` | Validate brackets match current DRT tables; add admin UI to update brackets without code deploy |
-| 941-GU quarterly filing report | ✅ | ❌ **Missing** | `tax_summary` endpoint has the right numbers; no 941-GU formatted output | Format `tax_summary` output as 941-GU-compatible PDF; verify line mapping against GRT/DRT forms |
+| 941-GU quarterly filing report | ✅ | ✅ **Done** | Implemented via Form 941-GU report endpoint (CPR-59) | Add PDF rendering/export once filing template is finalized |
 | W-2GU annual generation | ✅ | ❌ **Missing** | Not implemented | High priority for Jan year-end; needs employee SSN, YTD totals, employer EIN. Use Prawn |
 | W-2GU XML/EFW2 file (electronic filing) | ✅ | ❌ **Missing** | Not implemented | Follow after W-2GU PDF; Guam DRT accepts EFW2 format |
 | 1099-NEC (contractor payments) | ✅ | ❌ **Missing** | No contractor payment type | Add `contractor` employment type; 1099-NEC generation in Q4 |
 | ACH / direct deposit file generation (NACHA) | ✅ | ❌ **Missing** | Not implemented | Phase 2; requires bank routing/account on employee; NACHA format output |
-| Check printing (MICR / pre-printed stock) | ✅ | 🟡 **Partial** | `PayStubGenerator` uses Prawn; check-printing code exists but is screen-only per PRD | Verify `check_writer` gem integration; test against Bank of Guam pre-printed stock; add MICR encoding |
+| Check printing (MICR / pre-printed stock) | ✅ | ✅ **Done** | CPR-66 merged: check numbering, single/batch PDF, print/void/reprint, alignment test, audit trail | Run production stock validation cycle and document calibration defaults per client |
 
 ---
 
