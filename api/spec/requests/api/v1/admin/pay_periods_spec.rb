@@ -277,5 +277,25 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
       expect(JSON.parse(response.body)["error"]).to include("no payroll items")
     end
+
+    it "returns 422 when correction-commit audit validation fails" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(correction_status: "correction", source_pay_period_id: source.id)
+
+      allow(PayPeriodCorrectionService).to receive(:record_correction_committed!)
+        .and_raise(PayPeriodCorrectionService::InvalidStateError, "missing source pay period linkage")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/missing source pay period linkage/)
+    end
   end
 end

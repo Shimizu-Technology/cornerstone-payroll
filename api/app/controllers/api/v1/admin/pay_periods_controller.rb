@@ -181,6 +181,10 @@ module Api
           PayrollTaxSyncJob.perform_later(@pay_period.id)
 
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue PayPeriodCorrectionService::CorrectionError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
