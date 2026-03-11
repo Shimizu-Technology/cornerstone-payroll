@@ -198,8 +198,16 @@ export interface PayrollItem {
   ytd_medicare_tax?: number;
   ytd_retirement?: number;
   // Check info
+  // CPR-66: Check printing lifecycle
   check_number?: string;
-  check_printed_at?: string;
+  check_printed_at?: string | null;
+  check_print_count?: number;
+  check_status?: 'unprinted' | 'printed' | 'voided' | null;
+  voided?: boolean;
+  voided_at?: string | null;
+  void_reason?: string | null;
+  reprint_of_check_number?: string | null;
+  events?: CheckEvent[];
   created_at?: string;
   updated_at?: string;
   // Included relations
@@ -296,6 +304,59 @@ export interface PaginatedResponse<T> {
 export interface ApiError {
   error: string;
   details?: Record<string, string[]>;
+}
+
+// ----------------
+// Check Printing (CPR-66)
+// ----------------
+
+export interface CheckEvent {
+  id: number;
+  event_type: 'printed' | 'voided' | 'reprinted' | 'batch_downloaded';
+  check_number: string | null;
+  reason: string | null;
+  user_id: number | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface CheckItem {
+  id: number;
+  pay_period_id: number;
+  employee_id: number;
+  employee_name: string;
+  check_number: string | null;
+  net_pay: number;
+  gross_pay: number;
+  check_status: 'unprinted' | 'printed' | 'voided' | null;
+  check_printed_at: string | null;
+  check_print_count: number;
+  voided: boolean;
+  voided_at: string | null;
+  void_reason: string | null;
+  reprint_of_check_number: string | null;
+  events: CheckEvent[];
+}
+
+export interface CheckListMeta {
+  total: number;
+  printed: number;
+  unprinted: number;
+  voided: number;
+}
+
+export interface CheckListResponse {
+  checks: CheckItem[];
+  meta: CheckListMeta;
+}
+
+export interface CheckSettings {
+  next_check_number: number;
+  check_stock_type: 'bottom_check' | 'top_check';
+  check_offset_x: number;
+  check_offset_y: number;
+  bank_name: string | null;
+  bank_address: string | null;
 }
 
 // ----------------

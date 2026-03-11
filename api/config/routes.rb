@@ -40,7 +40,24 @@ Rails.application.routes.draw do
               post :recalculate
             end
           end
+
+          # CPR-66: Check printing (pay-period scoped)
+          get  "checks",                    to: "checks#index"
+          post "checks/batch_pdf",          to: "checks#batch_pdf"
+          post "checks/mark_all_printed",   to: "checks#mark_all_printed"
         end
+
+        # CPR-66: Per-item check actions (payroll_item_id param)
+        get  "payroll_items/:payroll_item_id/check",             to: "checks#show",           as: :payroll_item_check
+        post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
+        post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
+        post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
+
+        # CPR-66: Company check settings
+        get   "companies/check_settings",    to: "checks#check_settings"
+        patch "companies/check_settings",    to: "checks#update_check_settings"
+        patch "companies/next_check_number", to: "checks#update_next_check_number"
+        get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
 
         # Reports
         get "reports/dashboard", to: "reports#dashboard"

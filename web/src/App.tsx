@@ -13,6 +13,7 @@ import { Reports } from '@/pages/Reports';
 import TaxConfigs from '@/pages/TaxConfigs';
 import { Users } from '@/pages/Users';
 import { AuditLogs } from '@/pages/AuditLogs';
+import { CheckSettingsPage } from '@/pages/CheckSettings';
 import { Login } from '@/pages/Login';
 // AuthCallback removed — Clerk handles auth flow
 import { Invite } from '@/pages/Invite';
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route path="settings/users" element={<Users />} />
         <Route path="settings/tax-config" element={<TaxConfigs />} />
         <Route path="settings/audit-logs" element={<AuditLogs />} />
+        <Route path="settings/checks" element={<CheckSettingsPage />} />
       </Route>
 
       {/* Catch-all redirect */}
