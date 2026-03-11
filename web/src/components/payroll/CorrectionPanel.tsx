@@ -61,7 +61,14 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
     setHistoryEvents(null);
     setHistoryOpen(false);
     setHistoryError(null);
-  }, [payPeriod.id, payPeriod.pay_date]);
+  }, [
+    payPeriod.id,
+    payPeriod.pay_date,
+    payPeriod.updated_at,
+    payPeriod.correction_status,
+    payPeriod.superseded_by_id,
+    payPeriod.voided_at,
+  ]);
 
   // ----------------------------------------------------------------
   // Void
