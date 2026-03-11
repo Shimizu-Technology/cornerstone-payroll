@@ -202,6 +202,18 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         expect(JSON.parse(response.body)["error"]).to match(/Invalid date/i)
       end
 
+      it "returns 422 for invalid override date range" do
+        post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",
+             params: {
+               reason: "Bad range",
+               start_date: "2024-03-20",
+               end_date: "2024-03-10"
+             }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body)["error"]).to match(/end date|after start date/i)
+      end
+
       it "copies payroll items from source into the correction run" do
         post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",
              params: { reason: "Copy items" }, as: :json
