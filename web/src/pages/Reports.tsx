@@ -23,6 +23,8 @@ function W2GuPanel() {
   );
   const [year, setYear] = useState(currentYear - 1);
   const [loading, setLoading] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
 
@@ -50,6 +52,45 @@ function W2GuPanel() {
     }
   }
 
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function downloadCsv() {
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const blob = await reportsApi.w2GuCsv(year);
+      triggerDownload(blob, `w2gu_${year}.csv`);
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const blob = await reportsApi.w2GuPdf(year);
+      triggerDownload(blob, `w2gu_${year}.pdf`);
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  const busy = loading || exportingCsv || exportingPdf;
+
   return (
     <div className="space-y-6">
       {/* Controls */}
@@ -61,7 +102,7 @@ function W2GuPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="w2gu-year" className="text-sm font-medium text-gray-700">
                 Tax Year
@@ -74,7 +115,7 @@ function W2GuPanel() {
                   setReport(null);
                   setError(null);
                 }}
-                disabled={loading}
+                disabled={busy}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
               >
                 {yearOptions.map((y) => (
@@ -82,9 +123,31 @@ function W2GuPanel() {
                 ))}
               </select>
             </div>
-            <Button onClick={loadReport} disabled={loading}>
+            <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate W-2GU Report'}
             </Button>
+
+            {/* Export buttons */}
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadCsv}
+                disabled={busy}
+                title={`Download W-2GU CSV for ${year}`}
+              >
+                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadPdf}
+                disabled={busy}
+                title={`Download W-2GU PDF for ${year}`}
+              >
+                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+              </Button>
+            </div>
           </div>
           {error && (
             <p className="mt-3 text-sm text-red-600">{error}</p>

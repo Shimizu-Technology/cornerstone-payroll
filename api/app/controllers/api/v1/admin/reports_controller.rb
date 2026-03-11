@@ -197,6 +197,44 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/w2_gu_csv
+        # Downloads W-2GU annual summary as CSV.
+        # Params:
+        #   year [Integer] – tax year (defaults to current year)
+        def w2_gu_csv
+          report_data, error_response = build_w2_gu_report_data
+          return error_response if error_response
+
+          exporter = W2GuCsvExporter.new(report_data)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/reports/w2_gu_pdf
+        # Downloads W-2GU annual summary as PDF.
+        # Params:
+        #   year [Integer] – tax year (defaults to current year)
+        def w2_gu_pdf
+          report_data, error_response = build_w2_gu_report_data
+          return error_response if error_response
+
+          generator = W2GuPdfGenerator.new(report_data)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
@@ -217,6 +255,25 @@ module Api
         end
 
         private
+
+        # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
+        # Returns [report_data, nil] on success or [nil, rendered_response] on error.
+        def build_w2_gu_report_data
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.today.year
+          end
+
+          unless year && year > 2000 && year <= Date.today.year + 1
+            return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
+          end
+
+          company     = Company.find(current_company_id)
+          report_data = W2GuAggregator.new(company, year).generate
+          [ report_data, nil ]
+        end
 
         def current_pay_period_summary
           pp = PayPeriod.where(company_id: current_company_id)

@@ -67,6 +67,8 @@ Rails.application.routes.draw do
         get "reports/ytd_summary", to: "reports#ytd_summary"
         get "reports/form_941_gu", to: "reports#form_941_gu"
         get "reports/w2_gu", to: "reports#w2_gu"
+        get "reports/w2_gu_csv", to: "reports#w2_gu_csv"
+        get "reports/w2_gu_pdf", to: "reports#w2_gu_pdf"
 
         # Pay Stubs
         get "pay_stubs/:id", to: "pay_stubs#show"

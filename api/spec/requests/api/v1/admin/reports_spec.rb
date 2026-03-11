@@ -290,6 +290,161 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  # ─── W-2GU CSV Export ───────────────────────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/w2_gu_csv" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      employee.update!(ssn_encrypted: "123-45-6789")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns 200 with CSV content-type" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("text/csv")
+    end
+
+    it "includes a Content-Disposition attachment header" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2025 }
+
+      expect(response.headers["Content-Disposition"]).to include("attachment")
+      expect(response.headers["Content-Disposition"]).to include(".csv")
+    end
+
+    it "includes CSV header row" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2025 }
+
+      csv_body = response.body
+      expect(csv_body.lines.first).to include("Employee Name")
+      expect(csv_body.lines.first).to include("Box 1")
+    end
+
+    it "includes employee data row" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2025 }
+
+      csv_body = response.body
+      expect(csv_body).to include(employee.full_name)
+      expect(csv_body).to include("3100.00")
+    end
+
+    it "includes TOTALS row" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2025 }
+
+      expect(response.body).to include("TOTALS")
+    end
+
+    it "returns 422 for invalid year" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: "abc" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/)
+    end
+
+    it "returns 422 when SS wage base is not configured" do
+      get "/api/v1/admin/reports/w2_gu_csv", params: { year: 2027 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/SS wage base not configured/)
+    end
+
+    it "defaults to current year when year param is omitted" do
+      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+
+      get "/api/v1/admin/reports/w2_gu_csv"
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
+  # ─── W-2GU PDF Export ───────────────────────────────────────────────────────
+
+  describe "GET /api/v1/admin/reports/w2_gu_pdf" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      employee.update!(ssn_encrypted: "123-45-6789")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns 200 with PDF content-type" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+    end
+
+    it "includes a Content-Disposition attachment header" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: 2025 }
+
+      expect(response.headers["Content-Disposition"]).to include("attachment")
+      expect(response.headers["Content-Disposition"]).to include(".pdf")
+    end
+
+    it "returns binary data starting with PDF magic bytes" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: 2025 }
+
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ]) # %PDF
+    end
+
+    it "returns 422 for invalid year" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: "abc" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/)
+    end
+
+    it "returns 422 when SS wage base is not configured" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: 2027 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/SS wage base not configured/)
+    end
+
+    it "defaults to current year when year param is omitted" do
+      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+
+      get "/api/v1/admin/reports/w2_gu_pdf"
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "generates PDF for a year with no committed payroll (empty employees list)" do
+      get "/api/v1/admin/reports/w2_gu_pdf", params: { year: 2024 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+  end
+
   describe "GET /api/v1/admin/reports/tax_summary" do
     it "uses dedicated employer tax fields in totals" do
       pay_period = create(:pay_period, company: company, status: "committed", pay_date: Date.new(2026, 2, 13))
