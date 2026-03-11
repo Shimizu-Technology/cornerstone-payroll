@@ -6,6 +6,11 @@
 # This is a filing-prep dataset (JSON-first) for review/export.
 class W2GuAggregator
   SS_WAGE_BASE_BY_YEAR = {
+    2020 => 137_700.00,
+    2021 => 142_800.00,
+    2022 => 147_000.00,
+    2023 => 160_200.00,
+    2024 => 168_600.00,
     2025 => 176_100.00
   }.freeze
 
@@ -17,6 +22,9 @@ class W2GuAggregator
   end
 
   def generate
+    # Fail fast on unsupported years so operators don't file with wrong caps.
+    ss_wage_base
+
     rows = employees.map { |employee| employee_row(employee) }
 
     {
@@ -131,6 +139,8 @@ class W2GuAggregator
   end
 
   def ss_wage_base
-    SS_WAGE_BASE_BY_YEAR[year] || 176_100.00
+    SS_WAGE_BASE_BY_YEAR.fetch(year)
+  rescue KeyError
+    raise ArgumentError, "SS wage base not configured for #{year}"
   end
 end

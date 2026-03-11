@@ -191,6 +191,8 @@ module Api
           report = W2GuAggregator.new(company, year).generate
 
           render json: { report: report }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end

@@ -141,7 +141,9 @@ function W2GuPanel() {
                     <th className="pb-2 pr-4 font-medium">SSN</th>
                     <th className="pb-2 pr-4 font-medium text-right">Box 1<br /><span className="font-normal text-xs">Wages</span></th>
                     <th className="pb-2 pr-4 font-medium text-right">Box 2<br /><span className="font-normal text-xs">Fed W/H</span></th>
+                    <th className="pb-2 pr-4 font-medium text-right">Box 3<br /><span className="font-normal text-xs">SS Wages</span></th>
                     <th className="pb-2 pr-4 font-medium text-right">Box 4<br /><span className="font-normal text-xs">SS W/H</span></th>
+                    <th className="pb-2 pr-4 font-medium text-right">Box 5<br /><span className="font-normal text-xs">Medicare Wages</span></th>
                     <th className="pb-2 pr-4 font-medium text-right">Box 6<br /><span className="font-normal text-xs">Medicare</span></th>
                     <th className="pb-2 font-medium text-right">Box 7<br /><span className="font-normal text-xs">SS Tips</span></th>
                   </tr>
@@ -162,14 +164,16 @@ function W2GuPanel() {
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box1_wages_tips_other_comp)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box2_federal_income_tax_withheld)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box3_social_security_wages)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box4_social_security_tax_withheld)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box5_medicare_wages_tips)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box6_medicare_tax_withheld)}</td>
                       <td className="py-2 text-right tabular-nums">{fmt(emp.box7_social_security_tips)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="py-6 text-center text-gray-400">
+                      <td colSpan={9} className="py-6 text-center text-gray-400">
                         No committed payroll data found for {report.meta.year}.
                       </td>
                     </tr>

@@ -226,6 +226,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/year/)
     end
+
+    it "returns 422 when SS wage base is not configured for year" do
+      get "/api/v1/admin/reports/w2_gu", params: { year: 2026 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/SS wage base not configured/)
+    end
   end
 
   describe "GET /api/v1/admin/reports/tax_summary" do
