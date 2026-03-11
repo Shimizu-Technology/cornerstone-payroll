@@ -122,6 +122,18 @@ RSpec.describe W2GuCsvExporter do
       # Alice's box6 = 73.95
       expect(csv).to include("73.95")
     end
+
+    it "guards formula-like employee strings against CSV injection" do
+      report_data[:employees].first[:employee_name] = "=HYPERLINK(\"http://evil\")"
+      csv = exporter.generate
+      expect(csv).to include("'=HYPERLINK")
+    end
+
+    it "handles nil employees/totals without raising" do
+      report_data[:employees] = nil
+      report_data[:totals] = nil
+      expect { exporter.generate }.not_to raise_error
+    end
   end
 
   describe "#filename" do

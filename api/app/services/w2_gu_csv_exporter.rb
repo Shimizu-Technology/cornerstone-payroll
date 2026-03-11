@@ -36,7 +36,7 @@ class W2GuCsvExporter
     CSV.generate(headers: true, force_quotes: false) do |csv|
       csv << HEADERS
 
-      report[:employees].each { |emp| csv << employee_row(emp) }
+      (report[:employees] || []).each { |emp| csv << employee_row(emp) }
 
       csv << totals_row
     end
@@ -52,8 +52,8 @@ class W2GuCsvExporter
 
   def employee_row(emp)
     [
-      emp[:employee_name],
-      emp[:employee_ssn_last4].present? ? "***-**-#{emp[:employee_ssn_last4]}" : "MISSING",
+      sanitize_csv_field(emp[:employee_name]),
+      sanitize_csv_field(emp[:employee_ssn_last4].present? ? "***-**-#{emp[:employee_ssn_last4]}" : "MISSING"),
       format_currency(emp[:box1_wages_tips_other_comp]),
       format_currency(emp[:box2_federal_income_tax_withheld]),
       format_currency(emp[:box3_social_security_wages]),
@@ -67,9 +67,9 @@ class W2GuCsvExporter
   end
 
   def totals_row
-    t = report[:totals]
+    t = report[:totals] || {}
     [
-      "TOTALS",
+      sanitize_csv_field("TOTALS"),
       "",
       format_currency(t[:box1_wages_tips_other_comp]),
       format_currency(t[:box2_federal_income_tax_withheld]),
@@ -85,5 +85,11 @@ class W2GuCsvExporter
 
   def format_currency(value)
     format("%.2f", value.to_f)
+  end
+
+  # Mitigates CSV formula injection when opened in spreadsheet apps.
+  def sanitize_csv_field(value)
+    str = value.to_s
+    str.start_with?("=", "+", "-", "@", "\t", "\r") ? "'#{str}" : str
   end
 end

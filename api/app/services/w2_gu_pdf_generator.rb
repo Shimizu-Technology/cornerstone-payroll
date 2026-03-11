@@ -105,7 +105,7 @@ class W2GuPdfGenerator
   # ─── Totals Block ───────────────────────────────────────────────────────────
 
   def render_totals_block(pdf)
-    totals = report[:totals]
+    totals = report[:totals] || {}
 
     pdf.font_size(11) { pdf.text "Annual Totals (All Employees)", style: :bold }
     pdf.move_down 4
@@ -232,7 +232,7 @@ class W2GuPdfGenerator
     rows = employees.map { |emp| employee_table_row(emp) }
 
     # Totals footer
-    t = report[:totals]
+    t = report[:totals] || {}
     totals_row = [
       { content: "TOTALS", font_style: :bold, background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG },

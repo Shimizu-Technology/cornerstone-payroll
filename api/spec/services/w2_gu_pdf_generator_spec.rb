@@ -101,6 +101,18 @@ RSpec.describe W2GuPdfGenerator do
         expect { generator.generate }.not_to raise_error
       end
     end
+
+    context "with nil totals and nil collections" do
+      before do
+        report_data[:totals] = nil
+        report_data[:employees] = nil
+        report_data[:compliance_issues] = nil
+      end
+
+      it "generates without raising" do
+        expect { generator.generate }.not_to raise_error
+      end
+    end
   end
 
   describe "#filename" do
