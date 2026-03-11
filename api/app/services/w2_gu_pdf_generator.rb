@@ -70,8 +70,8 @@ class W2GuPdfGenerator
   # ─── Employer Block ─────────────────────────────────────────────────────────
 
   def render_employer_block(pdf)
-    employer  = report[:employer]
-    meta      = report[:meta]
+    employer  = report[:employer] || {}
+    meta      = report[:meta] || {}
 
     pdf.font_size(11) { pdf.text "Employer Information", style: :bold }
     pdf.move_down 4
