@@ -112,8 +112,6 @@ class PayPeriodCorrectionService
   )
     raise ArgumentError, "reason is required" if reason.blank?
 
-    correction_run = nil
-
     PayPeriod.transaction do
       locked_source = PayPeriod.lock("FOR UPDATE").find(source_pay_period.id)
 
@@ -150,8 +148,6 @@ class PayPeriodCorrectionService
 
       correction_run
     end
-
-    correction_run
   end
 
   # ----------------------------------------------------------------

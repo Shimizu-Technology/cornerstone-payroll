@@ -194,6 +194,14 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         expect(json["correction_run"]["pay_date"]).to eq("2024-03-22")
       end
 
+      it "rejects non-ISO ambiguous date formats" do
+        post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",
+             params: { reason: "Bad date", pay_date: "03/22/2024" }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(JSON.parse(response.body)["error"]).to match(/Invalid date/i)
+      end
+
       it "copies payroll items from source into the correction run" do
         post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",
              params: { reason: "Copy items" }, as: :json

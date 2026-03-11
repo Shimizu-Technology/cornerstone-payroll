@@ -429,9 +429,15 @@ function CorrectionModal({
 }: CorrectionModalProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
+
+    return () => {
+      returnFocusRef.current?.focus?.();
+    };
   }, []);
 
   useEffect(() => {

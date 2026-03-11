@@ -253,9 +253,9 @@ module Api
           end
 
           begin
-            new_start_date = params[:start_date].present? ? Date.parse(params[:start_date]) : nil
-            new_end_date   = params[:end_date].present?   ? Date.parse(params[:end_date])   : nil
-            new_pay_date   = params[:pay_date].present?   ? Date.parse(params[:pay_date])   : nil
+            new_start_date = parse_iso_date_param(params[:start_date])
+            new_end_date   = parse_iso_date_param(params[:end_date])
+            new_pay_date   = parse_iso_date_param(params[:pay_date])
 
             correction_run = PayPeriodCorrectionService.create_correction_run!(
               source_pay_period: @pay_period,
@@ -452,6 +452,12 @@ module Api
             year: @pay_period.pay_date.year
           )
           company_ytd.add_payroll_item!(payroll_item)
+        end
+
+        def parse_iso_date_param(value)
+          return nil if value.blank?
+
+          Date.strptime(value.to_s, "%Y-%m-%d")
         end
       end
     end
