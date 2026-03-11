@@ -238,8 +238,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
 
       row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == tipped_high_earner.id }
-      expect(row["box7_social_security_tips"].to_f).to eq(176_100.0)
-      expect(row["box3_social_security_wages"].to_f).to eq(0.0)
+      expect(row["box3_social_security_wages"].to_f).to eq(50_000.0)
+      expect(row["box7_social_security_tips"].to_f).to eq(126_100.0)
     end
 
     it "returns 422 for invalid year" do

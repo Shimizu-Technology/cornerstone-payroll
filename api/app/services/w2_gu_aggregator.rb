@@ -104,12 +104,11 @@ class W2GuAggregator
     # Approximation for box 1 until pre-tax exclusions are fully modeled.
     box1 = (gross_pay + reported_tips).round(2)
 
-    # Box 7 (Social Security tips) must be capped at SS wage base.
-    box7 = [ reported_tips, ss_wage_base ].min.round(2)
-
-    # Box 3 is SS wages excluding tips. Remaining base is after capped Box 7.
-    remaining_ss_base = [ ss_wage_base - box7, 0.0 ].max
-    box3 = [ gross_pay, remaining_ss_base ].min.round(2)
+    # W-2 convention: allocate SS wage base to Box 3 (wages) first,
+    # then Box 7 (tips) gets any remaining SS wage-base room.
+    box3 = [ gross_pay, ss_wage_base ].min.round(2)
+    remaining_ss_base = [ ss_wage_base - box3, 0.0 ].max
+    box7 = [ reported_tips, remaining_ss_base ].min.round(2)
 
     # Box 5 should be wage-based, not back-calculated from medicare tax,
     # because Additional Medicare Tax (> $200K) distorts the effective rate.
@@ -144,7 +143,7 @@ class W2GuAggregator
   end
 
   def ss_wage_base
-    SS_WAGE_BASE_BY_YEAR.fetch(year)
+    @ss_wage_base ||= SS_WAGE_BASE_BY_YEAR.fetch(year)
   rescue KeyError
     raise ArgumentError, "SS wage base not configured for #{year}"
   end
