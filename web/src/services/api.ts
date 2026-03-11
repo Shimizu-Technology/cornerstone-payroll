@@ -687,10 +687,20 @@ export const reportsApi = {
     api.get<DashboardResponse>('/admin/reports/dashboard'),
   payrollRegister: (payPeriodId: number) =>
     api.get<PayrollRegisterReport>('/admin/reports/payroll_register', { pay_period_id: payPeriodId }),
+  // CPR-70: Payroll Register exports
+  payrollRegisterCsv: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_csv', { pay_period_id: payPeriodId }),
+  payrollRegisterPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   employeePayHistory: (employeeId: number, limit?: number) =>
     api.get<{ report: { employee: Employee; history: PayrollItem[]; ytd: Record<string, number> } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
   taxSummary: (year?: number, quarter?: number) =>
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
+  // CPR-70: Tax Summary exports
+  taxSummaryCsv: (year: number, quarter?: number) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_csv', { year, quarter }),
+  taxSummaryPdf: (year: number, quarter?: number) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_pdf', { year, quarter }),
   ytdSummary: (year?: number) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
   // CPR-68: W-2GU Annual Report

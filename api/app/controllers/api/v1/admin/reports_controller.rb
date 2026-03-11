@@ -21,35 +21,36 @@ module Api
         # GET /api/v1/admin/reports/payroll_register
         # Detailed payroll for a pay period
         def payroll_register
-          pay_period = PayPeriod.includes(payroll_items: :employee).find(params[:pay_period_id])
+          report_data, error_response = build_payroll_register_data
+          return error_response if error_response
 
-          unless pay_period.company_id == current_company_id
-            return render json: { error: "Pay period not found" }, status: :not_found
-          end
+          render json: { report: report_data }
+        end
 
-          render json: {
-            report: {
-              type: "payroll_register",
-              pay_period: {
-                id: pay_period.id,
-                start_date: pay_period.start_date,
-                end_date: pay_period.end_date,
-                pay_date: pay_period.pay_date,
-                status: pay_period.status
-              },
-              summary: {
-                employee_count: pay_period.payroll_items.count,
-                total_gross: pay_period.payroll_items.sum(:gross_pay),
-                total_withholding: pay_period.payroll_items.sum(:withholding_tax),
-                total_social_security: pay_period.payroll_items.sum(:social_security_tax),
-                total_medicare: pay_period.payroll_items.sum(:medicare_tax),
-                total_retirement: pay_period.payroll_items.sum(:retirement_payment),
-                total_deductions: pay_period.payroll_items.sum(:total_deductions),
-                total_net: pay_period.payroll_items.sum(:net_pay)
-              },
-              employees: pay_period.payroll_items.map { |item| payroll_item_detail(item) }
-            }
-          }
+        # GET /api/v1/admin/reports/payroll_register_csv
+        # Downloads payroll register as CSV for the given pay period.
+        def payroll_register_csv
+          report_data, error_response = build_payroll_register_data
+          return error_response if error_response
+
+          exporter = PayrollRegisterCsvExporter.new(report_data)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/payroll_register_pdf
+        # Downloads payroll register as PDF for the given pay period.
+        def payroll_register_pdf
+          report_data, error_response = build_payroll_register_data
+          return error_response if error_response
+
+          generator = PayrollRegisterPdfGenerator.new(report_data)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
         end
 
         # GET /api/v1/admin/reports/employee_pay_history
@@ -85,52 +86,38 @@ module Api
         # GET /api/v1/admin/reports/tax_summary
         # Tax withholding summary (for quarterly filing)
         def tax_summary
-          year = params[:year]&.to_i || Date.today.year
-          quarter = params[:quarter]&.to_i
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
 
-          # Get committed pay periods in range
-          pay_periods = PayPeriod.committed
-                                 .where(company_id: current_company_id)
-                                 .for_year(year)
+          render json: { report: report_data }
+        end
 
-          if quarter
-            start_month = ((quarter - 1) * 3) + 1
-            end_month = start_month + 2
-            start_date = Date.new(year, start_month, 1)
-            end_date = Date.new(year, end_month, -1)
-            pay_periods = pay_periods.where(pay_date: start_date..end_date)
-          end
+        # GET /api/v1/admin/reports/tax_summary_csv
+        # Downloads tax summary as CSV.
+        # Params: year (required), quarter (optional, 1-4)
+        def tax_summary_csv
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
 
-          items = PayrollItem.joins(:pay_period)
-                            .where(pay_periods: { id: pay_periods.pluck(:id) })
-          employee_ss_total = items.sum(:social_security_tax)
-          employee_medicare_total = items.sum(:medicare_tax)
-          employer_ss_total = items.sum(:employer_social_security_tax)
-          employer_medicare_total = items.sum(:employer_medicare_tax)
-          withholding_total = items.sum(:withholding_tax)
+          exporter = TaxSummaryCsvExporter.new(report_data)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        end
 
-          render json: {
-            report: {
-              type: "tax_summary",
-              period: {
-                year: year,
-                quarter: quarter,
-                start_date: pay_periods.minimum("pay_periods.pay_date"),
-                end_date: pay_periods.maximum("pay_periods.pay_date")
-              },
-              totals: {
-                gross_wages: items.sum(:gross_pay),
-                withholding_tax: withholding_total,
-                social_security_employee: employee_ss_total,
-                social_security_employer: employer_ss_total,
-                medicare_employee: employee_medicare_total,
-                medicare_employer: employer_medicare_total,
-                total_employment_taxes: employee_ss_total + employer_ss_total + employee_medicare_total + employer_medicare_total + withholding_total
-              },
-              pay_periods_included: pay_periods.count,
-              employee_count: items.distinct.count(:employee_id)
-            }
-          }
+        # GET /api/v1/admin/reports/tax_summary_pdf
+        # Downloads tax summary as PDF.
+        # Params: year (required), quarter (optional, 1-4)
+        def tax_summary_pdf
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
+
+          generator = TaxSummaryPdfGenerator.new(report_data)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
         end
 
         # GET /api/v1/admin/reports/form_941_gu
@@ -244,6 +231,108 @@ module Api
         end
 
         private
+
+        # Shared data builder for payroll register (JSON + CSV + PDF).
+        # Returns [report_data, nil] on success or [nil, rendered_response] on error.
+        # pay_period_id param is required.
+        def build_payroll_register_data
+          pay_period_id = params[:pay_period_id]
+
+          if pay_period_id.blank?
+            return [ nil, render(json: { error: "pay_period_id is required" }, status: :unprocessable_entity) ]
+          end
+
+          pay_period = PayPeriod.includes(payroll_items: :employee).find_by(id: pay_period_id)
+
+          unless pay_period && pay_period.company_id == current_company_id
+            return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
+          end
+
+          items = pay_period.payroll_items
+
+          report_data = {
+            type: "payroll_register",
+            meta: { generated_at: Time.current.iso8601 },
+            pay_period: {
+              id: pay_period.id,
+              start_date: pay_period.start_date,
+              end_date: pay_period.end_date,
+              pay_date: pay_period.pay_date,
+              status: pay_period.status
+            },
+            summary: {
+              employee_count: items.size,
+              total_gross: items.sum(&:gross_pay),
+              total_withholding: items.sum(&:withholding_tax),
+              total_social_security: items.sum(&:social_security_tax),
+              total_medicare: items.sum(&:medicare_tax),
+              total_retirement: items.sum(&:retirement_payment),
+              total_deductions: items.sum(&:total_deductions),
+              total_net: items.sum(&:net_pay)
+            },
+            employees: items.map { |item| payroll_item_detail(item) }
+          }
+
+          [ report_data, nil ]
+        rescue ActiveRecord::RecordNotFound
+          [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
+        end
+
+        # Shared data builder for tax summary (JSON + CSV + PDF).
+        # Returns [report_data, nil] on success or [nil, rendered_response] on error.
+        # year defaults to current year; quarter is optional (1-4).
+        def build_tax_summary_data
+          year    = params[:year]&.to_i || Date.today.year
+          quarter = params[:quarter].present? ? params[:quarter].to_i : nil
+
+          if quarter && !(1..4).cover?(quarter)
+            return [ nil, render(json: { error: "quarter must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
+          end
+
+          # Get committed pay periods in range
+          pay_periods = PayPeriod.committed
+                                 .where(company_id: current_company_id)
+                                 .for_year(year)
+
+          if quarter
+            start_month = ((quarter - 1) * 3) + 1
+            end_month   = start_month + 2
+            start_date  = Date.new(year, start_month, 1)
+            end_date    = Date.new(year, end_month, -1)
+            pay_periods = pay_periods.where(pay_date: start_date..end_date)
+          end
+
+          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) })
+          employee_ss_total       = items.sum(:social_security_tax)
+          employee_medicare_total = items.sum(:medicare_tax)
+          employer_ss_total       = items.sum(:employer_social_security_tax)
+          employer_medicare_total = items.sum(:employer_medicare_tax)
+          withholding_total       = items.sum(:withholding_tax)
+
+          report_data = {
+            type: "tax_summary",
+            meta: { generated_at: Time.current.iso8601 },
+            period: {
+              year:       year,
+              quarter:    quarter,
+              start_date: pay_periods.minimum("pay_periods.pay_date"),
+              end_date:   pay_periods.maximum("pay_periods.pay_date")
+            },
+            totals: {
+              gross_wages:               items.sum(:gross_pay),
+              withholding_tax:           withholding_total,
+              social_security_employee:  employee_ss_total,
+              social_security_employer:  employer_ss_total,
+              medicare_employee:         employee_medicare_total,
+              medicare_employer:         employer_medicare_total,
+              total_employment_taxes:    employee_ss_total + employer_ss_total + employee_medicare_total + employer_medicare_total + withholding_total
+            },
+            pay_periods_included: pay_periods.count,
+            employee_count:       items.distinct.count(:employee_id)
+          }
+
+          [ report_data, nil ]
+        end
 
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
