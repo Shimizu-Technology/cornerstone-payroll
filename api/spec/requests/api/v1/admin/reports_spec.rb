@@ -256,6 +256,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == tipped_high_earner.id }
       expect(row["box3_social_security_wages"].to_f).to eq(50_000.0)
+      expect(row["box5_medicare_wages_tips"].to_f).to eq(250_000.0)
       expect(row["box7_social_security_tips"].to_f).to eq(126_100.0)
       expect(row["reported_tips_total"].to_f).to eq(200_000.0)
       expect(row["box7_limited_by_wage_base"]).to eq(true)

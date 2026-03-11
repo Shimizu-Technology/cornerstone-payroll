@@ -132,6 +132,7 @@ function W2GuPanel() {
                 <TotalBox label="Box 5 — Medicare Wages & Tips" value={report.totals.box5_medicare_wages_tips} />
                 <TotalBox label="Box 6 — Medicare Tax Withheld" value={report.totals.box6_medicare_tax_withheld} />
                 <TotalBox label="Box 7 — Social Security Tips" value={report.totals.box7_social_security_tips} />
+                <TotalBox label="Reported Tips (Uncapped)" value={report.totals.reported_tips_total} />
               </div>
 
               {/* Caveats */}
