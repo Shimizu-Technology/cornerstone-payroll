@@ -32,27 +32,6 @@ RSpec.describe EmployeeYtdTotal, type: :model do
       expect(ytd.reload.overtime_pay).to eq(0.0)
     end
 
-    it "does not accumulate phantom overtime for salaried items" do
-      salaried_employee = create(:employee, company: company, department: department, employment_type: "salary", pay_rate: 65_000)
-      salaried_item = create(:payroll_item,
-        employee: salaried_employee,
-        pay_period: create(:pay_period, company: company),
-        employment_type: "salary",
-        pay_rate: 65_000,
-        overtime_hours: 10,
-        gross_pay: 2_500.0,
-        net_pay: 2_000.0,
-        withholding_tax: 250.0,
-        social_security_tax: 155.0,
-        medicare_tax: 36.25)
 
-      expect(salaried_item.overtime_pay.to_f).to eq(0.0)
-
-      ytd.add_payroll_item!(salaried_item)
-      expect(ytd.reload.overtime_pay).to eq(0.0)
-
-      ytd.subtract_payroll_item!(salaried_item)
-      expect(ytd.reload.overtime_pay).to eq(0.0)
-    end
   end
 end

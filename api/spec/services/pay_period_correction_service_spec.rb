@@ -179,7 +179,7 @@ RSpec.describe PayPeriodCorrectionService do
       before { setup_ytd_totals }
 
       it "raises AlreadySupersededError if a correction run already exists" do
-        correction_run = create(:pay_period, :correction_run, company: company)
+        correction_run = create(:pay_period, :correction_run, company: company, source_pay_period: committed_period)
         committed_period.update!(superseded_by_id: correction_run.id)
 
         expect {
@@ -356,7 +356,7 @@ RSpec.describe PayPeriodCorrectionService do
 
     context "guard: already superseded" do
       it "raises AlreadySupersededError when a correction run already exists" do
-        existing = create(:pay_period, :correction_run, company: company)
+        existing = create(:pay_period, :correction_run, company: company, source_pay_period: voided_period)
         voided_period.update!(superseded_by_id: existing.id)
 
         expect {
@@ -385,8 +385,10 @@ RSpec.describe PayPeriodCorrectionService do
   # ----------------------------------------------------------------
   describe ".record_correction_committed!" do
     it "raises when correction run is missing source linkage" do
+      source = create(:pay_period, :voided, company: company, status: "committed")
       orphan_correction = create(:pay_period, :correction_run, company: company,
-                                 status: "committed", source_pay_period_id: nil)
+                                 status: "committed", source_pay_period: source)
+      orphan_correction.update_column(:source_pay_period_id, nil)
 
       expect {
         PayPeriodCorrectionService.record_correction_committed!(

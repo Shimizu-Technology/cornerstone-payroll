@@ -58,6 +58,9 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
 
   useEffect(() => {
     setCorrectionPayDate(payPeriod.pay_date ?? '');
+    setHistoryEvents(null);
+    setHistoryOpen(false);
+    setHistoryError(null);
   }, [payPeriod.id, payPeriod.pay_date]);
 
   // ----------------------------------------------------------------

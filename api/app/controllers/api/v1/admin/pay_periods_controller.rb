@@ -82,7 +82,10 @@ module Api
                 pay_period: source || @pay_period,
                 resulting_pay_period: @pay_period,
                 actor: current_user,
-                reason: "Draft correction run deleted by operator"
+                reason: "Draft correction run deleted by operator",
+                extra_metadata: {
+                  deleted_correction_run_id: @pay_period.id
+                }
               )
 
               @pay_period.destroy!

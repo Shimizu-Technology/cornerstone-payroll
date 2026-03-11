@@ -179,6 +179,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(deletion_event).to be_present
       expect(deletion_event.pay_period_id).to eq(source.id)
       expect(deletion_event.reason).to eq("Draft correction run deleted by operator")
+      expect(deletion_event.metadata["deleted_correction_run_id"]).to eq(pay_period.id)
     end
 
     it "returns correction-run delete message even when correction run is committed" do
