@@ -154,13 +154,19 @@ class W2GuPdfGenerator
       pdf.fill_color TEXT_DARK
     else
       issues.each do |issue|
-        pdf.fill_color DANGER_BG
-        pdf.fill_rectangle [ pdf.bounds.left, pdf.cursor ], pdf.bounds.width, 18
-        pdf.fill_color "C0392B"
-        pdf.bounding_box([ pdf.bounds.left + 8, pdf.cursor - 4 ], width: pdf.bounds.width - 16) do
-          pdf.font_size(9) { pdf.text "[!]  #{issue}" }
-        end
-        pdf.move_down 20
+        pdf.table(
+          [[ "[!]  #{issue}" ]],
+          width: pdf.bounds.width,
+          cell_style: {
+            background_color: DANGER_BG,
+            text_color: "C0392B",
+            size: 9,
+            padding: [ 4, 8 ],
+            border_width: 0,
+            inline_format: false
+          }
+        )
+        pdf.move_down 4
       end
       pdf.fill_color TEXT_DARK
     end
@@ -183,7 +189,7 @@ class W2GuPdfGenerator
 
     pdf.bounding_box([ pdf.bounds.left + 8, pdf.cursor - 5 ], width: pdf.bounds.width - 16) do
       caveats.each do |caveat|
-        pdf.font_size(8) { pdf.text "• #{caveat}" }
+        pdf.font_size(8) { pdf.text "- #{caveat}" }
         pdf.move_down 4
       end
     end
