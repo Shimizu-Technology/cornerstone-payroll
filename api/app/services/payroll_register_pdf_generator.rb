@@ -195,18 +195,18 @@ class PayrollRegisterPdfGenerator
 
     page_width = pdf.bounds.width
     width_fractions = [
-      0.16,      # Employee
+      0.15,      # Employee
       0.06,      # Type
-      0.055,     # Hours
-      0.055,     # OT Hrs
-      0.095,     # Gross
-      0.095,     # Withholding
-      0.09,      # Soc Sec
-      0.085,     # Medicare
-      0.09,      # Retirement
-      0.09,      # Deductions
-      0.09,      # Net Pay
-      0.095      # Check #
+      0.05,      # Hours
+      0.05,      # OT Hrs
+      0.085,     # Gross
+      0.085,     # Withholding
+      0.085,     # Soc Sec
+      0.08,      # Medicare
+      0.08,      # Retirement
+      0.08,      # Deductions
+      0.095,     # Net Pay
+      0.10       # Check #
     ]
     col_widths = width_fractions.map { |fraction| page_width * fraction }
     # Ensure widths sum to exactly page_width (float drift safety)
