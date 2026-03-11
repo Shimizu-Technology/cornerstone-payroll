@@ -6,7 +6,7 @@
  *   - Create correction run action (with required reason)
  *   - Correction history / audit trail display
  */
-import { useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -405,7 +405,7 @@ function CorrectionEventRow({ event }: CorrectionEventRowProps) {
 // Lightweight inline modal (no external dialog dependency needed here)
 interface CorrectionModalProps {
   title: string;
-  description: React.ReactNode;
+  description: ReactNode;
   errorMessage: string | null;
   confirmLabel: string;
   confirmClassName: string;
@@ -424,8 +424,21 @@ function CorrectionModal({
   onConfirm,
   onCancel,
 }: CorrectionModalProps) {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !loading) onCancel();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [loading, onCancel]);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !loading) onCancel();
+      }}
+    >
       <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
         <div className="border-b px-6 py-4">
           <h3 className="text-lg font-semibold text-gray-900">{title}</h3>

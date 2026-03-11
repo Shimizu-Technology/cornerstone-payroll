@@ -70,6 +70,15 @@ class PayPeriodCorrectionService
         void_reason:       reason
       )
 
+      # If a committed correction run is being voided, release source linkage so
+      # operators can create another correction run from the original source.
+      if locked.correction_run? && locked.source_pay_period_id.present?
+        source = PayPeriod.lock("FOR UPDATE").find(locked.source_pay_period_id)
+        if source.superseded_by_id == locked.id
+          source.update!(superseded_by_id: nil)
+        end
+      end
+
       event
     end
   end

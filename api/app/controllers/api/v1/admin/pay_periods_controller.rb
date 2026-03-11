@@ -240,11 +240,11 @@ module Api
             return render json: { error: "A reason is required to create a correction run" }, status: :unprocessable_entity
           end
 
-          new_start_date = params[:start_date].present? ? Date.parse(params[:start_date]) : nil
-          new_end_date   = params[:end_date].present?   ? Date.parse(params[:end_date])   : nil
-          new_pay_date   = params[:pay_date].present?   ? Date.parse(params[:pay_date])   : nil
-
           begin
+            new_start_date = params[:start_date].present? ? Date.parse(params[:start_date]) : nil
+            new_end_date   = params[:end_date].present?   ? Date.parse(params[:end_date])   : nil
+            new_pay_date   = params[:pay_date].present?   ? Date.parse(params[:pay_date])   : nil
+
             correction_run = PayPeriodCorrectionService.create_correction_run!(
               source_pay_period: @pay_period,
               actor:             current_user,
