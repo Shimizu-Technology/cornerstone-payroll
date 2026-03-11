@@ -62,8 +62,12 @@ Rails.application.routes.draw do
         # Reports
         get "reports/dashboard", to: "reports#dashboard"
         get "reports/payroll_register", to: "reports#payroll_register"
+        get "reports/payroll_register_csv", to: "reports#payroll_register_csv"
+        get "reports/payroll_register_pdf", to: "reports#payroll_register_pdf"
         get "reports/employee_pay_history", to: "reports#employee_pay_history"
         get "reports/tax_summary", to: "reports#tax_summary"
+        get "reports/tax_summary_csv", to: "reports#tax_summary_csv"
+        get "reports/tax_summary_pdf", to: "reports#tax_summary_pdf"
         get "reports/ytd_summary", to: "reports#ytd_summary"
         get "reports/form_941_gu", to: "reports#form_941_gu"
         get "reports/w2_gu", to: "reports#w2_gu"
