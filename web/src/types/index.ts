@@ -375,6 +375,8 @@ export interface W2GuEmployeeRow {
   box5_medicare_wages_tips: number;
   box6_medicare_tax_withheld: number;
   box7_social_security_tips: number;
+  reported_tips_total: number;
+  box7_limited_by_wage_base: boolean;
   has_missing_ssn: boolean;
   has_missing_address: boolean;
 }

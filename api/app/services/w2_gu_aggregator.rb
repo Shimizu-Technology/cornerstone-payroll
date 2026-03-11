@@ -127,6 +127,8 @@ class W2GuAggregator
       box5_medicare_wages_tips: box5,
       box6_medicare_tax_withheld: medicare_tax.round(2),
       box7_social_security_tips: box7,
+      reported_tips_total: reported_tips.round(2),
+      box7_limited_by_wage_base: reported_tips.positive? && box7 < reported_tips,
 
       has_missing_ssn: employee.ssn_last_four.blank?,
       has_missing_address: missing_employee_address?(employee)

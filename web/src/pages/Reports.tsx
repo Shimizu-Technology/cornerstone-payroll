@@ -16,7 +16,11 @@ function fmt(n: number) {
 
 function W2GuPanel() {
   const currentYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
+  const earliestSupportedYear = 2020;
+  const yearOptions = Array.from(
+    { length: currentYear - earliestSupportedYear + 1 },
+    (_, i) => currentYear - i
+  );
   const [year, setYear] = useState(currentYear - 1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +184,17 @@ function W2GuPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box4_social_security_tax_withheld)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box5_medicare_wages_tips)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.box6_medicare_tax_withheld)}</td>
-                      <td className="py-2 text-right tabular-nums">{fmt(emp.box7_social_security_tips)}</td>
+                      <td className="py-2 text-right tabular-nums">
+                        {fmt(emp.box7_social_security_tips)}
+                        {emp.box7_limited_by_wage_base && (
+                          <span
+                            className="ml-2 text-xs text-amber-700"
+                            title={`Reported tips ${fmt(emp.reported_tips_total)} exceeded remaining SS wage base; Box 7 capped at ${fmt(emp.box7_social_security_tips)}.`}
+                          >
+                            (capped)
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (

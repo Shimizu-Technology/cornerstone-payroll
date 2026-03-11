@@ -182,7 +182,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(employee_row["box7_social_security_tips"].to_f).to eq(100.0)
 
+      expect(totals["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
+      expect(totals["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
+      expect(totals["box3_social_security_wages"].to_f).to eq(3000.0)
+      expect(totals["box4_social_security_tax_withheld"].to_f).to eq(186.0)
       expect(totals["box5_medicare_wages_tips"].to_f).to eq(3100.0)
+      expect(totals["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(totals["box7_social_security_tips"].to_f).to eq(100.0)
     end
 
@@ -251,6 +256,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       row = response.parsed_body.dig("report", "employees").find { |r| r["employee_id"] == tipped_high_earner.id }
       expect(row["box3_social_security_wages"].to_f).to eq(50_000.0)
       expect(row["box7_social_security_tips"].to_f).to eq(126_100.0)
+      expect(row["reported_tips_total"].to_f).to eq(200_000.0)
+      expect(row["box7_limited_by_wage_base"]).to eq(true)
     end
 
     it "returns 422 for invalid year" do
