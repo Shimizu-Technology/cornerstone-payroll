@@ -143,7 +143,7 @@ class W2GuPdfGenerator
   # ─── Compliance Issues ──────────────────────────────────────────────────────
 
   def render_compliance_block(pdf)
-    issues = report[:compliance_issues]
+    issues = report[:compliance_issues] || []
 
     pdf.font_size(11) { pdf.text "Compliance Issues", style: :bold }
     pdf.move_down 4
