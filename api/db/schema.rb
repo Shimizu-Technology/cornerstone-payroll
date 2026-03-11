@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_11_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -224,30 +224,61 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_000003) do
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
   end
 
+  create_table "pay_period_correction_events", force: :cascade do |t|
+    t.string "action_type", null: false
+    t.bigint "actor_id"
+    t.string "actor_name"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "financial_snapshot", default: {}, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "pay_period_id", null: false
+    t.text "reason", null: false
+    t.bigint "resulting_pay_period_id"
+    t.datetime "updated_at", null: false
+    t.index ["action_type"], name: "index_pay_period_correction_events_on_action_type"
+    t.index ["actor_id"], name: "index_pay_period_correction_events_on_actor_id"
+    t.index ["company_id"], name: "index_pay_period_correction_events_on_company_id"
+    t.index ["created_at"], name: "index_pay_period_correction_events_on_created_at"
+    t.index ["pay_period_id", "action_type"], name: "idx_ppce_pay_period_action"
+    t.index ["pay_period_id"], name: "index_pay_period_correction_events_on_pay_period_id"
+    t.index ["resulting_pay_period_id"], name: "index_pay_period_correction_events_on_resulting_pay_period_id"
+  end
+
   create_table "pay_periods", force: :cascade do |t|
     t.bigint "approved_by_id"
     t.datetime "committed_at"
     t.bigint "company_id", null: false
+    t.string "correction_status"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
     t.date "end_date", null: false
     t.text "notes"
     t.date "pay_date", null: false
+    t.bigint "source_pay_period_id"
     t.date "start_date", null: false
     t.string "status", default: "draft"
+    t.bigint "superseded_by_id"
     t.integer "tax_sync_attempts", default: 0, null: false
     t.string "tax_sync_idempotency_key"
     t.text "tax_sync_last_error"
     t.string "tax_sync_status", default: "pending"
     t.datetime "tax_synced_at"
     t.datetime "updated_at", null: false
+    t.text "void_reason"
+    t.datetime "voided_at"
+    t.bigint "voided_by_id"
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
+    t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
+    t.index ["source_pay_period_id"], name: "index_pay_periods_on_source_pay_period_id"
     t.index ["status"], name: "index_pay_periods_on_status"
+    t.index ["superseded_by_id"], name: "index_pay_periods_on_superseded_by_id"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
+    t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
   end
 
   create_table "payroll_imports", force: :cascade do |t|

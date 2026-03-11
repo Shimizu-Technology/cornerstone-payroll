@@ -163,18 +163,18 @@ module Api
             # Prepare tax sync (generate idempotency key inside transaction)
             @pay_period.generate_idempotency_key!
             @pay_period.update!(tax_sync_status: "pending")
+
+            # CPR-71: if this is a correction run, write committed audit event atomically
+            if @pay_period.correction_run?
+              PayPeriodCorrectionService.record_correction_committed!(
+                pay_period: @pay_period,
+                actor:      current_user
+              )
+            end
           end
 
           # Enqueue async tax sync — never block commit
           PayrollTaxSyncJob.perform_later(@pay_period.id)
-
-          # CPR-71: if this is a correction run, write a committed audit event
-          if @pay_period.correction_run?
-            PayPeriodCorrectionService.record_correction_committed!(
-              pay_period: @pay_period,
-              actor:      current_user
-            )
-          end
 
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue ArgumentError => e

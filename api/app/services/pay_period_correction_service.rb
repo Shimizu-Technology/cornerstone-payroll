@@ -20,8 +20,9 @@
 #   3. audit_trail         – Returns correction events for a given pay period,
 #      including events where this period is the resulting period.
 #
-# All mutating operations run inside a serializable transaction with row-level
-# locking on the pay period to prevent concurrent double-voids.
+# All mutating operations run inside a transaction with explicit row-level
+# locking (SELECT ... FOR UPDATE) on the pay period to prevent concurrent
+# double-voids / duplicate correction-run creation.
 class PayPeriodCorrectionService
   # Errors specific to correction workflow
   class CorrectionError < StandardError; end
@@ -58,7 +59,7 @@ class PayPeriodCorrectionService
 
       # Reverse YTD totals for every non-voided payroll item
       locked.payroll_items.where(voided: false).each do |item|
-        reverse_ytd_for_item!(item, locked.pay_date.year)
+        reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
       end
 
       # Mark the pay period voided
@@ -167,7 +168,7 @@ class PayPeriodCorrectionService
   # ----------------------------------------------------------------
   # Private helpers
   # ----------------------------------------------------------------
-  private_class_method def self.reverse_ytd_for_item!(item, year)
+  private_class_method def self.reverse_ytd_for_item!(item, year, company_id)
     employee_ytd = EmployeeYtdTotal.find_by(
       employee_id: item.employee_id,
       year:        year
@@ -175,14 +176,14 @@ class PayPeriodCorrectionService
     employee_ytd&.subtract_payroll_item!(item)
 
     company_ytd = CompanyYtdTotal.find_by(
-      company_id: item.pay_period.company_id,
+      company_id: company_id,
       year:       year
     )
     company_ytd&.subtract_payroll_item!(item)
   end
 
   private_class_method def self.copy_payroll_items!(source:, target:)
-    source.payroll_items.each do |source_item|
+    source.payroll_items.where(voided: false).each do |source_item|
       target.payroll_items.create!(
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,
