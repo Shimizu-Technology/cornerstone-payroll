@@ -94,7 +94,7 @@ module Api
 
         # GET /api/v1/admin/reports/tax_summary_csv
         # Downloads tax summary as CSV.
-        # Params: year (required), quarter (optional, 1-4)
+        # Params: year (optional, defaults to current year), quarter (optional, 1-4)
         def tax_summary_csv
           report_data, error_response = build_tax_summary_data
           return error_response if error_response
@@ -108,7 +108,7 @@ module Api
 
         # GET /api/v1/admin/reports/tax_summary_pdf
         # Downloads tax summary as PDF.
-        # Params: year (required), quarter (optional, 1-4)
+        # Params: year (optional, defaults to current year), quarter (optional, 1-4)
         def tax_summary_pdf
           report_data, error_response = build_tax_summary_data
           return error_response if error_response
