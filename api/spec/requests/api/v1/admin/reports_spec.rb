@@ -213,7 +213,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         gross_pay: 250_000.00,
         reported_tips: 0.00,
         withholding_tax: 20_000.00,
-        social_security_tax: 9_932.20,
+        social_security_tax: 10_918.20,
         medicare_tax: 4_075.00)
 
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
@@ -232,7 +232,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         gross_pay: 50_000.00,
         reported_tips: 200_000.00,
         withholding_tax: 10_000.00,
-        social_security_tax: 9_932.20,
+        social_security_tax: 10_918.20,
         medicare_tax: 3_625.00)
 
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }

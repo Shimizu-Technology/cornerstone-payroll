@@ -22,6 +22,16 @@ function W2GuPanel() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
 
+  const extractErrorMessage = (err: unknown): string => {
+    if (err instanceof Error && err.message) return err.message;
+    if (typeof err === 'object' && err !== null) {
+      const maybeErr = err as { message?: unknown; error?: unknown };
+      if (typeof maybeErr.message === 'string' && maybeErr.message.length > 0) return maybeErr.message;
+      if (typeof maybeErr.error === 'string' && maybeErr.error.length > 0) return maybeErr.error;
+    }
+    return 'Failed to load report';
+  };
+
   async function loadReport() {
     setLoading(true);
     setError(null);
@@ -29,7 +39,7 @@ function W2GuPanel() {
       const res = await reportsApi.w2Gu(year);
       setReport(res.report);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load report');
+      setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -57,6 +67,7 @@ function W2GuPanel() {
                 onChange={(e) => {
                   setYear(Number(e.target.value));
                   setReport(null);
+                  setError(null);
                 }}
                 disabled={loading}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
