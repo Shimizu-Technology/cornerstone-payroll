@@ -65,7 +65,7 @@ Use this runbook for clients that do not use the MoSa import flow.
 ### FAIL Path (when any Hard STOP triggers)
 1. Do **not** approve/commit in Cornerstone Payroll.
 2. Complete discrepancy notes in `01-PARALLEL-RUN-VALIDATION-TEMPLATE.md` for every failing line.
-3. Open/update issue entry in `05-ISSUE-REMEDIATION-LOG.md` and post Plane comment with severity + owner + ETA.
+3. Open/update issue entry in `docs/rollout/evidence/ISSUE-LOG.md` and post Plane comment with severity + owner + ETA.
 4. Escalate immediately based on severity rules in `05-ISSUE-REMEDIATION-LOG.md`.
 5. Re-run from Phase 1 after fixes; FAIL cycles do not count toward consecutive-PASS gates.
 
