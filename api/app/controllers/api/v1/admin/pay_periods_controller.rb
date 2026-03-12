@@ -84,6 +84,7 @@ module Api
 
               deleted_run_id = @pay_period.id
               source_period  = nil
+              correction_event = nil
 
               ActiveRecord::Base.transaction do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
@@ -95,7 +96,7 @@ module Api
                 source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
-                event = PayPeriodCorrectionEvent.record!(
+                correction_event = PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
                   pay_period: source,
                   resulting_pay_period: nil,
@@ -127,11 +128,7 @@ module Api
               return render json: {
                 source_pay_period:         pay_period_json(source_period),
                 deleted_correction_run_id: deleted_run_id,
-                correction_event: correction_event_json(
-                  PayPeriodCorrectionEvent
-                    .where(pay_period_id: source_period.id, action_type: "correction_run_deleted")
-                    .order(created_at: :desc).first!
-                )
+                correction_event:          correction_event_json(correction_event)
               }, status: :ok
             rescue ActiveRecord::RecordInvalid => e
               return render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity

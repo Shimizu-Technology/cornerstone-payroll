@@ -182,7 +182,7 @@ export function CorrectionPanel({
       setHistoryError(null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to void pay period.';
-      setVoidError(buildErrorWithRecovery(msg, isVoidError(msg)));
+      setVoidError(buildErrorWithRecovery(msg));
     } finally {
       setVoidLoading(false);
     }
@@ -211,7 +211,7 @@ export function CorrectionPanel({
       navigate(`/pay-periods/${response.correction_run.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create correction run.';
-      setCorrectionError(buildErrorWithRecovery(msg, isCorrectionRunError(msg)));
+      setCorrectionError(buildErrorWithRecovery(msg));
     } finally {
       setCorrectionLoading(false);
     }
@@ -243,7 +243,7 @@ export function CorrectionPanel({
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Failed to delete draft correction run.';
-      setDeleteDraftError(buildErrorWithRecovery(msg, false));
+      setDeleteDraftError(buildErrorWithRecovery(msg));
     } finally {
       setDeleteDraftLoading(false);
     }
@@ -580,7 +580,7 @@ export function CorrectionPanel({
 // ----------------------------------------------------------------
 
 /** Append next-step guidance to server errors for common known conditions. */
-function buildErrorWithRecovery(msg: string, _isKnownError: boolean): string {
+function buildErrorWithRecovery(msg: string): string {
   const lower = msg.toLowerCase();
 
   if (lower.includes('already been voided') || lower.includes('already voided')) {
@@ -599,16 +599,6 @@ function buildErrorWithRecovery(msg: string, _isKnownError: boolean): string {
     return `${msg} — Check your network connection and try again. No changes were made.`;
   }
   return `${msg} — If this error persists, contact support with the pay period ID.`;
-}
-
-function isVoidError(msg: string): boolean {
-  const l = msg.toLowerCase();
-  return l.includes('void') || l.includes('ytd') || l.includes('committed');
-}
-
-function isCorrectionRunError(msg: string): boolean {
-  const l = msg.toLowerCase();
-  return l.includes('correction') || l.includes('voided');
 }
 
 // ----------------------------------------------------------------
