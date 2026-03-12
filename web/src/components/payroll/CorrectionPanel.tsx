@@ -168,6 +168,11 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
   const closeVoidModal = useCallback(() => setShowVoidModal(false), []);
   const closeCorrectionModal = useCallback(() => setShowCorrectionModal(false), []);
 
+  const voidReasonId = useId();
+  const voidConfirmId = useId();
+  const correctionReasonId = useId();
+  const correctionPayDateId = useId();
+
   return (
     <div className="space-y-4">
 
@@ -302,20 +307,22 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
                   </>
                 )} This action cannot be undone.
               </p>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor={voidReasonId} className="block text-sm font-medium text-gray-700 mb-1">
                 Reason <span className="text-red-500">*</span>
               </label>
               <textarea
+                id={voidReasonId}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-red-400 focus:border-red-400"
                 rows={3}
                 placeholder="Describe why this pay period is being voided…"
                 value={voidReason}
                 onChange={(e) => setVoidReason(e.target.value)}
               />
-              <label className="block text-sm font-medium text-gray-700 mt-3 mb-1">
+              <label htmlFor={voidConfirmId} className="block text-sm font-medium text-gray-700 mt-3 mb-1">
                 Type <strong>VOID</strong> to confirm
               </label>
               <input
+                id={voidConfirmId}
                 type="text"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-red-400 focus:border-red-400"
                 placeholder="VOID"
@@ -343,20 +350,22 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
                 A new <strong>draft pay period</strong> will be created with the same employees as this voided period.
                 You can adjust hours, re-calculate, and commit the correction run as a normal payroll.
               </p>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor={correctionReasonId} className="block text-sm font-medium text-gray-700 mb-1">
                 Reason <span className="text-red-500">*</span>
               </label>
               <textarea
+                id={correctionReasonId}
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
                 rows={3}
                 placeholder="Describe what is being corrected…"
                 value={correctionReason}
                 onChange={(e) => setCorrectionReason(e.target.value)}
               />
-              <label className="block text-sm font-medium text-gray-700 mt-3 mb-1">
+              <label htmlFor={correctionPayDateId} className="block text-sm font-medium text-gray-700 mt-3 mb-1">
                 Pay Date (optional override)
               </label>
               <input
+                id={correctionPayDateId}
                 type="date"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
                 value={correctionPayDate}
