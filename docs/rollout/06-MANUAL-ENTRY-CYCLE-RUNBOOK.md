@@ -28,7 +28,8 @@ Use this runbook for clients that do not use the MoSa import flow.
    - FIT/SS/Medicare (employee + employer)
    - net pay
    - check totals (if checks used)
-4. If any section fails, stop and log in:
+4. If any section fails, **STOP — do not proceed to Phase 4 — follow FAIL Path below**.
+   Also log in:
    - `05-ISSUE-REMEDIATION-LOG.md`
 
 ## Phase 4 — Approve + Commit
@@ -56,6 +57,7 @@ Use this runbook for clients that do not use the MoSa import flow.
 
 ## Hard STOP Conditions
 - Headcount mismatch
+- Gross pay mismatch beyond tolerance
 - Net pay mismatch beyond tolerance
 - Tax withholding mismatch beyond tolerance
 - Any unresolved P1/P2 issue
