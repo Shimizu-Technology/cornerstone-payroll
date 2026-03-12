@@ -223,8 +223,11 @@ class ApiClient {
     });
   }
 
-  async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, { method: 'DELETE' });
+  async delete<T>(endpoint: string, options?: { data?: unknown }): Promise<T> {
+    return this.request<T>(endpoint, {
+      method: 'DELETE',
+      body: options?.data ? JSON.stringify(options.data) : undefined,
+    });
   }
 }
 
@@ -506,6 +509,9 @@ export const payPeriodsApi = {
     api.post<CorrectionRunResponse>(`/admin/pay_periods/${id}/create_correction_run`, data),
   correctionHistory: (id: number) =>
     api.get<CorrectionHistoryResponse>(`/admin/pay_periods/${id}/correction_history`),
+  // CPR-73: Delete a draft correction run (undoes correction run creation without voiding).
+  deleteDraftCorrectionRun: (id: number, data: { reason: string }) =>
+    api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
 };
 
 // CPR-71: Correction response types
@@ -531,6 +537,13 @@ export interface CorrectionHistoryResponse {
     superseded_by_id: number | null;
   };
   correction_events: import('@/types').PayPeriodCorrectionEvent[];
+}
+
+// CPR-73: Delete draft correction run response
+export interface DeleteDraftCorrectionRunResponse {
+  source_pay_period: import('@/types').PayPeriod;
+  deleted_correction_run_id: number;
+  correction_event: import('@/types').PayPeriodCorrectionEvent;
 }
 
 // Import types

@@ -173,6 +173,7 @@ export interface PayPeriod {
   superseded_by_id?: number | null;
   can_void?: boolean;
   can_create_correction_run?: boolean;
+  can_delete_draft_correction_run?: boolean;
   // Computed/included
   employee_count?: number;
   payroll_items_count?: number;

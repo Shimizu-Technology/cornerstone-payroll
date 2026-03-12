@@ -169,9 +169,13 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
 
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
+      body = JSON.parse(response.body)
+
       expect(PayPeriod.exists?(pay_period.id)).to eq(false)
       expect(source.reload.superseded_by_id).to be_nil
+      expect(body["deleted_correction_run_id"]).to eq(pay_period.id)
+      expect(body["source_pay_period"]["id"]).to eq(source.id)
 
       deletion_event = PayPeriodCorrectionEvent.where(action_type: "correction_run_deleted")
                                                .order(:id)

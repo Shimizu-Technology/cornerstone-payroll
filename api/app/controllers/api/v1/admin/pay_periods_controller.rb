@@ -12,7 +12,7 @@ module Api
         # GET /api/v1/admin/pay_periods
         def index
           @pay_periods = PayPeriod.where(company_id: current_company_id)
-                                   .includes(:payroll_items, :voided_by)
+                                   .includes(:payroll_items, :voided_by, :correction_events)
                                    .order(pay_date: :desc)
 
           # Filter by status
@@ -71,10 +71,21 @@ module Api
               return render json: { error: "Can only delete draft correction run pay periods" }, status: :unprocessable_entity
             end
 
+            # CPR-73: accept an operator-supplied reason for audit clarity
+            deletion_reason = params[:reason].to_s.strip
+            if deletion_reason.blank?
+              deletion_reason = "Draft correction run deleted by operator"
+            end
+
             begin
               if @pay_period.source_pay_period_id.blank?
                 return render json: { error: "Cannot delete orphaned correction run without source linkage" }, status: :unprocessable_entity
               end
+
+              deleted_run_id = @pay_period.id
+              source_period  = nil
+              source_period_id = nil
+              correction_event = nil
 
               ActiveRecord::Base.transaction do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
@@ -84,23 +95,52 @@ module Api
                 end
 
                 source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
+
+                if locked_run.correction_events.exists?
+                  locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
+                  raise ActiveRecord::RecordInvalid.new(locked_run)
+                end
+
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
-                PayPeriodCorrectionEvent.record!(
+                correction_event = PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
                   pay_period: source,
                   resulting_pay_period: nil,
                   actor: current_user,
-                  reason: "Draft correction run deleted by operator",
+                  reason: deletion_reason,
                   extra_metadata: {
                     deleted_correction_run_id: locked_run.id
                   }
                 )
 
                 locked_run.destroy!
+                source_period_id = source.id
               end
 
-              return head :no_content
+              source_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events)
+                                     .find(source_period_id)
+
+              begin
+                AuditLog.record!(
+                  user:        current_user,
+                  company_id:  current_company_id,
+                  action:      "delete_draft_correction_run",
+                  record_type: "PayPeriod",
+                  record_id:   deleted_run_id,
+                  metadata:    { reason: deletion_reason, source_pay_period_id: source_period.id },
+                  ip_address:  request.remote_ip,
+                  user_agent:  request.user_agent
+                )
+              rescue StandardError => e
+                Rails.logger.error("[CPR-73] AuditLog delete_draft_correction_run failed for pay_period=#{deleted_run_id}: #{e.class}: #{e.message}")
+              end
+
+              return render json: {
+                source_pay_period:         pay_period_json(source_period),
+                deleted_correction_run_id: deleted_run_id,
+                correction_event:          correction_event_json(correction_event)
+              }, status: :ok
             rescue ActiveRecord::RecordInvalid => e
               return render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
             rescue ActiveRecord::RecordNotFound
@@ -367,7 +407,7 @@ module Api
         private
 
         def set_pay_period
-          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period).find(params[:id])
+          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events).find(params[:id])
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
@@ -405,8 +445,9 @@ module Api
             void_reason:              pay_period.void_reason,
             source_pay_period_id:     pay_period.source_pay_period_id,
             superseded_by_id:         pay_period.superseded_by_id,
-            can_void:                 pay_period.can_void?,
-            can_create_correction_run: pay_period.can_create_correction_run?,
+            can_void:                        pay_period.can_void?,
+            can_create_correction_run:       pay_period.can_create_correction_run?,
+            can_delete_draft_correction_run: pay_period.can_delete_draft_correction_run?,
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }
