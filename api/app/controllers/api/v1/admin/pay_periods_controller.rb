@@ -110,19 +110,19 @@ module Api
                 locked_run.destroy!
                 source.reload
                 source_period = source
+              end
 
-                begin
-                  AuditLog.record!(
-                    user:        current_user,
-                    company_id:  current_company_id,
-                    action:      "delete_draft_correction_run",
-                    record_type: "PayPeriod",
-                    record_id:   deleted_run_id,
-                    metadata:    { reason: deletion_reason, source_pay_period_id: source.id }
-                  )
-                rescue StandardError
-                  # Non-critical audit logging must not fail the transaction
-                end
+              begin
+                AuditLog.record!(
+                  user:        current_user,
+                  company_id:  current_company_id,
+                  action:      "delete_draft_correction_run",
+                  record_type: "PayPeriod",
+                  record_id:   deleted_run_id,
+                  metadata:    { reason: deletion_reason, source_pay_period_id: source_period.id }
+                )
+              rescue StandardError => e
+                Rails.logger.error("[CPR-73] AuditLog delete_draft_correction_run failed for pay_period=#{deleted_run_id}: #{e.class}: #{e.message}")
               end
 
               return render json: {
