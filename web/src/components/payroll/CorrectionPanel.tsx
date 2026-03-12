@@ -381,6 +381,15 @@ function CorrectionEventRow({ event }: CorrectionEventRowProps) {
   const variant = ACTION_BADGE_VARIANTS[event.action_type] ?? 'default';
   const snap    = event.financial_snapshot ?? {};
 
+  const metadata = (event.metadata ?? {}) as Record<string, unknown>;
+  const metadataRunId =
+    typeof metadata.created_correction_run_id === 'number'
+      ? metadata.created_correction_run_id
+      : typeof metadata.deleted_correction_run_id === 'number'
+        ? metadata.deleted_correction_run_id
+        : null;
+  const linkedRunId = event.resulting_pay_period_id ?? metadataRunId;
+
   return (
     <li className="px-4 py-3 text-sm">
       <div className="flex items-start justify-between gap-3">
@@ -397,14 +406,14 @@ function CorrectionEventRow({ event }: CorrectionEventRowProps) {
           <p className="mt-1 text-gray-700">
             <strong>Reason:</strong> {event.reason}
           </p>
-          {event.resulting_pay_period_id && (
+          {linkedRunId && (
             <p className="mt-0.5 text-gray-600 text-xs">
               Correction run:{' '}
               <button
                 className="underline text-blue-600 hover:text-blue-800"
-                onClick={() => navigate(`/pay-periods/${event.resulting_pay_period_id}`)}
+                onClick={() => navigate(`/pay-periods/${linkedRunId}`)}
               >
-                Period #{event.resulting_pay_period_id}
+                Period #{linkedRunId}
               </button>
             </p>
           )}
