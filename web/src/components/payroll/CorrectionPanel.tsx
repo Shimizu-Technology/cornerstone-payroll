@@ -231,7 +231,7 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
               setVoidConfirmText('');
             }}
           >
-            Void This Period
+            {isCorrection ? 'Void This Correction Run' : 'Void This Period'}
           </Button>
         )}
 
@@ -287,13 +287,20 @@ export function CorrectionPanel({ payPeriod, onPayPeriodChange }: CorrectionPane
       {/* ---- Void Modal ---- */}
       {showVoidModal && (
         <CorrectionModal
-          title="Void Pay Period"
+          title={isCorrection ? "Void Correction Run" : "Void Pay Period"}
           description={
             <>
               <p className="text-sm text-gray-700 mb-3">
-                Voiding a committed pay period will{' '}
-                <strong>reverse all YTD totals</strong> for every employee in this period.
-                This action cannot be undone. A correction run can be created afterward to re-process payroll.
+                {isCorrection ? (
+                  <>
+                    Voiding this committed <strong>correction run</strong> will reverse its YTD impact and reopen the source period for a new correction run.
+                  </>
+                ) : (
+                  <>
+                    Voiding a committed pay period will <strong>reverse all YTD totals</strong> for every employee in this period.
+                    A correction run can be created afterward to re-process payroll.
+                  </>
+                )} This action cannot be undone.
               </p>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Reason <span className="text-red-500">*</span>

@@ -164,18 +164,20 @@ class PayPeriodCorrectionService
     source_id = pay_period.source_pay_period_id
     raise InvalidStateError, "Correction run is missing source pay period linkage" if source_id.nil?
 
-    source = PayPeriod.lock("FOR UPDATE").find(source_id)
+    PayPeriod.transaction do
+      source = PayPeriod.lock("FOR UPDATE").find(source_id)
 
-    PayPeriodCorrectionEvent.record!(
-      action_type:           "correction_run_committed",
-      pay_period:            source,
-      resulting_pay_period:  pay_period,
-      actor:                 actor,
-      reason:                reason,
-      # Keep the canonical source-period linkage while capturing the
-      # newly committed correction-run totals for audit completeness.
-      financial_snapshot_from: :resulting_pay_period
-    )
+      PayPeriodCorrectionEvent.record!(
+        action_type:           "correction_run_committed",
+        pay_period:            source,
+        resulting_pay_period:  pay_period,
+        actor:                 actor,
+        reason:                reason,
+        # Keep the canonical source-period linkage while capturing the
+        # newly committed correction-run totals for audit completeness.
+        financial_snapshot_from: :resulting_pay_period
+      )
+    end
   end
 
   # ----------------------------------------------------------------
