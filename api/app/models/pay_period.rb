@@ -100,7 +100,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def can_delete_draft_correction_run?
-    correction_run? && draft?
+    correction_run? && draft? && !correction_events.exists?
   end
 
   def period_description

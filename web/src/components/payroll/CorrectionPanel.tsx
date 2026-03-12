@@ -198,9 +198,10 @@ export function CorrectionPanel({
       return;
     }
 
+    setCorrectionLoading(true);
+    setCorrectionError(null);
+
     try {
-      setCorrectionLoading(true);
-      setCorrectionError(null);
       const response = await payPeriodsApi.createCorrectionRun(payPeriod.id, {
         reason:   correctionReason.trim(),
         pay_date: correctionPayDate || undefined,
@@ -208,11 +209,11 @@ export function CorrectionPanel({
       onPayPeriodChange(response.source_pay_period);
       setShowCorrectionModal(false);
       setCorrectionReason('');
+      setCorrectionLoading(false);
       navigate(`/pay-periods/${response.correction_run.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create correction run.';
       setCorrectionError(buildErrorWithRecovery(msg));
-    } finally {
       setCorrectionLoading(false);
     }
   };
@@ -227,24 +228,24 @@ export function CorrectionPanel({
       return;
     }
 
+    setDeleteDraftLoading(true);
+    setDeleteDraftError(null);
+
     try {
-      setDeleteDraftLoading(true);
-      setDeleteDraftError(null);
       const response = await payPeriodsApi.deleteDraftCorrectionRun(payPeriod.id, {
         reason: deleteDraftReason.trim(),
       });
-      // After deletion, navigate back to the source period which is now open
-      onPayPeriodChange(response.source_pay_period);
+      // After deletion, close/reset local state and navigate to source period.
       setShowDeleteDraftModal(false);
       setDeleteDraftReason('');
       setHistoryEvents(null);
       setHistoryOpen(false);
+      setDeleteDraftLoading(false);
       navigate(`/pay-periods/${response.source_pay_period.id}`);
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Failed to delete draft correction run.';
       setDeleteDraftError(buildErrorWithRecovery(msg));
-    } finally {
       setDeleteDraftLoading(false);
     }
   };
