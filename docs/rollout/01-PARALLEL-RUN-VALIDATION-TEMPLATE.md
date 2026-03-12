@@ -45,10 +45,9 @@
 | Total other deductions | __ | __ | __ | **$0.00** | PASS / FAIL |
 | **GROSS PAY (total)** | **__** | **__** | **__** | Import: **$0.00** · Manual: **≤$2.00** | **PASS / FAIL** |
 
-**Manual-entry tie-breaker rule (Section 2):**
-- A Section 2 line item must pass its own tolerance.
+**Section 2 evaluation rule:**
+- Each Section 2 line item must pass its own tolerance.
 - The gross total row must also pass its tolerance.
-- If all line items pass but gross total exceeds tolerance, mark Section 2 **FAIL** and escalate before approval.
 
 ---
 

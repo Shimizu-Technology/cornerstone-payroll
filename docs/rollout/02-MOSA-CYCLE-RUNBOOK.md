@@ -98,7 +98,7 @@ MOSA_APPLY=1 scripts/mosa_run.sh apply PP<NN>
 
 ```bash
 cd api
-rails runner "pp = PayPeriod.find_by(start_date: 'YYYY-MM-DD'); puts pp.payroll_items.count"
+rails runner "pp = PayPeriod.find_by(start_date: 'YYYY-MM-DD'); abort('ERROR: PayPeriod not found — check start_date') if pp.nil?; puts pp.payroll_items.count"
 ```
 
 Expected: matches MoSa employee count for this period.
@@ -349,19 +349,24 @@ Must match intended target before running `MOSA_APPLY=1`.
 
 ### Check number sequence gap
 
-Query the DB (set COMPANY_ID first):
+Query the DB (set COMPANY_ID first; non-numeric check numbers are ignored):
 ```bash
 export COMPANY_ID=<MOSA_COMPANY_ID>
 rails runner '
 company_id = ENV.fetch("COMPANY_ID")
 company = Company.find(company_id)
-PayrollItem.where(company_id: company.id)
+nums = PayrollItem.where(company_id: company.id)
   .where.not(check_number: nil)
-  .order(:check_number)
   .pluck(:check_number)
-  .each_cons(2)
-  .select { |a,b| b - a > 1 }
-  .each { |a,b| puts "Gap: #{a} -> #{b}" }
+  .map(&:to_s)
+  .select { |n| n.match?(/\A\d+\z/) }
+  .map(&:to_i)
+  .uniq
+  .sort
+
+nums.each_cons(2)
+  .select { |a, b| b - a > 1 }
+  .each { |a, b| puts "Gap: #{a} -> #{b}" }
 '
 ```
 
