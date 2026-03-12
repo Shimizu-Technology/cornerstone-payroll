@@ -209,11 +209,11 @@ export function CorrectionPanel({
       onPayPeriodChange(response.source_pay_period);
       setShowCorrectionModal(false);
       setCorrectionReason('');
-      setCorrectionLoading(false);
       navigate(`/pay-periods/${response.correction_run.id}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create correction run.';
       setCorrectionError(buildErrorWithRecovery(msg));
+    } finally {
       setCorrectionLoading(false);
     }
   };
@@ -240,12 +240,12 @@ export function CorrectionPanel({
       setDeleteDraftReason('');
       setHistoryEvents(null);
       setHistoryOpen(false);
-      setDeleteDraftLoading(false);
       navigate(`/pay-periods/${response.source_pay_period.id}`);
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Failed to delete draft correction run.';
       setDeleteDraftError(buildErrorWithRecovery(msg));
+    } finally {
       setDeleteDraftLoading(false);
     }
   };
@@ -856,6 +856,13 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
 
   const linkedRunId = event.resulting_pay_period_id ?? createdRunId;
   const shouldRenderLink = linkedRunId !== null && !deletedRunIds.has(linkedRunId);
+  const runIdForDisplay = deletedRunId ?? linkedRunId;
+  const showDeletedMessage =
+    runIdForDisplay !== null &&
+    (
+      event.action_type === 'correction_run_deleted' ||
+      (event.action_type === 'correction_run_created' && !shouldRenderLink)
+    );
 
   return (
     <li
@@ -908,9 +915,9 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
           )}
 
           {/* Linkage — correction run deleted */}
-          {(!shouldRenderLink && linkedRunId) || (deletedRunId && event.action_type === 'correction_run_deleted') ? (
+          {showDeletedMessage ? (
             <p className="mt-1 text-gray-500 text-xs">
-              Draft correction run #{deletedRunId ?? linkedRunId} was deleted before committing.
+              Draft correction run #{runIdForDisplay} was deleted before committing.
             </p>
           ) : null}
         </div>
