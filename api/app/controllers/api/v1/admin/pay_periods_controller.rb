@@ -71,10 +71,19 @@ module Api
               return render json: { error: "Can only delete draft correction run pay periods" }, status: :unprocessable_entity
             end
 
+            # CPR-73: accept an operator-supplied reason for audit clarity
+            deletion_reason = params[:reason].to_s.strip
+            if deletion_reason.blank?
+              deletion_reason = "Draft correction run deleted by operator"
+            end
+
             begin
               if @pay_period.source_pay_period_id.blank?
                 return render json: { error: "Cannot delete orphaned correction run without source linkage" }, status: :unprocessable_entity
               end
+
+              deleted_run_id = @pay_period.id
+              source_period  = nil
 
               ActiveRecord::Base.transaction do
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
@@ -86,21 +95,44 @@ module Api
                 source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
-                PayPeriodCorrectionEvent.record!(
+                event = PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
                   pay_period: source,
                   resulting_pay_period: nil,
                   actor: current_user,
-                  reason: "Draft correction run deleted by operator",
+                  reason: deletion_reason,
                   extra_metadata: {
                     deleted_correction_run_id: locked_run.id
                   }
                 )
 
                 locked_run.destroy!
+                source.reload
+                source_period = source
+
+                begin
+                  AuditLog.record!(
+                    user:        current_user,
+                    company_id:  current_company_id,
+                    action:      "delete_draft_correction_run",
+                    record_type: "PayPeriod",
+                    record_id:   deleted_run_id,
+                    metadata:    { reason: deletion_reason, source_pay_period_id: source.id }
+                  )
+                rescue StandardError
+                  # Non-critical audit logging must not fail the transaction
+                end
               end
 
-              return head :no_content
+              return render json: {
+                source_pay_period:         pay_period_json(source_period),
+                deleted_correction_run_id: deleted_run_id,
+                correction_event: correction_event_json(
+                  PayPeriodCorrectionEvent
+                    .where(pay_period_id: source_period.id, action_type: "correction_run_deleted")
+                    .order(created_at: :desc).first!
+                )
+              }, status: :ok
             rescue ActiveRecord::RecordInvalid => e
               return render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
             rescue ActiveRecord::RecordNotFound
@@ -405,8 +437,9 @@ module Api
             void_reason:              pay_period.void_reason,
             source_pay_period_id:     pay_period.source_pay_period_id,
             superseded_by_id:         pay_period.superseded_by_id,
-            can_void:                 pay_period.can_void?,
-            can_create_correction_run: pay_period.can_create_correction_run?,
+            can_void:                        pay_period.can_void?,
+            can_create_correction_run:       pay_period.can_create_correction_run?,
+            can_delete_draft_correction_run: pay_period.can_delete_draft_correction_run?,
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }
