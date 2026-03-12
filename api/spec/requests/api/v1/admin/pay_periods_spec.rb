@@ -202,6 +202,28 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
       expect(JSON.parse(response.body)["error"]).to match(/Cannot delete a correction run/i)
     end
+
+    it "returns 422 for orphaned draft correction run delete" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(
+        correction_status: "correction",
+        source_pay_period_id: source.id,
+        status: "draft"
+      )
+      pay_period.update_column(:source_pay_period_id, nil)
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/orphaned correction run/i)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do

@@ -205,6 +205,29 @@ RSpec.describe PayPeriodCorrectionService do
     end
 
     context "when voiding a committed correction run" do
+      it "raises if correction run source linkage is missing" do
+        source = create(:pay_period, :voided, company: company,
+                        start_date: Date.new(2024, 1, 1),
+                        end_date: Date.new(2024, 1, 14),
+                        pay_date: Date.new(2024, 1, 19),
+                        status: "committed")
+        correction_run = create(:pay_period, :correction_run, company: company,
+                                start_date: Date.new(2024, 1, 1),
+                                end_date: Date.new(2024, 1, 14),
+                                pay_date: Date.new(2024, 1, 26),
+                                status: "committed",
+                                source_pay_period: source)
+        correction_run.update_column(:source_pay_period_id, nil)
+
+        expect {
+          PayPeriodCorrectionService.void!(
+            pay_period: correction_run,
+            actor: actor,
+            reason: "attempt void orphan correction run"
+          )
+        }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /missing source pay period linkage/)
+      end
+
       it "clears source superseded_by_id so another correction run can be created" do
         source = create(:pay_period, :voided, company: company,
                         start_date: Date.new(2024, 1, 1),

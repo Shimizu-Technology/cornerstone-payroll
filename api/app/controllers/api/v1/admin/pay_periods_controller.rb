@@ -71,12 +71,13 @@ module Api
             end
 
             begin
+              if @pay_period.source_pay_period_id.blank?
+                return render json: { error: "Cannot delete orphaned correction run without source linkage" }, status: :unprocessable_entity
+              end
+
               ActiveRecord::Base.transaction do
-                source = nil
-                if @pay_period.source_pay_period_id.present?
-                  source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
-                  source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
-                end
+                source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
+                source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
 
                 PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",

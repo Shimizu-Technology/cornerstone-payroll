@@ -52,6 +52,9 @@ class PayPeriodCorrectionService
       was_correction_run = locked.correction_run?
       source_pay_period_id = locked.source_pay_period_id
       source_period = source_pay_period_id.present? ? PayPeriod.lock("FOR UPDATE").find(source_pay_period_id) : nil
+      if was_correction_run && source_period.nil?
+        raise InvalidStateError, "Correction run is missing source pay period linkage"
+      end
 
       # Snapshot financials before mutation.
       # For a correction-run void, link the event to the source period while
@@ -155,8 +158,10 @@ class PayPeriodCorrectionService
   # Called from PayPeriodsController#commit for correction-run periods.
   # ----------------------------------------------------------------
   def self.record_correction_committed!(pay_period:, actor:, reason: "Correction run committed")
-    source = pay_period.source_pay_period
-    raise InvalidStateError, "Correction run is missing source pay period linkage" if source.nil?
+    source_id = pay_period.source_pay_period_id
+    raise InvalidStateError, "Correction run is missing source pay period linkage" if source_id.nil?
+
+    source = PayPeriod.lock("FOR UPDATE").find(source_id)
 
     PayPeriodCorrectionEvent.record!(
       action_type:           "correction_run_committed",

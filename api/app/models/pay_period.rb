@@ -26,6 +26,7 @@ class PayPeriod < ApplicationRecord
 
   # A voided period may have one correction run that supersedes it.
   has_one :correction_run,
+          -> { where(correction_status: "correction").order(id: :desc) },
           class_name: "PayPeriod",
           foreign_key: :source_pay_period_id,
           inverse_of: :source_pay_period
