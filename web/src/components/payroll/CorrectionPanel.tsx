@@ -859,10 +859,8 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
   const runIdForDisplay = deletedRunId ?? linkedRunId;
   const showDeletedMessage =
     runIdForDisplay !== null &&
-    (
-      event.action_type === 'correction_run_deleted' ||
-      (event.action_type === 'correction_run_created' && !shouldRenderLink)
-    );
+    event.action_type === 'correction_run_created' &&
+    !shouldRenderLink;
 
   return (
     <li
