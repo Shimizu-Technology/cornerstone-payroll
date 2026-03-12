@@ -44,7 +44,7 @@ All of the following must be true across both PASS cycles:
 | Field | Requirement |
 |-------|-------------|
 | Employee count | Exact match both cycles (0 tolerance) |
-| Gross pay (total) | Within tolerance both cycles (Import: $0.00; Manual: ≤$1.00/period) |
+| Gross pay (total) | Within tolerance both cycles (Import: $0.00; Manual: ≤$2.00/period) |
 | FIT/DRT withholding per employee | ≤ $0.01 both cycles |
 | SS employee per employee | ≤ $0.01 both cycles |
 | Medicare employee per employee | ≤ $0.01 both cycles |

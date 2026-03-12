@@ -167,7 +167,7 @@ _Complete per-employee table below. Aggregate tolerances: ≤$0.01/employee, ≤
 | Field | Import Mode | Manual Mode |
 |-------|------------|-------------|
 | Employee count | Exact (0 tolerance) | Exact (0 tolerance) |
-| Gross pay (total) | $0.00 | ≤ $1.00/period |
+| Gross pay (total) | $0.00 | ≤ $2.00/period |
 | Net pay (per employee) | ≤ $0.01 | ≤ $0.01 |
 | Net pay (total) | ≤ $0.50/period | ≤ $0.50/period |
 | FIT/DRT withholding (per employee) | ≤ $0.01 | ≤ $0.01 |

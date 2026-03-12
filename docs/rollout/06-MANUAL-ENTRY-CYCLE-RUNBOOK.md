@@ -40,7 +40,8 @@ Use this runbook for clients that do not use the MoSa import flow.
 1. Complete validation template signoff (operator + reviewer).
 2. Update sequencing tracker:
    - `04-MULTI-CLIENT-SEQUENCING-PLAN.md`
-3. File evidence under `docs/rollout/evidence/<client>/`.
+3. Add a Plane ticket comment for this cycle summarizing PASS/FAIL, key deltas, and remediation (if any).
+4. File evidence under `docs/rollout/evidence/<client>/`.
 
 ## Hard STOP Conditions
 - Headcount mismatch
