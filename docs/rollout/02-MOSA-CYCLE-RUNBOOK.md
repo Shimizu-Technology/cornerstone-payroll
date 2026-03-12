@@ -27,7 +27,7 @@ _Estimated time: 15–30 min_
 ### Step 1.1 — Download source files from email
 
 ```bash
-cd /Users/jerry/work/cornerstone-payroll
+cd <REPO_ROOT>
 scripts/mosa_run.sh download
 ```
 
@@ -144,7 +144,7 @@ Record same fields as above.
 Open: `docs/rollout/01-PARALLEL-RUN-VALIDATION-TEMPLATE.md`
 Save a filled copy to: `docs/rollout/evidence/mosa/YYYYMMDD-mosa-cycle-<N>.md`
 
-Work through **all 9 sections**:
+Work through **all 10 sections**:
 
 - [ ] Section 1: Employee count ← compare to QB headcount
 - [ ] Section 2: Gross pay breakdown ← every line vs QB
@@ -155,6 +155,7 @@ Work through **all 9 sections**:
 - [ ] Section 7: Report artifacts generated
 - [ ] Section 8: Import exceptions (unmatched names, outliers, gross_diff)
 - [ ] Section 9: Workflow gate checks
+- [ ] Section 10: Discrepancy notes (document every Δ > tolerance with root cause)
 
 ### Step 3.4 — Decision point
 
@@ -336,7 +337,7 @@ bundle exec rails runner scripts/mosa_backfill_employees.rb --dry-run
 ### Gmail token expired
 
 ```bash
-gog auth refresh --account jerry.shimizutechnology@gmail.com
+gog auth refresh --account <YOUR_GMAIL_ACCOUNT>
 ```
 
 ### Wrong environment (staging vs prod)
@@ -350,7 +351,7 @@ Must match intended target before running `MOSA_APPLY=1`.
 
 Query the DB:
 ```bash
-rails runner "PayrollItem.where(company_id: MOSA_COMPANY_ID).order(:check_number).pluck(:check_number).each_cons(2).select { |a,b| b - a > 1 }.each { |a,b| puts 'Gap: #{a} → #{b}' }"
+rails runner 'PayrollItem.where(company_id: MOSA_COMPANY_ID).order(:check_number).pluck(:check_number).each_cons(2).select { |a,b| b - a > 1 }.each { |a,b| puts "Gap: #{a} -> #{b}" }'
 ```
 
 ---

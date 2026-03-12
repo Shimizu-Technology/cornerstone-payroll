@@ -218,7 +218,7 @@ When a client reaches Cornerstone-Primary Mode:
 | QB usage | Full parallel run | Read-only / reference only |
 | Validation template | Required every cycle | Recommended for 2 more cycles, then spot-check |
 | Fallback path | QB authoritative | QB as emergency fallback (read-only data) |
-| Error escalation | See Section 5 of CLIENT_ROLLOUT_PLAN.md | Leon + Dev define correction path case-by-case |
+| Error escalation | See `docs/rollout/05-ISSUE-REMEDIATION-LOG.md` | Leon + Dev define correction path case-by-case |
 
 ---
 
