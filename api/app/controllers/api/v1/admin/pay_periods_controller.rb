@@ -119,7 +119,9 @@ module Api
                   action:      "delete_draft_correction_run",
                   record_type: "PayPeriod",
                   record_id:   deleted_run_id,
-                  metadata:    { reason: deletion_reason, source_pay_period_id: source_period.id }
+                  metadata:    { reason: deletion_reason, source_pay_period_id: source_period.id },
+                  ip_address:  request.remote_ip,
+                  user_agent:  request.user_agent
                 )
               rescue StandardError => e
                 Rails.logger.error("[CPR-73] AuditLog delete_draft_correction_run failed for pay_period=#{deleted_run_id}: #{e.class}: #{e.message}")
