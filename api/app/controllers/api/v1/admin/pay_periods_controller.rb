@@ -70,28 +70,36 @@ module Api
               return render json: { error: "Cannot delete a correction run pay period" }, status: :unprocessable_entity
             end
 
-            ActiveRecord::Base.transaction do
-              source = nil
-              if @pay_period.source_pay_period_id.present?
-                source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
-                source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
+            begin
+              ActiveRecord::Base.transaction do
+                source = nil
+                if @pay_period.source_pay_period_id.present?
+                  source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
+                  source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
+                end
+
+                PayPeriodCorrectionEvent.record!(
+                  action_type: "correction_run_deleted",
+                  pay_period: source || @pay_period,
+                  resulting_pay_period: @pay_period,
+                  actor: current_user,
+                  reason: "Draft correction run deleted by operator",
+                  extra_metadata: {
+                    deleted_correction_run_id: @pay_period.id
+                  }
+                )
+
+                @pay_period.destroy!
               end
 
-              PayPeriodCorrectionEvent.record!(
-                action_type: "correction_run_deleted",
-                pay_period: source || @pay_period,
-                resulting_pay_period: @pay_period,
-                actor: current_user,
-                reason: "Draft correction run deleted by operator",
-                extra_metadata: {
-                  deleted_correction_run_id: @pay_period.id
-                }
-              )
-
-              @pay_period.destroy!
+              return head :no_content
+            rescue ActiveRecord::RecordInvalid => e
+              return render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+            rescue ActiveRecord::RecordNotFound
+              return render json: { error: "Source pay period not found" }, status: :unprocessable_entity
+            rescue ActiveRecord::InvalidForeignKey, ActiveRecord::DeleteRestrictionError => e
+              return render json: { error: e.message }, status: :unprocessable_entity
             end
-
-            return head :no_content
           end
 
           if @pay_period.committed?
