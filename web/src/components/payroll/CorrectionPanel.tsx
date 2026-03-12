@@ -309,7 +309,7 @@ export function CorrectionPanel({
   const deleteReasonId    = useId();
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-correction-panel tabIndex={-1}>
 
       {/* ---- Voided period status banner ---- */}
       {isVoided && (
@@ -984,7 +984,12 @@ function CorrectionModal({
     const t = setTimeout(() => panelRef.current?.focus(), 10);
     return () => {
       clearTimeout(t);
-      returnFocusRef.current?.focus?.();
+      const target = returnFocusRef.current;
+      if (target && document.body.contains(target)) {
+        target.focus();
+      } else {
+        panelRef.current?.closest<HTMLElement>('[data-correction-panel]')?.focus();
+      }
     };
   }, []);
 
