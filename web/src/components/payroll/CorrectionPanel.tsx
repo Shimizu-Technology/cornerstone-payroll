@@ -856,9 +856,10 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
 
   const linkedRunId = event.resulting_pay_period_id ?? createdRunId;
   const shouldRenderLink = linkedRunId !== null && !deletedRunIds.has(linkedRunId);
-  const runIdForDisplay = deletedRunId ?? linkedRunId;
+  // `showDeletedMessage` is only true for correction_run_created rows,
+  // so the relevant identifier is always `linkedRunId`.
   const showDeletedMessage =
-    runIdForDisplay !== null &&
+    linkedRunId !== null &&
     event.action_type === 'correction_run_created' &&
     !shouldRenderLink;
 
@@ -915,7 +916,7 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
           {/* Linkage — correction run deleted */}
           {showDeletedMessage ? (
             <p className="mt-1 text-gray-500 text-xs">
-              Draft correction run #{runIdForDisplay} was deleted before committing.
+              Draft correction run #{linkedRunId} was deleted before committing.
             </p>
           ) : null}
         </div>
