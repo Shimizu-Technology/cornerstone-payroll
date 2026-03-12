@@ -59,7 +59,7 @@ _Complete per-employee table below. Aggregate tolerances: ≤$0.01/employee, ≤
 
 **Tolerance (per employee):**
 - Guam income tax (FIT/DRT withholding): ≤ $0.01
-- Social Security employee (6.2% of gross, capped at $176,100 YTD): ≤ $0.01
+- Social Security employee (6.2% of gross, capped at current-year SSA wage base — verify annually): ≤ $0.01
 - Medicare employee (1.45% of gross): ≤ $0.01
 
 ---

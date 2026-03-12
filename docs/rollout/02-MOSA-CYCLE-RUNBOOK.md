@@ -230,7 +230,7 @@ _Estimated time: 10 min_
 
 ### Step 6.1 — Complete signoff on validation template
 
-Fill in Section 10 (Signoff) of the completed validation template:
+Fill in the **Signoff** section of the completed validation template:
 - Payroll operator name + date
 - Reviewer (Leon / Ops lead) name + date
 - Mark overall result: **PASS**
