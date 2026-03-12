@@ -382,13 +382,14 @@ function CorrectionEventRow({ event }: CorrectionEventRowProps) {
   const snap    = event.financial_snapshot ?? {};
 
   const metadata = (event.metadata ?? {}) as Record<string, unknown>;
-  const metadataRunId =
-    typeof metadata.created_correction_run_id === 'number'
-      ? metadata.created_correction_run_id
-      : typeof metadata.deleted_correction_run_id === 'number'
-        ? metadata.deleted_correction_run_id
-        : null;
-  const linkedRunId = event.resulting_pay_period_id ?? metadataRunId;
+  const createdRunId = typeof metadata.created_correction_run_id === 'number'
+    ? metadata.created_correction_run_id
+    : null;
+  const deletedRunId = typeof metadata.deleted_correction_run_id === 'number'
+    ? metadata.deleted_correction_run_id
+    : null;
+
+  const linkedRunId = event.resulting_pay_period_id ?? createdRunId;
 
   return (
     <li className="px-4 py-3 text-sm">
@@ -415,6 +416,11 @@ function CorrectionEventRow({ event }: CorrectionEventRowProps) {
               >
                 Period #{linkedRunId}
               </button>
+            </p>
+          )}
+          {!linkedRunId && deletedRunId && event.action_type === 'correction_run_deleted' && (
+            <p className="mt-0.5 text-gray-600 text-xs">
+              Deleted correction run #{deletedRunId}
             </p>
           )}
         </div>
