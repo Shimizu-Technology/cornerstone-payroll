@@ -349,9 +349,20 @@ Must match intended target before running `MOSA_APPLY=1`.
 
 ### Check number sequence gap
 
-Query the DB:
+Query the DB (set COMPANY_ID first):
 ```bash
-rails runner 'PayrollItem.where(company_id: MOSA_COMPANY_ID).order(:check_number).pluck(:check_number).each_cons(2).select { |a,b| b - a > 1 }.each { |a,b| puts "Gap: #{a} -> #{b}" }'
+export COMPANY_ID=<MOSA_COMPANY_ID>
+rails runner '
+company_id = ENV.fetch("COMPANY_ID")
+company = Company.find(company_id)
+PayrollItem.where(company_id: company.id)
+  .where.not(check_number: nil)
+  .order(:check_number)
+  .pluck(:check_number)
+  .each_cons(2)
+  .select { |a,b| b - a > 1 }
+  .each { |a,b| puts "Gap: #{a} -> #{b}" }
+'
 ```
 
 ---

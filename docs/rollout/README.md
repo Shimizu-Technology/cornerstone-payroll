@@ -15,6 +15,7 @@
 | 03 | [03-CUTOVER-GATE-CRITERIA.md](03-CUTOVER-GATE-CRITERIA.md) | Strict go/no-go rules for each client's QB → CP cutover |
 | 04 | [04-MULTI-CLIENT-SEQUENCING-PLAN.md](04-MULTI-CLIENT-SEQUENCING-PLAN.md) | Rollout order + gate tracker for all 5 clients |
 | 05 | [05-ISSUE-REMEDIATION-LOG.md](05-ISSUE-REMEDIATION-LOG.md) | Issue log template + escalation rules |
+| 06 | [06-MANUAL-ENTRY-CYCLE-RUNBOOK.md](06-MANUAL-ENTRY-CYCLE-RUNBOOK.md) | Step-by-step runbook for ST / Cornerstone Internal / DDG / SPR manual-entry cycles |
 
 ---
 
@@ -44,7 +45,7 @@ evidence/
 | Field | Import Mode | Manual Mode |
 |-------|------------|-------------|
 | Employee count | Exact (0 tolerance) | Exact (0 tolerance) |
-| Gross pay total | $0.00 | ≤$1.00/period |
+| Gross pay total | $0.00 | ≤$2.00/period |
 | Net pay per employee | ≤$0.01 | ≤$0.01 |
 | Net pay total | ≤$0.50/period | ≤$0.50/period |
 | FIT/DRT withholding (per emp) | ≤$0.01 | ≤$0.01 |

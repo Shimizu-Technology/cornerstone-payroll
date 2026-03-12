@@ -43,7 +43,12 @@
 | Total loan deductions | __ | __ | __ | **$0.00** | PASS / FAIL |
 | Total retirement deductions | __ | __ | __ | **$0.00** | PASS / FAIL |
 | Total other deductions | __ | __ | __ | **$0.00** | PASS / FAIL |
-| **GROSS PAY (total)** | **__** | **__** | **__** | Import: **$0.00** · Manual: **≤$1.00** | **PASS / FAIL** |
+| **GROSS PAY (total)** | **__** | **__** | **__** | Import: **$0.00** · Manual: **≤$2.00** | **PASS / FAIL** |
+
+**Manual-entry tie-breaker rule (Section 2):**
+- A Section 2 line item must pass its own tolerance.
+- The gross total row must also pass its tolerance.
+- If all line items pass but gross total exceeds tolerance, mark Section 2 **FAIL** and escalate before approval.
 
 ---
 

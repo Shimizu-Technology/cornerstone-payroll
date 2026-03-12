@@ -56,6 +56,8 @@
 
 **Why second:** 2-person team = minimal complexity. Perfect to validate the manual-entry workflow before more complex clients.
 
+**Runbook:** `docs/rollout/06-MANUAL-ENTRY-CYCLE-RUNBOOK.md`
+
 **Pay frequency:** Biweekly (or per Leon's schedule)
 
 | Cycle | Target Period | Goal | Gate Achieved? | Notes |
@@ -77,6 +79,8 @@
 ### 3 — Cornerstone Internal (Third, Manual Entry)
 
 **Why third:** Internal team = fastest feedback loop. Issues found here are caught before they affect external clients. Also validates the "small team + mixed pay types" pattern.
+
+**Runbook:** `docs/rollout/06-MANUAL-ENTRY-CYCLE-RUNBOOK.md`
 
 **Pay frequency:** Biweekly (same as QB schedule)
 
@@ -100,6 +104,8 @@
 
 **Why fourth:** 3-employee mixed team (2 hourly, 1 salary) validates hourly+salary handling in the same period — a common pattern across future clients.
 
+**Runbook:** `docs/rollout/06-MANUAL-ENTRY-CYCLE-RUNBOOK.md`
+
 **Pay frequency:** Biweekly (timesheet source)
 
 | Cycle | Target Period | Goal | Gate Achieved? | Notes |
@@ -121,6 +127,8 @@
 ### 5 — Spike Coffee Roasters (SPR) (Fifth, Manual Entry + Tips)
 
 **Why last:** 10–15 employees + tips = highest complexity among manual-entry clients. Prior experience with MoSa (tips via import) and smaller clients informs how to handle this.
+
+**Runbook:** `docs/rollout/06-MANUAL-ENTRY-CYCLE-RUNBOOK.md`
 
 **Pay frequency:** Biweekly (email/timesheet source)
 
