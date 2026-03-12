@@ -26,6 +26,9 @@ class PayPeriodCorrectionEvent < ApplicationRecord
   scope :chronological, -> { order(created_at: :asc) }
   scope :for_action, ->(type) { where(action_type: type) }
 
+  before_update :prevent_mutation
+  before_destroy :prevent_deletion
+
   # Build a financial snapshot hash from a pay period and its items.
   # Called before any mutation so the snapshot reflects state at time of action.
   def self.build_financial_snapshot(pay_period)
@@ -72,5 +75,17 @@ class PayPeriodCorrectionEvent < ApplicationRecord
       financial_snapshot:      snapshot,
       metadata:                extra_metadata
     )
+  end
+
+  private
+
+  def prevent_mutation
+    errors.add(:base, "Pay period correction events are append-only and cannot be updated")
+    throw(:abort)
+  end
+
+  def prevent_deletion
+    errors.add(:base, "Pay period correction events are append-only and cannot be deleted")
+    throw(:abort)
   end
 end

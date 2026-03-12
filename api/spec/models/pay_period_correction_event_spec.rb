@@ -107,6 +107,27 @@ RSpec.describe PayPeriodCorrectionEvent, type: :model do
     end
   end
 
+  describe "append-only behavior" do
+    let!(:event) do
+      PayPeriodCorrectionEvent.record!(
+        action_type: "void_initiated",
+        pay_period: pay_period,
+        actor: user,
+        reason: "append-only test"
+      )
+    end
+
+    it "rejects updates" do
+      expect(event.update(reason: "changed")).to eq(false)
+      expect(event.errors[:base].join).to match(/append-only/i)
+    end
+
+    it "rejects deletes" do
+      expect(event.destroy).to eq(false)
+      expect(event.errors[:base].join).to match(/append-only/i)
+    end
+  end
+
   describe ".build_financial_snapshot" do
     let(:department) { create(:department, company: company) }
     let(:employee) { create(:employee, company: company, department: department) }
