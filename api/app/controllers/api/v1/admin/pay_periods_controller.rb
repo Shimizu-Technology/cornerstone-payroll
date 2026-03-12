@@ -66,8 +66,8 @@ module Api
         # DELETE /api/v1/admin/pay_periods/:id
         def destroy
           if @pay_period.correction_run?
-            if @pay_period.committed?
-              return render json: { error: "Cannot delete a correction run pay period" }, status: :unprocessable_entity
+            unless @pay_period.draft?
+              return render json: { error: "Can only delete draft correction run pay periods" }, status: :unprocessable_entity
             end
 
             begin

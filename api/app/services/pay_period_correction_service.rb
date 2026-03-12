@@ -144,7 +144,7 @@ class PayPeriodCorrectionService
       PayPeriodCorrectionEvent.record!(
         action_type:           "correction_run_created",
         pay_period:            locked_source,
-        resulting_pay_period:  nil,
+        resulting_pay_period:  correction_run,
         actor:                 actor,
         reason:                reason,
         extra_metadata: {

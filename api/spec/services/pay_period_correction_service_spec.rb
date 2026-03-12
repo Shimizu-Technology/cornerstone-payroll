@@ -361,7 +361,7 @@ RSpec.describe PayPeriodCorrectionService do
         event = PayPeriodCorrectionEvent.last
         expect(event.action_type).to eq("correction_run_created")
         expect(event.pay_period_id).to eq(voided_period.id)
-        expect(event.resulting_pay_period_id).to be_nil
+        expect(event.resulting_pay_period_id).to eq(correction_run.id)
         expect(event.metadata["created_correction_run_id"]).to eq(correction_run.id)
       end
     end

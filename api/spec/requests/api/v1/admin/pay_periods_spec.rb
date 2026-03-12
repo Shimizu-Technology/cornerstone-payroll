@@ -182,7 +182,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(deletion_event.metadata["deleted_correction_run_id"]).to eq(pay_period.id)
     end
 
-    it "returns correction-run delete message even when correction run is committed" do
+    it "blocks deleting non-draft correction runs" do
       source = PayPeriod.create!(
         company: company,
         start_date: Date.today - 28.days,
@@ -200,7 +200,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       delete "/api/v1/admin/pay_periods/#{pay_period.id}"
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(JSON.parse(response.body)["error"]).to match(/Cannot delete a correction run/i)
+      expect(JSON.parse(response.body)["error"]).to match(/only delete draft correction run/i)
     end
 
     it "returns 422 for orphaned draft correction run delete" do
