@@ -35,6 +35,8 @@
 
 **Pay frequency:** Biweekly
 
+**Runbook:** `docs/rollout/02-MOSA-CYCLE-RUNBOOK.md`
+
 | Cycle | Target Period | Goal | Gate Achieved? | Notes |
 |-------|-------------|------|----------------|-------|
 | Cycle 1 (Parallel) | Week 1 | Validate import pipeline end-to-end against QB | ☐ PASS / ☐ FAIL | First live parallel run |

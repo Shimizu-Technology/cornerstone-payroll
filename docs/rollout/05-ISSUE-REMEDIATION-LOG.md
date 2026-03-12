@@ -35,7 +35,7 @@
 | Situation | First Contact | Second Contact | Third Contact |
 |-----------|--------------|----------------|---------------|
 | Import parser failure (MoSa) | Developer on-call (Leon) | — | — |
-| Gross pay mismatch > $1.00 | Payroll Operator → Leon | Cornerstone Ops Lead | — |
+| Gross pay mismatch > $0.00 (import) or > $2.00 (manual) | Payroll Operator → Leon | Cornerstone Ops Lead | — |
 | Employee count mismatch | Cornerstone Ops Lead | Leon | — |
 | Tax withholding mismatch > $1.00 | Leon (dev) | Cornerstone Ops Lead | External CPA (if filing risk) |
 | Post-commit error (any amount) | **Leon immediately** | Cornerstone Ops Lead | External CPA / DRT contact if tax affected |
