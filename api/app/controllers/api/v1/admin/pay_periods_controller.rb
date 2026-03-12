@@ -84,6 +84,7 @@ module Api
 
               deleted_run_id = @pay_period.id
               source_period  = nil
+              source_period_id = nil
               correction_event = nil
 
               ActiveRecord::Base.transaction do
@@ -94,12 +95,13 @@ module Api
                 end
 
                 source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
-                source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
                 if locked_run.correction_events.exists?
                   locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
                   raise ActiveRecord::RecordInvalid.new(locked_run)
                 end
+
+                source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
                 correction_event = PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
@@ -113,9 +115,11 @@ module Api
                 )
 
                 locked_run.destroy!
-                source.reload
-                source_period = source
+                source_period_id = source.id
               end
+
+              source_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events)
+                                     .find(source_period_id)
 
               begin
                 AuditLog.record!(
