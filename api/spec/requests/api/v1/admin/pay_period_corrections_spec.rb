@@ -327,5 +327,247 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       period = json["pay_periods"].find { |p| p["id"] == committed_period.id }
       expect(period["correction_status"]).to eq("voided")
     end
+
+    it "includes can_delete_draft_correction_run on a draft correction run" do
+      # Create a voided period + draft correction run
+      setup_ytd
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "Set up draft run" }, as: :json
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
+           params: { reason: "Create draft correction run" }, as: :json
+      new_id = JSON.parse(response.body)["correction_run"]["id"]
+
+      get "/api/v1/admin/pay_periods/#{new_id}"
+      json = JSON.parse(response.body)
+      pp = json["pay_period"]
+      expect(pp["can_delete_draft_correction_run"]).to be true
+      expect(pp["can_void"]).to be false  # draft, not committed
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # CPR-73: DELETE /api/v1/admin/pay_periods/:id — draft correction run
+  # ----------------------------------------------------------------
+  describe "DELETE /api/v1/admin/pay_periods/:id (draft correction run) — CPR-73" do
+    let!(:voided_period_for_delete) do
+      setup_ytd
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "Void to set up draft correction run" }, as: :json
+      committed_period.reload
+      committed_period
+    end
+
+    let!(:draft_correction_run) do
+      post "/api/v1/admin/pay_periods/#{voided_period_for_delete.id}/create_correction_run",
+           params: { reason: "Create draft correction run for delete test" }, as: :json
+      new_id = JSON.parse(response.body)["correction_run"]["id"]
+      PayPeriod.find(new_id)
+    end
+
+    context "happy path" do
+      it "returns 200 with source_pay_period, deleted_correction_run_id, and correction_event" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Created with wrong pay date, need to redo" }, as: :json
+
+        expect(response).to have_http_status(:ok)
+        json = JSON.parse(response.body)
+        expect(json).to have_key("source_pay_period")
+        expect(json).to have_key("deleted_correction_run_id")
+        expect(json).to have_key("correction_event")
+        expect(json["deleted_correction_run_id"]).to eq(draft_correction_run.id)
+        expect(json["correction_event"]["action_type"]).to eq("correction_run_deleted")
+      end
+
+      it "destroys the correction run record" do
+        expect {
+          delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+                 params: { reason: "Created with wrong pay date, need to redo" }, as: :json
+        }.to change(PayPeriod, :count).by(-1)
+
+        expect { PayPeriod.find(draft_correction_run.id) }
+          .to raise_error(ActiveRecord::RecordNotFound)
+      end
+
+      it "clears superseded_by_id on the source period" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Clearing source period for redo" }, as: :json
+
+        voided_period_for_delete.reload
+        expect(voided_period_for_delete.superseded_by_id).to be_nil
+      end
+
+      it "re-opens the source period for a new correction run (can_create_correction_run = true)" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Clearing source period for redo" }, as: :json
+
+        json = JSON.parse(response.body)
+        expect(json["source_pay_period"]["can_create_correction_run"]).to be true
+      end
+
+      it "records the operator-supplied reason in the correction event" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Specific operator reason for deleting" }, as: :json
+
+        json = JSON.parse(response.body)
+        expect(json["correction_event"]["reason"]).to eq("Specific operator reason for deleting")
+      end
+
+      it "falls back to default reason when none is provided" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}", as: :json
+
+        json = JSON.parse(response.body)
+        expect(json["correction_event"]["reason"]).to match(/deleted by operator/i)
+      end
+
+      it "records a correction_run_deleted audit event on the source period" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Audit event recording test" }, as: :json
+
+        events = PayPeriodCorrectionEvent.where(
+          pay_period_id: voided_period_for_delete.id,
+          action_type: "correction_run_deleted"
+        )
+        expect(events.count).to eq(1)
+        expect(events.first.metadata["deleted_correction_run_id"]).to eq(draft_correction_run.id)
+      end
+
+      it "allows a new correction run to be created after delete" do
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Freeing up for re-run" }, as: :json
+        expect(response).to have_http_status(:ok)
+
+        post "/api/v1/admin/pay_periods/#{voided_period_for_delete.id}/create_correction_run",
+             params: { reason: "Re-running after deleting the wrong draft" }, as: :json
+        expect(response).to have_http_status(:created)
+        new_json = JSON.parse(response.body)
+        expect(new_json["correction_run"]["status"]).to eq("draft")
+      end
+    end
+
+    context "validation errors" do
+      it "returns 422 for a non-draft correction run" do
+        # Fast-track committed correction run by promoting it
+        draft_correction_run.update_columns(status: "committed")
+
+        delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+               params: { reason: "Trying to delete committed run" }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        json = JSON.parse(response.body)
+        expect(json["error"]).to match(/draft/i)
+      end
+
+      it "returns 404 for a correction run belonging to another company" do
+        other_company  = create(:company)
+        other_voided   = create(:pay_period, :voided,          company: other_company)
+        other_run      = create(:pay_period, :correction_run,  company: other_company,
+                                source_pay_period: other_voided)
+        other_voided.update!(superseded_by_id: other_run.id)
+
+        delete "/api/v1/admin/pay_periods/#{other_run.id}",
+               params: { reason: "Cross-company attack" }, as: :json
+
+        expect(response).to have_http_status(:not_found)
+      end
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # CPR-73: Re-correction chain visibility
+  # ----------------------------------------------------------------
+  describe "Re-correction chain (CPR-73)" do
+    it "supports a full re-correction chain: void → correct → void correction → re-correct" do
+      setup_ytd
+
+      # Step 1: void the committed period
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "Initial void for re-correction chain" }, as: :json
+      expect(response).to have_http_status(:ok)
+
+      # Step 2: create correction run #1
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
+           params: { reason: "First correction attempt" }, as: :json
+      expect(response).to have_http_status(:created)
+      run1_id = JSON.parse(response.body)["correction_run"]["id"]
+
+      # Step 3: delete draft correction run #1 (simulate it was wrong)
+      delete "/api/v1/admin/pay_periods/#{run1_id}",
+             params: { reason: "Wrong pay date on first attempt, redoing" }, as: :json
+      expect(response).to have_http_status(:ok)
+
+      # Step 4: source period should now be re-openable
+      committed_period.reload
+      expect(committed_period.superseded_by_id).to be_nil
+      expect(committed_period.can_create_correction_run?).to be true
+
+      # Step 5: create correction run #2
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
+           params: { reason: "Second correction run with correct pay date" }, as: :json
+      expect(response).to have_http_status(:created)
+      run2 = JSON.parse(response.body)["correction_run"]
+      expect(run2["status"]).to eq("draft")
+      expect(run2["source_pay_period_id"]).to eq(committed_period.id)
+
+      # Step 6: audit trail should show all events in chronological order
+      get "/api/v1/admin/pay_periods/#{committed_period.id}/correction_history"
+      events = JSON.parse(response.body)["correction_events"]
+      action_types = events.map { |e| e["action_type"] }
+      expect(action_types).to include("void_initiated", "correction_run_created", "correction_run_deleted", "correction_run_created")
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # CPR-73: Error paths and recovery
+  # ----------------------------------------------------------------
+  describe "Error paths and recovery (CPR-73)" do
+    it "returns a meaningful error on double-void with operator guidance info" do
+      setup_ytd
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "First void" }, as: :json
+
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "Second void attempt" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      error_msg = JSON.parse(response.body)["error"].downcase
+      expect(error_msg).to match(/already been voided|already voided/)
+    end
+
+    it "returns 422 when trying to create correction run on non-voided period" do
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
+           params: { reason: "Source is not voided yet" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/voided/i)
+    end
+
+    it "returns 422 when reason is blank on void" do
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/reason/i)
+    end
+
+    it "returns 422 when reason is blank on create_correction_run" do
+      setup_ytd
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+           params: { reason: "Setting up" }, as: :json
+
+      post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
+           params: { reason: "  " }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/reason/i)
+    end
+
+    it "cannot void a draft period (pre-condition error)" do
+      draft = create(:pay_period, company: company, status: "draft")
+      post "/api/v1/admin/pay_periods/#{draft.id}/void",
+           params: { reason: "Attempting void of draft" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/committed/i)
+    end
   end
 end

@@ -99,6 +99,10 @@ class PayPeriod < ApplicationRecord
     voided? && superseded_by_id.nil?
   end
 
+  def can_delete_draft_correction_run?
+    correction_run? && draft? && !correction_events.exists?
+  end
+
   def period_description
     "#{start_date.strftime('%m/%d/%Y')} - #{end_date.strftime('%m/%d/%Y')}"
   end
