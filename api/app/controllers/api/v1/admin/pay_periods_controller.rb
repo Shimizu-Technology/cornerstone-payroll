@@ -12,7 +12,7 @@ module Api
         # GET /api/v1/admin/pay_periods
         def index
           @pay_periods = PayPeriod.where(company_id: current_company_id)
-                                   .includes(:payroll_items, :voided_by)
+                                   .includes(:payroll_items, :voided_by, :correction_events)
                                    .order(pay_date: :desc)
 
           # Filter by status
@@ -403,7 +403,7 @@ module Api
         private
 
         def set_pay_period
-          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period).find(params[:id])
+          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events).find(params[:id])
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
