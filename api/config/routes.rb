@@ -30,6 +30,10 @@ Rails.application.routes.draw do
             post :approve
             post :commit
             post :retry_tax_sync
+            # CPR-71: Payroll correction workflow
+            post :void
+            post :create_correction_run
+            get  :correction_history
             # Payroll import (MoSa Revel PDF + Excel)
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"

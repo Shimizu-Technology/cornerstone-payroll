@@ -16,6 +16,7 @@ import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/ut
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
+import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import type { PayPeriod, PayrollItem, Employee, TaxSyncStatus } from '@/types';
 
 interface HoursEntry {
@@ -206,6 +207,8 @@ export function PayPeriodDetail() {
   const isCalculated = payPeriod.status === 'calculated';
   const isApproved = payPeriod.status === 'approved';
   const isCommitted = payPeriod.status === 'committed';
+  const isVoided = payPeriod.correction_status === 'voided';
+  const isCorrection = payPeriod.correction_status === 'correction';
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
 
   const syncStatus = payPeriod.tax_sync_status as TaxSyncStatus | null | undefined;
@@ -278,11 +281,15 @@ export function PayPeriodDetail() {
         <div className="flex flex-wrap items-center gap-3">
           <Badge
             variant={
+              isVoided ? 'danger' :
               isCommitted ? 'success' : isApproved ? 'info' : isCalculated ? 'warning' : 'default'
             }
           >
-            {statusConfig?.label || payPeriod.status}
+            {isVoided ? 'Voided' : statusConfig?.label || payPeriod.status}
           </Badge>
+          {isCorrection && (
+            <Badge variant="warning">Correction Run</Badge>
+          )}
           {isCommitted && payPeriod.committed_at && (
             <span className="text-sm text-gray-500">
               Committed {new Date(payPeriod.committed_at).toLocaleString()}
@@ -592,6 +599,29 @@ export function PayPeriodDetail() {
             </div>
             <div className="p-4">
               <ChecksPanel payPeriod={payPeriod} />
+            </div>
+          </Card>
+        )}
+
+        {/* CPR-71: Correction Panel — committed and voided periods */}
+        {(isCommitted || isVoided || isCorrection) && (
+          <Card>
+            <div className="p-4 border-b">
+              <h3 className="font-semibold text-gray-900">Payroll Corrections</h3>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Void this period, create a correction re-run, or review correction history.
+              </p>
+            </div>
+            <div className="p-4">
+              <CorrectionPanel
+                payPeriod={payPeriod}
+                onPayPeriodChange={(updated) => {
+                  setPayPeriod(updated);
+                  if (updated.payroll_items) {
+                    setPayrollItems(updated.payroll_items);
+                  }
+                }}
+              />
             </div>
           </Card>
         )}
