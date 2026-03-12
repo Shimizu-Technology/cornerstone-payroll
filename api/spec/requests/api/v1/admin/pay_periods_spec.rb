@@ -150,6 +150,80 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
     end
+
+    it "deletes a draft correction-run pay period and clears source superseded link" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(
+        correction_status: "correction",
+        source_pay_period_id: source.id,
+        status: "draft"
+      )
+      source.update!(superseded_by_id: pay_period.id)
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:no_content)
+      expect(PayPeriod.exists?(pay_period.id)).to eq(false)
+      expect(source.reload.superseded_by_id).to be_nil
+
+      deletion_event = PayPeriodCorrectionEvent.where(action_type: "correction_run_deleted")
+                                               .order(:id)
+                                               .last
+      expect(deletion_event).to be_present
+      expect(deletion_event.pay_period_id).to eq(source.id)
+      expect(deletion_event.reason).to eq("Draft correction run deleted by operator")
+      expect(deletion_event.metadata["deleted_correction_run_id"]).to eq(pay_period.id)
+    end
+
+    it "blocks deleting non-draft correction runs" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(
+        correction_status: "correction",
+        source_pay_period_id: source.id,
+        status: "committed"
+      )
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/only delete draft correction run/i)
+    end
+
+    it "returns 422 for orphaned draft correction run delete" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(
+        correction_status: "correction",
+        source_pay_period_id: source.id,
+        status: "draft"
+      )
+      pay_period.update_column(:source_pay_period_id, nil)
+
+      delete "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/orphaned correction run/i)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do
@@ -254,6 +328,26 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(JSON.parse(response.body)["error"]).to include("no payroll items")
+    end
+
+    it "returns 422 when correction-commit audit validation fails" do
+      source = PayPeriod.create!(
+        company: company,
+        start_date: Date.today - 28.days,
+        end_date: Date.today - 14.days,
+        pay_date: Date.today - 11.days,
+        status: "committed",
+        correction_status: "voided"
+      )
+      pay_period.update!(correction_status: "correction", source_pay_period_id: source.id)
+
+      allow(PayPeriodCorrectionService).to receive(:record_correction_committed!)
+        .and_raise(PayPeriodCorrectionService::InvalidStateError, "missing source pay period linkage")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to match(/missing source pay period linkage/)
     end
   end
 end

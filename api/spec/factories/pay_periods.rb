@@ -20,5 +20,21 @@ FactoryBot.define do
       status { "committed" }
       committed_at { Time.current }
     end
+
+    # CPR-71: correction traits
+    trait :voided do
+      status { "committed" }
+      committed_at { 1.day.ago }
+      correction_status { "voided" }
+      voided_at { Time.current }
+      void_reason { "Test void reason" }
+    end
+
+    trait :correction_run do
+      status { "draft" }
+      correction_status { "correction" }
+      # Must be persisted so source_pay_period_id is present for model validation.
+      association :source_pay_period, factory: :pay_period, strategy: :create
+    end
   end
 end

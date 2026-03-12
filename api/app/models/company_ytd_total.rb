@@ -35,4 +35,19 @@ class CompanyYtdTotal < ApplicationRecord
       save!
     end
   end
+
+  # CPR-71: Reverse the YTD contribution of a payroll item (used when voiding a committed period).
+  # Floors each field at 0 to guard against rounding edge-cases producing negative totals.
+  def subtract_payroll_item!(payroll_item)
+    with_lock do
+      self.gross_pay              = [ gross_pay - payroll_item.gross_pay.to_f, 0 ].max
+      self.net_pay                = [ net_pay - payroll_item.net_pay.to_f, 0 ].max
+      self.withholding_tax        = [ withholding_tax - payroll_item.withholding_tax.to_f, 0 ].max
+      self.social_security_tax    = [ social_security_tax - payroll_item.social_security_tax.to_f, 0 ].max
+      self.medicare_tax           = [ medicare_tax - payroll_item.medicare_tax.to_f, 0 ].max
+      self.employer_social_security = [ employer_social_security - payroll_item.employer_social_security_tax.to_f, 0 ].max
+      self.employer_medicare      = [ employer_medicare - payroll_item.employer_medicare_tax.to_f, 0 ].max
+      save!
+    end
+  end
 end

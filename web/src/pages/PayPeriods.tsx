@@ -312,16 +312,22 @@ export function PayPeriods() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={
-                            period.status === 'committed' ? 'success' :
-                            period.status === 'approved' ? 'info' :
-                            period.status === 'calculated' ? 'warning' :
-                            'default'
-                          }
-                        >
-                          {statusConfig?.label || period.status}
-                        </Badge>
+                        <div className="flex flex-col gap-1 items-start">
+                          <Badge
+                            variant={
+                              period.correction_status === 'voided' ? 'danger' :
+                              period.status === 'committed' ? 'success' :
+                              period.status === 'approved' ? 'info' :
+                              period.status === 'calculated' ? 'warning' :
+                              'default'
+                            }
+                          >
+                            {period.correction_status === 'voided' ? 'Voided' : (statusConfig?.label || period.status)}
+                          </Badge>
+                          {period.correction_status === 'correction' && (
+                            <Badge variant="warning">Correction</Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
