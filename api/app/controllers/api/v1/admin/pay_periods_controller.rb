@@ -96,6 +96,11 @@ module Api
                 source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
                 source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
+                if locked_run.correction_events.exists?
+                  locked_run.errors.add(:base, "Cannot delete correction run: audit events are attached to this run")
+                  raise ActiveRecord::RecordInvalid.new(locked_run)
+                end
+
                 correction_event = PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
                   pay_period: source,

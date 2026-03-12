@@ -472,14 +472,27 @@ export function CorrectionPanel({
             </p>
           ) : (
             <ol aria-label="Correction audit timeline" className="divide-y divide-gray-100">
-              {historyEvents.map((event, idx) => (
-                <CorrectionEventRow
-                  key={event.id}
-                  event={event}
-                  index={idx + 1}
-                  total={historyEvents.length}
-                />
-              ))}
+              {(() => {
+                const deletedRunIds = new Set<number>(
+                  historyEvents
+                    .filter((e) => e.action_type === 'correction_run_deleted')
+                    .map((e) => {
+                      const md = (e.metadata ?? {}) as Record<string, unknown>;
+                      return typeof md.deleted_correction_run_id === 'number' ? md.deleted_correction_run_id : null;
+                    })
+                    .filter((id): id is number => id !== null)
+                );
+
+                return historyEvents.map((event, idx) => (
+                  <CorrectionEventRow
+                    key={event.id}
+                    event={event}
+                    index={idx + 1}
+                    total={historyEvents.length}
+                    deletedRunIds={deletedRunIds}
+                  />
+                ));
+              })()}
             </ol>
           )}
         </div>
@@ -824,9 +837,10 @@ interface CorrectionEventRowProps {
   event: PayPeriodCorrectionEvent;
   index: number;
   total: number;
+  deletedRunIds: Set<number>;
 }
 
-function CorrectionEventRow({ event, index, total }: CorrectionEventRowProps) {
+function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEventRowProps) {
   const navigate = useNavigate();
   const label   = ACTION_LABELS[event.action_type] ?? event.action_type;
   const variant = ACTION_BADGE_VARIANTS[event.action_type] ?? 'default';
@@ -840,6 +854,7 @@ function CorrectionEventRow({ event, index, total }: CorrectionEventRowProps) {
     ? metadata.deleted_correction_run_id : null;
 
   const linkedRunId = event.resulting_pay_period_id ?? createdRunId;
+  const shouldRenderLink = linkedRunId !== null && !deletedRunIds.has(linkedRunId);
 
   return (
     <li
@@ -879,7 +894,7 @@ function CorrectionEventRow({ event, index, total }: CorrectionEventRowProps) {
           </p>
 
           {/* Linkage — correction run created */}
-          {linkedRunId && (
+          {shouldRenderLink && linkedRunId && (
             <p className="mt-1 text-gray-600 text-xs flex items-center gap-1">
               <span>→ Correction run:</span>
               <button
@@ -892,11 +907,11 @@ function CorrectionEventRow({ event, index, total }: CorrectionEventRowProps) {
           )}
 
           {/* Linkage — correction run deleted */}
-          {!linkedRunId && deletedRunId && event.action_type === 'correction_run_deleted' && (
+          {(!shouldRenderLink && linkedRunId) || (deletedRunId && event.action_type === 'correction_run_deleted') ? (
             <p className="mt-1 text-gray-500 text-xs">
-              Draft correction run #{deletedRunId} was deleted before committing.
+              Draft correction run #{deletedRunId ?? linkedRunId} was deleted before committing.
             </p>
-          )}
+          ) : null}
         </div>
 
         {/* Financial snapshot */}
