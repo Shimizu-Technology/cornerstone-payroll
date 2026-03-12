@@ -53,7 +53,8 @@ module Api
         # PATCH/PUT /api/v1/admin/pay_periods/:id
         def update
           unless @pay_period.can_edit?
-            return render json: { error: "Cannot edit a committed pay period" }, status: :unprocessable_entity
+            message = @pay_period.voided? ? "Cannot edit a voided pay period" : "Cannot edit a committed pay period"
+            return render json: { error: message }, status: :unprocessable_entity
           end
 
           if @pay_period.update(pay_period_params)
@@ -76,8 +77,14 @@ module Api
               end
 
               ActiveRecord::Base.transaction do
-                source = PayPeriod.lock("FOR UPDATE").find(@pay_period.source_pay_period_id)
-                source.update!(superseded_by_id: nil) if source.superseded_by_id == @pay_period.id
+                locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
+                unless locked_run.draft? && locked_run.correction_run?
+                  locked_run.errors.add(:base, "Can only delete draft correction run pay periods")
+                  raise ActiveRecord::RecordInvalid.new(locked_run)
+                end
+
+                source = PayPeriod.lock("FOR UPDATE").find(locked_run.source_pay_period_id)
+                source.update!(superseded_by_id: nil) if source.superseded_by_id == locked_run.id
 
                 PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
@@ -86,11 +93,11 @@ module Api
                   actor: current_user,
                   reason: "Draft correction run deleted by operator",
                   extra_metadata: {
-                    deleted_correction_run_id: @pay_period.id
+                    deleted_correction_run_id: locked_run.id
                   }
                 )
 
-                @pay_period.destroy!
+                locked_run.destroy!
               end
 
               return head :no_content
