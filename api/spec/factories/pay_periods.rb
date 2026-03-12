@@ -33,6 +33,7 @@ FactoryBot.define do
     trait :correction_run do
       status { "draft" }
       correction_status { "correction" }
+      association :source_pay_period, factory: :pay_period, strategy: :build
     end
   end
 end

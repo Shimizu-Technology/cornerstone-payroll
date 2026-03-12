@@ -82,7 +82,7 @@ module Api
                 PayPeriodCorrectionEvent.record!(
                   action_type: "correction_run_deleted",
                   pay_period: source || @pay_period,
-                  resulting_pay_period: @pay_period,
+                  resulting_pay_period: nil,
                   actor: current_user,
                   reason: "Draft correction run deleted by operator",
                   extra_metadata: {

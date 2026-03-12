@@ -161,7 +161,7 @@ class PayPeriodCorrectionService
     source_id = pay_period.source_pay_period_id
     raise InvalidStateError, "Correction run is missing source pay period linkage" if source_id.nil?
 
-    source = PayPeriod.lock("FOR UPDATE").find(source_id)
+    source = PayPeriod.find(source_id)
 
     PayPeriodCorrectionEvent.record!(
       action_type:           "correction_run_committed",
