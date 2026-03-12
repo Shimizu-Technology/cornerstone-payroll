@@ -62,7 +62,9 @@ Use this runbook for clients that do not use the MoSa import flow.
 - Tax withholding mismatch beyond tolerance
 - Any unresolved P1/P2 issue
 
-### FAIL Path (when any Hard STOP triggers)
+### FAIL Path (when any section fails)
+Use this path for **any** Section 1–10 FAIL, including non-Hard-STOP sections (e.g., check totals, report artifacts, workflow gates).
+
 1. Do **not** approve/commit in Cornerstone Payroll.
 2. Complete discrepancy notes in `01-PARALLEL-RUN-VALIDATION-TEMPLATE.md` for every failing line.
 3. Open/update issue entry in `docs/rollout/evidence/ISSUE-LOG.md` and post Plane comment with severity + owner + ETA.
@@ -70,5 +72,7 @@ Use this runbook for clients that do not use the MoSa import flow.
 5. Re-run from Phase 1 after fixes; FAIL cycles do not count toward consecutive-PASS gates.
 
 ## Notes for SPR (manual-entry + tips)
-- Apply Section 2 tie-breaker rule from validation template.
-- Explicitly review tips and gross-total tolerance before approval.
+- Ensure tips are entered per employee and flow into gross correctly.
+- Apply Section 2 evaluation rule from validation template (line items pass + gross total passes).
+- Explicitly compare gross total against QB before approval (manual tolerance ≤ $2.00/period).
+- If gross delta is between $1.50 and $2.00, document per-line deltas in discrepancy notes even when the cycle passes.
