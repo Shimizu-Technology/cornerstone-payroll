@@ -505,6 +505,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(preflight).to have_key("blocking_count")
       expect(preflight).to have_key("warning_count")
       expect(preflight["blocking_count"]).to eq(0)
+
+      filing = response.parsed_body["filing"]
+      expect(filing).to be_a(Hash)
+      expect(filing["status"]).to eq("preflight_passed")
+      expect(filing["blocking_count"]).to eq(0)
+      expect(filing["preflight_run_at"]).to be_present
     end
 
     it "flags missing SSN as blocking finding" do
