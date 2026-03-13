@@ -446,6 +446,19 @@ function W2GuPanel() {
     }
   }
 
+  async function runPreflight() {
+    setPreflightLoading(true);
+    setPreflightError(null);
+    try {
+      const res = await reportsApi.w2GuPreflight(year);
+      setPreflight(res.preflight);
+    } catch (err: unknown) {
+      setPreflightError(extractErrorMessage(err));
+    } finally {
+      setPreflightLoading(false);
+    }
+  }
+
   async function downloadCsv() {
     setExportingCsv(true);
     setError(null);
