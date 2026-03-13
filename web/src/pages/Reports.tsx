@@ -437,6 +437,7 @@ function W2GuPanel() {
   const [preflight, setPreflight] = useState<W2GuPreflightResult | null>(null);
   const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [markReadyError, setMarkReadyError] = useState<string | null>(null);
   const [markingReady, setMarkingReady] = useState(false);
   const [filingNotes, setFilingNotes] = useState('');
 
@@ -470,12 +471,12 @@ function W2GuPanel() {
 
   async function markFilingReady() {
     setMarkingReady(true);
-    setPreflightError(null);
+    setMarkReadyError(null);
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
     } catch (err: unknown) {
-      setPreflightError(extractErrorMessage(err));
+      setMarkReadyError(extractErrorMessage(err));
     } finally {
       setMarkingReady(false);
     }
@@ -535,6 +536,7 @@ function W2GuPanel() {
                   setPreflight(null);
                   setFiling(null);
                   setPreflightError(null);
+                  setMarkReadyError(null);
                   setFilingNotes('');
                 }}
                 disabled={busy}
@@ -600,7 +602,17 @@ function W2GuPanel() {
       {preflightError && (
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-red-600">{preflightError}</p>
+            <p className="text-sm font-medium text-red-700">Preflight Error</p>
+            <p className="text-sm text-red-600 mt-1">{preflightError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {markReadyError && (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
+            <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
           </CardContent>
         </Card>
       )}

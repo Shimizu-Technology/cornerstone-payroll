@@ -573,6 +573,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to match(/blocking findings/i)
     end
 
+    it "revalidates preflight at mark_ready time to prevent stale blocking_count" do
+      # Initial preflight is clean in before block. Introduce a new blocking issue after that.
+      employee.update!(ssn_encrypted: nil)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/blocking findings/i)
+
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(filing.status).to eq("draft")
+      expect(filing.blocking_count).to be > 0
+    end
+
     it "preserves filing_ready status and audit fields on clean preflight re-run" do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
       expect(response).to have_http_status(:ok)

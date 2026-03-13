@@ -270,12 +270,17 @@ module Api
             return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
           end
 
-          if filing.blocking_count.to_i > 0
-            return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
-          end
-
           if filing.status == "filing_ready"
             return render json: { filing: filing_readiness_payload(filing) }
+          end
+
+          company = Company.find(current_company_id)
+          fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
+          apply_preflight_to_filing!(filing, fresh_preflight)
+          filing.save!
+
+          if filing.blocking_count.to_i > 0
+            return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
           end
 
           filing.update!(
