@@ -134,7 +134,7 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
           quarter = params[:quarter]&.to_i
 
@@ -218,7 +218,7 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
 
           unless year && year > 2000 && year <= Date.current.year + 1
@@ -261,7 +261,7 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
 
           unless year && year > 2000 && year <= Date.current.year + 1
@@ -308,7 +308,7 @@ module Api
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
-          year = params[:year]&.to_i || Date.today.year
+          year = params[:year]&.to_i || Date.current.year
 
           employees = Employee.where(company_id: current_company_id)
                              .includes(:employee_ytd_totals)
@@ -374,7 +374,7 @@ module Api
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
         # year defaults to current year; quarter is optional (1-4).
         def build_tax_summary_data
-          year    = params[:year]&.to_i || Date.today.year
+          year    = params[:year]&.to_i || Date.current.year
           quarter = params[:quarter].present? ? params[:quarter].to_i : nil
 
           if quarter && !(1..4).cover?(quarter)
@@ -433,7 +433,7 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
 
           unless year && year > 2000 && year <= Date.current.year + 1
@@ -464,7 +464,7 @@ module Api
           }
         end
 
-        def ytd_company_totals(year = Date.today.year)
+        def ytd_company_totals(year = Date.current.year)
           items = PayrollItem.joins(:pay_period)
                             .where(pay_periods: {
                               company_id: current_company_id,
@@ -533,7 +533,7 @@ module Api
           }
         end
 
-        def employee_ytd_summary(employee, year = Date.today.year)
+        def employee_ytd_summary(employee, year = Date.current.year)
           ytd = employee.ytd_totals_for(year)
           {
             year: year,
