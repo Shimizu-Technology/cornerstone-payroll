@@ -508,7 +508,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,

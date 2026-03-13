@@ -211,6 +211,77 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/w2_gu_preflight
+        # Runs preflight checks and persists filing readiness state for a given tax year.
+        def w2_gu_preflight
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.today.year
+          end
+
+          unless year && year > 2000 && year <= Date.today.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          preflight = W2GuPreflightValidator.new(company: company, year: year).run
+
+          filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
+          filing.blocking_count = preflight[:blocking_count]
+          filing.warning_count = preflight[:warning_count]
+          filing.preflight_run_at = Time.current
+          filing.status = preflight[:blocking_count].zero? ? "preflight_passed" : "draft"
+
+          if filing.status != "filing_ready"
+            filing.marked_ready_at = nil
+            filing.marked_ready_by_id = nil
+          end
+
+          filing.save!
+
+          render json: {
+            preflight: preflight,
+            filing: filing_readiness_payload(filing)
+          }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        end
+
+        # POST /api/v1/admin/reports/w2_gu_mark_ready
+        # Marks a W-2 filing year as filing-ready if no blocking findings remain.
+        def w2_gu_mark_ready
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.today.year
+          end
+
+          unless year && year > 2000 && year <= Date.today.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
+          unless filing
+            return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
+          end
+
+          if filing.blocking_count.to_i > 0
+            return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
+          end
+
+          filing.update!(
+            status: "filing_ready",
+            marked_ready_at: Time.current,
+            marked_ready_by_id: current_user&.id,
+            notes: params[:notes].presence || filing.notes
+          )
+
+          render json: { filing: filing_readiness_payload(filing) }
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
@@ -466,6 +537,19 @@ module Api
             medicare_tax: ytd&.medicare_tax || 0,
             retirement: ytd&.retirement || 0,
             net_pay: ytd&.net_pay || 0
+          }
+        end
+
+        def filing_readiness_payload(filing)
+          {
+            year: filing.year,
+            status: filing.status,
+            blocking_count: filing.blocking_count,
+            warning_count: filing.warning_count,
+            preflight_run_at: filing.preflight_run_at,
+            marked_ready_at: filing.marked_ready_at,
+            marked_ready_by_id: filing.marked_ready_by_id,
+            notes: filing.notes
           }
         end
       end
