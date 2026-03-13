@@ -458,6 +458,7 @@ function W2GuPanel() {
   async function runPreflight() {
     setPreflightLoading(true);
     setPreflightError(null);
+    setMarkReadyError(null);
     try {
       const res = await reportsApi.w2GuPreflight(year);
       setPreflight(res.preflight);
@@ -480,6 +481,7 @@ function W2GuPanel() {
       if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
         setFiling((err.data as { filing: W2GuFilingReadiness }).filing);
       }
+      setPreflight(null);
       setMarkReadyError(extractErrorMessage(err));
     } finally {
       setMarkingReady(false);
@@ -617,6 +619,7 @@ function W2GuPanel() {
           <CardContent className="pt-6">
             <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
             <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
+            <p className="text-xs text-gray-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
           </CardContent>
         </Card>
       )}
