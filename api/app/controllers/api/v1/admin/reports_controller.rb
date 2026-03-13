@@ -285,7 +285,11 @@ module Api
             filing.save!
             return render json: {
               error: "Cannot mark filing ready with blocking findings",
-              filing: filing_readiness_payload(filing)
+              filing: filing_readiness_payload(
+                filing,
+                findings: fresh_preflight[:findings],
+                findings_source: "revalidation"
+              )
             }, status: :unprocessable_entity
           end
 
@@ -578,7 +582,7 @@ module Api
           end
         end
 
-        def filing_readiness_payload(filing)
+        def filing_readiness_payload(filing, findings: nil, findings_source: "persisted")
           {
             year: filing.year,
             status: filing.status,
@@ -588,7 +592,8 @@ module Api
             marked_ready_at: filing.marked_ready_at,
             marked_ready_by_id: filing.marked_ready_by_id,
             notes: filing.notes,
-            findings: filing.findings
+            findings: findings || filing.findings,
+            findings_source: findings_source
           }
         end
       end
