@@ -445,6 +445,59 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/reports/w2_gu_preflight" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      employee.update!(ssn_encrypted: "123-45-6789")
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns preflight structure" do
+      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      expect(preflight["year"]).to eq(2025)
+      expect(preflight["company_id"]).to eq(company.id)
+      expect(preflight["findings"]).to be_an(Array)
+      expect(preflight).to have_key("blocking_count")
+      expect(preflight).to have_key("warning_count")
+    end
+
+    it "flags missing SSN as blocking finding" do
+      employee.update!(ssn_encrypted: nil)
+
+      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      preflight = response.parsed_body["preflight"]
+      ssn_finding = preflight["findings"].find { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }
+      expect(ssn_finding).to be_present
+      expect(ssn_finding["severity"]).to eq("blocking")
+      expect(preflight["blocking_count"]).to be >= 1
+    end
+
+    it "returns 422 for invalid year" do
+      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/i)
+    end
+  end
+
   describe "GET /api/v1/admin/reports/tax_summary" do
     it "uses dedicated employer tax fields in totals" do
       pay_period = create(:pay_period, company: company, status: "committed", pay_date: Date.new(2026, 2, 13))
