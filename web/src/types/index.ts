@@ -450,6 +450,28 @@ export interface W2GuReportResponse {
   report: W2GuReport;
 }
 
+export interface W2GuPreflightFinding {
+  severity: 'blocking' | 'warning';
+  code: string;
+  message: string;
+  employee_id?: number | null;
+}
+
+export interface W2GuPreflightResult {
+  year: number;
+  company_id: number;
+  company_name: string;
+  run_at: string;
+  blocking_count: number;
+  warning_count: number;
+  findings: W2GuPreflightFinding[];
+}
+
+export interface W2GuPreflightResponse {
+  preflight: W2GuPreflightResult;
+}
+
+
 // ----------------
 // Dashboard Stats
 // ----------------

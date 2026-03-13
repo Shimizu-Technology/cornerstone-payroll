@@ -271,6 +271,7 @@ import type {
   CheckItem,
   CheckSettings,
   W2GuReportResponse,
+  W2GuPreflightResponse,
 } from '@/types';
 
 // Companies
