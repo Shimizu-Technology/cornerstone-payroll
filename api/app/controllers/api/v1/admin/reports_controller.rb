@@ -211,7 +211,7 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
-        # GET /api/v1/admin/reports/w2_gu_preflight
+        # POST /api/v1/admin/reports/w2_gu_preflight
         # Runs preflight checks and persists filing readiness state for a given tax year.
         def w2_gu_preflight
           raw_year = params[:year]
@@ -229,20 +229,7 @@ module Api
           preflight = W2GuPreflightValidator.new(company: company, year: year).run
 
           filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
-
-          filing.blocking_count = preflight[:blocking_count]
-          filing.warning_count = preflight[:warning_count]
-          filing.findings = preflight[:findings]
-          filing.preflight_run_at = Time.current
-
-          if preflight[:blocking_count].zero?
-            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
-          else
-            filing.status = "draft"
-            filing.marked_ready_at = nil
-            filing.marked_ready_by_id = nil
-          end
+          apply_preflight_to_filing!(filing, preflight)
 
           attempts = 0
           begin
@@ -252,18 +239,7 @@ module Api
             raise if attempts >= 2
 
             filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-            was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
-            filing.blocking_count = preflight[:blocking_count]
-            filing.warning_count = preflight[:warning_count]
-            filing.findings = preflight[:findings]
-            filing.preflight_run_at = Time.current
-            if preflight[:blocking_count].zero?
-              filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
-            else
-              filing.status = "draft"
-              filing.marked_ready_at = nil
-              filing.marked_ready_by_id = nil
-            end
+            apply_preflight_to_filing!(filing, preflight)
             retry
           end
 
@@ -568,6 +544,23 @@ module Api
             retirement: ytd&.retirement || 0,
             net_pay: ytd&.net_pay || 0
           }
+        end
+
+        def apply_preflight_to_filing!(filing, preflight)
+          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+
+          filing.blocking_count = preflight[:blocking_count]
+          filing.warning_count = preflight[:warning_count]
+          filing.findings = preflight[:findings]
+          filing.preflight_run_at = Time.current
+
+          if preflight[:blocking_count].zero?
+            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+          else
+            filing.status = "draft"
+            filing.marked_ready_at = nil
+            filing.marked_ready_by_id = nil
+          end
         end
 
         def filing_readiness_payload(filing)
