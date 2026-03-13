@@ -277,18 +277,17 @@ module Api
           company = Company.find(current_company_id)
           fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
           apply_preflight_to_filing!(filing, fresh_preflight)
-          filing.save!
 
           if filing.blocking_count.to_i > 0
+            filing.save!
             return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
           end
 
-          filing.update!(
-            status: "filing_ready",
-            marked_ready_at: Time.current,
-            marked_ready_by_id: current_user&.id,
-            notes: params.key?(:notes) ? params[:notes].presence : filing.notes
-          )
+          filing.status = "filing_ready"
+          filing.marked_ready_at = Time.current
+          filing.marked_ready_by_id = current_user&.id
+          filing.notes = params.key?(:notes) ? params[:notes].presence : filing.notes
+          filing.save!
 
           render json: { filing: filing_readiness_payload(filing) }
         end
