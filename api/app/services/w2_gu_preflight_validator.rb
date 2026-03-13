@@ -55,7 +55,14 @@ class W2GuPreflightValidator
   def employee_findings
     out = []
 
-    Employee.where(company_id: company.id).find_each do |employee|
+    employee_ids = PayrollItem
+      .joins(:pay_period)
+      .where(pay_periods: { company_id: company.id, status: 'committed' })
+      .where('EXTRACT(YEAR FROM pay_periods.pay_date) = ?', year)
+      .distinct
+      .pluck(:employee_id)
+
+    Employee.where(id: employee_ids).find_each do |employee|
       if employee.ssn_last_four.blank?
         out << Finding.new(
           severity: 'blocking',

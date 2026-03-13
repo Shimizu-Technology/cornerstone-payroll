@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { reportsApi, payPeriodsApi } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
-import type { PayPeriod, W2GuReport, W2GuEmployeeRow } from '@/types';
+import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -80,19 +80,6 @@ function PayrollRegisterPanel() {
     }
   }
 
-
-  async function markFilingReady() {
-    setMarkingReady(true);
-    setPreflightError(null);
-    try {
-      const res = await reportsApi.w2GuMarkReady(year);
-      setFiling(res.filing);
-    } catch (err: unknown) {
-      setPreflightError(extractErrorMessage(err));
-    } finally {
-      setMarkingReady(false);
-    }
-  }
 
   async function downloadCsv() {
     if (!selectedPeriodId) return;
@@ -295,19 +282,6 @@ function TaxSummaryPanel() {
   }
 
 
-  async function markFilingReady() {
-    setMarkingReady(true);
-    setPreflightError(null);
-    try {
-      const res = await reportsApi.w2GuMarkReady(year);
-      setFiling(res.filing);
-    } catch (err: unknown) {
-      setPreflightError(extractErrorMessage(err));
-    } finally {
-      setMarkingReady(false);
-    }
-  }
-
   async function downloadCsv() {
     setExportingCsv(true);
     setError(null);
@@ -459,6 +433,11 @@ function W2GuPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflight, setPreflight] = useState<W2GuPreflightResult | null>(null);
+  const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [markingReady, setMarkingReady] = useState(false);
 
   async function loadReport() {
     setLoading(true);
@@ -487,7 +466,6 @@ function W2GuPanel() {
       setPreflightLoading(false);
     }
   }
-
 
   async function markFilingReady() {
     setMarkingReady(true);
@@ -528,7 +506,7 @@ function W2GuPanel() {
     }
   }
 
-  const busy = loading || exportingCsv || exportingPdf;
+  const busy = loading || exportingCsv || exportingPdf || preflightLoading || markingReady;
 
   return (
     <div className="space-y-6">
@@ -553,6 +531,9 @@ function W2GuPanel() {
                   setYear(Number(e.target.value));
                   setReport(null);
                   setError(null);
+                  setPreflight(null);
+                  setFiling(null);
+                  setPreflightError(null);
                 }}
                 disabled={busy}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -564,6 +545,13 @@ function W2GuPanel() {
             </div>
             <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate W-2GU Report'}
+            </Button>
+
+            <Button variant="outline" onClick={runPreflight} disabled={busy}>
+              {preflightLoading ? 'Running Preflight…' : 'Run Preflight'}
+            </Button>
+            <Button onClick={markFilingReady} disabled={busy || !filing || filing.blocking_count > 0}>
+              {markingReady ? 'Marking…' : 'Mark Filing Ready'}
             </Button>
 
             {/* Export buttons */}
@@ -593,6 +581,43 @@ function W2GuPanel() {
           )}
         </CardContent>
       </Card>
+
+      {preflightError && (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm text-red-600">{preflightError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {filing && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Filing Readiness</CardTitle>
+            <CardDescription>
+              Status: <span className="font-medium">{filing.status}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
+      {preflight && preflight.findings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Preflight Findings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {preflight.findings.slice(0, 25).map((f, i) => (
+              <p key={i} className={f.severity === 'blocking' ? 'text-sm text-red-700' : 'text-sm text-amber-700'}>
+                • [{f.severity}] {f.message}
+              </p>
+            ))}
+            {preflight.findings.length > 25 && (
+              <p className="text-xs text-gray-500">Showing first 25 of {preflight.findings.length} findings.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Results */}
       {report && (
