@@ -609,6 +609,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(filing.blocking_count).to be > 0
     end
 
+    it "does not overwrite preflight_run_at when mark_ready performs revalidation" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      preflight_run_at = filing.preflight_run_at
+      expect(preflight_run_at).to be_present
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+
+      updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(updated.preflight_run_at.to_i).to eq(preflight_run_at.to_i)
+      expect(updated.status).to eq("filing_ready")
+    end
+
     it "preserves filing_ready status and audit fields on clean preflight re-run" do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
       expect(response).to have_http_status(:ok)
