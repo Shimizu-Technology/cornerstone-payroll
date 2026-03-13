@@ -472,7 +472,7 @@ function W2GuPanel() {
     setMarkingReady(true);
     setPreflightError(null);
     try {
-      const res = await reportsApi.w2GuMarkReady(year, filingNotes.trim() || undefined);
+      const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));

@@ -282,7 +282,7 @@ module Api
             status: "filing_ready",
             marked_ready_at: Time.current,
             marked_ready_by_id: current_user&.id,
-            notes: params[:notes].presence || filing.notes
+            notes: params.key?(:notes) ? params[:notes].presence : filing.notes
           )
 
           render json: { filing: filing_readiness_payload(filing) }
@@ -560,6 +560,7 @@ module Api
             filing.status = "draft"
             filing.marked_ready_at = nil
             filing.marked_ready_by_id = nil
+            filing.notes = nil
           end
         end
 

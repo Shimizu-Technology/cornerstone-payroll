@@ -606,6 +606,34 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(second["marked_ready_by_id"]).to eq(first["marked_ready_by_id"])
       expect(second["notes"]).to eq(first["notes"])
     end
+
+    it "clears approval notes when filing is downgraded back to draft" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed and approved by ops" }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("filing", "notes")).to eq("Reviewed and approved by ops")
+
+      employee.update!(ssn_encrypted: nil)
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      filing = response.parsed_body["filing"]
+      expect(filing["status"]).to eq("draft")
+      expect(filing["notes"]).to be_nil
+      expect(filing["marked_ready_at"]).to be_nil
+      expect(filing["marked_ready_by_id"]).to be_nil
+    end
+
+    it "allows explicit note clearing when marking filing ready" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      filing.update!(status: "preflight_passed", notes: "stale note")
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "" }
+      expect(response).to have_http_status(:ok)
+
+      updated = response.parsed_body["filing"]
+      expect(updated["status"]).to eq("filing_ready")
+      expect(updated["notes"]).to be_nil
+    end
   end
 
   describe "GET /api/v1/admin/reports/tax_summary" do
