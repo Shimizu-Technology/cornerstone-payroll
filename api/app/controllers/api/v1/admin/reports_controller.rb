@@ -138,7 +138,7 @@ module Api
           end
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return render json: {
               error: "year must be a valid 4-digit tax year"
             }, status: :unprocessable_entity
@@ -221,7 +221,7 @@ module Api
             Date.today.year
           end
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -264,7 +264,7 @@ module Api
             Date.today.year
           end
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -288,7 +288,8 @@ module Api
               filing: filing_readiness_payload(
                 filing,
                 findings: fresh_preflight[:findings],
-                findings_source: "revalidation"
+                findings_source: "revalidation",
+                warning_count: fresh_preflight[:warning_count]
               )
             }, status: :unprocessable_entity
           end
@@ -435,7 +436,7 @@ module Api
             Date.today.year
           end
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
           end
 
@@ -566,8 +567,8 @@ module Api
           was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
 
           filing.blocking_count = preflight[:blocking_count]
-          filing.warning_count = preflight[:warning_count]
           if update_preflight_run_at
+            filing.warning_count = preflight[:warning_count]
             filing.findings = preflight[:findings]
             filing.preflight_run_at = Time.current
           end
@@ -582,12 +583,12 @@ module Api
           end
         end
 
-        def filing_readiness_payload(filing, findings: nil, findings_source: "persisted")
+        def filing_readiness_payload(filing, findings: nil, findings_source: "persisted", warning_count: nil)
           {
             year: filing.year,
             status: filing.status,
             blocking_count: filing.blocking_count,
-            warning_count: filing.warning_count,
+            warning_count: warning_count || filing.warning_count,
             preflight_run_at: filing.preflight_run_at,
             marked_ready_at: filing.marked_ready_at,
             marked_ready_by_id: filing.marked_ready_by_id,
