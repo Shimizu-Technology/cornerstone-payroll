@@ -543,6 +543,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/blocking findings/i)
     end
+
+    it "preserves filing_ready status and audit fields on clean preflight re-run" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+
+      filing_ready = response.parsed_body["filing"]
+      expect(filing_ready["status"]).to eq("filing_ready")
+      expect(filing_ready["marked_ready_at"]).to be_present
+      expect(filing_ready["marked_ready_by_id"]).to be_present
+
+      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      filing_after_rerun = response.parsed_body["filing"]
+      expect(filing_after_rerun["status"]).to eq("filing_ready")
+      expect(filing_after_rerun["marked_ready_at"]).to eq(filing_ready["marked_ready_at"])
+      expect(filing_after_rerun["marked_ready_by_id"]).to eq(filing_ready["marked_ready_by_id"])
+      expect(filing_after_rerun["findings"]).to be_an(Array)
+    end
   end
 
   describe "GET /api/v1/admin/reports/tax_summary" do

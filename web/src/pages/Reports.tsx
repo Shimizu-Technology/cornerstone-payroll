@@ -438,6 +438,7 @@ function W2GuPanel() {
   const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [markingReady, setMarkingReady] = useState(false);
+  const [filingNotes, setFilingNotes] = useState('');
 
   async function loadReport() {
     setLoading(true);
@@ -471,7 +472,7 @@ function W2GuPanel() {
     setMarkingReady(true);
     setPreflightError(null);
     try {
-      const res = await reportsApi.w2GuMarkReady(year);
+      const res = await reportsApi.w2GuMarkReady(year, filingNotes.trim() || undefined);
       setFiling(res.filing);
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));
@@ -534,6 +535,7 @@ function W2GuPanel() {
                   setPreflight(null);
                   setFiling(null);
                   setPreflightError(null);
+                  setFilingNotes('');
                 }}
                 disabled={busy}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -576,6 +578,19 @@ function W2GuPanel() {
               </Button>
             </div>
           </div>
+          <div className="mt-3">
+            <label htmlFor="w2gu-filing-notes" className="block text-sm font-medium text-gray-700 mb-1">
+              Filing Notes (optional)
+            </label>
+            <textarea
+              id="w2gu-filing-notes"
+              value={filingNotes}
+              onChange={(e) => setFilingNotes(e.target.value)}
+              disabled={busy}
+              placeholder="Add operator notes before marking filing ready"
+              className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            />
+          </div>
           {error && (
             <p className="mt-3 text-sm text-red-600">{error}</p>
           )}
@@ -597,6 +612,7 @@ function W2GuPanel() {
             <CardDescription>
               Status: <span className="font-medium">{filing.status}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
             </CardDescription>
+            {filing.notes && <p className="text-sm text-gray-600">Notes: {filing.notes}</p>}
           </CardHeader>
         </Card>
       )}

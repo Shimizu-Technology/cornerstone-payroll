@@ -476,6 +476,7 @@ export interface W2GuFilingReadiness {
   marked_ready_at?: string | null;
   marked_ready_by_id?: number | null;
   notes?: string | null;
+  findings?: W2GuPreflightFinding[];
 }
 
 export interface W2GuPreflightResponse {

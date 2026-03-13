@@ -229,12 +229,17 @@ module Api
           preflight = W2GuPreflightValidator.new(company: company, year: year).run
 
           filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
+          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+
           filing.blocking_count = preflight[:blocking_count]
           filing.warning_count = preflight[:warning_count]
+          filing.findings = preflight[:findings]
           filing.preflight_run_at = Time.current
-          filing.status = preflight[:blocking_count].zero? ? "preflight_passed" : "draft"
 
-          if filing.status != "filing_ready"
+          if preflight[:blocking_count].zero?
+            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+          else
+            filing.status = "draft"
             filing.marked_ready_at = nil
             filing.marked_ready_by_id = nil
           end
@@ -549,7 +554,8 @@ module Api
             preflight_run_at: filing.preflight_run_at,
             marked_ready_at: filing.marked_ready_at,
             marked_ready_by_id: filing.marked_ready_by_id,
-            notes: filing.notes
+            notes: filing.notes,
+            findings: filing.findings
           }
         end
       end
