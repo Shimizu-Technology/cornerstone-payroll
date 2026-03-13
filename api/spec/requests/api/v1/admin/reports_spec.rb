@@ -557,6 +557,21 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    it "returns 403 for manager users (admin-only approval action)" do
+      manager_user = User.create!(
+        company: company,
+        email: "manager-reports-#{company.id}@example.com",
+        name: "Reports Manager",
+        role: "manager",
+        active: true
+      )
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(manager_user)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to match(/Admin access required/i)
+    end
+
     it "returns 422 when preflight has not been run" do
       W2FilingReadiness.where(company_id: company.id, year: 2025).delete_all
 

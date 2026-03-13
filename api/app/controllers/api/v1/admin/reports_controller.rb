@@ -254,6 +254,9 @@ module Api
         # POST /api/v1/admin/reports/w2_gu_mark_ready
         # Marks a W-2 filing year as filing-ready if no blocking findings remain.
         def w2_gu_mark_ready
+          require_admin!
+          return if performed?
+
           raw_year = params[:year]
           year = if raw_year.present?
             Integer(raw_year, exception: false)
@@ -293,6 +296,8 @@ module Api
           filing.save!
 
           render json: { filing: filing_readiness_payload(filing) }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
         end
 
         # GET /api/v1/admin/reports/ytd_summary
