@@ -519,6 +519,17 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(preflight["blocking_count"]).to eq(1)
     end
 
+    it "returns blocking finding when no committed payroll exists for the year" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "NO_COMMITTED_PAYROLL" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+      expect(preflight["blocking_count"]).to be >= 1
+    end
+
     it "returns 422 for invalid year" do
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
 
@@ -578,6 +589,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/Run W-2 preflight/i)
+    end
+
+    it "returns 422 for future year when preflight found no committed payroll" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("preflight", "findings").any? { |f| f["code"] == "NO_COMMITTED_PAYROLL" }).to eq(true)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/blocking findings/i)
     end
 
     it "marks filing ready when no blocking findings" do

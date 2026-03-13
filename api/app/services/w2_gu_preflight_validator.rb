@@ -62,6 +62,15 @@ class W2GuPreflightValidator
       .distinct
       .pluck(:employee_id)
 
+    if employee_ids.empty?
+      out << Finding.new(
+        severity: 'blocking',
+        code: 'NO_COMMITTED_PAYROLL',
+        message: "No committed payroll items found for #{year}. Cannot validate W-2 readiness."
+      )
+      return out
+    end
+
     Employee.where(id: employee_ids).find_each do |employee|
       if employee.ssn_last_four.blank?
         out << Finding.new(
