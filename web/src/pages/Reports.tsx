@@ -552,7 +552,7 @@ function W2GuPanel() {
             <Button variant="outline" onClick={runPreflight} disabled={busy}>
               {preflightLoading ? 'Running Preflight…' : 'Run Preflight'}
             </Button>
-            <Button onClick={markFilingReady} disabled={busy || !filing || filing.blocking_count > 0}>
+            <Button onClick={markFilingReady} disabled={busy || !filing || filing.blocking_count > 0 || filing.status === 'filing_ready'}>
               {markingReady ? 'Marking…' : 'Mark Filing Ready'}
             </Button>
 

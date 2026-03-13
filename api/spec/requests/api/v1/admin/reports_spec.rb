@@ -562,6 +562,21 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(filing_after_rerun["marked_ready_by_id"]).to eq(filing_ready["marked_ready_by_id"])
       expect(filing_after_rerun["findings"]).to be_an(Array)
     end
+
+    it "does not overwrite approval audit fields on repeated mark_ready calls" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Initial signoff" }
+      expect(response).to have_http_status(:ok)
+      first = response.parsed_body["filing"]
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Attempted overwrite" }
+      expect(response).to have_http_status(:ok)
+      second = response.parsed_body["filing"]
+
+      expect(second["status"]).to eq("filing_ready")
+      expect(second["marked_ready_at"]).to eq(first["marked_ready_at"])
+      expect(second["marked_ready_by_id"]).to eq(first["marked_ready_by_id"])
+      expect(second["notes"]).to eq(first["notes"])
+    end
   end
 
   describe "GET /api/v1/admin/reports/tax_summary" do

@@ -244,7 +244,28 @@ module Api
             filing.marked_ready_by_id = nil
           end
 
-          filing.save!
+          attempts = 0
+          begin
+            attempts += 1
+            filing.save!
+          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+            raise if attempts >= 2
+
+            filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
+            was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+            filing.blocking_count = preflight[:blocking_count]
+            filing.warning_count = preflight[:warning_count]
+            filing.findings = preflight[:findings]
+            filing.preflight_run_at = Time.current
+            if preflight[:blocking_count].zero?
+              filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+            else
+              filing.status = "draft"
+              filing.marked_ready_at = nil
+              filing.marked_ready_by_id = nil
+            end
+            retry
+          end
 
           render json: {
             preflight: preflight,
@@ -275,6 +296,10 @@ module Api
 
           if filing.blocking_count.to_i > 0
             return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
+          end
+
+          if filing.status == "filing_ready"
+            return render json: { filing: filing_readiness_payload(filing) }
           end
 
           filing.update!(
