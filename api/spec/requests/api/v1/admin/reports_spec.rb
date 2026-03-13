@@ -622,6 +622,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(updated.status).to eq("filing_ready")
     end
 
+    it "does not overwrite persisted findings during mark_ready revalidation" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      persisted_findings = filing.findings
+
+      employee.update!(ssn_encrypted: nil)
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(updated.findings).to eq(persisted_findings)
+      expect(updated.status).to eq("draft")
+    end
+
     it "preserves filing_ready status and audit fields on clean preflight re-run" do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
       expect(response).to have_http_status(:ok)

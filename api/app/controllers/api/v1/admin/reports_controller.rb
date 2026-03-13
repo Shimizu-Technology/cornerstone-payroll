@@ -563,8 +563,10 @@ module Api
 
           filing.blocking_count = preflight[:blocking_count]
           filing.warning_count = preflight[:warning_count]
-          filing.findings = preflight[:findings]
-          filing.preflight_run_at = Time.current if update_preflight_run_at
+          if update_preflight_run_at
+            filing.findings = preflight[:findings]
+            filing.preflight_run_at = Time.current
+          end
 
           if preflight[:blocking_count].zero?
             filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
