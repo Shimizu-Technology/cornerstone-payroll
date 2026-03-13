@@ -272,6 +272,7 @@ import type {
   CheckSettings,
   W2GuReportResponse,
   W2GuPreflightResponse,
+  W2GuMarkReadyResponse,
 } from '@/types';
 
 // Companies

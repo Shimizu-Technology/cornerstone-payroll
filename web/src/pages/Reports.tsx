@@ -80,6 +80,20 @@ function PayrollRegisterPanel() {
     }
   }
 
+
+  async function markFilingReady() {
+    setMarkingReady(true);
+    setPreflightError(null);
+    try {
+      const res = await reportsApi.w2GuMarkReady(year);
+      setFiling(res.filing);
+    } catch (err: unknown) {
+      setPreflightError(extractErrorMessage(err));
+    } finally {
+      setMarkingReady(false);
+    }
+  }
+
   async function downloadCsv() {
     if (!selectedPeriodId) return;
     setExportingCsv(true);
@@ -280,6 +294,20 @@ function TaxSummaryPanel() {
     }
   }
 
+
+  async function markFilingReady() {
+    setMarkingReady(true);
+    setPreflightError(null);
+    try {
+      const res = await reportsApi.w2GuMarkReady(year);
+      setFiling(res.filing);
+    } catch (err: unknown) {
+      setPreflightError(extractErrorMessage(err));
+    } finally {
+      setMarkingReady(false);
+    }
+  }
+
   async function downloadCsv() {
     setExportingCsv(true);
     setError(null);
@@ -452,10 +480,25 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuPreflight(year);
       setPreflight(res.preflight);
+      setFiling(res.filing);
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));
     } finally {
       setPreflightLoading(false);
+    }
+  }
+
+
+  async function markFilingReady() {
+    setMarkingReady(true);
+    setPreflightError(null);
+    try {
+      const res = await reportsApi.w2GuMarkReady(year);
+      setFiling(res.filing);
+    } catch (err: unknown) {
+      setPreflightError(extractErrorMessage(err));
+    } finally {
+      setMarkingReady(false);
     }
   }
 

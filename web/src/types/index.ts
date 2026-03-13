@@ -467,8 +467,24 @@ export interface W2GuPreflightResult {
   findings: W2GuPreflightFinding[];
 }
 
+export interface W2GuFilingReadiness {
+  year: number;
+  status: 'draft' | 'preflight_passed' | 'filing_ready';
+  blocking_count: number;
+  warning_count: number;
+  preflight_run_at?: string | null;
+  marked_ready_at?: string | null;
+  marked_ready_by_id?: number | null;
+  notes?: string | null;
+}
+
 export interface W2GuPreflightResponse {
   preflight: W2GuPreflightResult;
+  filing: W2GuFilingReadiness;
+}
+
+export interface W2GuMarkReadyResponse {
+  filing: W2GuFilingReadiness;
 }
 
 
