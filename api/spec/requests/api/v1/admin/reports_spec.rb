@@ -146,7 +146,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -302,7 +309,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -384,7 +398,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -445,7 +466,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
-  describe "GET /api/v1/admin/reports/w2_gu_preflight" do
+  describe "POST /api/v1/admin/reports/w2_gu_preflight" do
     let!(:pay_period_2025) do
       create(:pay_period, :committed,
         company: company,
@@ -455,7 +476,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -467,7 +495,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "returns preflight structure" do
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
 
       expect(response).to have_http_status(:ok)
       preflight = response.parsed_body["preflight"]
@@ -476,22 +504,23 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(preflight["findings"]).to be_an(Array)
       expect(preflight).to have_key("blocking_count")
       expect(preflight).to have_key("warning_count")
+      expect(preflight["blocking_count"]).to eq(0)
     end
 
     it "flags missing SSN as blocking finding" do
       employee.update!(ssn_encrypted: nil)
 
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
 
       preflight = response.parsed_body["preflight"]
       ssn_finding = preflight["findings"].find { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }
       expect(ssn_finding).to be_present
       expect(ssn_finding["severity"]).to eq("blocking")
-      expect(preflight["blocking_count"]).to be >= 1
+      expect(preflight["blocking_count"]).to eq(1)
     end
 
     it "returns 422 for invalid year" do
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/year/i)
@@ -524,7 +553,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         withholding_tax: 250.00,
         social_security_tax: 186.00,
         medicare_tax: 43.50)
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
       expect(response).to have_http_status(:ok)
     end
 
@@ -537,7 +566,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
     it "returns 422 when blocking findings exist" do
       employee.update!(ssn_encrypted: nil)
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
 
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
@@ -553,7 +582,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(filing_ready["marked_ready_at"]).to be_present
       expect(filing_ready["marked_ready_by_id"]).to be_present
 
-      get "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
       expect(response).to have_http_status(:ok)
 
       filing_after_rerun = response.parsed_body["filing"]
