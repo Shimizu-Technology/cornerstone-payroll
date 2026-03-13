@@ -3,7 +3,7 @@ import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { reportsApi, payPeriodsApi } from '@/services/api';
+import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
 import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
 
@@ -475,7 +475,11 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
+      setFilingNotes('');
     } catch (err: unknown) {
+      if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
+        setFiling((err.data as { filing: W2GuFilingReadiness }).filing);
+      }
       setMarkReadyError(extractErrorMessage(err));
     } finally {
       setMarkingReady(false);

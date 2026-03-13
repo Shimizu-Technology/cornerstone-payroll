@@ -84,7 +84,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -125,7 +126,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -148,7 +150,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -174,7 +177,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -202,7 +206,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -234,12 +239,14 @@ class ApiClient {
 export class ApiError extends Error {
   status: number;
   details?: Record<string, string[]>;
+  data?: unknown;
 
-  constructor(message: string, status: number, details?: Record<string, string[]>) {
+  constructor(message: string, status: number, details?: Record<string, string[]>, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.data = data;
   }
 }
 

@@ -280,7 +280,10 @@ module Api
 
           if filing.blocking_count.to_i > 0
             filing.save!
-            return render json: { error: "Cannot mark filing ready with blocking findings" }, status: :unprocessable_entity
+            return render json: {
+              error: "Cannot mark filing ready with blocking findings",
+              filing: filing_readiness_payload(filing)
+            }, status: :unprocessable_entity
           end
 
           filing.status = "filing_ready"
