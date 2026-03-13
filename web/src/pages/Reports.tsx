@@ -592,7 +592,7 @@ function W2GuPanel() {
               id="w2gu-filing-notes"
               value={filingNotes}
               onChange={(e) => setFilingNotes(e.target.value)}
-              disabled={busy}
+              disabled={busy || filing?.status === 'filing_ready'}
               placeholder="Add operator notes before marking filing ready"
               className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
             />

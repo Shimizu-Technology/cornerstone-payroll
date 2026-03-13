@@ -557,6 +557,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    it "returns 422 when preflight has not been run" do
+      W2FilingReadiness.where(company_id: company.id, year: 2025).delete_all
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/Run W-2 preflight/i)
+    end
+
     it "marks filing ready when no blocking findings" do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
       expect(response).to have_http_status(:ok)
