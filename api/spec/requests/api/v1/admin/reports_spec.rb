@@ -467,6 +467,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
   end
 
   describe "POST /api/v1/admin/reports/w2_gu_preflight" do
+    let(:year_without_committed_payroll) { Date.current.year + 1 }
+
     let!(:pay_period_2025) do
       create(:pay_period, :committed,
         company: company,
@@ -525,8 +527,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(preflight["blocking_count"]).to eq(1)
     end
 
-    it "returns blocking finding when no committed payroll exists for the year" do
-      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
+    it "returns blocking finding when selected year has no committed payroll" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: year_without_committed_payroll }
 
       expect(response).to have_http_status(:ok)
       preflight = response.parsed_body["preflight"]
@@ -569,6 +571,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
   end
 
   describe "POST /api/v1/admin/reports/w2_gu_mark_ready" do
+    let(:year_without_committed_payroll) { Date.current.year + 1 }
+
     let!(:pay_period_2025) do
       create(:pay_period, :committed,
         company: company,
@@ -621,12 +625,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to match(/Run W-2 preflight/i)
     end
 
-    it "returns 422 for future year when preflight found no committed payroll" do
-      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
+    it "returns 422 when selected year has no committed payroll" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: year_without_committed_payroll }
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("preflight", "findings").any? { |f| f["code"] == "NO_COMMITTED_PAYROLL" }).to eq(true)
 
-      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026 }
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: year_without_committed_payroll }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/blocking findings/i)
     end
