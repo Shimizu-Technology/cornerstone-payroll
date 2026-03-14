@@ -677,7 +677,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
 
       updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
-      expect(updated.preflight_run_at.to_i).to eq(preflight_run_at.to_i)
+      expect(updated.preflight_run_at).to eq(preflight_run_at)
       expect(updated.status).to eq("filing_ready")
     end
 

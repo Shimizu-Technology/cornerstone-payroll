@@ -229,7 +229,12 @@ module Api
           preflight = W2GuPreflightValidator.new(company: company, year: year).run
 
           filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-          apply_preflight_to_filing!(filing, preflight, update_preflight_run_at: true)
+          apply_preflight_to_filing!(
+            filing,
+            preflight,
+            update_preflight_run_at: true,
+            preserve_filing_ready_status: true
+          )
 
           attempts = 0
           begin
@@ -239,7 +244,12 @@ module Api
             raise if attempts >= 2
 
             filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
-            apply_preflight_to_filing!(filing, preflight, update_preflight_run_at: true)
+            apply_preflight_to_filing!(
+              filing,
+              preflight,
+              update_preflight_run_at: true,
+              preserve_filing_ready_status: true
+            )
             retry
           end
 
@@ -279,7 +289,12 @@ module Api
 
           company = Company.find(current_company_id)
           fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
-          apply_preflight_to_filing!(filing, fresh_preflight, update_preflight_run_at: false)
+          apply_preflight_to_filing!(
+            filing,
+            fresh_preflight,
+            update_preflight_run_at: false,
+            preserve_filing_ready_status: false
+          )
 
           if filing.blocking_count.to_i > 0
             filing.save!
@@ -570,7 +585,7 @@ module Api
           }
         end
 
-        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
+        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, preserve_filing_ready_status:)
           was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
 
           filing.blocking_count = preflight[:blocking_count]
@@ -581,7 +596,7 @@ module Api
           end
 
           if preflight[:blocking_count].zero?
-            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+            filing.status = preserve_filing_ready_status && was_filing_ready ? "filing_ready" : "preflight_passed"
           else
             filing.status = "draft"
             filing.marked_ready_at = nil
