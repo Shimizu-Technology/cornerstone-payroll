@@ -450,6 +450,55 @@ export interface W2GuReportResponse {
   report: W2GuReport;
 }
 
+export interface W2GuPreflightFinding {
+  severity: 'blocking' | 'warning';
+  code: string;
+  message: string;
+  employee_id?: number | null;
+}
+
+export interface W2GuPreflightResult {
+  year: number;
+  company_id: number;
+  company_name: string;
+  run_at: string;
+  blocking_count: number;
+  warning_count: number;
+  findings: W2GuPreflightFinding[];
+}
+
+export interface W2GuFilingReadiness {
+  year: number;
+  status: 'draft' | 'preflight_passed' | 'filing_ready';
+  blocking_count: number;
+  warning_count: number;
+  preflight_run_at?: string | null;
+  marked_ready_at?: string | null;
+  marked_ready_by_id?: number | null;
+  notes?: string | null;
+  findings?: W2GuPreflightFinding[];
+  findings_source?: 'persisted' | 'revalidation';
+}
+
+export interface W2GuPreflightResponse {
+  preflight: W2GuPreflightResult;
+  filing: W2GuFilingReadiness;
+}
+
+export interface W2GuRevalidationResult {
+  run_at: string;
+  blocking_count: number;
+  warning_count: number;
+  findings: W2GuPreflightFinding[];
+  findings_source: 'revalidation';
+}
+
+export interface W2GuMarkReadyResponse {
+  filing: W2GuFilingReadiness;
+  revalidation?: W2GuRevalidationResult;
+}
+
+
 // ----------------
 // Dashboard Stats
 // ----------------

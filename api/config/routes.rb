@@ -75,6 +75,8 @@ Rails.application.routes.draw do
         get "reports/ytd_summary", to: "reports#ytd_summary"
         get "reports/form_941_gu", to: "reports#form_941_gu"
         get "reports/w2_gu", to: "reports#w2_gu"
+        post "reports/w2_gu_preflight", to: "reports#w2_gu_preflight"
+        post "reports/w2_gu_mark_ready", to: "reports#w2_gu_mark_ready"
         get "reports/w2_gu_csv", to: "reports#w2_gu_csv"
         get "reports/w2_gu_pdf", to: "reports#w2_gu_pdf"
 
