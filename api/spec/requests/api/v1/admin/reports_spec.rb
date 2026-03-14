@@ -536,6 +536,30 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(preflight["blocking_count"]).to be >= 1
     end
 
+    it "flags missing employer EIN as blocking finding" do
+      company.update!(ein: nil)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "EMPLOYER_EIN_MISSING" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+    end
+
+    it "flags incomplete employer address as blocking finding" do
+      company.update!(address_line1: nil)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "EMPLOYER_ADDRESS_INCOMPLETE" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+    end
+
     it "returns 422 for invalid year" do
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
 

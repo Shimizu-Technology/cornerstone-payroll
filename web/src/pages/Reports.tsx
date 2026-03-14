@@ -643,6 +643,17 @@ function W2GuPanel() {
             <CardDescription>
               Status: <span className="font-medium">{filing.status}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
             </CardDescription>
+            {filing.preflight_run_at && (
+              <p className="text-xs text-gray-500">
+                Last explicit preflight: {new Date(filing.preflight_run_at).toLocaleString()}
+              </p>
+            )}
+            {filing.marked_ready_at && (
+              <p className="text-xs text-gray-500">
+                Marked ready: {new Date(filing.marked_ready_at).toLocaleString()}
+                {typeof filing.marked_ready_by_id === 'number' ? ` (user #${filing.marked_ready_by_id})` : ''}
+              </p>
+            )}
             {filing.notes && <p className="text-sm text-gray-600">Notes: {filing.notes}</p>}
           </CardHeader>
         </Card>
