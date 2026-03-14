@@ -300,7 +300,14 @@ module Api
           filing.notes = params.key?(:notes) ? params[:notes].presence : filing.notes
           filing.save!
 
-          render json: { filing: filing_readiness_payload(filing) }
+          render json: {
+            filing: filing_readiness_payload(
+              filing,
+              findings: fresh_preflight[:findings],
+              findings_source: "revalidation",
+              warning_count: fresh_preflight[:warning_count]
+            )
+          }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         end

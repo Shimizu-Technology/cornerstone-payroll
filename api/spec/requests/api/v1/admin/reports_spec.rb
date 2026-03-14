@@ -612,6 +612,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       filing = response.parsed_body["filing"]
       expect(filing["status"]).to eq("filing_ready")
+      expect(filing["notes"]).to eq("Reviewed by ops")
+      expect(filing["marked_ready_at"]).to be_present
+      expect(filing["marked_ready_by_id"]).to eq(admin_user.id)
+      expect(filing["findings_source"]).to eq("revalidation")
+      expect(filing["warning_count"]).to be_a(Integer)
     end
 
     it "returns 422 when blocking findings exist" do
