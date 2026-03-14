@@ -300,12 +300,8 @@ module Api
             filing.save!
             return render json: {
               error: "Cannot mark filing ready with blocking findings",
-              filing: filing_readiness_payload(
-                filing,
-                findings: fresh_preflight[:findings],
-                findings_source: "revalidation",
-                warning_count: fresh_preflight[:warning_count]
-              )
+              filing: filing_readiness_payload(filing),
+              revalidation: revalidation_payload(fresh_preflight)
             }, status: :unprocessable_entity
           end
 
@@ -316,12 +312,8 @@ module Api
           filing.save!
 
           render json: {
-            filing: filing_readiness_payload(
-              filing,
-              findings: fresh_preflight[:findings],
-              findings_source: "revalidation",
-              warning_count: fresh_preflight[:warning_count]
-            )
+            filing: filing_readiness_payload(filing),
+            revalidation: revalidation_payload(fresh_preflight)
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
@@ -605,18 +597,28 @@ module Api
           end
         end
 
-        def filing_readiness_payload(filing, findings: nil, findings_source: "persisted", warning_count: nil)
+        def filing_readiness_payload(filing)
           {
             year: filing.year,
             status: filing.status,
             blocking_count: filing.blocking_count,
-            warning_count: warning_count || filing.warning_count,
+            warning_count: filing.warning_count,
             preflight_run_at: filing.preflight_run_at,
             marked_ready_at: filing.marked_ready_at,
             marked_ready_by_id: filing.marked_ready_by_id,
             notes: filing.notes,
-            findings: findings || filing.findings,
-            findings_source: findings_source
+            findings: filing.findings,
+            findings_source: "persisted"
+          }
+        end
+
+        def revalidation_payload(preflight)
+          {
+            run_at: preflight[:run_at],
+            blocking_count: preflight[:blocking_count],
+            warning_count: preflight[:warning_count],
+            findings: preflight[:findings],
+            findings_source: "revalidation"
           }
         end
       end

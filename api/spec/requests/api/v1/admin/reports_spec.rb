@@ -639,8 +639,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(filing["notes"]).to eq("Reviewed by ops")
       expect(filing["marked_ready_at"]).to be_present
       expect(filing["marked_ready_by_id"]).to eq(admin_user.id)
-      expect(filing["findings_source"]).to eq("revalidation")
-      expect(filing["warning_count"]).to be_a(Integer)
+      expect(filing["findings_source"]).to eq("persisted")
+      expect(response.parsed_body.dig("revalidation", "findings_source")).to eq("revalidation")
+      expect(response.parsed_body.dig("revalidation", "warning_count")).to be_a(Integer)
     end
 
     it "returns 422 when blocking findings exist" do
@@ -659,9 +660,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/blocking findings/i)
-      expect(response.parsed_body.dig("filing", "findings_source")).to eq("revalidation")
-      expect(response.parsed_body.dig("filing", "findings")).to be_an(Array)
-      expect(response.parsed_body.dig("filing", "findings").any? { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }).to eq(true)
+      expect(response.parsed_body.dig("filing", "findings_source")).to eq("persisted")
+      expect(response.parsed_body.dig("revalidation", "findings_source")).to eq("revalidation")
+      expect(response.parsed_body.dig("revalidation", "findings")).to be_an(Array)
+      expect(response.parsed_body.dig("revalidation", "findings").any? { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }).to eq(true)
 
       filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
       expect(filing.status).to eq("draft")

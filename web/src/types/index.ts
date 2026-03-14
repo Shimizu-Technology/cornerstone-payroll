@@ -485,8 +485,17 @@ export interface W2GuPreflightResponse {
   filing: W2GuFilingReadiness;
 }
 
+export interface W2GuRevalidationResult {
+  run_at: string;
+  blocking_count: number;
+  warning_count: number;
+  findings: W2GuPreflightFinding[];
+  findings_source: 'revalidation';
+}
+
 export interface W2GuMarkReadyResponse {
   filing: W2GuFilingReadiness;
+  revalidation?: W2GuRevalidationResult;
 }
 
 
