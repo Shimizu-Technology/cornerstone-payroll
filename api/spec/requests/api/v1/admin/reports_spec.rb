@@ -687,9 +687,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(updated.status).to eq("filing_ready")
     end
 
-    it "does not overwrite persisted findings during mark_ready revalidation" do
+    it "does not overwrite persisted findings/warnings during mark_ready revalidation" do
       filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
       persisted_findings = filing.findings
+      persisted_warning_count = filing.warning_count
 
       employee.update!(ssn_encrypted: nil)
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
@@ -697,6 +698,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
       expect(updated.findings).to eq(persisted_findings)
+      expect(updated.warning_count).to eq(persisted_warning_count)
       expect(updated.status).to eq("draft")
     end
 
