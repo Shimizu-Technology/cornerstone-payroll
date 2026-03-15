@@ -270,7 +270,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu"
 
@@ -378,7 +378,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu_csv"
 
@@ -451,7 +451,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu_pdf"
 
@@ -1026,7 +1026,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/tax_summary_csv"
 
@@ -1099,7 +1099,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/tax_summary_pdf"
 
