@@ -498,14 +498,14 @@ module Api
         end
 
         def ytd_company_totals(year = Date.current.year)
+          reportable_period_ids = PayPeriod.reportable_committed
+                                           .where(company_id: current_company_id)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
           items = PayrollItem.joins(:pay_period)
                             .where(pay_periods: {
-                              company_id: current_company_id,
-                              id: PayPeriod.reportable_committed
-                                .where(company_id: current_company_id)
-                                .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
-                                .select(:id),
-                              pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)
+                              id: reportable_period_ids
                             })
 
           {

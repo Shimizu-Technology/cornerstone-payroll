@@ -184,7 +184,7 @@ RSpec.describe Form941GuAggregator do
         # employee SS: 124 + 93 + 124 = 341
         expect(detail[:ss_employee]).to eq(341.0)
         expect(detail[:ss_employer]).to eq(341.0)
-        expect(detail[:ss_combined]).to eq(672.7)
+        expect(detail[:ss_combined]).to eq(682.0)
       end
 
       it "separates employee and employer Medicare taxes" do

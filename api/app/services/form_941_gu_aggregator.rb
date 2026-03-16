@@ -174,7 +174,7 @@ class Form941GuAggregator
         fit_withheld:                 total_fit_withheld.to_f,
         ss_employee:                  ss_employee_total.to_f,
         ss_employer:                  ss_employer_total.to_f,
-        ss_combined:                  ss_combined_total.to_f,
+        ss_combined:                  (ss_employee_total + ss_employer_total).round(2).to_f,
         medicare_employee:            medicare_employee_total.to_f,
         medicare_employer:            medicare_employer_total.to_f,
         medicare_combined:            medicare_combined_total.to_f,

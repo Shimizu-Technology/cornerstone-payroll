@@ -63,7 +63,6 @@ class W2GuPreflightValidator
           .where('EXTRACT(YEAR FROM pay_date) = ?', year)
           .select(:id)
       })
-      .where('EXTRACT(YEAR FROM pay_periods.pay_date) = ?', year)
       .distinct
       .pluck(:employee_id)
 
