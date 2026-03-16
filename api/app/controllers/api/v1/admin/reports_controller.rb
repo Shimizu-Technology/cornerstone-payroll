@@ -508,6 +508,7 @@ module Api
                                            .select(:id)
 
           items = PayrollItem.joins(:pay_period)
+                            .where(company_id: current_company_id)
                             .where(pay_periods: {
                               id: reportable_period_ids
                             })
