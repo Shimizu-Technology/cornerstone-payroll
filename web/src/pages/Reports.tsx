@@ -41,6 +41,25 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
+function buildRevalidationPreflight(
+  year: number,
+  revalidation: W2GuMarkReadyResponse['revalidation'],
+  report: W2GuReport | null,
+  preflight: W2GuPreflightResult | null
+): W2GuPreflightResult | null {
+  if (!revalidation) return null;
+
+  return {
+    year,
+    company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
+    company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
+    run_at: revalidation.run_at,
+    blocking_count: revalidation.blocking_count,
+    warning_count: revalidation.warning_count,
+    findings: revalidation.findings,
+  };
+}
+
 // ─── Payroll Register Panel ───────────────────────────────────────────────────
 
 function PayrollRegisterPanel() {
@@ -499,16 +518,9 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
-      if (res.revalidation) {
-        setPreflight({
-          year,
-          company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
-          company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
-          run_at: res.revalidation.run_at,
-          blocking_count: res.revalidation.blocking_count,
-          warning_count: res.revalidation.warning_count,
-          findings: res.revalidation.findings,
-        });
+      const revalidatedPreflight = buildRevalidationPreflight(year, res.revalidation, report, preflight);
+      if (revalidatedPreflight) {
+        setPreflight(revalidatedPreflight);
       }
       setPreflightError(null);
       setFilingNotes('');
@@ -520,16 +532,9 @@ function W2GuPanel() {
           setFiling(errorData.filing);
         }
 
-        if (errorData.revalidation) {
-          setPreflight({
-            year,
-            company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
-            company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
-            run_at: errorData.revalidation.run_at,
-            blocking_count: errorData.revalidation.blocking_count,
-            warning_count: errorData.revalidation.warning_count,
-            findings: errorData.revalidation.findings,
-          });
+        const revalidatedPreflight = buildRevalidationPreflight(year, errorData.revalidation, report, preflight);
+        if (revalidatedPreflight) {
+          setPreflight(revalidatedPreflight);
         }
       }
       setMarkReadyError(extractErrorMessage(err));
