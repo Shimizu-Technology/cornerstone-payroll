@@ -232,8 +232,7 @@ module Api
           apply_preflight_to_filing!(
             filing,
             preflight,
-            update_preflight_run_at: true,
-            preserve_filing_ready_status: true
+            update_preflight_run_at: true
           )
 
           attempts = 0
@@ -247,8 +246,7 @@ module Api
             apply_preflight_to_filing!(
               filing,
               preflight,
-              update_preflight_run_at: true,
-              preserve_filing_ready_status: true
+              update_preflight_run_at: true
             )
             retry
           end
@@ -294,8 +292,7 @@ module Api
           apply_preflight_to_filing!(
             filing,
             fresh_preflight,
-            update_preflight_run_at: false,
-            preserve_filing_ready_status: false
+            update_preflight_run_at: false
           )
 
           if filing.blocking_count.to_i > 0
@@ -579,7 +576,7 @@ module Api
           }
         end
 
-        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:, preserve_filing_ready_status:)
+        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
           was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
 
           filing.blocking_count = preflight[:blocking_count]
@@ -590,7 +587,7 @@ module Api
           end
 
           if preflight[:blocking_count].zero?
-            filing.status = preserve_filing_ready_status && was_filing_ready ? "filing_ready" : "preflight_passed"
+            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
           else
             filing.status = "draft"
             filing.marked_ready_at = nil

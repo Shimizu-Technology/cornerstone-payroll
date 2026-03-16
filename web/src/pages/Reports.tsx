@@ -463,7 +463,6 @@ function W2GuPanel() {
       const res = await reportsApi.w2GuPreflight(year);
       setPreflight(res.preflight);
       setFiling(res.filing);
-      setFilingNotes('');
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));
     } finally {
@@ -477,6 +476,7 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
+      setPreflightError(null);
       setFilingNotes('');
     } catch (err: unknown) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
