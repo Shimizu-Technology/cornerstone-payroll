@@ -220,6 +220,7 @@ class PayPeriodCorrectionService
     # recalculate or zero it out explicitly in the correction run.
     source.payroll_items.find_each(batch_size: 500) do |source_item|
       target.payroll_items.create!(
+        company_id:               target.company_id,
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,
         pay_rate:                 source_item.pay_rate,
