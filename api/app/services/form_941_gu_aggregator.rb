@@ -138,6 +138,7 @@ class Form941GuAggregator
           "Lines 8–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
+          "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
           "Only 'committed' pay periods with pay_date in the quarter are included."
         ]
@@ -179,6 +180,8 @@ class Form941GuAggregator
         fit_withheld:                 total_fit_withheld.to_f,
         ss_employee:                  ss_employee_total.to_f,
         ss_employer:                  ss_employer_total.to_f,
+        ss_wages_combined:            ss_combined_total.to_f,
+        ss_tips_combined:             ss_tips_combined.to_f,
         ss_combined:                  (ss_employee_total + ss_employer_total).round(2).to_f,
         medicare_employee:            medicare_employee_total.to_f,
         medicare_employer:            medicare_employer_total.to_f,
@@ -272,6 +275,12 @@ class Form941GuAggregator
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
         month_key = item.pay_period.pay_date.beginning_of_month.to_date
+        if item.reported_tips.to_f > item.gross_pay.to_f
+          Rails.logger.warn(
+            "[Form941GuAggregator] payroll_item=#{item.id} reported_tips exceed gross_pay; " \
+            "clamping wages_only to zero for SS allocation"
+          )
+        end
         wages_only = [ item.gross_pay.to_f - item.reported_tips.to_f, 0.0 ].max
         remaining_headroom = [ ss_wage_base - running_taxable_wages, 0.0 ].max
         taxable_wages = [ wages_only, remaining_headroom ].min.round(2)

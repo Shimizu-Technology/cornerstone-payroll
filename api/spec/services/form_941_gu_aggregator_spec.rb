@@ -184,6 +184,8 @@ RSpec.describe Form941GuAggregator do
         # employee SS: 124 + 93 + 124 = 341
         expect(detail[:ss_employee]).to eq(341.0)
         expect(detail[:ss_employer]).to eq(341.0)
+        expect(detail[:ss_wages_combined]).to eq(report[:lines][:line5a_ss_combined_tax])
+        expect(detail[:ss_tips_combined]).to eq(report[:lines][:line5b_ss_tips_combined_tax])
         expect(detail[:ss_combined]).to eq(682.0)
       end
 
@@ -203,6 +205,10 @@ RSpec.describe Form941GuAggregator do
         # SS er: 341 + Medicare er: 79.75 = 420.75
         expect(detail[:total_employer_taxes]).to eq(420.75)
       end
+    end
+
+    it "documents that tax_detail SS totals include tips" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips") }).to be(true)
     end
 
     describe "monthly_liability section" do
@@ -514,6 +520,36 @@ RSpec.describe Form941GuAggregator do
       expect(monthly_total).to eq(29.01)
       expect(report[:lines][:line7_adj_fractions_cents]).to eq(0.01)
       expect(report[:lines][:line10_total_taxes_after_adj]).to eq(monthly_total)
+    end
+  end
+
+  describe "SS tip allocation anomalies" do
+    it "logs a warning when reported tips exceed gross pay" do
+      company = create(:company, name: "Tip Warning Co")
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 4, 1),
+        end_date: Date.new(2025, 4, 14),
+        pay_date: Date.new(2025, 4, 15))
+
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 50.0,
+        withholding_tax: 0.0,
+        social_security_tax: 3.1,
+        employer_social_security_tax: 3.1,
+        medicare_tax: 0.73,
+        employer_medicare_tax: 0.73,
+        reported_tips: 100.0)
+
+      allow(Rails.logger).to receive(:warn)
+
+      described_class.new(company, 2025, 2).generate
+
+      expect(Rails.logger).to have_received(:warn).with(include("reported_tips exceed gross_pay"))
     end
   end
 end
