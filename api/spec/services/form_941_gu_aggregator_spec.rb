@@ -552,4 +552,19 @@ RSpec.describe Form941GuAggregator do
       expect(Rails.logger).to have_received(:warn).with(include("reported_tips exceed gross_pay"))
     end
   end
+
+  describe "#fractions_of_cents_adjustment" do
+    it "returns nil when the monthly and quarterly totals match" do
+      expect(aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.0)).to be_nil
+    end
+
+    it "logs a warning when the adjustment exceeds the expected threshold" do
+      allow(Rails.logger).to receive(:warn)
+
+      adjustment = aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.25)
+
+      expect(adjustment).to eq(0.25)
+      expect(Rails.logger).to have_received(:warn).with(include("Large fractions-of-cents adjustment=0.25"))
+    end
+  end
 end
