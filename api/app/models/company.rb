@@ -4,6 +4,7 @@ class Company < ApplicationRecord
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :pay_periods, dependent: :destroy
+  has_many :payroll_items, dependent: :restrict_with_error
   has_many :deduction_types, dependent: :destroy
   has_many :company_ytd_totals, dependent: :destroy
   has_many :users, dependent: :destroy
@@ -42,7 +43,9 @@ class Company < ApplicationRecord
     end
     assigned
   rescue ActiveRecord::StatementInvalid => e
-    if e.message.include?("index_payroll_items_on_check_number") || e.message.downcase.include?("unique")
+    if e.message.include?("index_payroll_items_on_check_number") ||
+       e.message.include?("index_payroll_items_on_company_check_number") ||
+       e.message.downcase.include?("unique")
       raise ArgumentError, "Check number collision detected while assigning checks. Please verify company check settings and retry."
     end
     raise

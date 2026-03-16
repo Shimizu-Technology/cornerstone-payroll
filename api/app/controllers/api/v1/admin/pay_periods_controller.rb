@@ -245,9 +245,8 @@ module Api
             unassigned = @pay_period.payroll_items.where(check_number: nil)
             @pay_period.company.assign_check_numbers!(unassigned) if unassigned.exists?
 
-            # Prepare tax sync (generate idempotency key inside transaction)
-            @pay_period.generate_idempotency_key!
-            @pay_period.update!(tax_sync_status: "pending")
+            # Prepare tax sync with a fresh idempotency key for this commit event.
+            @pay_period.prepare_tax_sync!
 
             # CPR-71: if this is a correction run, write committed audit event atomically
             if @pay_period.correction_run?
@@ -307,6 +306,7 @@ module Api
             end
 
             @pay_period.reload
+            PayrollTaxSyncJob.perform_later(@pay_period.id)
             render json: {
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)
@@ -421,6 +421,7 @@ module Api
         def pay_period_json(pay_period, include_items: false)
           json = {
             id: pay_period.id,
+            company_id: pay_period.company_id,
             start_date: pay_period.start_date,
             end_date: pay_period.end_date,
             pay_date: pay_period.pay_date,

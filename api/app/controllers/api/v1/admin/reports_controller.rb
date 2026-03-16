@@ -64,7 +64,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .where(pay_periods: { status: "committed" })
+                         .where(pay_periods: { id: PayPeriod.reportable_committed.select(:id) })
                          .order("pay_periods.pay_date DESC")
                          .limit(params[:limit] || 12)
 
@@ -415,7 +415,7 @@ module Api
           end
 
           # Get committed pay periods in range
-          pay_periods = PayPeriod.committed
+          pay_periods = PayPeriod.reportable_committed
                                  .where(company_id: current_company_id)
                                  .for_year(year)
 
@@ -501,7 +501,10 @@ module Api
           items = PayrollItem.joins(:pay_period)
                             .where(pay_periods: {
                               company_id: current_company_id,
-                              status: "committed",
+                              id: PayPeriod.reportable_committed
+                                .where(company_id: current_company_id)
+                                .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                .select(:id),
                               pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)
                             })
 
@@ -518,7 +521,7 @@ module Api
         end
 
         def recent_payroll_summary
-          PayPeriod.committed
+          PayPeriod.reportable_committed
                    .where(company_id: current_company_id)
                    .order(pay_date: :desc)
                    .limit(5)

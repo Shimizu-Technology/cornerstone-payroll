@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
-import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
+import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightFinding, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -492,13 +492,47 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
+      if (res.revalidation) {
+        setPreflight({
+          year,
+          company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
+          company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
+          run_at: res.revalidation.run_at,
+          blocking_count: res.revalidation.blocking_count,
+          warning_count: res.revalidation.warning_count,
+          findings: res.revalidation.findings,
+        });
+      }
       setPreflightError(null);
       setFilingNotes('');
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
-        setFiling((err.data as { filing: W2GuFilingReadiness }).filing);
+      if (err instanceof ApiError && err.data && typeof err.data === 'object') {
+        const errorData = err.data as {
+          filing?: W2GuFilingReadiness;
+          revalidation?: {
+            run_at: string;
+            blocking_count: number;
+            warning_count: number;
+            findings: W2GuPreflightFinding[];
+          };
+        };
+
+        if (errorData.filing) {
+          setFiling(errorData.filing);
+        }
+
+        if (errorData.revalidation) {
+          setPreflight({
+            year,
+            company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
+            company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
+            run_at: errorData.revalidation.run_at,
+            blocking_count: errorData.revalidation.blocking_count,
+            warning_count: errorData.revalidation.warning_count,
+            findings: errorData.revalidation.findings,
+          });
+        }
       }
-      setPreflight(null);
       setMarkReadyError(extractErrorMessage(err));
     } finally {
       setMarkingReady(false);
