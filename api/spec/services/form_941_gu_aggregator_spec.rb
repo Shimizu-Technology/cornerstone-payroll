@@ -249,6 +249,20 @@ RSpec.describe Form941GuAggregator do
         monthly_total = breakdown.sum { |m| m[:total_liability].to_f }.round(2)
         expect(monthly_total).to eq(report[:lines][:line6_total_taxes_before_adj].to_f)
       end
+
+      it "keeps each month total aligned with the published rounded fields" do
+        breakdown.each do |month|
+          published_total = (
+            month[:fit_withheld].to_f +
+            month[:ss_combined].to_f +
+            month[:ss_tips_combined].to_f +
+            month[:medicare_combined].to_f +
+            month[:add_medicare_tax].to_f
+          ).round(2)
+
+          expect(month[:total_liability].to_f).to eq(published_total)
+        end
+      end
     end
 
     describe "excludes non-committed pay periods" do
@@ -420,6 +434,30 @@ RSpec.describe Form941GuAggregator do
 
       report = described_class.new(company, 2025, 2).generate
       expect(report[:lines][:line5b_ss_tips]).to eq(75.0)
+    end
+  end
+
+  describe "line 1 quarter-boundary pay dates" do
+    it "counts employees whose pay period spans the 12th even if pay_date falls in the next quarter" do
+      boundary_employee = create(:employee, company: company, department: department)
+      next_quarter_pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 6, 1),
+        end_date: Date.new(2025, 6, 15),
+        pay_date: Date.new(2025, 7, 1))
+
+      create(:payroll_item,
+        pay_period: next_quarter_pay_period,
+        employee: boundary_employee,
+        gross_pay: 1500.0,
+        withholding_tax: 100.0,
+        social_security_tax: 93.0,
+        employer_social_security_tax: 93.0,
+        medicare_tax: 21.75,
+        employer_medicare_tax: 21.75)
+
+      report = described_class.new(company, 2025, 2).generate
+      expect(report[:lines][:line1_employee_count]).to eq(1)
     end
   end
 end

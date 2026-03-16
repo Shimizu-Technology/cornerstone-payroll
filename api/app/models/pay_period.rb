@@ -113,14 +113,18 @@ class PayPeriod < ApplicationRecord
     self.tax_sync_idempotency_key ||= "cpr-#{id}-#{committed_at&.to_i || Time.current.to_i}"
   end
 
-  def prepare_tax_sync!
-    update!(
+  def tax_sync_reset_attributes(reference_time: Time.current)
+    {
       tax_sync_status: "pending",
       tax_sync_attempts: 0,
       tax_sync_last_error: nil,
       tax_synced_at: nil,
-      tax_sync_idempotency_key: "cpr-#{id}-#{Time.current.to_i}"
-    )
+      tax_sync_idempotency_key: "cpr-#{id}-#{reference_time.to_i}"
+    }
+  end
+
+  def prepare_tax_sync!
+    update!(tax_sync_reset_attributes)
   end
 
   def mark_syncing!

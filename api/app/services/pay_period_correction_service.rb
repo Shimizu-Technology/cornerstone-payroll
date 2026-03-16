@@ -73,17 +73,15 @@ class PayPeriodCorrectionService
         reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
       end
 
+      void_time = Time.current
+
       # Mark the pay period voided
       locked.update!(
         correction_status: "voided",
-        voided_at:         Time.current,
+        voided_at:         void_time,
         voided_by_id:      actor&.id,
         void_reason:       reason,
-        tax_sync_status:   "pending",
-        tax_sync_attempts: 0,
-        tax_sync_last_error: nil,
-        tax_synced_at:     nil,
-        tax_sync_idempotency_key: "cpr-#{locked.id}-#{Time.current.to_i}"
+        **locked.tax_sync_reset_attributes(reference_time: void_time)
       )
 
       # If a committed correction run is being voided, release source linkage so
