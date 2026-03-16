@@ -232,23 +232,24 @@ class Form941GuAggregator
     months.map do |month_start|
       month_end = month_start.end_of_month
       month_items = month_map[month_start] || []
-      month_fit        = sum(month_items, :withholding_tax)
-      month_gross      = sum(month_items, :gross_pay)
-      month_ss_wages   = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
-      month_ss_tips    = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]
-      month_ss_tax     = ((month_ss_wages + month_ss_tips) * SS_RATE_COMBINED).round(2)
-      month_medicare   = (month_gross * MEDICARE_RATE_COMBINED).round(2)
-      month_add_med = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
+      month_fit              = sum(month_items, :withholding_tax)
+      month_gross            = sum(month_items, :gross_pay)
+      month_ss_wages         = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
+      month_ss_tips          = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]
+      month_ss_combined      = (month_ss_wages * SS_RATE_COMBINED).round(2)
+      month_ss_tips_combined = (month_ss_tips * SS_RATE_COMBINED).round(2)
+      month_medicare         = (month_gross * MEDICARE_RATE_COMBINED).round(2)
+      month_add_med          = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
 
-      total = (month_fit + month_ss_tax + month_medicare + month_add_med).round(2)
+      total = (month_fit + month_ss_combined + month_ss_tips_combined + month_medicare + month_add_med).round(2)
 
       {
         month:        month_start.strftime("%B %Y"),
         month_start:  month_start.iso8601,
         month_end:    month_end.iso8601,
         fit_withheld: month_fit.to_f,
-        ss_combined:  (month_ss_wages * SS_RATE_COMBINED).round(2).to_f,
-        ss_tips_combined: (month_ss_tips * SS_RATE_COMBINED).round(2).to_f,
+        ss_combined:  month_ss_combined.to_f,
+        ss_tips_combined: month_ss_tips_combined.to_f,
         medicare_combined: month_medicare.to_f,
         add_medicare_tax: month_add_med.to_f,
         total_liability: total.to_f
@@ -341,7 +342,8 @@ class Form941GuAggregator
 
     PayrollItem.joins(:pay_period)
                .where(pay_periods: {
-                 id: committed_pay_periods
+                 id: PayPeriod.reportable_committed
+                   .where(company_id: company.id)
                    .where("start_date <= ? AND end_date >= ?", reference_date, reference_date)
                    .select(:id)
                })
