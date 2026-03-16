@@ -562,6 +562,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(finding["severity"]).to eq("blocking")
     end
 
+    it "preserves filing_ready status and audit fields on clean preflight re-run" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+
+      filing_ready = response.parsed_body["filing"]
+      expect(filing_ready["status"]).to eq("filing_ready")
+      expect(filing_ready["marked_ready_at"]).to be_present
+      expect(filing_ready["marked_ready_by_id"]).to be_present
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      filing_after_rerun = response.parsed_body["filing"]
+      expect(filing_after_rerun["status"]).to eq("filing_ready")
+      expect(filing_after_rerun["marked_ready_at"]).to eq(filing_ready["marked_ready_at"])
+      expect(filing_after_rerun["marked_ready_by_id"]).to eq(filing_ready["marked_ready_by_id"])
+      expect(filing_after_rerun["findings"]).to be_an(Array)
+    end
+
     it "returns 422 for invalid year" do
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
 
@@ -700,25 +719,6 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(updated.findings).to eq(persisted_findings)
       expect(updated.warning_count).to eq(persisted_warning_count)
       expect(updated.status).to eq("draft")
-    end
-
-    it "preserves filing_ready status and audit fields on clean preflight re-run" do
-      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
-      expect(response).to have_http_status(:ok)
-
-      filing_ready = response.parsed_body["filing"]
-      expect(filing_ready["status"]).to eq("filing_ready")
-      expect(filing_ready["marked_ready_at"]).to be_present
-      expect(filing_ready["marked_ready_by_id"]).to be_present
-
-      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
-      expect(response).to have_http_status(:ok)
-
-      filing_after_rerun = response.parsed_body["filing"]
-      expect(filing_after_rerun["status"]).to eq("filing_ready")
-      expect(filing_after_rerun["marked_ready_at"]).to eq(filing_ready["marked_ready_at"])
-      expect(filing_after_rerun["marked_ready_by_id"]).to eq(filing_ready["marked_ready_by_id"])
-      expect(filing_after_rerun["findings"]).to be_an(Array)
     end
 
     it "does not overwrite approval audit fields on repeated mark_ready calls" do

@@ -423,9 +423,10 @@ function TaxSummaryPanel() {
 function W2GuPanel() {
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
+  const selectableMaxYear = currentYear + 1;
   const yearOptions = Array.from(
-    { length: currentYear - earliestSupportedYear + 1 },
-    (_, i) => currentYear - i
+    { length: selectableMaxYear - earliestSupportedYear + 1 },
+    (_, i) => selectableMaxYear - i
   );
   const [year, setYear] = useState(currentYear - 1);
   const [loading, setLoading] = useState(false);

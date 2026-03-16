@@ -316,6 +316,8 @@ module Api
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
+        rescue ActiveRecord::RecordInvalid
+          render json: { error: "Unable to persist W-2 filing readiness state" }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/reports/ytd_summary
