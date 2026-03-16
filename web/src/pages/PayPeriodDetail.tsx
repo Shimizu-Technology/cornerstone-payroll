@@ -33,9 +33,10 @@ const toNumber = (value: unknown): number => {
 
 function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Record<string, HoursEntry> {
   const hours: Record<string, HoursEntry> = {};
+  const employeeMap = new Map(employees.map((emp) => [emp.id, emp]));
 
   payrollItems.forEach((item) => {
-    const employee = employees.find((emp) => emp.id === item.employee_id);
+    const employee = employeeMap.get(item.employee_id);
     const isSalary = employee?.employment_type === 'salary';
     hours[String(item.employee_id)] = {
       regular: isSalary ? 0 : (item.hours_worked || 80),
