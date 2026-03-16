@@ -146,6 +146,7 @@ class Form941GuAggregator
           "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
           "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
+          "If prior-quarter payroll was committed before tips were embedded in gross_pay, verify transition-year Additional Medicare carry-forward manually.",
           "Only 'committed' pay periods with pay_date in the quarter are included."
         ]
       },
@@ -363,6 +364,9 @@ class Form941GuAggregator
   end
 
   def prior_medicare_wages_by_employee
+    # Prior-quarter Additional Medicare carry-forward relies on stored gross_pay.
+    # For transition-year data committed before tips were embedded in gross_pay,
+    # operators should verify year-to-date Medicare wages manually.
     PayrollItem.joins(:pay_period)
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
