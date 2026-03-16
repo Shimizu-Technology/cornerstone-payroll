@@ -7,7 +7,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
 
-  before_validation :sync_company_from_pay_period
+  before_validation :sync_company_from_pay_period, on: :create
 
   validates :employment_type, inclusion: { in: %w[hourly salary] }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
