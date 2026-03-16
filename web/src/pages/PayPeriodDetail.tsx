@@ -77,12 +77,17 @@ export function PayPeriodDetail() {
     let page = 1;
     let totalPages = 1;
 
-    do {
-      const response = await employeesApi.list({ status: 'active', per_page: 100, page });
-      allEmployees.push(...response.data);
-      totalPages = response.meta.total_pages;
-      page += 1;
-    } while (page <= totalPages);
+    try {
+      do {
+        const response = await employeesApi.list({ status: 'active', per_page: 100, page });
+        allEmployees.push(...response.data);
+        totalPages = response.meta.total_pages;
+        page += 1;
+      } while (page <= totalPages);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      throw new Error(`Failed to load active employees page ${page}: ${message}`);
+    }
 
     return allEmployees;
   }, []);
