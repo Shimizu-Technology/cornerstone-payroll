@@ -105,13 +105,17 @@ class Form941GuAggregator
     # --- Line 6 ---
     line6  = (total_fit_withheld + line5e).round(2)
 
-    # --- Adjustments (PLACEHOLDER) ---
-    adj_fractions_of_cents = nil  # PLACEHOLDER: requires manual entry
+    # Monthly liability breakdown (for Form 941-GU Schedule B equivalent)
+    monthly_liability = monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
+    monthly_total_liability = monthly_liability.sum { |month| month[:total_liability].to_f }.round(2)
+
+    # --- Adjustments ---
+    adj_fractions_of_cents = monthly_total_liability == line6 ? nil : (monthly_total_liability - line6).round(2)
     adj_sick_pay           = nil  # PLACEHOLDER: not tracked in payroll_items
     adj_tips_group_life    = nil  # PLACEHOLDER: not tracked in payroll_items
 
     # --- Line 10 ---
-    line10 = line6  # Adjustments default to 0 when nil (not yet entered)
+    line10 = (line6 + adj_fractions_of_cents.to_f).round(2)
 
     # --- Employee breakdown for per-period schedule ---
     employee_count    = line1_employee_count
@@ -130,7 +134,8 @@ class Form941GuAggregator
         generated_at:   Time.current.iso8601,
         pay_periods_included: pay_period_count,
         caveats: [
-          "Lines 7–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
+          "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
+          "Lines 8–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
@@ -158,7 +163,7 @@ class Form941GuAggregator
         line5e_total_ss_medicare:          line5e.to_f,
 
         line6_total_taxes_before_adj:      line6.to_f,
-        line7_adj_fractions_cents:         adj_fractions_of_cents, # PLACEHOLDER (nil = not entered)
+        line7_adj_fractions_cents:         adj_fractions_of_cents&.to_f,
         line8_adj_sick_pay:                adj_sick_pay,           # PLACEHOLDER
         line9_adj_tips_group_life:         adj_tips_group_life,    # PLACEHOLDER
         line10_total_taxes_after_adj:      line10.to_f,
@@ -182,8 +187,7 @@ class Form941GuAggregator
         total_employee_taxes:         (total_fit_withheld + ss_employee_total + medicare_employee_total + add_medicare_tax).round(2).to_f,
         total_employer_taxes:         (ss_employer_total + medicare_employer_total).round(2).to_f
       },
-      # Monthly liability breakdown (for Form 941-GU Schedule B equivalent)
-      monthly_liability: monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
+      monthly_liability: monthly_liability
     }
   end
 
