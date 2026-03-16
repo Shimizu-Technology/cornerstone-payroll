@@ -255,10 +255,11 @@ module Api
                 actor:      current_user
               )
             end
-          end
 
-          # Enqueue async tax sync — never block commit
-          PayrollTaxSyncJob.perform_later(@pay_period.id)
+            ActiveRecord.after_all_transactions_commit do
+              PayrollTaxSyncJob.perform_later(@pay_period.id)
+            end
+          end
 
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodCorrectionService::CorrectionError => e

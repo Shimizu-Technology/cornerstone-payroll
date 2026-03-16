@@ -59,7 +59,7 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
-          .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
           .select(:id)
       })
       .sum(:gross_pay)
@@ -71,7 +71,7 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
-          .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
           .select(:id)
       })
       .sum(:social_security_tax)
