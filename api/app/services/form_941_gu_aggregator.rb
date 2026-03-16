@@ -225,6 +225,7 @@ class Form941GuAggregator
 
   def qualifying_payroll_items
     PayrollItem.includes(:pay_period)
+               .where(company_id: company.id)
                .where(pay_period_id: committed_pay_periods.select(:id))
   end
 
