@@ -257,7 +257,7 @@ module Api
           }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
-        rescue ActiveRecord::RecordInvalid
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
           render json: { error: "Unable to persist W-2 preflight readiness state" }, status: :unprocessable_entity
         end
 
