@@ -214,6 +214,10 @@ class PayPeriodCorrectionService
   end
 
   private_class_method def self.copy_payroll_items!(source:, target:)
+    # Copy every payroll row into the correction run, even if the original paper
+    # check was voided. Check voiding is an issuance/audit concern, not a payroll
+    # inclusion flag, and operators need the employee row present so they can
+    # recalculate or zero it out explicitly in the correction run.
     source.payroll_items.find_each(batch_size: 500) do |source_item|
       target.payroll_items.create!(
         employee_id:              source_item.employee_id,
