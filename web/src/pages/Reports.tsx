@@ -520,6 +520,7 @@ function W2GuPanel() {
       setPreflightError(null);
       setFilingNotes('');
     } catch (err: unknown) {
+      let revalidated = false;
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
         const errorData = err.data as Partial<W2GuMarkReadyResponse>;
 
@@ -530,7 +531,11 @@ function W2GuPanel() {
         const revalidatedPreflight = buildRevalidationPreflight(errorData.revalidation);
         if (revalidatedPreflight) {
           setPreflight(revalidatedPreflight);
+          revalidated = true;
         }
+      }
+      if (!revalidated) {
+        setPreflight(null);
       }
       setMarkReadyError(extractErrorMessage(err));
     } finally {
