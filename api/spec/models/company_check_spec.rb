@@ -52,6 +52,18 @@ RSpec.describe Company, type: :model do
       expect(all_numbers.uniq.size).to eq(10)  # no duplicates
       expect(company.reload.next_check_number).to eq(2010)
     end
+
+    it "allows the same check number to exist in another company" do
+      other_company = create(:company, next_check_number: 2000)
+      other_period = create(:pay_period, :committed, company: other_company)
+      other_employee = create(:employee, company: other_company)
+      other_item = create(:payroll_item, pay_period: other_period, employee: other_employee, check_number: nil)
+
+      company.assign_check_numbers!(make_items(1))
+
+      expect { other_company.assign_check_numbers!([ other_item ]) }.not_to raise_error
+      expect(other_item.reload.check_number).to eq("2000")
+    end
   end
 
   # ---------------------------------------------------------------------------

@@ -41,8 +41,10 @@ class Form941GuAggregator
   MEDICARE_RATE_COMBINED = 0.029 # 1.45% employee + 1.45% employer
   ADD_MEDICARE_RATE      = 0.009  # Additional Medicare Tax (employee only)
   ADD_MEDICARE_THRESHOLD = 200_000.00
+  FRACTIONS_OF_CENTS_WARNING_THRESHOLD = 0.10
   SS_WAGE_BASE_BY_YEAR = {
-    2025 => 176_100.00
+    2025 => 176_100.00,
+    2026 => 184_500.00
   }.freeze
 
   attr_reader :company, :year, :quarter
@@ -68,34 +70,33 @@ class Form941GuAggregator
     # --- Line 2 breakdowns ---
     total_gross          = sum(records, :gross_pay)
     total_reported_tips  = sum(records, :reported_tips)
-    # Line 2 is wages + tips + other compensation.
-    line2_total_compensation = (total_gross + total_reported_tips).round(2)
+    # `gross_pay` already includes reported tips in the payroll calculators.
+    line2_total_compensation = total_gross.round(2)
 
     # --- Line 3 ---
     total_fit_withheld   = sum(records, :withholding_tax)
 
-    # --- Line 5a: taxable SS wages derived from correctly-computed SS taxes ---
-    ss_employee_total    = sum(records, :social_security_tax)
-    ss_employer_total    = sum(records, :employer_social_security_tax)
-    ss_combined_total    = ss_employee_total + ss_employer_total
-    taxable_ss_wages     = (ss_combined_total / SS_RATE_COMBINED).round(2)
-
-    # --- Line 5b: SS tips (capped per employee remaining SS headroom) ---
+    # --- Line 5a / 5b: split SS wages and tips using actual wage-base ordering ---
     prior_ss_taxable_wages = prior_ss_taxable_wages_by_employee
-    monthly_ss_tips_wages = ss_taxable_tips_wages_by_month(records, prior_ss_taxable_wages)
-    taxable_ss_tips      = monthly_ss_tips_wages.values.sum.round(2)
+    monthly_ss_allocations = ss_taxable_allocations_by_month(records, prior_ss_taxable_wages)
+    taxable_ss_wages     = monthly_ss_allocations.values.sum { |allocation| allocation[:wages] }.round(2)
+    taxable_ss_tips      = monthly_ss_allocations.values.sum { |allocation| allocation[:tips] }.round(2)
+    ss_combined_total    = (taxable_ss_wages * SS_RATE_COMBINED).round(2)
     ss_tips_combined     = (taxable_ss_tips * SS_RATE_COMBINED).round(2)
 
-    # --- Line 5c: Medicare wages derived from computed Medicare tax totals ---
+    # --- Line 5c: Medicare wages and tips (base 2.9%) ---
+    taxable_medicare_wages  = total_gross.round(2)
+    medicare_combined_total = (taxable_medicare_wages * MEDICARE_RATE_COMBINED).round(2)
+
+    # --- Actual tax totals retained for detail / reconciliation ---
+    ss_employee_total       = sum(records, :social_security_tax)
+    ss_employer_total       = sum(records, :employer_social_security_tax)
     medicare_employee_total = sum(records, :medicare_tax)
     medicare_employer_total = sum(records, :employer_medicare_tax)
-    medicare_combined_total = medicare_employee_total + medicare_employer_total
-    taxable_medicare_wages  = (medicare_combined_total / MEDICARE_RATE_COMBINED).round(2)
 
     # --- Line 5d: Additional Medicare Tax ---
-    # Estimated per-employee: wages above $200K threshold within the quarter.
-    # Derive quarter total from the same monthly allocation snapshot used below.
-    monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(records)
+    prior_medicare_wages = prior_medicare_wages_by_employee
+    monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(records, prior_medicare_wages)
     add_medicare_wages   = monthly_add_medicare_wages.values.sum.round(2)
     add_medicare_tax     = (add_medicare_wages * ADD_MEDICARE_RATE).round(2)
 
@@ -105,16 +106,23 @@ class Form941GuAggregator
     # --- Line 6 ---
     line6  = (total_fit_withheld + line5e).round(2)
 
-    # --- Adjustments (PLACEHOLDER) ---
-    adj_fractions_of_cents = nil  # PLACEHOLDER: requires manual entry
+    # Monthly liability breakdown (for Form 941-GU Schedule B equivalent)
+    monthly_liability = monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
+    monthly_total_liability = monthly_liability.sum { |month| month[:total_liability].to_f }.round(2)
+
+    # --- Adjustments ---
+    adj_fractions_of_cents = fractions_of_cents_adjustment(
+      line6: line6,
+      monthly_total_liability: monthly_total_liability
+    )
     adj_sick_pay           = nil  # PLACEHOLDER: not tracked in payroll_items
     adj_tips_group_life    = nil  # PLACEHOLDER: not tracked in payroll_items
 
     # --- Line 10 ---
-    line10 = line6  # Adjustments default to 0 when nil (not yet entered)
+    line10 = (line6 + adj_fractions_of_cents.to_f).round(2)
 
     # --- Employee breakdown for per-period schedule ---
-    employee_count    = records.map(&:employee_id).uniq.count
+    employee_count    = line1_employee_count
 
     {
       meta: {
@@ -130,10 +138,15 @@ class Form941GuAggregator
         generated_at:   Time.current.iso8601,
         pay_periods_included: pay_period_count,
         caveats: [
-          "Lines 7–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
+          "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
+          "Line 7 fractions-of-cents uses (monthly Schedule B total - line 6); positive means monthly liability exceeds line 6, negative means it is lower.",
+          "Lines 8–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
-          "Line 5b (SS tips) uses reported_tips; verify tip pool allocation if applicable.",
-          "Line 5d (Additional Medicare Tax) is estimated from quarterly wages; actual may differ.",
+          "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
+          "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
+          "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
+          "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
+          "If prior-quarter payroll was committed before tips were embedded in gross_pay, verify transition-year Additional Medicare carry-forward manually.",
           "Only 'committed' pay periods with pay_date in the quarter are included."
         ]
       },
@@ -158,7 +171,7 @@ class Form941GuAggregator
         line5e_total_ss_medicare:          line5e.to_f,
 
         line6_total_taxes_before_adj:      line6.to_f,
-        line7_adj_fractions_cents:         adj_fractions_of_cents, # PLACEHOLDER (nil = not entered)
+        line7_adj_fractions_cents:         adj_fractions_of_cents&.to_f,
         line8_adj_sick_pay:                adj_sick_pay,           # PLACEHOLDER
         line9_adj_tips_group_life:         adj_tips_group_life,    # PLACEHOLDER
         line10_total_taxes_after_adj:      line10.to_f,
@@ -174,7 +187,9 @@ class Form941GuAggregator
         fit_withheld:                 total_fit_withheld.to_f,
         ss_employee:                  ss_employee_total.to_f,
         ss_employer:                  ss_employer_total.to_f,
-        ss_combined:                  ss_combined_total.to_f,
+        ss_wages_combined:            ss_combined_total.to_f,
+        ss_tips_combined:             ss_tips_combined.to_f,
+        ss_combined:                  (ss_employee_total + ss_employer_total).round(2).to_f,
         medicare_employee:            medicare_employee_total.to_f,
         medicare_employer:            medicare_employer_total.to_f,
         medicare_combined:            medicare_combined_total.to_f,
@@ -182,8 +197,7 @@ class Form941GuAggregator
         total_employee_taxes:         (total_fit_withheld + ss_employee_total + medicare_employee_total + add_medicare_tax).round(2).to_f,
         total_employer_taxes:         (ss_employer_total + medicare_employer_total).round(2).to_f
       },
-      # Monthly liability breakdown (for Form 941-GU Schedule B equivalent)
-      monthly_liability: monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_tips_wages)
+      monthly_liability: monthly_liability
     }
   end
 
@@ -200,7 +214,7 @@ class Form941GuAggregator
   end
 
   def committed_pay_periods
-    @committed_pay_periods ||= PayPeriod.committed
+    @committed_pay_periods ||= PayPeriod.reportable_committed
                                         .where(company_id: company.id)
                                         .where(pay_date: quarter_start_date..quarter_end_date)
   end
@@ -211,6 +225,7 @@ class Form941GuAggregator
 
   def qualifying_payroll_items
     PayrollItem.includes(:pay_period)
+               .where(company_id: company.id)
                .where(pay_period_id: committed_pay_periods.select(:id))
   end
 
@@ -222,63 +237,81 @@ class Form941GuAggregator
     end
   end
 
+  def fractions_of_cents_adjustment(line6:, monthly_total_liability:)
+    diff = (monthly_total_liability - line6).round(2)
+    return nil if diff.zero?
+
+    if diff.abs > FRACTIONS_OF_CENTS_WARNING_THRESHOLD
+      Rails.logger.warn(
+        "[Form941GuAggregator] Large fractions-of-cents adjustment=#{diff} " \
+        "(company=#{company.id}, year=#{year}, quarter=#{quarter}). Verify monthly liability breakdown."
+      )
+    end
+
+    diff
+  end
+
   # Monthly breakdown: total tax liability per calendar month in the quarter.
   # Useful for determining whether the company is a monthly or semiweekly depositor.
   # Must reconcile to line 6 total (FIT + line 5e), including SS tips and Additional Medicare.
-  def monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_tips_wages)
+  def monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
     month_map = records.group_by { |item| item.pay_period.pay_date.beginning_of_month.to_date }
 
     months.map do |month_start|
       month_end = month_start.end_of_month
       month_items = month_map[month_start] || []
-      month_fit     = sum(month_items, :withholding_tax)
-      month_ss_emp  = sum(month_items, :social_security_tax)
-      month_ss_er   = sum(month_items, :employer_social_security_tax)
-      month_med_emp = sum(month_items, :medicare_tax)
-      month_med_er  = sum(month_items, :employer_medicare_tax)
+      month_fit              = sum(month_items, :withholding_tax)
+      month_gross            = sum(month_items, :gross_pay)
+      month_ss_wages         = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
+      month_ss_tips          = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]
+      month_ss_combined      = (month_ss_wages * SS_RATE_COMBINED).round(2)
+      month_ss_tips_combined = (month_ss_tips * SS_RATE_COMBINED).round(2)
+      month_medicare         = (month_gross * MEDICARE_RATE_COMBINED).round(2)
+      month_add_med          = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
 
-      month_ss_tips = (monthly_ss_tips_wages[month_start] * SS_RATE_COMBINED).round(2)
-      month_add_med = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
-
-      total = (month_fit + month_ss_emp + month_ss_er + month_med_emp + month_med_er + month_ss_tips + month_add_med).round(2)
+      total = (month_fit + month_ss_combined + month_ss_tips_combined + month_medicare + month_add_med).round(2)
 
       {
         month:        month_start.strftime("%B %Y"),
         month_start:  month_start.iso8601,
         month_end:    month_end.iso8601,
         fit_withheld: month_fit.to_f,
-        ss_combined:  (month_ss_emp + month_ss_er).round(2).to_f,
-        ss_tips_combined: month_ss_tips.to_f,
-        medicare_combined: (month_med_emp + month_med_er).round(2).to_f,
+        ss_combined:  month_ss_combined.to_f,
+        ss_tips_combined: month_ss_tips_combined.to_f,
+        medicare_combined: month_medicare.to_f,
         add_medicare_tax: month_add_med.to_f,
         total_liability: total.to_f
       }
     end
   end
 
-  # Allocate SS-taxable tips wages into calendar months after applying per-employee
-  # SS wage-base headroom (wages consume headroom before tips).
-  def ss_taxable_tips_wages_by_month(items, prior_ss_taxable_wages = {})
-    allocations = Hash.new(0.0)
+  # Allocate SS-taxable wages and tips into calendar months after applying the
+  # per-employee SS wage base. Wages consume headroom before tips.
+  def ss_taxable_allocations_by_month(items, prior_ss_taxable_wages = {})
+    allocations = Hash.new { |hash, key| hash[key] = { wages: 0.0, tips: 0.0 } }
 
     items.group_by(&:employee_id)
          .each do |employee_id, employee_items|
-      running_wages_only = prior_ss_taxable_wages[employee_id].to_f
+      running_taxable_wages = prior_ss_taxable_wages[employee_id].to_f
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        # In this schema, gross_pay excludes reported_tips (tips are a separate column).
-        wages_only = item.gross_pay.to_f
-        remaining_headroom_after_wages = [ ss_wage_base - (running_wages_only + wages_only), 0.0 ].max
-
-        taxable_tips = [ item.reported_tips.to_f, remaining_headroom_after_wages ].min.round(2)
-        if taxable_tips.positive?
-          month_key = item.pay_period.pay_date.beginning_of_month.to_date
-          allocations[month_key] += taxable_tips
+        month_key = item.pay_period.pay_date.beginning_of_month.to_date
+        if item.reported_tips.to_f > item.gross_pay.to_f
+          Rails.logger.warn(
+            "[Form941GuAggregator] payroll_item=#{item.id} reported_tips exceed gross_pay; " \
+            "clamping wages_only to zero for SS allocation"
+          )
         end
+        wages_only = [ item.gross_pay.to_f - item.reported_tips.to_f, 0.0 ].max
+        remaining_headroom = [ ss_wage_base - running_taxable_wages, 0.0 ].max
+        taxable_wages = [ wages_only, remaining_headroom ].min.round(2)
+        remaining_headroom_after_wages = [ remaining_headroom - taxable_wages, 0.0 ].max
+        taxable_tips = [ item.reported_tips.to_f, remaining_headroom_after_wages ].min.round(2)
 
-        # Both wages and any SS-taxable tips consume remaining SS wage-base headroom.
-        running_wages_only += wages_only + taxable_tips
+        allocations[month_key][:wages] += taxable_wages if taxable_wages.positive?
+        allocations[month_key][:tips] += taxable_tips if taxable_tips.positive?
+        running_taxable_wages += taxable_wages + taxable_tips
       end
     end
 
@@ -287,16 +320,16 @@ class Form941GuAggregator
 
   # Allocate Additional Medicare taxable wages into calendar months based on
   # when each employee crosses the $200K threshold within the quarter.
-  def additional_medicare_taxable_wages_by_month(items)
+  def additional_medicare_taxable_wages_by_month(items, prior_medicare_wages = {})
     allocations = Hash.new(0.0)
 
     items.group_by(&:employee_id)
-         .each_value do |employee_items|
-      running_wages = 0.0
+         .each do |employee_id, employee_items|
+      running_wages = prior_medicare_wages[employee_id].to_f
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        # Additional Medicare threshold applies to Medicare wages (wages + tips).
-        gross = item.gross_pay.to_f + item.reported_tips.to_f
+        # Additional Medicare threshold applies to Medicare wages, already reflected in gross_pay.
+        gross = item.gross_pay.to_f
         prev_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
         running_wages += gross
         new_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
@@ -316,15 +349,52 @@ class Form941GuAggregator
   # Derived from posted SS taxes to preserve historical cap behavior across prior quarters.
   def prior_ss_taxable_wages_by_employee
     prior_items = PayrollItem.joins(:pay_period)
+                             .where(company_id: company.id)
                              .where(pay_periods: {
-                               company_id: company.id,
-                               status: "committed",
-                               pay_date: Date.new(year, 1, 1)...quarter_start_date
+                               id: PayPeriod.reportable_committed
+                                 .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
+                                 .select(:id)
                              })
 
+    # Stored employee+employer SS taxes always reflect the total SS-taxable base
+    # consumed in prior quarters, including SS-taxable tips when present. Dividing
+    # that combined tax by the combined SS rate therefore reconstructs the same
+    # wages+tips headroom consumption used by the current-quarter allocator.
     prior_items.group(:employee_id)
                .sum("social_security_tax + employer_social_security_tax")
                .transform_values { |combined_tax| (combined_tax.to_f / SS_RATE_COMBINED).round(2) }
+  end
+
+  def prior_medicare_wages_by_employee
+    # Prior-quarter Additional Medicare carry-forward relies on stored gross_pay.
+    # For transition-year data committed before tips were embedded in gross_pay,
+    # operators should verify year-to-date Medicare wages manually.
+    PayrollItem.joins(:pay_period)
+               .where(company_id: company.id)
+               .where(pay_periods: {
+                 id: PayPeriod.reportable_committed
+                   .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
+                   .select(:id)
+               })
+               .group(:employee_id)
+               .sum(:gross_pay)
+               .transform_values(&:to_f)
+  end
+
+  def line1_employee_count
+    reference_date = Date.new(year, quarter * 3, 12)
+
+    PayrollItem.joins(:pay_period)
+               .where(company_id: company.id)
+               .where(pay_periods: {
+                 id: PayPeriod.reportable_committed
+                   .where(company_id: company.id)
+                   .where("start_date <= ? AND end_date >= ?", reference_date, reference_date)
+                   .where(end_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                   .select(:id)
+               })
+               .distinct
+               .count(:employee_id)
   end
 
   def ss_wage_base

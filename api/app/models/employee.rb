@@ -57,7 +57,11 @@ class Employee < ApplicationRecord
   def calculate_ytd_gross(year)
     payroll_items
       .joins(:pay_period)
-      .where(pay_periods: { status: "committed", pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .select(:id)
+      })
       .sum(:gross_pay)
   end
 
@@ -65,14 +69,26 @@ class Employee < ApplicationRecord
   def calculate_ytd_social_security(year)
     payroll_items
       .joins(:pay_period)
-      .where(pay_periods: { status: "committed", pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31) })
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .select(:id)
+      })
       .sum(:social_security_tax)
   end
 
   # Returns last 4 digits of SSN for display purposes
-  def ssn_last_four
+  def ssn_digits
     return nil if ssn_encrypted.blank?
-    # Remove any non-digit characters and get last 4
-    ssn_encrypted.to_s.gsub(/\D/, "").last(4).presence
+
+    ssn_encrypted.to_s.gsub(/\D/, "").presence
+  end
+
+  def ssn_last_four
+    ssn_digits&.last(4)
+  end
+
+  def valid_filing_ssn?
+    ssn_digits&.length == 9
   end
 end

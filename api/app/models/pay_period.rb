@@ -54,13 +54,19 @@ class PayPeriod < ApplicationRecord
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
+  scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
 
   # CPR-71: correction scopes
   scope :voided, -> { where(correction_status: "voided") }
   scope :correction_runs, -> { where(correction_status: "correction") }
-  scope :active_periods, -> { where(correction_status: nil) }
+  # "Reportable" means any non-voided period in the correction chain: the original
+  # run (`nil`) or a correction run. Kept separate from `reportable_committed`
+  # because drafts/calculated/approved correction runs can still be editable.
+  scope :reportable_periods, -> { where(correction_status: [ nil, "correction" ]) }
+  # Backward-compatible alias. "Active" here means non-voided, not "original only."
+  scope :active_periods, -> { reportable_periods }
 
   def draft?
     status == "draft"
@@ -110,6 +116,20 @@ class PayPeriod < ApplicationRecord
   # Tax sync lifecycle
   def generate_idempotency_key!
     self.tax_sync_idempotency_key ||= "cpr-#{id}-#{committed_at&.to_i || Time.current.to_i}"
+  end
+
+  def tax_sync_reset_attributes(reference_time: Time.current)
+    {
+      tax_sync_status: "pending",
+      tax_sync_attempts: 0,
+      tax_sync_last_error: nil,
+      tax_synced_at: nil,
+      tax_sync_idempotency_key: "cpr-#{id}-#{reference_time.to_i}"
+    }
+  end
+
+  def prepare_tax_sync!
+    update!(tax_sync_reset_attributes)
   end
 
   def mark_syncing!

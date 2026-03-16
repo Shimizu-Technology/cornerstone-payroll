@@ -91,6 +91,20 @@ RSpec.describe PayPeriodCorrectionService do
         expect(event.actor_name).to eq(actor.name)
       end
 
+      it "registers tax sync enqueue on transaction commit" do
+        allow(PayrollTaxSyncJob).to receive(:perform_later)
+        allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
+
+        PayPeriodCorrectionService.void!(
+          pay_period: committed_period,
+          actor: actor,
+          reason: "Data entry error"
+        )
+
+        expect(ActiveRecord).to have_received(:after_all_transactions_commit)
+        expect(PayrollTaxSyncJob).to have_received(:perform_later).with(committed_period.id)
+      end
+
       it "captures financial snapshot on the audit event" do
         event = PayPeriodCorrectionService.void!(
           pay_period: committed_period,
@@ -349,6 +363,24 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect(correction_run.payroll_items.count).to eq(voided_period.payroll_items.count)
         expect(correction_run.payroll_items.first.employee_id).to eq(employee.id)
+      end
+
+      it "copies items even when the source check was voided" do
+        voided_period.payroll_items.first.update!(
+          voided: true,
+          voided_at: Time.current,
+          void_reason: "Paper check voided after printer jam"
+        )
+
+        correction_run = PayPeriodCorrectionService.create_correction_run!(
+          source_pay_period: voided_period,
+          actor:             actor,
+          reason:            "Reissue after paper check void"
+        )
+
+        copied_item = correction_run.payroll_items.find_by(employee_id: employee.id)
+        expect(copied_item).to be_present
+        expect(copied_item.voided).to eq(false)
       end
 
       it "creates a correction_run_created audit event" do

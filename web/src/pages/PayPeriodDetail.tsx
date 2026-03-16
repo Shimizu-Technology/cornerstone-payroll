@@ -31,6 +31,28 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Record<string, HoursEntry> {
+  const hours: Record<string, HoursEntry> = {};
+  const employeeMap = new Map(employees.map((emp) => [emp.id, emp]));
+
+  payrollItems.forEach((item) => {
+    const employee = employeeMap.get(item.employee_id);
+    const isSalary = employee?.employment_type === 'salary';
+    hours[String(item.employee_id)] = {
+      regular: isSalary ? 0 : (item.hours_worked || 80),
+      overtime: isSalary ? 0 : (item.overtime_hours || 0),
+    };
+  });
+
+  employees.forEach((emp) => {
+    if (!hours[String(emp.id)]) {
+      hours[String(emp.id)] = { regular: emp.employment_type === 'salary' ? 0 : 80, overtime: 0 };
+    }
+  });
+
+  return hours;
+}
+
 const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
   pending: { label: 'Tax Sync Pending', variant: 'default' },
   syncing: { label: 'Tax Syncing...', variant: 'info' },
@@ -51,6 +73,26 @@ export function PayPeriodDetail() {
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
+  const loadAllActiveEmployees = useCallback(async () => {
+    const allEmployees: Employee[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    try {
+      do {
+        const response = await employeesApi.list({ status: 'active', per_page: 100, page });
+        allEmployees.push(...response.data);
+        totalPages = response.meta.total_pages;
+        page += 1;
+      } while (page <= totalPages);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      throw new Error(`Failed to load active employees page ${page}: ${message}`);
+    }
+
+    return allEmployees;
+  }, []);
+
   const loadPayPeriod = useCallback(async (periodId: number) => {
     try {
       setLoading(true);
@@ -59,35 +101,19 @@ export function PayPeriodDetail() {
       // Load pay period and employees in parallel
       const [ppResponse, empResponse] = await Promise.all([
         payPeriodsApi.get(periodId),
-        employeesApi.list({ status: 'active', per_page: 100 }),
+        loadAllActiveEmployees(),
       ]);
 
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
-      setEmployees(empResponse.data);
-
-      // Build hours map: use existing payroll items first, then fill defaults for remaining employees
-      const hours: Record<string, HoursEntry> = {};
-      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
-        const employee = empResponse.data.find((emp: Employee) => emp.id === item.employee_id);
-        const isSalary = employee?.employment_type === 'salary';
-        hours[String(item.employee_id)] = {
-          regular: isSalary ? 0 : (item.hours_worked || 80),
-          overtime: isSalary ? 0 : (item.overtime_hours || 0),
-        };
-      });
-      empResponse.data.forEach((emp: Employee) => {
-        if (!hours[String(emp.id)]) {
-          hours[String(emp.id)] = { regular: emp.employment_type === 'salary' ? 0 : 80, overtime: 0 };
-        }
-      });
-      setHoursMap(hours);
+      setEmployees(empResponse);
+      setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadAllActiveEmployees]);
 
   useEffect(() => {
     if (id) {
@@ -131,9 +157,13 @@ export function PayPeriodDetail() {
         hours[empId] = { regular: entry.regular, overtime: entry.overtime };
       });
 
-      const response = await payPeriodsApi.runPayroll(payPeriod.id, { hours });
+      const response = await payPeriodsApi.runPayroll(payPeriod.id, {
+        employee_ids: employees.map((employee) => employee.id),
+        hours,
+      });
       setPayPeriod(response.pay_period);
       setPayrollItems(response.pay_period.payroll_items || []);
+      setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
 
       if (response.results.errors.length > 0) {
         setError(
@@ -193,6 +223,7 @@ export function PayPeriodDetail() {
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
     setPayPeriod(updatedPayPeriod);
     setPayrollItems(updatedPayPeriod.payroll_items || []);
+    setHoursMap(buildHoursMap(updatedPayPeriod.payroll_items || [], employees));
   };
 
   if (loading) {

@@ -116,13 +116,13 @@ RSpec.describe Form941GuAggregator do
       let(:lines) { report[:lines] }
 
       it "line1: counts distinct employees" do
-        # employee1 and employee2 each have items in Q2
-        expect(lines[:line1_employee_count]).to eq(2)
+        # Q2 line 1 uses employees paid during the pay period containing June 12.
+        expect(lines[:line1_employee_count]).to eq(0)
       end
 
       it "line2: sums wages + tips + other compensation" do
-        # gross: 5500 + reported_tips: 75 = 5575
-        expect(lines[:line2_wages_tips_other]).to eq(5575.0)
+        # Gross pay is already the source of truth for wages/tips compensation.
+        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
       end
 
       it "line3: sums FIT withheld" do
@@ -131,8 +131,8 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "line5a: combined SS tax (employee + employer)" do
-        # (124 + 124) + (93 + 93) + (124 + 124) = 682
-        expect(lines[:line5a_ss_combined_tax]).to eq(682.0)
+        # SS wages exclude the reported_tips portion from gross_pay.
+        expect(lines[:line5a_ss_combined_tax]).to eq(672.7)
       end
 
       it "line5b: SS tips" do
@@ -154,7 +154,7 @@ RSpec.describe Form941GuAggregator do
 
       it "line5e: total SS + Medicare taxes" do
         ss_tips_combined  = (75.0 * 0.124).round(2)
-        expected_5e = (682.0 + ss_tips_combined + 159.5 + 0.0).round(2)
+        expected_5e = (672.7 + ss_tips_combined + 159.5 + 0.0).round(2)
         expect(lines[:line5e_total_ss_medicare]).to eq(expected_5e)
       end
 
@@ -184,6 +184,8 @@ RSpec.describe Form941GuAggregator do
         # employee SS: 124 + 93 + 124 = 341
         expect(detail[:ss_employee]).to eq(341.0)
         expect(detail[:ss_employer]).to eq(341.0)
+        expect(detail[:ss_wages_combined]).to eq(report[:lines][:line5a_ss_combined_tax])
+        expect(detail[:ss_tips_combined]).to eq(report[:lines][:line5b_ss_tips_combined_tax])
         expect(detail[:ss_combined]).to eq(682.0)
       end
 
@@ -205,6 +207,22 @@ RSpec.describe Form941GuAggregator do
       end
     end
 
+    it "documents that tax_detail SS totals include tips" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips") }).to be(true)
+    end
+
+    it "documents that tax detail SS totals can drift from form lines by rounding" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined is based on stored SS taxes") }).to be(true)
+    end
+
+    it "documents the Additional Medicare transition-year caveat" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("verify transition-year Additional Medicare carry-forward manually") }).to be(true)
+    end
+
+    it "documents line 7 sign semantics for operator review" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 fractions-of-cents uses (monthly Schedule B total - line 6)") }).to be(true)
+    end
+
     describe "monthly_liability section" do
       let(:breakdown) { report[:monthly_liability] }
 
@@ -220,25 +238,24 @@ RSpec.describe Form941GuAggregator do
 
       it "calculates April liability" do
         april = breakdown[0]
-        # FIT: 100+75=175, SS combined: (124+124)+(93+93)=434,
-        # SS tips: 50*12.4%=6.2, Medicare combined: (29+29)+(21.75+21.75)=101.5
+        # FIT: 175, SS wages: (2000-50)+1500, SS tips: 50, Medicare base: 3500
         expect(april[:fit_withheld].to_f).to eq(175.0)
-        expect(april[:ss_combined].to_f).to eq(434.0)
+        expect(april[:ss_combined].to_f).to eq(427.8)
         expect(april[:ss_tips_combined].to_f).to eq(6.2)
         expect(april[:medicare_combined].to_f).to eq(101.5)
         expect(april[:add_medicare_tax].to_f).to eq(0.0)
-        expect(april[:total_liability].to_f).to eq(716.7)
+        expect(april[:total_liability].to_f).to eq(710.5)
       end
 
       it "calculates May liability" do
         may = breakdown[1]
-        # FIT: 100, SS combined: 248, SS tips: 25*12.4%=3.1, Medicare combined: 58
+        # FIT: 100, SS wages: 2000-25, SS tips: 25, Medicare base: 2000
         expect(may[:fit_withheld].to_f).to eq(100.0)
-        expect(may[:ss_combined].to_f).to eq(248.0)
+        expect(may[:ss_combined].to_f).to eq(244.9)
         expect(may[:ss_tips_combined].to_f).to eq(3.1)
         expect(may[:medicare_combined].to_f).to eq(58.0)
         expect(may[:add_medicare_tax].to_f).to eq(0.0)
-        expect(may[:total_liability].to_f).to eq(409.1)
+        expect(may[:total_liability].to_f).to eq(406.0)
       end
 
       it "June has zero liability (no committed pay periods)" do
@@ -248,7 +265,21 @@ RSpec.describe Form941GuAggregator do
 
       it "reconciles monthly liabilities to line6 total" do
         monthly_total = breakdown.sum { |m| m[:total_liability].to_f }.round(2)
-        expect(monthly_total).to eq(report[:lines][:line6_total_taxes_before_adj].to_f)
+        expect(monthly_total).to eq(report[:lines][:line10_total_taxes_after_adj].to_f)
+      end
+
+      it "keeps each month total aligned with the published rounded fields" do
+        breakdown.each do |month|
+          published_total = (
+            month[:fit_withheld].to_f +
+            month[:ss_combined].to_f +
+            month[:ss_tips_combined].to_f +
+            month[:medicare_combined].to_f +
+            month[:add_medicare_tax].to_f
+          ).round(2)
+
+          expect(month[:total_liability].to_f).to eq(published_total)
+        end
       end
     end
 
@@ -271,7 +302,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include draft pay period wages in line2" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
       end
     end
 
@@ -293,7 +324,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include Q1 wages in Q2 report" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
       end
     end
   end
@@ -366,7 +397,7 @@ RSpec.describe Form941GuAggregator do
       create(:payroll_item,
         pay_period:                   pp,
         employee:                     high_earner,
-        gross_pay:                    198_000.00,
+        gross_pay:                    203_000.00,
         reported_tips:                5_000.00,
         withholding_tax:              0.0,
         social_security_tax:          0.0,
@@ -421,6 +452,134 @@ RSpec.describe Form941GuAggregator do
 
       report = described_class.new(company, 2025, 2).generate
       expect(report[:lines][:line5b_ss_tips]).to eq(75.0)
+    end
+  end
+
+  describe "line 1 quarter-boundary pay dates" do
+    it "counts employees whose pay period spans the 12th even if pay_date falls in the next quarter" do
+      boundary_employee = create(:employee, company: company, department: department)
+      next_quarter_pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 6, 1),
+        end_date: Date.new(2025, 6, 15),
+        pay_date: Date.new(2025, 7, 1))
+
+      create(:payroll_item,
+        pay_period: next_quarter_pay_period,
+        employee: boundary_employee,
+        gross_pay: 1500.0,
+        withholding_tax: 100.0,
+        social_security_tax: 93.0,
+        employer_social_security_tax: 93.0,
+        medicare_tax: 21.75,
+        employer_medicare_tax: 21.75)
+
+      report = described_class.new(company, 2025, 2).generate
+      expect(report[:lines][:line1_employee_count]).to eq(1)
+    end
+  end
+
+  describe "fractions-of-cents adjustment" do
+    it "uses line 7 to reconcile monthly liability rounding to quarter totals" do
+      company = create(:company, name: "Rounding Test Co")
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+
+      q1_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 3, 1),
+        end_date: Date.new(2025, 3, 14),
+        pay_date: Date.new(2025, 3, 15))
+
+      create(:payroll_item,
+        pay_period: q1_period,
+        employee: employee,
+        gross_pay: 176_100.0,
+        withholding_tax: 0.0,
+        social_security_tax: 10_918.2,
+        employer_social_security_tax: 10_918.2,
+        medicare_tax: 0.0,
+        employer_medicare_tax: 0.0,
+        reported_tips: 0.0)
+
+      [
+        Date.new(2025, 4, 15),
+        Date.new(2025, 5, 15),
+        Date.new(2025, 6, 15)
+      ].zip([ 333.33, 333.33, 333.34 ]).each do |pay_date, gross_pay|
+        period = create(:pay_period, :committed,
+          company: company,
+          start_date: pay_date - 14.days,
+          end_date: pay_date - 1.day,
+          pay_date: pay_date)
+
+        create(:payroll_item,
+          pay_period: period,
+          employee: employee,
+          gross_pay: gross_pay,
+          withholding_tax: 0.0,
+          social_security_tax: 0.0,
+          employer_social_security_tax: 0.0,
+          medicare_tax: (gross_pay * 0.0145).round(2),
+          employer_medicare_tax: (gross_pay * 0.0145).round(2),
+          reported_tips: 0.0)
+      end
+
+      report = described_class.new(company, 2025, 2).generate
+      monthly_total = report[:monthly_liability].sum { |month| month[:total_liability].to_f }.round(2)
+      line6 = report[:lines][:line6_total_taxes_before_adj]
+
+      expect(report[:lines][:line5c_medicare_combined_tax]).to eq(29.0)
+      expect(line6).to eq(29.0)
+      expect(monthly_total).to eq(29.01)
+      expect(report[:lines][:line7_adj_fractions_cents]).to eq((monthly_total - line6).round(2))
+      expect(report[:lines][:line10_total_taxes_after_adj]).to eq(monthly_total)
+      expect(report[:lines][:line10_total_taxes_after_adj]).to eq((line6 + report[:lines][:line7_adj_fractions_cents]).round(2))
+    end
+  end
+
+  describe "SS tip allocation anomalies" do
+    it "logs a warning when reported tips exceed gross pay" do
+      company = create(:company, name: "Tip Warning Co")
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 4, 1),
+        end_date: Date.new(2025, 4, 14),
+        pay_date: Date.new(2025, 4, 15))
+
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 50.0,
+        withholding_tax: 0.0,
+        social_security_tax: 3.1,
+        employer_social_security_tax: 3.1,
+        medicare_tax: 0.73,
+        employer_medicare_tax: 0.73,
+        reported_tips: 100.0)
+
+      allow(Rails.logger).to receive(:warn)
+
+      described_class.new(company, 2025, 2).generate
+
+      expect(Rails.logger).to have_received(:warn).with(include("reported_tips exceed gross_pay"))
+    end
+  end
+
+  describe "#fractions_of_cents_adjustment" do
+    it "returns nil when the monthly and quarterly totals match" do
+      expect(aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.0)).to be_nil
+    end
+
+    it "logs a warning when the adjustment exceeds the expected threshold" do
+      allow(Rails.logger).to receive(:warn)
+
+      adjustment = aggregator.send(:fractions_of_cents_adjustment, line6: 100.0, monthly_total_liability: 100.25)
+
+      expect(adjustment).to eq(0.25)
+      expect(Rails.logger).to have_received(:warn).with(include("Large fractions-of-cents adjustment=0.25"))
     end
   end
 end

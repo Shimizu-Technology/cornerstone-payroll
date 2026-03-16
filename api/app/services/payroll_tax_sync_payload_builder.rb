@@ -28,7 +28,12 @@ class PayrollTaxSyncPayloadBuilder
       start_date: pay_period.start_date.iso8601,
       end_date: pay_period.end_date.iso8601,
       pay_date: pay_period.pay_date.iso8601,
-      committed_at: pay_period.committed_at&.iso8601
+      committed_at: pay_period.committed_at&.iso8601,
+      correction_status: pay_period.correction_status,
+      source_pay_period_id: pay_period.source_pay_period_id,
+      superseded_by_id: pay_period.superseded_by_id,
+      voided_at: pay_period.voided_at&.iso8601,
+      void_reason: pay_period.void_reason
     }
   end
 

@@ -3,19 +3,27 @@
 class PayrollItem < ApplicationRecord
   belongs_to :pay_period
   belongs_to :employee
+  belongs_to :company
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
+
+  # Sync on create only. On update, `company_matches_pay_period` enforces the
+  # constraint instead, so operators cannot silently reassign across companies.
+  # Uses ||= so an explicitly-passed company_id (e.g. in copy_payroll_items!)
+  # is respected without triggering a pay_period reload query.
+  before_validation :sync_company_from_pay_period, on: :create
 
   validates :employment_type, inclusion: { in: %w[hourly salary] }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
             numericality: { greater_than_or_equal_to: 0 },
             allow_nil: true
+  validates :company_id, presence: true
+  validate :company_matches_pay_period
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }
 
-  delegate :company, to: :pay_period
   delegate :full_name, to: :employee, prefix: true
 
   # ---------------------------------------------------------------------------
@@ -128,5 +136,18 @@ class PayrollItem < ApplicationRecord
     calculator = PayrollCalculator.for(employee, self)
     calculator.calculate
     save!
+  end
+
+  private
+
+  def sync_company_from_pay_period
+    self.company_id ||= pay_period&.company_id
+  end
+
+  def company_matches_pay_period
+    return if pay_period.blank? || company_id.blank?
+    return if company_id == pay_period.company_id
+
+    errors.add(:company_id, "must match the pay period company")
   end
 end
