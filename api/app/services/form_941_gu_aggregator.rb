@@ -386,6 +386,7 @@ class Form941GuAggregator
                  id: PayPeriod.reportable_committed
                    .where(company_id: company.id)
                    .where("start_date <= ? AND end_date >= ?", reference_date, reference_date)
+                   .where(end_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                    .select(:id)
                })
                .distinct

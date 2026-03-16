@@ -137,7 +137,7 @@ class PayrollItem < ApplicationRecord
   private
 
   def sync_company_from_pay_period
-    self.company_id ||= pay_period&.company_id
+    self.company_id = pay_period&.company_id if pay_period
   end
 
   def company_matches_pay_period
