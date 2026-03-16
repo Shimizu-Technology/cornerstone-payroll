@@ -5,7 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
-import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
+import type {
+  PayPeriod,
+  W2GuReport,
+  W2GuEmployeeRow,
+  W2GuPreflightResult,
+  W2GuFilingReadiness,
+  W2GuMarkReadyResponse,
+} from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -32,6 +39,20 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalidation']): W2GuPreflightResult | null {
+  if (!revalidation) return null;
+
+  return {
+    year: revalidation.year,
+    company_id: revalidation.company_id,
+    company_name: revalidation.company_name,
+    run_at: revalidation.run_at,
+    blocking_count: revalidation.blocking_count,
+    warning_count: revalidation.warning_count,
+    findings: revalidation.findings,
+  };
 }
 
 // ─── Payroll Register Panel ───────────────────────────────────────────────────
@@ -492,13 +513,32 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
+      const revalidatedPreflight = buildRevalidationPreflight(res.revalidation);
+      if (revalidatedPreflight) {
+        setPreflight(revalidatedPreflight);
+      } else {
+        setPreflight(null);
+      }
       setPreflightError(null);
       setFilingNotes('');
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
-        setFiling((err.data as { filing: W2GuFilingReadiness }).filing);
+      let revalidated = false;
+      if (err instanceof ApiError && err.data && typeof err.data === 'object') {
+        const errorData = err.data as Partial<W2GuMarkReadyResponse>;
+
+        if (errorData.filing) {
+          setFiling(errorData.filing);
+        }
+
+        const revalidatedPreflight = buildRevalidationPreflight(errorData.revalidation);
+        if (revalidatedPreflight) {
+          setPreflight(revalidatedPreflight);
+          revalidated = true;
+        }
       }
-      setPreflight(null);
+      if (!revalidated) {
+        setPreflight(null);
+      }
       setMarkReadyError(extractErrorMessage(err));
     } finally {
       setMarkingReady(false);

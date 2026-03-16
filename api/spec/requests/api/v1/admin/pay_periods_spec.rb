@@ -325,6 +325,17 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(company_ytd.gross_pay).to eq(1200.00)
     end
 
+    it "registers tax sync enqueue on transaction commit" do
+      allow(PayrollTaxSyncJob).to receive(:perform_later)
+      allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(ActiveRecord).to have_received(:after_all_transactions_commit)
+      expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
+    end
+
     it "cannot commit when no payroll items exist" do
       pay_period.payroll_items.destroy_all
 

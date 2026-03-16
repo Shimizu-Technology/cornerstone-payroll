@@ -183,8 +183,8 @@ class ApiClient {
     }
 
     const contentDisposition = response.headers.get('content-disposition') || '';
-    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|\")?([^";]+)/i);
-    const filename = match ? decodeURIComponent(match[1].replace(/\"/g, '').trim()) : undefined;
+    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
+    const filename = match ? decodeURIComponent(match[1].replace(/"/g, '').trim()) : undefined;
 
     return { blob: await response.blob(), filename };
   }
@@ -279,6 +279,7 @@ import type {
   CheckSettings,
   W2GuReportResponse,
   W2GuPreflightResponse,
+  W2GuFilingReadinessResponse,
   W2GuMarkReadyResponse,
 } from '@/types';
 

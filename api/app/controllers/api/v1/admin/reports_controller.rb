@@ -64,7 +64,11 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .where(pay_periods: { status: "committed" })
+                         .where(pay_periods: {
+                           id: PayPeriod.reportable_committed
+                                        .where(company_id: employee.company_id)
+                                        .select(:id)
+                         })
                          .order("pay_periods.pay_date DESC")
                          .limit(params[:limit] || 12)
 
@@ -415,7 +419,7 @@ module Api
           end
 
           # Get committed pay periods in range
-          pay_periods = PayPeriod.committed
+          pay_periods = PayPeriod.reportable_committed
                                  .where(company_id: current_company_id)
                                  .for_year(year)
 
@@ -498,11 +502,15 @@ module Api
         end
 
         def ytd_company_totals(year = Date.current.year)
+          reportable_period_ids = PayPeriod.reportable_committed
+                                           .where(company_id: current_company_id)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
           items = PayrollItem.joins(:pay_period)
+                            .where(company_id: current_company_id)
                             .where(pay_periods: {
-                              company_id: current_company_id,
-                              status: "committed",
-                              pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)
+                              id: reportable_period_ids
                             })
 
           {
@@ -518,7 +526,7 @@ module Api
         end
 
         def recent_payroll_summary
-          PayPeriod.committed
+          PayPeriod.reportable_committed
                    .where(company_id: current_company_id)
                    .order(pay_date: :desc)
                    .limit(5)
@@ -633,6 +641,9 @@ module Api
 
         def revalidation_payload(preflight)
           {
+            year: preflight[:year],
+            company_id: preflight[:company_id],
+            company_name: preflight[:company_name],
             run_at: preflight[:run_at],
             blocking_count: preflight[:blocking_count],
             warning_count: preflight[:warning_count],

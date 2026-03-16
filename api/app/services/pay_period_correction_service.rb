@@ -68,17 +68,20 @@ class PayPeriodCorrectionService
         financial_snapshot_from: (was_correction_run ? :resulting_pay_period : :pay_period)
       )
 
-      # Reverse YTD totals for every non-voided payroll item (batch to avoid loading all rows at once)
-      locked.payroll_items.where(voided: false).find_each(batch_size: 500) do |item|
+      # Reverse all payroll items; paper-check void state must not affect payroll correction math.
+      locked.payroll_items.find_each(batch_size: 500) do |item|
         reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
       end
+
+      void_time = Time.current
 
       # Mark the pay period voided
       locked.update!(
         correction_status: "voided",
-        voided_at:         Time.current,
+        voided_at:         void_time,
         voided_by_id:      actor&.id,
-        void_reason:       reason
+        void_reason:       reason,
+        **locked.tax_sync_reset_attributes(reference_time: void_time)
       )
 
       # If a committed correction run is being voided, release source linkage so
@@ -87,6 +90,10 @@ class PayPeriodCorrectionService
         if source_period.superseded_by_id == locked.id
           source_period.update!(superseded_by_id: nil)
         end
+      end
+
+      ActiveRecord.after_all_transactions_commit do
+        PayrollTaxSyncJob.perform_later(locked.id)
       end
 
       event
@@ -211,8 +218,13 @@ class PayPeriodCorrectionService
   end
 
   private_class_method def self.copy_payroll_items!(source:, target:)
-    source.payroll_items.where(voided: false).find_each(batch_size: 500) do |source_item|
+    # Copy every payroll row into the correction run, even if the original paper
+    # check was voided. Check voiding is an issuance/audit concern, not a payroll
+    # inclusion flag, and operators need the employee row present so they can
+    # recalculate or zero it out explicitly in the correction run.
+    source.payroll_items.find_each(batch_size: 500) do |source_item|
       target.payroll_items.create!(
+        company_id:               target.company_id,
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,
         pay_rate:                 source_item.pay_rate,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -302,6 +302,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
     t.string "check_number"
     t.integer "check_print_count", default: 0, null: false
     t.datetime "check_printed_at"
+    t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
     t.bigint "employee_id", null: false
@@ -344,7 +345,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
     t.decimal "ytd_social_security_tax", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_withholding_tax", precision: 14, scale: 2, default: "0.0"
     t.index ["check_number"], name: "index_payroll_items_on_check_number"
-    t.index ["check_number"], name: "index_payroll_items_on_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
+    t.index ["company_id", "check_number"], name: "index_payroll_items_on_company_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
+    t.index ["company_id"], name: "index_payroll_items_on_company_id"
     t.index ["employee_id"], name: "index_payroll_items_on_employee_id"
     t.index ["pay_period_id", "employee_id"], name: "index_payroll_items_on_pay_period_id_and_employee_id", unique: true
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
@@ -445,6 +447,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
     t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
   end
 
+  create_table "w2_filing_readinesses", force: :cascade do |t|
+    t.integer "blocking_count", default: 0, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "findings", default: [], null: false
+    t.datetime "marked_ready_at"
+    t.bigint "marked_ready_by_id"
+    t.text "notes"
+    t.datetime "preflight_run_at"
+    t.string "status", default: "draft", null: false
+    t.datetime "updated_at", null: false
+    t.integer "warning_count", default: 0, null: false
+    t.integer "year", null: false
+    t.index ["company_id", "year"], name: "index_w2_filing_readinesses_on_company_id_and_year", unique: true
+    t.index ["company_id"], name: "index_w2_filing_readinesses_on_company_id"
+    t.index ["marked_ready_by_id"], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
+  end
+
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "users"
   add_foreign_key "check_events", "payroll_items"
@@ -468,6 +488,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
+  add_foreign_key "payroll_items", "companies", on_delete: :restrict
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
@@ -477,4 +498,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_11_000009) do
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
+  add_foreign_key "w2_filing_readinesses", "companies"
+  add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 end
