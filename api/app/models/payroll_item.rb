@@ -9,6 +9,8 @@ class PayrollItem < ApplicationRecord
 
   # Sync on create only. On update, `company_matches_pay_period` enforces the
   # constraint instead, so operators cannot silently reassign across companies.
+  # Uses ||= so an explicitly-passed company_id (e.g. in copy_payroll_items!)
+  # is respected without triggering a pay_period reload query.
   before_validation :sync_company_from_pay_period, on: :create
 
   validates :employment_type, inclusion: { in: %w[hourly salary] }
@@ -139,7 +141,7 @@ class PayrollItem < ApplicationRecord
   private
 
   def sync_company_from_pay_period
-    self.company_id = pay_period&.company_id if pay_period
+    self.company_id ||= pay_period&.company_id
   end
 
   def company_matches_pay_period
