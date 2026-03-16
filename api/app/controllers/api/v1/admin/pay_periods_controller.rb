@@ -307,7 +307,6 @@ module Api
             end
 
             @pay_period.reload
-            PayrollTaxSyncJob.perform_later(@pay_period.id)
             render json: {
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)

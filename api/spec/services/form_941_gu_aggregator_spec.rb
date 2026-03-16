@@ -211,6 +211,10 @@ RSpec.describe Form941GuAggregator do
       expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips") }).to be(true)
     end
 
+    it "documents that tax detail SS totals can drift from form lines by rounding" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined is based on stored SS taxes") }).to be(true)
+    end
+
     it "documents line 7 sign semantics for operator review" do
       expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 fractions-of-cents uses (monthly Schedule B total - line 6)") }).to be(true)
     end

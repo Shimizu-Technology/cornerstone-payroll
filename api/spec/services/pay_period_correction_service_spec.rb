@@ -91,6 +91,20 @@ RSpec.describe PayPeriodCorrectionService do
         expect(event.actor_name).to eq(actor.name)
       end
 
+      it "registers tax sync enqueue on transaction commit" do
+        allow(PayrollTaxSyncJob).to receive(:perform_later)
+        allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
+
+        PayPeriodCorrectionService.void!(
+          pay_period: committed_period,
+          actor: actor,
+          reason: "Data entry error"
+        )
+
+        expect(ActiveRecord).to have_received(:after_all_transactions_commit)
+        expect(PayrollTaxSyncJob).to have_received(:perform_later).with(committed_period.id)
+      end
+
       it "captures financial snapshot on the audit event" do
         event = PayPeriodCorrectionService.void!(
           pay_period: committed_period,
