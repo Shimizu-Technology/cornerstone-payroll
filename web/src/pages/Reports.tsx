@@ -5,7 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
-import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightFinding, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
+import type {
+  PayPeriod,
+  W2GuReport,
+  W2GuEmployeeRow,
+  W2GuPreflightResult,
+  W2GuFilingReadiness,
+  W2GuMarkReadyResponse,
+} from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -507,15 +514,7 @@ function W2GuPanel() {
       setFilingNotes('');
     } catch (err: unknown) {
       if (err instanceof ApiError && err.data && typeof err.data === 'object') {
-        const errorData = err.data as {
-          filing?: W2GuFilingReadiness;
-          revalidation?: {
-            run_at: string;
-            blocking_count: number;
-            warning_count: number;
-            findings: W2GuPreflightFinding[];
-          };
-        };
+        const errorData = err.data as Partial<W2GuMarkReadyResponse>;
 
         if (errorData.filing) {
           setFiling(errorData.filing);
