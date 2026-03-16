@@ -348,6 +348,7 @@ class Form941GuAggregator
   # Derived from posted SS taxes to preserve historical cap behavior across prior quarters.
   def prior_ss_taxable_wages_by_employee
     prior_items = PayrollItem.joins(:pay_period)
+                             .where(company_id: company.id)
                              .where(pay_periods: {
                                id: PayPeriod.reportable_committed
                                  .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
@@ -368,6 +369,7 @@ class Form941GuAggregator
     # For transition-year data committed before tips were embedded in gross_pay,
     # operators should verify year-to-date Medicare wages manually.
     PayrollItem.joins(:pay_period)
+               .where(company_id: company.id)
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
                    .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
@@ -382,6 +384,7 @@ class Form941GuAggregator
     reference_date = Date.new(year, quarter * 3, 12)
 
     PayrollItem.joins(:pay_period)
+               .where(company_id: company.id)
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
                    .where(company_id: company.id)
