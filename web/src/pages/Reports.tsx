@@ -516,6 +516,8 @@ function W2GuPanel() {
       const revalidatedPreflight = buildRevalidationPreflight(res.revalidation);
       if (revalidatedPreflight) {
         setPreflight(revalidatedPreflight);
+      } else {
+        setPreflight(null);
       }
       setPreflightError(null);
       setFilingNotes('');
