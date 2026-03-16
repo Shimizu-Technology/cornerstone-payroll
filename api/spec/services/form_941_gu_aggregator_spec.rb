@@ -247,7 +247,7 @@ RSpec.describe Form941GuAggregator do
 
       it "reconciles monthly liabilities to line6 total" do
         monthly_total = breakdown.sum { |m| m[:total_liability].to_f }.round(2)
-        expect(monthly_total).to eq(report[:lines][:line6_total_taxes_before_adj].to_f)
+        expect(monthly_total).to eq(report[:lines][:line10_total_taxes_after_adj].to_f)
       end
 
       it "keeps each month total aligned with the published rounded fields" do
@@ -458,6 +458,62 @@ RSpec.describe Form941GuAggregator do
 
       report = described_class.new(company, 2025, 2).generate
       expect(report[:lines][:line1_employee_count]).to eq(1)
+    end
+  end
+
+  describe "fractions-of-cents adjustment" do
+    it "uses line 7 to reconcile monthly liability rounding to quarter totals" do
+      company = create(:company, name: "Rounding Test Co")
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+
+      q1_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 3, 1),
+        end_date: Date.new(2025, 3, 14),
+        pay_date: Date.new(2025, 3, 15))
+
+      create(:payroll_item,
+        pay_period: q1_period,
+        employee: employee,
+        gross_pay: 176_100.0,
+        withholding_tax: 0.0,
+        social_security_tax: 10_918.2,
+        employer_social_security_tax: 10_918.2,
+        medicare_tax: 0.0,
+        employer_medicare_tax: 0.0,
+        reported_tips: 0.0)
+
+      [
+        Date.new(2025, 4, 15),
+        Date.new(2025, 5, 15),
+        Date.new(2025, 6, 15)
+      ].zip([ 333.33, 333.33, 333.34 ]).each do |pay_date, gross_pay|
+        period = create(:pay_period, :committed,
+          company: company,
+          start_date: pay_date - 14.days,
+          end_date: pay_date - 1.day,
+          pay_date: pay_date)
+
+        create(:payroll_item,
+          pay_period: period,
+          employee: employee,
+          gross_pay: gross_pay,
+          withholding_tax: 0.0,
+          social_security_tax: 0.0,
+          employer_social_security_tax: 0.0,
+          medicare_tax: (gross_pay * 0.0145).round(2),
+          employer_medicare_tax: (gross_pay * 0.0145).round(2),
+          reported_tips: 0.0)
+      end
+
+      report = described_class.new(company, 2025, 2).generate
+      monthly_total = report[:monthly_liability].sum { |month| month[:total_liability].to_f }.round(2)
+
+      expect(report[:lines][:line5c_medicare_combined_tax]).to eq(29.0)
+      expect(monthly_total).to eq(29.01)
+      expect(report[:lines][:line7_adj_fractions_cents]).to eq(0.01)
+      expect(report[:lines][:line10_total_taxes_after_adj]).to eq(monthly_total)
     end
   end
 end
