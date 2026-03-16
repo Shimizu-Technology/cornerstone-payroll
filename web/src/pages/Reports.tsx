@@ -463,6 +463,7 @@ function W2GuPanel() {
       const res = await reportsApi.w2GuPreflight(year);
       setPreflight(res.preflight);
       setFiling(res.filing);
+      setFilingNotes('');
     } catch (err: unknown) {
       setPreflightError(extractErrorMessage(err));
     } finally {
