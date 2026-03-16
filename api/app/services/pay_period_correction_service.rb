@@ -92,6 +92,10 @@ class PayPeriodCorrectionService
         end
       end
 
+      ActiveRecord.after_all_transactions_commit do
+        PayrollTaxSyncJob.perform_later(locked.id)
+      end
+
       event
     end
   end

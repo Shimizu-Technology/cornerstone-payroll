@@ -144,6 +144,7 @@ class Form941GuAggregator
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
           "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
+          "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
           "Only 'committed' pay periods with pay_date in the quarter are included."
         ]
