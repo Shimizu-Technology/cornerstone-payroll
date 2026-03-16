@@ -42,7 +42,8 @@ class W2GuAggregator
           "Employees missing SSN are flagged in compliance_issues.",
           "Box labels map to W-2GU concepts but final filing format/export is separate.",
           "Box 5 is derived from gross wages + reported tips (pre-tax exclusions not modeled yet).",
-          "Box 1 and Box 5 can match in this initial pass when no pre-tax exclusions are modeled."
+          "Box 1 and Box 5 can match in this initial pass when no pre-tax exclusions are modeled.",
+          "If payroll items were committed before tips were embedded in gross_pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually."
         ]
       },
       employer: {
