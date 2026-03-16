@@ -146,7 +146,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -263,7 +270,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu"
 
@@ -302,7 +309,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -364,7 +378,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu_csv"
 
@@ -384,7 +398,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     before do
-      employee.update!(ssn_encrypted: "123-45-6789")
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: employee,
@@ -430,7 +451,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/w2_gu_pdf"
 
@@ -442,6 +463,353 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+  end
+
+  describe "POST /api/v1/admin/reports/w2_gu_preflight" do
+    let(:year_without_committed_payroll) { Date.current.year + 1 }
+
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns preflight structure" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      expect(preflight["year"]).to eq(2025)
+      expect(preflight["company_id"]).to eq(company.id)
+      expect(preflight["findings"]).to be_an(Array)
+      expect(preflight).to have_key("blocking_count")
+      expect(preflight).to have_key("warning_count")
+      expect(preflight["blocking_count"]).to eq(0)
+
+      filing = response.parsed_body["filing"]
+      expect(filing).to be_a(Hash)
+      expect(filing["status"]).to eq("preflight_passed")
+      expect(filing["blocking_count"]).to eq(0)
+      expect(filing["preflight_run_at"]).to be_present
+    end
+
+    it "flags missing SSN as blocking finding" do
+      employee.update!(ssn_encrypted: nil)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      preflight = response.parsed_body["preflight"]
+      ssn_finding = preflight["findings"].find { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }
+      expect(ssn_finding).to be_present
+      expect(ssn_finding["severity"]).to eq("blocking")
+      expect(preflight["blocking_count"]).to eq(1)
+    end
+
+    it "returns blocking finding when selected year has no committed payroll" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: year_without_committed_payroll }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "NO_COMMITTED_PAYROLL" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+      expect(preflight["blocking_count"]).to be >= 1
+    end
+
+    it "flags missing employer EIN as blocking finding" do
+      company.update!(ein: nil)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "EMPLOYER_EIN_MISSING" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+    end
+
+    it "flags incomplete employer address as blocking finding" do
+      company.update!(address_line1: nil)
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      preflight = response.parsed_body["preflight"]
+      finding = preflight["findings"].find { |f| f["code"] == "EMPLOYER_ADDRESS_INCOMPLETE" }
+      expect(finding).to be_present
+      expect(finding["severity"]).to eq("blocking")
+    end
+
+    it "returns 422 for invalid year" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: "bad" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/year/i)
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/w2_gu_filing_readiness" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns nil when no readiness row exists for year" do
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["filing"]).to be_nil
+    end
+
+    it "returns persisted readiness for year" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      filing = response.parsed_body["filing"]
+      expect(filing["status"]).to eq("preflight_passed")
+      expect(filing["blocking_count"]).to eq(0)
+      expect(filing["findings_source"]).to eq("persisted")
+    end
+  end
+
+  describe "POST /api/v1/admin/reports/w2_gu_mark_ready" do
+    let(:year_without_committed_payroll) { Date.current.year + 1 }
+
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "returns 403 for manager users (admin-only approval action)" do
+      manager_user = User.create!(
+        company: company,
+        email: "manager-reports-#{company.id}@example.com",
+        name: "Reports Manager",
+        role: "manager",
+        active: true
+      )
+      allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(manager_user)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to match(/Admin access required/i)
+    end
+
+    it "returns 422 when preflight has not been run" do
+      W2FilingReadiness.where(company_id: company.id, year: 2025).delete_all
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/Run W-2 preflight/i)
+    end
+
+    it "returns 422 when selected year has no committed payroll" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: year_without_committed_payroll }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("preflight", "findings").any? { |f| f["code"] == "NO_COMMITTED_PAYROLL" }).to eq(true)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: year_without_committed_payroll }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/blocking findings/i)
+    end
+
+    it "marks filing ready when no blocking findings" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+      filing = response.parsed_body["filing"]
+      expect(filing["status"]).to eq("filing_ready")
+      expect(filing["notes"]).to eq("Reviewed by ops")
+      expect(filing["marked_ready_at"]).to be_present
+      expect(filing["marked_ready_by_id"]).to eq(admin_user.id)
+      expect(filing["findings_source"]).to eq("persisted")
+      expect(response.parsed_body.dig("revalidation", "findings_source")).to eq("revalidation")
+      expect(response.parsed_body.dig("revalidation", "warning_count")).to be_a(Integer)
+    end
+
+    it "returns 422 when blocking findings exist" do
+      employee.update!(ssn_encrypted: nil)
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/blocking findings/i)
+    end
+
+    it "revalidates preflight at mark_ready time to prevent stale blocking_count" do
+      # Initial preflight is clean in before block. Introduce a new blocking issue after that.
+      employee.update!(ssn_encrypted: nil)
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to match(/blocking findings/i)
+      expect(response.parsed_body.dig("filing", "findings_source")).to eq("persisted")
+      expect(response.parsed_body.dig("revalidation", "findings_source")).to eq("revalidation")
+      expect(response.parsed_body.dig("revalidation", "findings")).to be_an(Array)
+      expect(response.parsed_body.dig("revalidation", "findings").any? { |f| f["code"] == "EMPLOYEE_SSN_MISSING" }).to eq(true)
+
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(filing.status).to eq("draft")
+      expect(filing.blocking_count).to be > 0
+    end
+
+    it "does not overwrite preflight_run_at when mark_ready performs revalidation" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      preflight_run_at = filing.preflight_run_at
+      expect(preflight_run_at).to be_present
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+
+      updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(updated.preflight_run_at).to eq(preflight_run_at)
+      expect(updated.status).to eq("filing_ready")
+    end
+
+    it "does not overwrite persisted findings/warnings during mark_ready revalidation" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      persisted_findings = filing.findings
+      persisted_warning_count = filing.warning_count
+
+      employee.update!(ssn_encrypted: nil)
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      updated = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      expect(updated.findings).to eq(persisted_findings)
+      expect(updated.warning_count).to eq(persisted_warning_count)
+      expect(updated.status).to eq("draft")
+    end
+
+    it "preserves filing_ready status and audit fields on clean preflight re-run" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed by ops" }
+      expect(response).to have_http_status(:ok)
+
+      filing_ready = response.parsed_body["filing"]
+      expect(filing_ready["status"]).to eq("filing_ready")
+      expect(filing_ready["marked_ready_at"]).to be_present
+      expect(filing_ready["marked_ready_by_id"]).to be_present
+
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      filing_after_rerun = response.parsed_body["filing"]
+      expect(filing_after_rerun["status"]).to eq("filing_ready")
+      expect(filing_after_rerun["marked_ready_at"]).to eq(filing_ready["marked_ready_at"])
+      expect(filing_after_rerun["marked_ready_by_id"]).to eq(filing_ready["marked_ready_by_id"])
+      expect(filing_after_rerun["findings"]).to be_an(Array)
+    end
+
+    it "does not overwrite approval audit fields on repeated mark_ready calls" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Initial signoff" }
+      expect(response).to have_http_status(:ok)
+      first = response.parsed_body["filing"]
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Attempted overwrite" }
+      expect(response).to have_http_status(:ok)
+      second = response.parsed_body["filing"]
+
+      expect(second["status"]).to eq("filing_ready")
+      expect(second["marked_ready_at"]).to eq(first["marked_ready_at"])
+      expect(second["marked_ready_by_id"]).to eq(first["marked_ready_by_id"])
+      expect(second["notes"]).to eq(first["notes"])
+    end
+
+    it "clears approval notes when filing is downgraded back to draft" do
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "Reviewed and approved by ops" }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("filing", "notes")).to eq("Reviewed and approved by ops")
+
+      employee.update!(ssn_encrypted: nil)
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      filing = response.parsed_body["filing"]
+      expect(filing["status"]).to eq("draft")
+      expect(filing["notes"]).to be_nil
+      expect(filing["marked_ready_at"]).to be_nil
+      expect(filing["marked_ready_by_id"]).to be_nil
+    end
+
+    it "allows explicit note clearing when marking filing ready" do
+      filing = W2FilingReadiness.find_by!(company_id: company.id, year: 2025)
+      filing.update!(status: "preflight_passed", notes: "stale note")
+
+      post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025, notes: "" }
+      expect(response).to have_http_status(:ok)
+
+      updated = response.parsed_body["filing"]
+      expect(updated["status"]).to eq("filing_ready")
+      expect(updated["notes"]).to be_nil
     end
   end
 
@@ -708,7 +1076,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/tax_summary_csv"
 
@@ -781,7 +1149,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:today).and_return(Date.new(2025, 6, 1))
+      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
 
       get "/api/v1/admin/reports/tax_summary_pdf"
 

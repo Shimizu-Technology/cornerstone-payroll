@@ -3,9 +3,9 @@ import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { reportsApi, payPeriodsApi } from '@/services/api';
+import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
-import type { PayPeriod, W2GuReport, W2GuEmployeeRow } from '@/types';
+import type { PayPeriod, W2GuReport, W2GuEmployeeRow, W2GuPreflightResult, W2GuFilingReadiness } from '@/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +79,7 @@ function PayrollRegisterPanel() {
       setLoading(false);
     }
   }
+
 
   async function downloadCsv() {
     if (!selectedPeriodId) return;
@@ -280,6 +281,7 @@ function TaxSummaryPanel() {
     }
   }
 
+
   async function downloadCsv() {
     setExportingCsv(true);
     setError(null);
@@ -421,9 +423,10 @@ function TaxSummaryPanel() {
 function W2GuPanel() {
   const currentYear = new Date().getFullYear();
   const earliestSupportedYear = 2020;
+  const selectableMaxYear = currentYear + 1;
   const yearOptions = Array.from(
-    { length: currentYear - earliestSupportedYear + 1 },
-    (_, i) => currentYear - i
+    { length: selectableMaxYear - earliestSupportedYear + 1 },
+    (_, i) => selectableMaxYear - i
   );
   const [year, setYear] = useState(currentYear - 1);
   const [loading, setLoading] = useState(false);
@@ -431,6 +434,28 @@ function W2GuPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflight, setPreflight] = useState<W2GuPreflightResult | null>(null);
+  const [filing, setFiling] = useState<W2GuFilingReadiness | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [markReadyError, setMarkReadyError] = useState<string | null>(null);
+  const [markingReady, setMarkingReady] = useState(false);
+  const [filingNotes, setFilingNotes] = useState('');
+
+  useEffect(() => {
+    void loadPersistedFilingReadiness();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
+
+  async function loadPersistedFilingReadiness() {
+    try {
+      const res = await reportsApi.w2GuFilingReadiness(year);
+      setFiling(res.filing);
+    } catch {
+      // Non-blocking: filing readiness can be absent or temporarily unavailable.
+      setFiling(null);
+    }
+  }
 
   async function loadReport() {
     setLoading(true);
@@ -443,6 +468,40 @@ function W2GuPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function runPreflight() {
+    setPreflightLoading(true);
+    setPreflightError(null);
+    setMarkReadyError(null);
+    try {
+      const res = await reportsApi.w2GuPreflight(year);
+      setPreflight(res.preflight);
+      setFiling(res.filing);
+    } catch (err: unknown) {
+      setPreflightError(extractErrorMessage(err));
+    } finally {
+      setPreflightLoading(false);
+    }
+  }
+
+  async function markFilingReady() {
+    setMarkingReady(true);
+    setMarkReadyError(null);
+    try {
+      const res = await reportsApi.w2GuMarkReady(year, filingNotes);
+      setFiling(res.filing);
+      setPreflightError(null);
+      setFilingNotes('');
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.data && typeof err.data === 'object' && 'filing' in (err.data as Record<string, unknown>)) {
+        setFiling((err.data as { filing: W2GuFilingReadiness }).filing);
+      }
+      setPreflight(null);
+      setMarkReadyError(extractErrorMessage(err));
+    } finally {
+      setMarkingReady(false);
     }
   }
 
@@ -472,7 +531,7 @@ function W2GuPanel() {
     }
   }
 
-  const busy = loading || exportingCsv || exportingPdf;
+  const busy = loading || exportingCsv || exportingPdf || preflightLoading || markingReady;
 
   return (
     <div className="space-y-6">
@@ -497,6 +556,11 @@ function W2GuPanel() {
                   setYear(Number(e.target.value));
                   setReport(null);
                   setError(null);
+                  setPreflight(null);
+                  setFiling(null);
+                  setPreflightError(null);
+                  setMarkReadyError(null);
+                  setFilingNotes('');
                 }}
                 disabled={busy}
                 className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
@@ -508,6 +572,25 @@ function W2GuPanel() {
             </div>
             <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate W-2GU Report'}
+            </Button>
+
+            <Button variant="outline" onClick={runPreflight} disabled={busy}>
+              {preflightLoading ? 'Running Preflight…' : 'Run Preflight'}
+            </Button>
+            <Button
+              onClick={markFilingReady}
+              disabled={busy || !filing || filing.blocking_count > 0 || filing.status === 'filing_ready'}
+              title={
+                !filing
+                  ? 'Run preflight first'
+                  : filing.status === 'filing_ready'
+                    ? 'Already marked filing ready'
+                    : filing.blocking_count > 0
+                      ? 'Resolve blocking findings before marking ready'
+                      : 'Mark filing as ready for submission'
+              }
+            >
+              {markingReady ? 'Marking…' : 'Mark Filing Ready'}
             </Button>
 
             {/* Export buttons */}
@@ -532,11 +615,84 @@ function W2GuPanel() {
               </Button>
             </div>
           </div>
+          <div className="mt-3">
+            <label htmlFor="w2gu-filing-notes" className="block text-sm font-medium text-gray-700 mb-1">
+              Filing Notes (optional)
+            </label>
+            <textarea
+              id="w2gu-filing-notes"
+              value={filingNotes}
+              onChange={(e) => setFilingNotes(e.target.value)}
+              disabled={busy || filing?.status === 'filing_ready'}
+              placeholder="Add operator notes before marking filing ready"
+              className="w-full min-h-[72px] rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            />
+          </div>
           {error && (
             <p className="mt-3 text-sm text-red-600">{error}</p>
           )}
         </CardContent>
       </Card>
+
+      {preflightError && (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm font-medium text-red-700">Preflight Error</p>
+            <p className="text-sm text-red-600 mt-1">{preflightError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {markReadyError && (
+        <Card>
+          <CardContent className="pt-6">
+            <p className="text-sm font-medium text-red-700">Mark Ready Error</p>
+            <p className="text-sm text-red-600 mt-1">{markReadyError}</p>
+            <p className="text-xs text-gray-600 mt-2">Re-run preflight to view the latest blocking findings.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {filing && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Filing Readiness</CardTitle>
+            <CardDescription>
+              Status: <span className="font-medium">{filing.status}</span> • Blocking: {filing.blocking_count} • Warnings: {filing.warning_count}
+            </CardDescription>
+            {filing.preflight_run_at && (
+              <p className="text-xs text-gray-500">
+                Last explicit preflight: {new Date(filing.preflight_run_at).toLocaleString()}
+              </p>
+            )}
+            {filing.marked_ready_at && (
+              <p className="text-xs text-gray-500">
+                Marked ready: {new Date(filing.marked_ready_at).toLocaleString()}
+                {typeof filing.marked_ready_by_id === 'number' ? ` (user #${filing.marked_ready_by_id})` : ''}
+              </p>
+            )}
+            {filing.notes && <p className="text-sm text-gray-600">Notes: {filing.notes}</p>}
+          </CardHeader>
+        </Card>
+      )}
+
+      {preflight && preflight.findings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Preflight Findings</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {preflight.findings.slice(0, 25).map((f, i) => (
+              <p key={i} className={f.severity === 'blocking' ? 'text-sm text-red-700' : 'text-sm text-amber-700'}>
+                • [{f.severity}] {f.message}
+              </p>
+            ))}
+            {preflight.findings.length > 25 && (
+              <p className="text-xs text-gray-500">Showing first 25 of {preflight.findings.length} findings.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Results */}
       {report && (

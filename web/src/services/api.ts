@@ -84,7 +84,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -125,7 +126,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -148,7 +150,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -174,7 +177,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -202,7 +206,8 @@ class ApiClient {
       throw new ApiError(
         errorData.error || `HTTP ${response.status}`,
         response.status,
-        errorData.details
+        errorData.details,
+        errorData
       );
     }
 
@@ -234,12 +239,14 @@ class ApiClient {
 export class ApiError extends Error {
   status: number;
   details?: Record<string, string[]>;
+  data?: unknown;
 
-  constructor(message: string, status: number, details?: Record<string, string[]>) {
+  constructor(message: string, status: number, details?: Record<string, string[]>, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.data = data;
   }
 }
 
@@ -271,6 +278,8 @@ import type {
   CheckItem,
   CheckSettings,
   W2GuReportResponse,
+  W2GuPreflightResponse,
+  W2GuMarkReadyResponse,
 } from '@/types';
 
 // Companies
@@ -765,6 +774,13 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/w2_gu_csv', { year }),
   w2GuPdf: (year: number) =>
     api.getBlobWithParams('/admin/reports/w2_gu_pdf', { year }),
+  // CPR-74: W-2 filing operationalization
+  w2GuPreflight: (year: number) =>
+    api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
+  w2GuFilingReadiness: (year: number) =>
+    api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
+  w2GuMarkReady: (year: number, notes?: string) =>
+    api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
 };
 
 // Pay Stubs (Admin API)
