@@ -692,6 +692,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(filing["marked_ready_at"]).to be_present
       expect(filing["marked_ready_by_id"]).to eq(admin_user.id)
       expect(filing["findings_source"]).to eq("persisted")
+      expect(response.parsed_body.dig("revalidation", "year")).to eq(2025)
+      expect(response.parsed_body.dig("revalidation", "company_id")).to eq(company.id)
+      expect(response.parsed_body.dig("revalidation", "company_name")).to eq(company.name)
       expect(response.parsed_body.dig("revalidation", "findings_source")).to eq("revalidation")
       expect(response.parsed_body.dig("revalidation", "warning_count")).to be_a(Integer)
     end

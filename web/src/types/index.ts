@@ -486,6 +486,9 @@ export interface W2GuPreflightResponse {
 }
 
 export interface W2GuRevalidationResult {
+  year: number;
+  company_id: number;
+  company_name: string;
   run_at: string;
   blocking_count: number;
   warning_count: number;

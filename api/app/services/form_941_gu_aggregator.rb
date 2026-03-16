@@ -351,6 +351,10 @@ class Form941GuAggregator
                                  .select(:id)
                              })
 
+    # Stored employee+employer SS taxes always reflect the total SS-taxable base
+    # consumed in prior quarters, including SS-taxable tips when present. Dividing
+    # that combined tax by the combined SS rate therefore reconstructs the same
+    # wages+tips headroom consumption used by the current-quarter allocator.
     prior_items.group(:employee_id)
                .sum("social_security_tax + employer_social_security_tax")
                .transform_values { |combined_tax| (combined_tax.to_f / SS_RATE_COMBINED).round(2) }
