@@ -57,7 +57,12 @@ class W2GuPreflightValidator
 
     employee_ids = PayrollItem
       .joins(:pay_period)
-      .where(pay_periods: { company_id: company.id, status: 'committed' })
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+          .where(company_id: company.id)
+          .where('EXTRACT(YEAR FROM pay_date) = ?', year)
+          .select(:id)
+      })
       .where('EXTRACT(YEAR FROM pay_periods.pay_date) = ?', year)
       .distinct
       .pluck(:employee_id)
@@ -72,7 +77,7 @@ class W2GuPreflightValidator
     end
 
     Employee.where(id: employee_ids).find_each do |employee|
-      if employee.ssn_last_four.blank?
+      unless employee.valid_filing_ssn?
         out << Finding.new(
           severity: 'blocking',
           code: 'EMPLOYEE_SSN_MISSING',

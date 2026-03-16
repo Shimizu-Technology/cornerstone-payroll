@@ -54,13 +54,14 @@ class PayPeriod < ApplicationRecord
   scope :calculated, -> { where(status: "calculated") }
   scope :approved, -> { where(status: "approved") }
   scope :committed, -> { where(status: "committed") }
+  scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
 
   # CPR-71: correction scopes
   scope :voided, -> { where(correction_status: "voided") }
   scope :correction_runs, -> { where(correction_status: "correction") }
-  scope :active_periods, -> { where(correction_status: nil) }
+  scope :active_periods, -> { where(correction_status: [ nil, "correction" ]) }
 
   def draft?
     status == "draft"
@@ -110,6 +111,16 @@ class PayPeriod < ApplicationRecord
   # Tax sync lifecycle
   def generate_idempotency_key!
     self.tax_sync_idempotency_key ||= "cpr-#{id}-#{committed_at&.to_i || Time.current.to_i}"
+  end
+
+  def prepare_tax_sync!
+    update!(
+      tax_sync_status: "pending",
+      tax_sync_attempts: 0,
+      tax_sync_last_error: nil,
+      tax_synced_at: nil,
+      tax_sync_idempotency_key: "cpr-#{id}-#{Time.current.to_i}"
+    )
   end
 
   def mark_syncing!

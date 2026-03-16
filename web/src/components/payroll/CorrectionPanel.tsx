@@ -851,9 +851,6 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
   const metadata    = (event.metadata ?? {}) as Record<string, unknown>;
   const createdRunId = typeof metadata.created_correction_run_id === 'number'
     ? metadata.created_correction_run_id : null;
-  const deletedRunId = typeof metadata.deleted_correction_run_id === 'number'
-    ? metadata.deleted_correction_run_id : null;
-
   const linkedRunId = event.resulting_pay_period_id ?? createdRunId;
   const shouldRenderLink = linkedRunId !== null && !deletedRunIds.has(linkedRunId);
   // `showDeletedMessage` is only true for correction_run_created rows,
@@ -874,7 +871,7 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
           <div className="flex items-center gap-2 flex-wrap">
             {/* Timeline indicator */}
             <span
-              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-200 text-gray-500 text-xs font-semibold flex-shrink-0"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-500"
               aria-hidden="true"
             >
               {index}
@@ -981,15 +978,16 @@ function CorrectionModal({
   // Capture focus when dialog opens; restore when it closes
   useEffect(() => {
     returnFocusRef.current = document.activeElement as HTMLElement | null;
+    const panelElement = panelRef.current;
     // Small delay so the DOM is fully mounted before focusing
-    const t = setTimeout(() => panelRef.current?.focus(), 10);
+    const t = setTimeout(() => panelElement?.focus(), 10);
     return () => {
       clearTimeout(t);
       const target = returnFocusRef.current;
       if (target && document.body.contains(target)) {
         target.focus();
       } else {
-        panelRef.current?.closest<HTMLElement>('[data-correction-panel]')?.focus();
+        panelElement?.closest<HTMLElement>('[data-correction-panel]')?.focus();
       }
     };
   }, []);

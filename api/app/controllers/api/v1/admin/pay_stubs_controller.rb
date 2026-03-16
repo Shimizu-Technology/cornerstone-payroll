@@ -124,7 +124,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
-                         .where(pay_periods: { status: "committed" })
+                         .where(pay_periods: { id: PayPeriod.reportable_committed.select(:id) })
                          .order("pay_periods.pay_date DESC")
                          .limit(params[:limit] || 12)
 

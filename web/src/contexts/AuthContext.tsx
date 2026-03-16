@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
@@ -22,6 +23,18 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+type AuthResponseUser = Awaited<ReturnType<typeof authApi.me>>['user'];
+
+function mapAuthUser(user: AuthResponseUser): User {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    company_id: user.company_id,
+    company_name: user.company_name,
+  };
+}
 
 // Dev mode bypass — when VITE_CLERK_PUBLISHABLE_KEY is not set
 const isDevMode = !import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -29,7 +42,7 @@ const authEnabled = import.meta.env.VITE_AUTH_ENABLED === 'true';
 
 function DevAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!authEnabled);
 
   useEffect(() => {
     // Dev mode does not rely on Clerk token provider.
@@ -41,14 +54,12 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
     // If auth is enabled but Clerk is not configured, don't hammer /auth/me.
     // The UI should route to /login and show the missing configuration state.
     if (authEnabled) {
-      setUser(null);
-      setIsLoading(false);
       return;
     }
 
     // In dev mode, just fetch /auth/me without a token
     authApi.me()
-      .then((res) => setUser(res.user as any))
+      .then((res) => setUser(mapAuthUser(res.user)))
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
   }, []);
@@ -64,7 +75,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         signOut: async () => setUser(null),
         refreshUser: async () => {
           const res = await authApi.me();
-          setUser(res.user as any);
+          setUser(mapAuthUser(res.user));
         },
       }}
     >
@@ -111,7 +122,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const res = await authApi.me();
-      setUser(res.user as any);
+      setUser(mapAuthUser(res.user));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         // Clerk session exists but backend rejected user (e.g. not provisioned/invited).

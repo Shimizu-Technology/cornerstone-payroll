@@ -61,7 +61,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 1 }
 
       lines = response.parsed_body.dig("report", "lines")
-      expect(lines["line1_employee_count"]).to eq(1)
+      expect(lines["line1_employee_count"]).to eq(0)
       expect(lines["line2_wages_tips_other"].to_f).to eq(3000.0)
       expect(lines["line3_fit_withheld"].to_f).to eq(200.0)
       expect(lines["line5a_ss_combined_tax"].to_f).to eq(372.0)  # 186 + 186
@@ -83,7 +83,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 1 }
 
       lines = response.parsed_body.dig("report", "lines")
-      expect(lines["line2_wages_tips_other"].to_f).to eq(4100.0) # 3000 + 1000 + 100 tips
+      expect(lines["line2_wages_tips_other"].to_f).to eq(4000.0) # gross_pay already includes reported_tips
     end
 
     it "includes tax_detail and monthly_liability" do
@@ -102,7 +102,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "returns 422 when SS wage base is not configured for the requested year" do
-      get "/api/v1/admin/reports/form_941_gu", params: { year: 2026, quarter: 1 }
+      get "/api/v1/admin/reports/form_941_gu", params: { year: 2027, quarter: 1 }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to match(/SS wage base not configured/)
     end
@@ -181,19 +181,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       employee_row = response.parsed_body.dig("report", "employees", 0)
       totals = response.parsed_body.dig("report", "totals")
 
-      expect(employee_row["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
+      expect(employee_row["box1_wages_tips_other_comp"].to_f).to eq(3000.0)
       expect(employee_row["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
-      expect(employee_row["box3_social_security_wages"].to_f).to eq(3000.0)
+      expect(employee_row["box3_social_security_wages"].to_f).to eq(2900.0)
       expect(employee_row["box4_social_security_tax_withheld"].to_f).to eq(186.0)
-      expect(employee_row["box5_medicare_wages_tips"].to_f).to eq(3100.0)
+      expect(employee_row["box5_medicare_wages_tips"].to_f).to eq(3000.0)
       expect(employee_row["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(employee_row["box7_social_security_tips"].to_f).to eq(100.0)
 
-      expect(totals["box1_wages_tips_other_comp"].to_f).to eq(3100.0)
+      expect(totals["box1_wages_tips_other_comp"].to_f).to eq(3000.0)
       expect(totals["box2_federal_income_tax_withheld"].to_f).to eq(250.0)
-      expect(totals["box3_social_security_wages"].to_f).to eq(3000.0)
+      expect(totals["box3_social_security_wages"].to_f).to eq(2900.0)
       expect(totals["box4_social_security_tax_withheld"].to_f).to eq(186.0)
-      expect(totals["box5_medicare_wages_tips"].to_f).to eq(3100.0)
+      expect(totals["box5_medicare_wages_tips"].to_f).to eq(3000.0)
       expect(totals["box6_medicare_tax_withheld"].to_f).to eq(43.5)
       expect(totals["box7_social_security_tips"].to_f).to eq(100.0)
       expect(totals["reported_tips_total"].to_f).to eq(100.0)
@@ -253,7 +253,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       create(:payroll_item,
         pay_period: pay_period_2025,
         employee: tipped_high_earner,
-        gross_pay: 50_000.00,
+        gross_pay: 250_000.00,
         reported_tips: 200_000.00,
         withholding_tax: 10_000.00,
         social_security_tax: 10_918.20,
@@ -354,7 +354,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       csv_body = response.body
       expect(csv_body).to include(employee.full_name)
-      expect(csv_body).to include("3100.00")
+      expect(csv_body).to include("3000.00")
     end
 
     it "includes TOTALS row" do

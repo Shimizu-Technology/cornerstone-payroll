@@ -68,8 +68,8 @@ class PayPeriodCorrectionService
         financial_snapshot_from: (was_correction_run ? :resulting_pay_period : :pay_period)
       )
 
-      # Reverse YTD totals for every non-voided payroll item (batch to avoid loading all rows at once)
-      locked.payroll_items.where(voided: false).find_each(batch_size: 500) do |item|
+      # Reverse all payroll items; paper-check void state must not affect payroll correction math.
+      locked.payroll_items.find_each(batch_size: 500) do |item|
         reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
       end
 
@@ -78,7 +78,12 @@ class PayPeriodCorrectionService
         correction_status: "voided",
         voided_at:         Time.current,
         voided_by_id:      actor&.id,
-        void_reason:       reason
+        void_reason:       reason,
+        tax_sync_status:   "pending",
+        tax_sync_attempts: 0,
+        tax_sync_last_error: nil,
+        tax_synced_at:     nil,
+        tax_sync_idempotency_key: "cpr-#{locked.id}-#{Time.current.to_i}"
       )
 
       # If a committed correction run is being voided, release source linkage so
@@ -211,7 +216,7 @@ class PayPeriodCorrectionService
   end
 
   private_class_method def self.copy_payroll_items!(source:, target:)
-    source.payroll_items.where(voided: false).find_each(batch_size: 500) do |source_item|
+    source.payroll_items.find_each(batch_size: 500) do |source_item|
       target.payroll_items.create!(
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,

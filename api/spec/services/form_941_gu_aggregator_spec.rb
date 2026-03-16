@@ -116,13 +116,13 @@ RSpec.describe Form941GuAggregator do
       let(:lines) { report[:lines] }
 
       it "line1: counts distinct employees" do
-        # employee1 and employee2 each have items in Q2
-        expect(lines[:line1_employee_count]).to eq(2)
+        # Q2 line 1 uses employees paid during the pay period containing June 12.
+        expect(lines[:line1_employee_count]).to eq(0)
       end
 
       it "line2: sums wages + tips + other compensation" do
-        # gross: 5500 + reported_tips: 75 = 5575
-        expect(lines[:line2_wages_tips_other]).to eq(5575.0)
+        # Gross pay is already the source of truth for wages/tips compensation.
+        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
       end
 
       it "line3: sums FIT withheld" do
@@ -131,8 +131,8 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "line5a: combined SS tax (employee + employer)" do
-        # (124 + 124) + (93 + 93) + (124 + 124) = 682
-        expect(lines[:line5a_ss_combined_tax]).to eq(682.0)
+        # SS wages exclude the reported_tips portion from gross_pay.
+        expect(lines[:line5a_ss_combined_tax]).to eq(672.7)
       end
 
       it "line5b: SS tips" do
@@ -154,7 +154,7 @@ RSpec.describe Form941GuAggregator do
 
       it "line5e: total SS + Medicare taxes" do
         ss_tips_combined  = (75.0 * 0.124).round(2)
-        expected_5e = (682.0 + ss_tips_combined + 159.5 + 0.0).round(2)
+        expected_5e = (672.7 + ss_tips_combined + 159.5 + 0.0).round(2)
         expect(lines[:line5e_total_ss_medicare]).to eq(expected_5e)
       end
 
@@ -184,7 +184,7 @@ RSpec.describe Form941GuAggregator do
         # employee SS: 124 + 93 + 124 = 341
         expect(detail[:ss_employee]).to eq(341.0)
         expect(detail[:ss_employer]).to eq(341.0)
-        expect(detail[:ss_combined]).to eq(682.0)
+        expect(detail[:ss_combined]).to eq(672.7)
       end
 
       it "separates employee and employer Medicare taxes" do
@@ -220,25 +220,24 @@ RSpec.describe Form941GuAggregator do
 
       it "calculates April liability" do
         april = breakdown[0]
-        # FIT: 100+75=175, SS combined: (124+124)+(93+93)=434,
-        # SS tips: 50*12.4%=6.2, Medicare combined: (29+29)+(21.75+21.75)=101.5
+        # FIT: 175, SS wages: (2000-50)+1500, SS tips: 50, Medicare base: 3500
         expect(april[:fit_withheld].to_f).to eq(175.0)
-        expect(april[:ss_combined].to_f).to eq(434.0)
+        expect(april[:ss_combined].to_f).to eq(427.8)
         expect(april[:ss_tips_combined].to_f).to eq(6.2)
         expect(april[:medicare_combined].to_f).to eq(101.5)
         expect(april[:add_medicare_tax].to_f).to eq(0.0)
-        expect(april[:total_liability].to_f).to eq(716.7)
+        expect(april[:total_liability].to_f).to eq(710.5)
       end
 
       it "calculates May liability" do
         may = breakdown[1]
-        # FIT: 100, SS combined: 248, SS tips: 25*12.4%=3.1, Medicare combined: 58
+        # FIT: 100, SS wages: 2000-25, SS tips: 25, Medicare base: 2000
         expect(may[:fit_withheld].to_f).to eq(100.0)
-        expect(may[:ss_combined].to_f).to eq(248.0)
+        expect(may[:ss_combined].to_f).to eq(244.9)
         expect(may[:ss_tips_combined].to_f).to eq(3.1)
         expect(may[:medicare_combined].to_f).to eq(58.0)
         expect(may[:add_medicare_tax].to_f).to eq(0.0)
-        expect(may[:total_liability].to_f).to eq(409.1)
+        expect(may[:total_liability].to_f).to eq(406.0)
       end
 
       it "June has zero liability (no committed pay periods)" do
@@ -271,7 +270,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include draft pay period wages in line2" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
       end
     end
 
@@ -293,7 +292,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include Q1 wages in Q2 report" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5575.0)
+        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
       end
     end
   end
@@ -366,7 +365,7 @@ RSpec.describe Form941GuAggregator do
       create(:payroll_item,
         pay_period:                   pp,
         employee:                     high_earner,
-        gross_pay:                    198_000.00,
+        gross_pay:                    203_000.00,
         reported_tips:                5_000.00,
         withholding_tax:              0.0,
         social_security_tax:          0.0,
