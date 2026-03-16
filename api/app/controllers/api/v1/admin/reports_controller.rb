@@ -134,11 +134,11 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return render json: {
               error: "year must be a valid 4-digit tax year"
             }, status: :unprocessable_entity
@@ -211,10 +211,137 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # POST /api/v1/admin/reports/w2_gu_preflight
+        # Runs preflight checks and persists filing readiness state for a given tax year.
+        def w2_gu_preflight
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.current.year
+          end
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          company = Company.find(current_company_id)
+          preflight = W2GuPreflightValidator.new(company: company, year: year).run
+
+          filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
+          apply_preflight_to_filing!(
+            filing,
+            preflight,
+            update_preflight_run_at: true
+          )
+
+          attempts = 0
+          begin
+            attempts += 1
+            filing.save!
+          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+            raise if attempts >= 2
+
+            filing = W2FilingReadiness.find_or_initialize_by(company_id: company.id, year: year)
+            apply_preflight_to_filing!(
+              filing,
+              preflight,
+              update_preflight_run_at: true
+            )
+            retry
+          end
+
+          render json: {
+            preflight: preflight,
+            filing: filing_readiness_payload(filing)
+          }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+          render json: { error: "Unable to persist W-2 preflight readiness state" }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/reports/w2_gu_filing_readiness
+        # Returns persisted filing readiness state for the requested year (no side effects).
+        def w2_gu_filing_readiness
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.current.year
+          end
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
+          render json: { filing: filing ? filing_readiness_payload(filing) : nil }
+        end
+
+        # POST /api/v1/admin/reports/w2_gu_mark_ready
+        # Marks a W-2 filing year as filing-ready if no blocking findings remain.
+        def w2_gu_mark_ready
+          require_admin!
+          return if performed?
+
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.current.year
+          end
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
+          unless filing
+            return render json: { error: "Run W-2 preflight before marking filing ready" }, status: :unprocessable_entity
+          end
+
+          if filing.status == "filing_ready"
+            return render json: { filing: filing_readiness_payload(filing) }
+          end
+
+          company = Company.find(current_company_id)
+          fresh_preflight = W2GuPreflightValidator.new(company: company, year: year).run
+          apply_preflight_to_filing!(
+            filing,
+            fresh_preflight,
+            update_preflight_run_at: false
+          )
+
+          if filing.blocking_count.to_i > 0
+            filing.save!
+            return render json: {
+              error: "Cannot mark filing ready with blocking findings",
+              filing: filing_readiness_payload(filing),
+              revalidation: revalidation_payload(fresh_preflight)
+            }, status: :unprocessable_entity
+          end
+
+          filing.status = "filing_ready"
+          filing.marked_ready_at = Time.current
+          filing.marked_ready_by_id = current_user&.id
+          filing.notes = params.key?(:notes) ? params[:notes].presence : filing.notes
+          filing.save!
+
+          render json: {
+            filing: filing_readiness_payload(filing),
+            revalidation: revalidation_payload(fresh_preflight)
+          }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ActiveRecord::RecordInvalid
+          render json: { error: "Unable to persist W-2 filing readiness state" }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
-          year = params[:year]&.to_i || Date.today.year
+          year = params[:year]&.to_i || Date.current.year
 
           employees = Employee.where(company_id: current_company_id)
                              .includes(:employee_ytd_totals)
@@ -280,7 +407,7 @@ module Api
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
         # year defaults to current year; quarter is optional (1-4).
         def build_tax_summary_data
-          year    = params[:year]&.to_i || Date.today.year
+          year    = params[:year]&.to_i || Date.current.year
           quarter = params[:quarter].present? ? params[:quarter].to_i : nil
 
           if quarter && !(1..4).cover?(quarter)
@@ -339,10 +466,10 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.today.year
+            Date.current.year
           end
 
-          unless year && year > 2000 && year <= Date.today.year + 1
+          unless year && year > 2000 && year <= Date.current.year + 1
             return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
           end
 
@@ -370,7 +497,7 @@ module Api
           }
         end
 
-        def ytd_company_totals(year = Date.today.year)
+        def ytd_company_totals(year = Date.current.year)
           items = PayrollItem.joins(:pay_period)
                             .where(pay_periods: {
                               company_id: current_company_id,
@@ -439,7 +566,7 @@ module Api
           }
         end
 
-        def employee_ytd_summary(employee, year = Date.today.year)
+        def employee_ytd_summary(employee, year = Date.current.year)
           ytd = employee.ytd_totals_for(year)
           {
             year: year,
@@ -466,6 +593,51 @@ module Api
             medicare_tax: ytd&.medicare_tax || 0,
             retirement: ytd&.retirement || 0,
             net_pay: ytd&.net_pay || 0
+          }
+        end
+
+        def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
+          was_filing_ready = !filing.new_record? && filing.status == "filing_ready"
+
+          filing.blocking_count = preflight[:blocking_count]
+          if update_preflight_run_at
+            filing.warning_count = preflight[:warning_count]
+            filing.findings = preflight[:findings]
+            filing.preflight_run_at = Time.current
+          end
+
+          if preflight[:blocking_count].zero?
+            filing.status = was_filing_ready ? "filing_ready" : "preflight_passed"
+          else
+            filing.status = "draft"
+            filing.marked_ready_at = nil
+            filing.marked_ready_by_id = nil
+            filing.notes = nil
+          end
+        end
+
+        def filing_readiness_payload(filing)
+          {
+            year: filing.year,
+            status: filing.status,
+            blocking_count: filing.blocking_count,
+            warning_count: filing.warning_count,
+            preflight_run_at: filing.preflight_run_at,
+            marked_ready_at: filing.marked_ready_at,
+            marked_ready_by_id: filing.marked_ready_by_id,
+            notes: filing.notes,
+            findings: filing.findings,
+            findings_source: "persisted"
+          }
+        end
+
+        def revalidation_payload(preflight)
+          {
+            run_at: preflight[:run_at],
+            blocking_count: preflight[:blocking_count],
+            warning_count: preflight[:warning_count],
+            findings: preflight[:findings],
+            findings_source: "revalidation"
           }
         end
       end
