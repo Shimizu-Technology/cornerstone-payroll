@@ -2,7 +2,9 @@
 
 class EnforcePayrollItemsCompanyIdNotNull < ActiveRecord::Migration[8.0]
   def up
-    return if company_id_column.null == false
+    col = company_id_column
+    return unless col
+    return if col.null == false
 
     unless check_constraint_exists?(:payroll_items, name: "payroll_items_company_id_not_null")
       add_check_constraint :payroll_items,
@@ -18,7 +20,9 @@ class EnforcePayrollItemsCompanyIdNotNull < ActiveRecord::Migration[8.0]
   end
 
   def down
-    return if company_id_column.null
+    col = company_id_column
+    return unless col
+    return if col.null
 
     with_lock_timeout do
       change_column_null :payroll_items, :company_id, true
