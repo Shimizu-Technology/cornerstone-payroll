@@ -134,6 +134,30 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(lines).to have_key("line13_total_deposits")
       expect(lines["line13_total_deposits"]).to be_nil
     end
+
+    it "counts employees whose Q2 pay period spans June 12" do
+      q2_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 6, 1),
+        end_date: Date.new(2025, 6, 15),
+        pay_date: Date.new(2025, 6, 20))
+
+      create(:payroll_item,
+        pay_period: q2_period,
+        employee: employee,
+        gross_pay: 1200.0,
+        withholding_tax: 100.0,
+        social_security_tax: 74.4,
+        employer_social_security_tax: 74.4,
+        medicare_tax: 17.4,
+        employer_medicare_tax: 17.4,
+        reported_tips: 0.0)
+
+      get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 2 }
+
+      lines = response.parsed_body.dig("report", "lines")
+      expect(lines["line1_employee_count"]).to eq(1)
+    end
   end
 
   describe "GET /api/v1/admin/reports/w2_gu" do

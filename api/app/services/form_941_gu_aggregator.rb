@@ -139,6 +139,7 @@ class Form941GuAggregator
         pay_periods_included: pay_period_count,
         caveats: [
           "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
+          "Line 7 fractions-of-cents uses (monthly Schedule B total - line 6); positive means monthly liability exceeds line 6, negative means it is lower.",
           "Lines 8–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
