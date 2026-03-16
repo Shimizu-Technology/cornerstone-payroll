@@ -215,6 +215,10 @@ RSpec.describe Form941GuAggregator do
       expect(report[:meta][:caveats].any? { |c| c.include?("tax_detail.ss_combined is based on stored SS taxes") }).to be(true)
     end
 
+    it "documents the Additional Medicare transition-year caveat" do
+      expect(report[:meta][:caveats].any? { |c| c.include?("verify transition-year Additional Medicare carry-forward manually") }).to be(true)
+    end
+
     it "documents line 7 sign semantics for operator review" do
       expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 fractions-of-cents uses (monthly Schedule B total - line 6)") }).to be(true)
     end
@@ -523,11 +527,14 @@ RSpec.describe Form941GuAggregator do
 
       report = described_class.new(company, 2025, 2).generate
       monthly_total = report[:monthly_liability].sum { |month| month[:total_liability].to_f }.round(2)
+      line6 = report[:lines][:line6_total_taxes_before_adj]
 
       expect(report[:lines][:line5c_medicare_combined_tax]).to eq(29.0)
+      expect(line6).to eq(29.0)
       expect(monthly_total).to eq(29.01)
-      expect(report[:lines][:line7_adj_fractions_cents]).to eq(0.01)
+      expect(report[:lines][:line7_adj_fractions_cents]).to eq((monthly_total - line6).round(2))
       expect(report[:lines][:line10_total_taxes_after_adj]).to eq(monthly_total)
+      expect(report[:lines][:line10_total_taxes_after_adj]).to eq((line6 + report[:lines][:line7_adj_fractions_cents]).round(2))
     end
   end
 
