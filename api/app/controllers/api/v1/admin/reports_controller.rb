@@ -640,6 +640,9 @@ module Api
 
         def revalidation_payload(preflight)
           {
+            year: preflight[:year],
+            company_id: preflight[:company_id],
+            company_name: preflight[:company_name],
             run_at: preflight[:run_at],
             blocking_count: preflight[:blocking_count],
             warning_count: preflight[:warning_count],

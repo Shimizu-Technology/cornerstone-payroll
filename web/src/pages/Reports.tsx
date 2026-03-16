@@ -41,18 +41,13 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
-function buildRevalidationPreflight(
-  year: number,
-  revalidation: W2GuMarkReadyResponse['revalidation'],
-  report: W2GuReport | null,
-  preflight: W2GuPreflightResult | null
-): W2GuPreflightResult | null {
+function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalidation']): W2GuPreflightResult | null {
   if (!revalidation) return null;
 
   return {
-    year,
-    company_id: report?.meta.company_id ?? preflight?.company_id ?? 0,
-    company_name: report?.meta.company_name ?? preflight?.company_name ?? '',
+    year: revalidation.year,
+    company_id: revalidation.company_id,
+    company_name: revalidation.company_name,
     run_at: revalidation.run_at,
     blocking_count: revalidation.blocking_count,
     warning_count: revalidation.warning_count,
@@ -518,7 +513,7 @@ function W2GuPanel() {
     try {
       const res = await reportsApi.w2GuMarkReady(year, filingNotes);
       setFiling(res.filing);
-      const revalidatedPreflight = buildRevalidationPreflight(year, res.revalidation, report, preflight);
+      const revalidatedPreflight = buildRevalidationPreflight(res.revalidation);
       if (revalidatedPreflight) {
         setPreflight(revalidatedPreflight);
       }
@@ -532,7 +527,7 @@ function W2GuPanel() {
           setFiling(errorData.filing);
         }
 
-        const revalidatedPreflight = buildRevalidationPreflight(year, errorData.revalidation, report, preflight);
+        const revalidatedPreflight = buildRevalidationPreflight(errorData.revalidation);
         if (revalidatedPreflight) {
           setPreflight(revalidatedPreflight);
         }
