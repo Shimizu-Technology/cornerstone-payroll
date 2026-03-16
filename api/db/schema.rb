@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_16_000103) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -352,7 +352,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000103) do
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
     t.index ["voided"], name: "index_payroll_items_on_voided"
-    t.check_constraint "company_id IS NOT NULL", name: "payroll_items_company_id_not_null"
   end
 
   create_table "tax_brackets", force: :cascade do |t|
