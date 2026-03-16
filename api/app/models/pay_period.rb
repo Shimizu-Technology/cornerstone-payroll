@@ -61,7 +61,12 @@ class PayPeriod < ApplicationRecord
   # CPR-71: correction scopes
   scope :voided, -> { where(correction_status: "voided") }
   scope :correction_runs, -> { where(correction_status: "correction") }
-  scope :active_periods, -> { where(correction_status: [ nil, "correction" ]) }
+  # "Reportable" means any non-voided period in the correction chain: the original
+  # run (`nil`) or a correction run. Kept separate from `reportable_committed`
+  # because drafts/calculated/approved correction runs can still be editable.
+  scope :reportable_periods, -> { where(correction_status: [ nil, "correction" ]) }
+  # Backward-compatible alias. "Active" here means non-voided, not "original only."
+  scope :active_periods, -> { reportable_periods }
 
   def draft?
     status == "draft"
