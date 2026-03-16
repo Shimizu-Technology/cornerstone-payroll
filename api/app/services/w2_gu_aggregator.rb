@@ -107,6 +107,12 @@ class W2GuAggregator
     ss_tax = sums&.ss_tax.to_f
     medicare_tax = sums&.medicare_tax.to_f
 
+    if reported_tips > gross_pay
+      Rails.logger.warn(
+        "[W2GuAggregator] employee=#{employee.id} reported_tips=#{reported_tips} exceed gross_pay=#{gross_pay}; " \
+        "clamping wages_only to zero for SS wage-base allocation"
+      )
+    end
     wages_only = [ gross_pay - reported_tips, 0.0 ].max
 
     # Approximation for box 1 until pre-tax exclusions are fully modeled.

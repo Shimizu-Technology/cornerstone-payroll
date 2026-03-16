@@ -41,6 +41,7 @@ class Form941GuAggregator
   MEDICARE_RATE_COMBINED = 0.029 # 1.45% employee + 1.45% employer
   ADD_MEDICARE_RATE      = 0.009  # Additional Medicare Tax (employee only)
   ADD_MEDICARE_THRESHOLD = 200_000.00
+  FRACTIONS_OF_CENTS_WARNING_THRESHOLD = 0.10
   SS_WAGE_BASE_BY_YEAR = {
     2025 => 176_100.00,
     2026 => 184_500.00
@@ -110,7 +111,10 @@ class Form941GuAggregator
     monthly_total_liability = monthly_liability.sum { |month| month[:total_liability].to_f }.round(2)
 
     # --- Adjustments ---
-    adj_fractions_of_cents = monthly_total_liability == line6 ? nil : (monthly_total_liability - line6).round(2)
+    adj_fractions_of_cents = fractions_of_cents_adjustment(
+      line6: line6,
+      monthly_total_liability: monthly_total_liability
+    )
     adj_sick_pay           = nil  # PLACEHOLDER: not tracked in payroll_items
     adj_tips_group_life    = nil  # PLACEHOLDER: not tracked in payroll_items
 
@@ -227,6 +231,20 @@ class Form941GuAggregator
     else
       items.sum { |item| item.public_send(column).to_f }
     end
+  end
+
+  def fractions_of_cents_adjustment(line6:, monthly_total_liability:)
+    diff = (monthly_total_liability - line6).round(2)
+    return nil if diff.zero?
+
+    if diff.abs > FRACTIONS_OF_CENTS_WARNING_THRESHOLD
+      Rails.logger.warn(
+        "[Form941GuAggregator] Large fractions-of-cents adjustment=#{diff} " \
+        "(company=#{company.id}, year=#{year}, quarter=#{quarter}). Verify monthly liability breakdown."
+      )
+    end
+
+    diff
   end
 
   # Monthly breakdown: total tax liability per calendar month in the quarter.
