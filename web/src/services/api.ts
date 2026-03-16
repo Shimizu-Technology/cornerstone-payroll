@@ -777,6 +777,8 @@ export const reportsApi = {
   // CPR-74: W-2 filing operationalization
   w2GuPreflight: (year: number) =>
     api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
+  w2GuFilingReadiness: (year: number) =>
+    api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
   w2GuMarkReady: (year: number, notes?: string) =>
     api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
 };

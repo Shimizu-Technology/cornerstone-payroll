@@ -442,6 +442,21 @@ function W2GuPanel() {
   const [markingReady, setMarkingReady] = useState(false);
   const [filingNotes, setFilingNotes] = useState('');
 
+  useEffect(() => {
+    void loadPersistedFilingReadiness();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year]);
+
+  async function loadPersistedFilingReadiness() {
+    try {
+      const res = await reportsApi.w2GuFilingReadiness(year);
+      setFiling(res.filing);
+    } catch {
+      // Non-blocking: filing readiness can be absent or temporarily unavailable.
+      setFiling(null);
+    }
+  }
+
   async function loadReport() {
     setLoading(true);
     setError(null);

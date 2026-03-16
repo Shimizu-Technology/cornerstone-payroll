@@ -261,6 +261,24 @@ module Api
           render json: { error: "Unable to persist W-2 preflight readiness state" }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/w2_gu_filing_readiness
+        # Returns persisted filing readiness state for the requested year (no side effects).
+        def w2_gu_filing_readiness
+          raw_year = params[:year]
+          year = if raw_year.present?
+            Integer(raw_year, exception: false)
+          else
+            Date.current.year
+          end
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
+          end
+
+          filing = W2FilingReadiness.find_by(company_id: current_company_id, year: year)
+          render json: { filing: filing ? filing_readiness_payload(filing) : nil }
+        end
+
         # POST /api/v1/admin/reports/w2_gu_mark_ready
         # Marks a W-2 filing year as filing-ready if no blocking findings remain.
         def w2_gu_mark_ready

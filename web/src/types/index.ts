@@ -493,6 +493,10 @@ export interface W2GuRevalidationResult {
   findings_source: 'revalidation';
 }
 
+export interface W2GuFilingReadinessResponse {
+  filing: W2GuFilingReadiness | null;
+}
+
 export interface W2GuMarkReadyResponse {
   filing: W2GuFilingReadiness;
   revalidation?: W2GuRevalidationResult;

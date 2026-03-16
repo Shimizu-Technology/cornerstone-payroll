@@ -589,6 +589,54 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/reports/w2_gu_filing_readiness" do
+    let!(:pay_period_2025) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 1, 1),
+        end_date: Date.new(2025, 1, 14),
+        pay_date: Date.new(2025, 1, 18))
+    end
+
+    before do
+      company.update!(ein: "12-3456789")
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Main St",
+        city: "Hagåtña",
+        state: "GU",
+        zip: "96910"
+      )
+      create(:payroll_item,
+        pay_period: pay_period_2025,
+        employee: employee,
+        gross_pay: 3000.00,
+        reported_tips: 100.00,
+        withholding_tax: 250.00,
+        social_security_tax: 186.00,
+        medicare_tax: 43.50)
+    end
+
+    it "returns nil when no readiness row exists for year" do
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["filing"]).to be_nil
+    end
+
+    it "returns persisted readiness for year" do
+      post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/admin/reports/w2_gu_filing_readiness", params: { year: 2025 }
+      expect(response).to have_http_status(:ok)
+      filing = response.parsed_body["filing"]
+      expect(filing["status"]).to eq("preflight_passed")
+      expect(filing["blocking_count"]).to eq(0)
+      expect(filing["findings_source"]).to eq("persisted")
+    end
+  end
+
   describe "POST /api/v1/admin/reports/w2_gu_mark_ready" do
     let(:year_without_committed_payroll) { Date.current.year + 1 }
 
