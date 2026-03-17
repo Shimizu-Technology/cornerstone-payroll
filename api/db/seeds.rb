@@ -189,6 +189,16 @@ if Rails.env.development?
 
   puts "Created Cornerstone Tax Services with #{company.employees.count} employees"
 
+  # Admin user for development
+  User.find_or_create_by!(email: "shimizutechnology@gmail.com") do |u|
+    u.name = "Leon Shimizu"
+    u.clerk_id = "user_3A6fIlTloHIiJxXCDqEnqzO0ogg"
+    u.company = company
+    u.role = :admin
+  end
+
+  puts "Created admin user: shimizutechnology@gmail.com"
+
   # =============================================================================
   # Seed placeholder companies for Cornerstone's clients (empty, ready to populate)
   # =============================================================================
