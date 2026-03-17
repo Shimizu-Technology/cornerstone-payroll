@@ -330,52 +330,46 @@ export function PayPeriods() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => navigate(`/pay-periods/${period.id}`)}
-                          >
-                            View
-                          </Button>
-                          {period.status !== 'committed' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditModal(period)}
+                        <div className="flex items-center justify-end gap-3">
+                          <div className="flex items-center gap-1 text-sm">
+                            <button
+                              className="text-gray-500 hover:text-gray-800 hover:underline"
+                              onClick={() => navigate(`/pay-periods/${period.id}`)}
                             >
-                              Edit
+                              View
+                            </button>
+                            {period.status !== 'committed' && (
+                              <>
+                                <span className="text-gray-300">·</span>
+                                <button
+                                  className="text-gray-500 hover:text-gray-800 hover:underline"
+                                  onClick={() => openEditModal(period)}
+                                >
+                                  Edit
+                                </button>
+                                <span className="text-gray-300">·</span>
+                                <button
+                                  className="text-red-400 hover:text-red-600 hover:underline"
+                                  onClick={() => handleDelete(period.id)}
+                                  disabled={actionInFlight !== null}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+
+                          {period.status === 'draft' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => navigate(`/pay-periods/${period.id}`)}
+                            >
+                              Enter Hours
                             </Button>
                           )}
-                          {period.status === 'draft' && (
-                            <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => navigate(`/pay-periods/${period.id}`)}
-                              >
-                                Enter Hours
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-red-600 hover:text-red-700"
-                                onClick={() => handleDelete(period.id)}
-                                disabled={actionInFlight !== null}
-                              >
-                                Delete
-                              </Button>
-                            </>
-                          )}
                           {period.status === 'calculated' && (
-                            <>
-                              <Button
-                                size="sm"
-                                onClick={() => handleApprove(period.id)}
-                                disabled={actionInFlight !== null}
-                              >
-                                Approve
-                              </Button>
+                            <div className="flex items-center gap-1.5">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -384,7 +378,14 @@ export function PayPeriods() {
                               >
                                 Recalculate
                               </Button>
-                            </>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprove(period.id)}
+                                disabled={actionInFlight !== null}
+                              >
+                                Approve
+                              </Button>
+                            </div>
                           )}
                           {period.status === 'approved' && (
                             <Button
