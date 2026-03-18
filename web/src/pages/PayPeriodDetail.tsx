@@ -551,48 +551,48 @@ export function PayPeriodDetail() {
             <div className="p-4 border-b border-amber-200 bg-amber-50">
               <h3 className="font-semibold text-amber-900">Employer Tax Obligations</h3>
               <p className="text-sm text-amber-700 mt-1">
-                Amounts Cornerstone must deposit with Guam DRT in addition to employee withholdings
+                Amounts Cornerstone must deposit with Guam DRT
               </p>
             </div>
             <div className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Employee-side taxes */}
+                {/* FIT Column */}
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Employee Withholdings</h4>
+                  <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Federal / Guam Income Tax</h4>
                   <div className="space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Federal/Guam Income Tax</span>
+                      <span className="text-gray-600">Employee FIT Withheld</span>
                       <span className="font-medium">{formatCurrency(totalWithholding)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Social Security (6.2%)</span>
-                      <span className="font-medium">{formatCurrency(totalSS)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Medicare (1.45%)</span>
-                      <span className="font-medium">{formatCurrency(totalMedicare)}</span>
-                    </div>
                     <div className="flex justify-between pt-2 border-t font-semibold">
-                      <span>Subtotal (Employee)</span>
-                      <span>{formatCurrency(totalWithholding + totalSS + totalMedicare)}</span>
+                      <span>FIT Subtotal</span>
+                      <span>{formatCurrency(totalWithholding)}</span>
                     </div>
                   </div>
                 </div>
-                {/* Employer-side taxes */}
+                {/* SS + Medicare Column */}
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Employer Match</h4>
+                  <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Social Security & Medicare (FICA)</h4>
                   <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employee Social Security (6.2%)</span>
+                      <span className="font-medium">{formatCurrency(totalSS)}</span>
+                    </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Employer Social Security (6.2%)</span>
                       <span className="font-medium">{formatCurrency(totalEmployerSS)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employee Medicare (1.45%)</span>
+                      <span className="font-medium">{formatCurrency(totalMedicare)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Employer Medicare (1.45%)</span>
                       <span className="font-medium">{formatCurrency(totalEmployerMedicare)}</span>
                     </div>
                     <div className="flex justify-between pt-2 border-t font-semibold">
-                      <span>Subtotal (Employer)</span>
-                      <span>{formatCurrency(totalEmployerTaxes)}</span>
+                      <span>FICA Subtotal</span>
+                      <span>{formatCurrency(totalSS + totalEmployerSS + totalMedicare + totalEmployerMedicare)}</span>
                     </div>
                   </div>
                 </div>
@@ -601,7 +601,7 @@ export function PayPeriodDetail() {
               <div className="mt-6 flex flex-col gap-3 border-t-2 border-amber-300 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-lg font-bold text-amber-900">Total DRT Deposit</p>
-                  <p className="text-sm text-amber-700">Employee withholdings + Employer SS & Medicare</p>
+                  <p className="text-sm text-amber-700">FIT + Employee & Employer SS & Medicare</p>
                 </div>
                 <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
