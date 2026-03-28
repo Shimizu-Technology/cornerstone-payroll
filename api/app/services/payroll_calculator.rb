@@ -121,6 +121,7 @@ class PayrollCalculator
   # Called before tax calculation so these reduce the FIT withholding base.
   def pre_tax_employee_deductions_total
     employee.employee_deductions.active.includes(:deduction_type)
+      .reject { |ed| skip_employee_deduction?(ed.deduction_type) }
       .select { |ed| ed.deduction_type.active? && ed.deduction_type.pre_tax? }
       .sum { |ed| ed.calculate_amount(payroll_item.gross_pay) }
   end
@@ -137,6 +138,7 @@ class PayrollCalculator
     active_deductions.each do |ed|
       dt = ed.deduction_type
       next unless dt.active?
+      next if skip_employee_deduction?(dt)
 
       amount = ed.calculate_amount(payroll_item.gross_pay)
       next if amount.zero?
@@ -172,9 +174,9 @@ class PayrollCalculator
   # Process loan balance tracking for any loan-type deductions
   def process_loan_payments
     payroll_item.payroll_item_deductions.select { |pid| pid.deduction_type&.loan? }.each do |pid|
-      loan = employee.employee_loans.active.find_by(deduction_type_id: pid.deduction_type_id)
+      loan = find_active_loan_for_deduction(pid.deduction_type_id)
       next unless loan
-      next if loan.loan_transactions.payments.exists?(payroll_item_id: payroll_item.id)
+      next if payment_already_recorded?(loan)
 
       loan.record_payment!(
         amount: pid.amount,
@@ -265,5 +267,27 @@ class PayrollCalculator
       company.deduction_types.create!(name: label, category: "pre_tax", sub_category: "retirement")
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
     company.deduction_types.find_by!(name: label)
+  end
+
+  def skip_employee_deduction?(deduction_type)
+    return false unless deduction_type&.sub_category == "retirement"
+
+    employee.retirement_rate.to_f.positive? || employee.roth_retirement_rate.to_f.positive?
+  end
+
+  def find_active_loan_for_deduction(deduction_type_id)
+    if employee.association(:employee_loans).loaded?
+      employee.employee_loans.find { |loan| loan.active? && loan.deduction_type_id == deduction_type_id }
+    else
+      employee.employee_loans.active.find_by(deduction_type_id: deduction_type_id)
+    end
+  end
+
+  def payment_already_recorded?(loan)
+    if loan.association(:loan_transactions).loaded?
+      loan.loan_transactions.any? { |transaction| transaction.transaction_type == "payment" && transaction.payroll_item_id == payroll_item.id }
+    else
+      loan.loan_transactions.payments.exists?(payroll_item_id: payroll_item.id)
+    end
   end
 end

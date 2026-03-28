@@ -255,7 +255,9 @@ function PayrollRegisterPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement_payment ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">
+                        {fmt(emp.total_retirement_payment ?? ((emp.retirement_payment ?? 0) + (emp.roth_retirement_payment ?? 0)))}
+                      </td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(emp.net_pay ?? 0)}</td>
                       <td className="py-2 font-mono text-gray-500">{emp.check_number ?? '—'}</td>
                     </tr>

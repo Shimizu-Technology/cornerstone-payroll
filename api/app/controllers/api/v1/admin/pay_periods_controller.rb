@@ -266,9 +266,14 @@ module Api
 
           ActiveRecord::Base.transaction do
             @pay_period.update!(status: "committed", committed_at: Time.current)
+            committed_items = @pay_period.payroll_items.includes(
+              :employee,
+              payroll_item_deductions: :deduction_type,
+              employee: { employee_loans: :loan_transactions }
+            )
 
             # Update YTD totals for all employees
-            @pay_period.payroll_items.each do |item|
+            committed_items.each do |item|
               PayrollCalculator.for(item.employee, item).send(:process_loan_payments)
               update_ytd_totals(item)
             end
