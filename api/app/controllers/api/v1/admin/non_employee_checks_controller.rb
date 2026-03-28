@@ -27,9 +27,15 @@ module Api
 
         # POST /api/v1/admin/non_employee_checks
         def create
-          check = NonEmployeeCheck.new(check_params)
+          attrs = check_params.to_h
+          pay_period_id = attrs["pay_period_id"] || attrs[:pay_period_id]
+          pay_period = resolve_pay_period(pay_period_id) if pay_period_id.present?
+          return if pay_period_id.present? && pay_period.nil?
+
+          check = NonEmployeeCheck.new(attrs.except("pay_period_id", :pay_period_id))
           check.company_id = current_company_id
           check.created_by = current_user
+          check.pay_period = pay_period if pay_period
 
           if check.save
             render json: { non_employee_check: check_payload(check) }, status: :created
@@ -44,7 +50,16 @@ module Api
             return render json: { error: "Cannot update a voided check" }, status: :unprocessable_entity
           end
 
-          if @check.update(check_params)
+          attrs = check_params.to_h
+          if attrs.key?("pay_period_id") || attrs.key?(:pay_period_id)
+            pay_period_id = attrs["pay_period_id"] || attrs[:pay_period_id]
+            pay_period = resolve_pay_period(pay_period_id) if pay_period_id.present?
+            return if pay_period_id.present? && pay_period.nil?
+
+            attrs["pay_period_id"] = pay_period&.id
+          end
+
+          if @check.update(attrs)
             render json: { non_employee_check: check_payload(@check) }
           else
             render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
@@ -81,10 +96,10 @@ module Api
         private
 
         def set_check
-          @check = NonEmployeeCheck.find(params[:id])
-          unless @check.company_id == current_company_id
-            render json: { error: "Check not found" }, status: :not_found
-          end
+          @check = NonEmployeeCheck.find_by(id: params[:id], company_id: current_company_id)
+          return if @check
+
+          render json: { error: "Check not found" }, status: :not_found
         end
 
         def check_params
@@ -92,6 +107,14 @@ module Api
             :pay_period_id, :payable_to, :amount, :check_type,
             :memo, :description, :reference_number, :check_number
           )
+        end
+
+        def resolve_pay_period(pay_period_id)
+          pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id)
+          return pay_period if pay_period
+
+          render json: { error: "Pay period not found" }, status: :not_found
+          nil
         end
 
         def check_payload(check)

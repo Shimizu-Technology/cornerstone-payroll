@@ -9,7 +9,7 @@ module Api
         # regular users see only their own.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
-          companies = Company.where(id: accessible_ids).order(:name)
+          companies = Company.where(id: accessible_ids).includes(:employees).order(:name)
           companies = companies.where(active: true) if params[:active] == "true"
 
           render json: {
@@ -82,12 +82,14 @@ module Api
         end
 
         def company_payload(company, detailed: false)
+          employees = company.association(:employees).loaded? ? company.employees.to_a : nil
+
           payload = {
             id: company.id,
             name: company.name,
             active: company.active,
-            active_employees: company.employees.active.count,
-            total_employees: company.employees.count,
+            active_employees: employees ? employees.count(&:active?) : company.employees.active.count,
+            total_employees: employees ? employees.length : company.employees.count,
             pay_frequency: company.pay_frequency
           }
 

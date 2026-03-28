@@ -134,6 +134,7 @@ module Api
                   ip_address:  request.remote_ip,
                   user_agent:  request.user_agent
                 )
+                skip_default_audit_log!
               rescue StandardError => e
                 Rails.logger.error("[CPR-73] AuditLog delete_draft_correction_run failed for pay_period=#{deleted_run_id}: #{e.class}: #{e.message}")
               end
@@ -340,6 +341,7 @@ module Api
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent
               )
+              skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
@@ -395,6 +397,7 @@ module Api
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent
               )
+              skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog create_correction_run failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end

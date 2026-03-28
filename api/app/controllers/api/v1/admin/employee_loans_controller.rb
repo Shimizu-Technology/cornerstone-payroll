@@ -26,16 +26,19 @@ module Api
 
         # POST /api/v1/admin/employee_loans
         def create
-          employee = Employee.find(loan_params[:employee_id])
-          unless employee.company_id == current_company_id
+          employee = Employee.find_by(id: loan_params[:employee_id], company_id: current_company_id)
+          unless employee
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
           loan = EmployeeLoan.new(loan_params)
           loan.company_id = current_company_id
+          loan.employee = employee
           loan.current_balance = loan.original_amount if loan.current_balance.zero?
 
-          if loan.save
+          ActiveRecord::Base.transaction do
+            loan.save!
+
             # Record initial addition transaction
             loan.loan_transactions.create!(
               transaction_type: "addition",
@@ -45,10 +48,11 @@ module Api
               transaction_date: loan.start_date || Date.current,
               notes: "Initial loan"
             )
+
             render json: { loan: loan_payload(loan) }, status: :created
-          else
-            render json: { errors: loan.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/employee_loans/:id
@@ -98,10 +102,10 @@ module Api
         private
 
         def set_loan
-          @loan = EmployeeLoan.find(params[:id])
-          unless @loan.company_id == current_company_id
-            render json: { error: "Loan not found" }, status: :not_found
-          end
+          @loan = EmployeeLoan.find_by(id: params[:id], company_id: current_company_id)
+          return if @loan
+
+          render json: { error: "Loan not found" }, status: :not_found
         end
 
         def loan_params

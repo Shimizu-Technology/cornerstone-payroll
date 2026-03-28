@@ -38,6 +38,7 @@ module Auditable
     return unless audited.include?(action_name)
     return unless response.successful?
     return unless current_user
+    return if @skip_default_audit_log
 
     record_type = controller_path.gsub("api/v1/admin/", "")
     action_label = "#{record_type}##{action_name}"
@@ -85,5 +86,9 @@ module Auditable
     end
 
     nil
+  end
+
+  def skip_default_audit_log!
+    @skip_default_audit_log = true
   end
 end
