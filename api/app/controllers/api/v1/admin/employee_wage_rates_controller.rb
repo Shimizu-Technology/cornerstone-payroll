@@ -10,8 +10,8 @@ module Api
             return render json: { error: "employee_id is required" }, status: :unprocessable_entity
           end
 
-          employee = Employee.find(params[:employee_id])
-          unless employee.company_id == current_company_id
+          employee = scoped_employee(params[:employee_id])
+          unless employee
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
@@ -21,12 +21,13 @@ module Api
 
         # POST /api/v1/admin/employee_wage_rates
         def create
-          employee = Employee.find(rate_params[:employee_id])
-          unless employee.company_id == current_company_id
+          employee = scoped_employee(rate_params[:employee_id])
+          unless employee
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
           rate = EmployeeWageRate.new(rate_params)
+          rate.employee = employee
           if rate.save
             render json: { wage_rate: rate_payload(rate) }, status: :created
           else
@@ -36,8 +37,8 @@ module Api
 
         # PATCH /api/v1/admin/employee_wage_rates/:id
         def update
-          rate = EmployeeWageRate.find(params[:id])
-          unless rate.employee.company_id == current_company_id
+          rate = scoped_rate(params[:id])
+          unless rate
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
@@ -50,8 +51,8 @@ module Api
 
         # DELETE /api/v1/admin/employee_wage_rates/:id
         def destroy
-          rate = EmployeeWageRate.find(params[:id])
-          unless rate.employee.company_id == current_company_id
+          rate = scoped_rate(params[:id])
+          unless rate
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
@@ -80,6 +81,14 @@ module Api
             created_at: rate.created_at,
             updated_at: rate.updated_at
           }
+        end
+
+        def scoped_employee(id)
+          Employee.find_by(id: id, company_id: current_company_id)
+        end
+
+        def scoped_rate(id)
+          EmployeeWageRate.joins(:employee).find_by(id: id, employees: { company_id: current_company_id })
         end
       end
     end

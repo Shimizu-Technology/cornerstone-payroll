@@ -27,6 +27,50 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
     allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:current_user).and_return(admin_user)
   end
 
+  describe "GET /api/v1/admin/employee_loans" do
+    it "orders results by employee name without raising SQL errors" do
+      other_employee = create(:employee,
+        company: company,
+        department: department,
+        first_name: "Alice",
+        last_name: "Zephyr"
+      )
+      create(:employee,
+        company: company,
+        department: department,
+        first_name: "Bob",
+        last_name: "Anderson"
+      ).tap do |second_employee|
+        EmployeeLoan.create!(
+          employee: second_employee,
+          company: company,
+          name: "First Loan",
+          original_amount: 100.00,
+          current_balance: 100.00,
+          payment_amount: 10.00,
+          status: "active"
+        )
+      end
+      EmployeeLoan.create!(
+        employee: other_employee,
+        company: company,
+        name: "Second Loan",
+        original_amount: 100.00,
+        current_balance: 100.00,
+        payment_amount: 10.00,
+        status: "active"
+      )
+
+      get "/api/v1/admin/employee_loans"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("loans").map { |loan| loan.fetch("employee_name") }).to eq([
+        "Bob Anderson",
+        "Alice Zephyr"
+      ])
+    end
+  end
+
   describe "POST /api/v1/admin/employee_loans" do
     let(:valid_params) do
       {
