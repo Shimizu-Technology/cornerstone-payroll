@@ -95,6 +95,15 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         ytd = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024)
         expect(ytd.gross_pay.to_f).to eq(0.0)
       end
+
+      it "writes only one audit log entry for a successful void" do
+        expect {
+          post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
+               params: { reason: "Audit dedupe test" }, as: :json
+        }.to change(AuditLog, :count).by(1)
+
+        expect(AuditLog.last.action).to eq("void_pay_period")
+      end
     end
 
     context "validation errors" do
@@ -237,6 +246,15 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         new_period = PayPeriod.find(new_id)
         expect(new_period.payroll_items.count).to eq(1)
         expect(new_period.payroll_items.first.employee_id).to eq(employee.id)
+      end
+
+      it "writes only one audit log entry for correction-run creation" do
+        expect {
+          post "/api/v1/admin/pay_periods/#{voided_period.id}/create_correction_run",
+               params: { reason: "Audit dedupe create correction run" }, as: :json
+        }.to change(AuditLog, :count).by(1)
+
+        expect(AuditLog.last.action).to eq("create_correction_run")
       end
     end
 
@@ -429,6 +447,15 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         )
         expect(events.count).to eq(1)
         expect(events.first.metadata["deleted_correction_run_id"]).to eq(draft_correction_run.id)
+      end
+
+      it "writes only one audit log entry when deleting a draft correction run" do
+        expect {
+          delete "/api/v1/admin/pay_periods/#{draft_correction_run.id}",
+                 params: { reason: "Audit dedupe delete correction run" }, as: :json
+        }.to change(AuditLog, :count).by(1)
+
+        expect(AuditLog.last.action).to eq("delete_draft_correction_run")
       end
 
       it "allows a new correction run to be created after delete" do
