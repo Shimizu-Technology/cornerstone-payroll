@@ -22,8 +22,8 @@ const payFrequencyOptions = [
 ];
 
 const checkStockOptions = [
-  { value: 'bottom_check', label: 'Bottom Check' },
   { value: 'top_check', label: 'Top Check' },
+  { value: 'bottom_check', label: 'Bottom Check' },
 ];
 
 const emptyForm: CompanyFormData = {
@@ -39,7 +39,7 @@ const emptyForm: CompanyFormData = {
   email: '',
   bank_name: '',
   bank_address: '',
-  check_stock_type: 'bottom_check',
+  check_stock_type: 'top_check',
   next_check_number: 1001,
 };
 

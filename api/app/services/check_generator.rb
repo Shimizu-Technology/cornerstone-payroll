@@ -97,10 +97,8 @@ class CheckGenerator
   def ox; (company.check_offset_x.to_f * 72).round(1); end
   def oy; (company.check_offset_y.to_f * 72).round(1); end
 
-  # QuickBooks-style stock used by this workflow always places the negotiable
-  # check face on the top third, with the two stubs beneath it.
   def top_check?
-    true
+    company.check_stock_type != "bottom_check"
   end
 
   def check_y;  top_check? ? (SECTION_HEIGHT * 2) : 0;              end

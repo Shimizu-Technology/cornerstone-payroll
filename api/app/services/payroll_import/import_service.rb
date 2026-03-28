@@ -146,9 +146,27 @@ module PayrollImport
         match = matcher.match_excel_name(row[:last_name], row[:first_name])
         next unless match
 
-        lookup[match[:employee_id]] = row
+        existing = lookup[match[:employee_id]]
+        lookup[match[:employee_id]] = existing ? merge_excel_rows(existing, row) : row.dup
       end
       lookup
+    end
+
+    def merge_excel_rows(existing, incoming)
+      {
+        last_name: existing[:last_name] || incoming[:last_name],
+        first_name: existing[:first_name] || incoming[:first_name],
+        total_tips: existing[:total_tips].to_f + incoming[:total_tips].to_f,
+        loan_deduction: existing[:loan_deduction].to_f + incoming[:loan_deduction].to_f,
+        tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
+      }
+    end
+
+    def merge_tip_pool(existing_pool, incoming_pool)
+      return incoming_pool if existing_pool.blank?
+      return existing_pool if incoming_pool.blank? || incoming_pool == existing_pool
+
+      "mixed"
     end
 
     def build_preview_row(pdf_row, employee, match, excel_data)

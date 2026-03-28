@@ -269,6 +269,7 @@ module Api
 
             # Update YTD totals for all employees
             @pay_period.payroll_items.each do |item|
+              PayrollCalculator.for(item.employee, item).send(:process_loan_payments)
               update_ytd_totals(item)
             end
 

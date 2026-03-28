@@ -21,7 +21,7 @@ export function CheckSettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Editable form state
-  const [stockType, setStockType] = useState<'bottom_check' | 'top_check'>('bottom_check');
+  const [stockType, setStockType] = useState<'bottom_check' | 'top_check'>('top_check');
   const [offsetX, setOffsetX] = useState('0.000');
   const [offsetY, setOffsetY] = useState('0.000');
   const [bankName, setBankName] = useState('');
@@ -188,11 +188,11 @@ export function CheckSettingsPage() {
                 onChange={(e) => setStockType(e.target.value as 'bottom_check' | 'top_check')}
                 className="w-64"
               >
-                <option value="bottom_check">Bottom Check (most common US payroll)</option>
                 <option value="top_check">Top Check</option>
+                <option value="bottom_check">Bottom Check</option>
               </Select>
               <p className="text-xs text-gray-500">
-                Bottom check: stubs on top, check face at bottom. Top check: reversed.
+                Top check: check face on top with stubs underneath. Bottom check: stubs on top, check face at bottom.
               </p>
             </div>
 

@@ -80,13 +80,17 @@ class PayrollCalculator
   end
 
   def calculate_taxes(withholding_gross: payroll_item.gross_pay)
-    taxes = tax_calculator.calculate(
+    tax_args = {
       gross_pay: payroll_item.gross_pay,
       ytd_gross: ytd_gross_before,
       ytd_ss_tax: ytd_ss_before,
-      withholding_gross: withholding_gross,
-      w4_dependent_credit: employee.w4_dependent_credit.to_f
-    )
+      withholding_gross: withholding_gross
+    }
+    if tax_calculator.method(:calculate).parameters.any? { |type, name| [:key, :keyreq].include?(type) && name == :w4_dependent_credit }
+      tax_args[:w4_dependent_credit] = employee.w4_dependent_credit.to_f
+    end
+
+    taxes = tax_calculator.calculate(**tax_args)
 
     payroll_item.withholding_tax = taxes[:withholding]
     payroll_item.social_security_tax = taxes[:social_security]
@@ -170,6 +174,7 @@ class PayrollCalculator
     payroll_item.payroll_item_deductions.select { |pid| pid.deduction_type&.loan? }.each do |pid|
       loan = employee.employee_loans.active.find_by(deduction_type_id: pid.deduction_type_id)
       next unless loan
+      next if loan.loan_transactions.payments.exists?(payroll_item_id: payroll_item.id)
 
       loan.record_payment!(
         amount: pid.amount,
