@@ -47,7 +47,7 @@ module Auditable
     if action_name == "create" && record_id.blank?
       begin
         body = JSON.parse(response.body)
-        record_id = body.dig("data", "id")
+        record_id = extract_record_id_from_body(body)
       rescue JSON::ParserError
         # ignore
       end
@@ -73,5 +73,17 @@ module Auditable
     )
   rescue => e
     Rails.logger.warn("[Auditable] Failed to write audit log: #{e.message}")
+  end
+
+  def extract_record_id_from_body(payload)
+    return payload["id"] if payload.is_a?(Hash) && payload["id"].present?
+    return payload.dig("data", "id") if payload.is_a?(Hash) && payload.dig("data", "id").present?
+
+    if payload.is_a?(Hash)
+      nested_hash = payload.values.find { |value| value.is_a?(Hash) && value["id"].present? }
+      return nested_hash["id"] if nested_hash
+    end
+
+    nil
   end
 end

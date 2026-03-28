@@ -178,6 +178,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         employee = Employee.last
         expect(employee.ssn_encrypted).to eq("123-45-6789")
       end
+
+      it "records the created employee id in the audit log" do
+        expect {
+          post "/api/v1/admin/employees", params: valid_params
+        }.to change(AuditLog, :count).by(1)
+
+        log = AuditLog.last
+        expect(log.action).to eq("employees#create")
+        expect(log.record_id.to_s).to eq(Employee.last.id.to_s)
+      end
     end
 
     context "with invalid params" do

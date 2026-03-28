@@ -167,8 +167,8 @@ class PayrollCalculator
     end
 
     # Update aggregate fields for backward compatibility with existing code
-    payroll_item.loan_payment = aggregate_loan if aggregate_loan > 0
-    payroll_item.insurance_payment = aggregate_insurance if aggregate_insurance > 0
+    payroll_item.loan_payment = aggregate_loan
+    payroll_item.insurance_payment = aggregate_insurance
   end
 
   # Process loan balance tracking for any loan-type deductions
@@ -194,9 +194,12 @@ class PayrollCalculator
       payroll_item.non_taxable_pay.to_f
     ).round(2)
 
+    imported_loan_payment = 0.0
+
     # Sync loan_deduction from import for imported rows
     if payroll_item.import_source.present? && payroll_item.loan_deduction.to_f > 0
-      payroll_item.loan_payment = payroll_item.loan_deduction.to_f
+      imported_loan_payment = payroll_item.loan_deduction.to_f
+      payroll_item.loan_payment = payroll_item.loan_payment.to_f + imported_loan_payment
     end
 
     # Sum itemized deductions from payroll_item_deductions if present
@@ -210,7 +213,7 @@ class PayrollCalculator
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
     post_tax_deductions = if itemized_post_tax > 0
-      itemized_post_tax
+      itemized_post_tax + imported_loan_payment
     else
       payroll_item.loan_payment.to_f + payroll_item.insurance_payment.to_f
     end
