@@ -18,6 +18,7 @@ class ContractorPayrollCalculator < PayrollCalculator
   def calculate
     calculate_gross_pay
     record_earnings_breakdown
+    clear_deduction_state
     zero_out_taxes
     calculate_totals
     calculate_net_pay
@@ -93,6 +94,12 @@ class ContractorPayrollCalculator < PayrollCalculator
     payroll_item.roth_retirement_payment = 0
     payroll_item.employer_retirement_match = 0
     payroll_item.employer_roth_retirement_match = 0
+  end
+
+  def clear_deduction_state
+    payroll_item.payroll_item_deductions.clear
+    payroll_item.loan_payment = 0
+    payroll_item.insurance_payment = 0
   end
 
   def build_earning(category, label, hours, rate, amount)
