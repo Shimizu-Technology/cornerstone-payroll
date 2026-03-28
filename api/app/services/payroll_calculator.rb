@@ -40,6 +40,10 @@ class PayrollCalculator
     raise NotImplementedError, "Subclasses must implement #calculate"
   end
 
+  def apply_loan_payments!
+    process_loan_payments
+  end
+
   protected
 
   def tax_calculator

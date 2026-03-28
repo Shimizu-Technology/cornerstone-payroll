@@ -67,6 +67,18 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(LoanTransaction.count).to eq(0)
     end
 
+    it "persists the loan and opening transaction if payload rendering fails after commit" do
+      allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:loan_payload)
+        .and_raise(StandardError, "payload boom")
+
+      expect {
+        post "/api/v1/admin/employee_loans", params: valid_params, as: :json
+      }.to raise_error(StandardError, "payload boom")
+
+      expect(EmployeeLoan.count).to eq(1)
+      expect(LoanTransaction.count).to eq(1)
+    end
+
     it "rejects employees from another company" do
       foreign_department = create(:department, company: other_company)
       foreign_employee = create(:employee, company: other_company, department: foreign_department)
