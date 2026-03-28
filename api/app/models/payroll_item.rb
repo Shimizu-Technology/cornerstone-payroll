@@ -140,9 +140,11 @@ class PayrollItem < ApplicationRecord
 
   # Calculate and store all values
   def calculate!
-    calculator = PayrollCalculator.for(employee, self)
-    calculator.calculate
-    save!
+    ApplicationRecord.transaction do
+      calculator = PayrollCalculator.for(employee, self)
+      calculator.calculate
+      save!
+    end
   end
 
   def wage_rate_hours

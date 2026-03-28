@@ -247,6 +247,82 @@ RSpec.describe HourlyPayrollCalculator do
         payroll_item.roth_retirement_payment.to_f
       )
     end
+
+    it "keeps a fixed traditional 401(k) deduction when only roth_retirement_rate is configured" do
+      roth_only_employee = create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single",
+        retirement_rate: 0.0,
+        roth_retirement_rate: 0.05
+      )
+      roth_only_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: roth_only_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80
+      )
+      traditional_type = DeductionType.create!(
+        company: company,
+        name: "401(k) Fixed",
+        category: "pre_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: roth_only_employee,
+        deduction_type: traditional_type,
+        amount: 40.00,
+        is_percentage: false,
+        active: true
+      )
+
+      described_class.new(roth_only_employee, roth_only_item).calculate
+
+      expect(roth_only_item.roth_retirement_payment).to eq(80.00)
+      expect(roth_only_item.payroll_item_deductions.map(&:label)).to include("401(k) Fixed")
+    end
+
+    it "keeps a fixed roth deduction when only retirement_rate is configured" do
+      traditional_only_employee = create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single",
+        retirement_rate: 0.04,
+        roth_retirement_rate: 0.0
+      )
+      traditional_only_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: traditional_only_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80
+      )
+      roth_type = DeductionType.create!(
+        company: company,
+        name: "Roth 401(k) Fixed",
+        category: "post_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: traditional_only_employee,
+        deduction_type: roth_type,
+        amount: 30.00,
+        is_percentage: false,
+        active: true
+      )
+
+      described_class.new(traditional_only_employee, traditional_only_item).calculate
+
+      expect(traditional_only_item.retirement_payment).to eq(64.00)
+      expect(traditional_only_item.payroll_item_deductions.map(&:label)).to include("Roth 401(k) Fixed")
+    end
   end
 
   describe "with imported loan deductions and itemized post-tax deductions" do

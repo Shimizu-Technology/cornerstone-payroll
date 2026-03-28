@@ -274,8 +274,9 @@ class PayrollCalculator
 
   def skip_employee_deduction?(deduction_type)
     return false unless deduction_type&.sub_category == "retirement"
+    return employee.roth_retirement_rate.to_f.positive? if roth_retirement_deduction?(deduction_type)
 
-    employee.retirement_rate.to_f.positive? || employee.roth_retirement_rate.to_f.positive?
+    employee.retirement_rate.to_f.positive?
   end
 
   def find_active_loan_for_deduction(deduction_type_id)
@@ -292,5 +293,9 @@ class PayrollCalculator
     else
       loan.loan_transactions.payments.exists?(payroll_item_id: payroll_item.id)
     end
+  end
+
+  def roth_retirement_deduction?(deduction_type)
+    deduction_type.category == "post_tax" || deduction_type.name.to_s.match?(/roth/i)
   end
 end
