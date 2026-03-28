@@ -73,8 +73,7 @@ class GuamTaxCalculatorV2
   # Step 2 (Multiple Jobs): Per Pub 15-T, when checked the withholding is
   # computed using the "higher withholding rate" schedule, which effectively
   # halves the standard deduction and bracket widths. We implement this by
-  # halving the standard deduction and dividing bracket boundaries by 2, then
-  # doubling the resulting tax — equivalent to the IRS lookup tables.
+  # halving the standard deduction and dividing bracket boundaries by 2.
   #
   # @param gross_pay [Decimal] Gross pay subject to withholding
   # @param w4_dependent_credit [Decimal] Annual W-4 Step 3 credit (default 0)

@@ -256,8 +256,9 @@ class PayrollCalculator
 
   def find_or_create_employer_deduction_type(label)
     company = payroll_item.company || pay_period.company
-    company.deduction_types.find_or_create_by!(name: label, category: "pre_tax") do |dt|
-      dt.sub_category = "retirement"
-    end
+    company.deduction_types.find_by(name: label) ||
+      company.deduction_types.create!(name: label, category: "pre_tax", sub_category: "retirement")
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+    company.deduction_types.find_by!(name: label)
   end
 end

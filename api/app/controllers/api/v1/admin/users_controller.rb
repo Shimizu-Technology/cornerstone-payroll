@@ -132,7 +132,7 @@ module Api
           if clerk_result[:success] && clerk_result[:url].present?
             send_invite_email(@user, clerk_result[:url])
             email_queued = true
-            @user.update(invited_at: Time.current)
+            @user.update!(invited_at: Time.current)
           end
 
           render json: {
@@ -140,6 +140,8 @@ module Api
             invitation_sent: email_queued,
             invitation_error: clerk_result[:success] ? nil : clerk_result[:error]
           }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         private
@@ -177,7 +179,15 @@ module Api
           )
 
           if result[:success]
-            user.update(clerk_invitation_id: result[:invitation_id])
+            begin
+              user.update!(clerk_invitation_id: result[:invitation_id])
+            rescue ActiveRecord::RecordInvalid => e
+              service.revoke_invitation(result[:invitation_id]) if result[:invitation_id].present?
+              return {
+                success: false,
+                error: "Invitation could not be saved locally: #{e.record.errors.full_messages.join(', ')}"
+              }
+            end
           end
 
           result
