@@ -48,9 +48,9 @@ module Api
               transaction_date: loan.start_date || Date.current,
               notes: "Initial loan"
             )
-
-            render json: { loan: loan_payload(loan) }, status: :created
           end
+
+          render json: { loan: loan_payload(loan) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         end
