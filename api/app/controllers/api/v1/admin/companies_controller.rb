@@ -37,7 +37,7 @@ module Api
           end
 
           company = Company.new(company_params)
-          company.check_stock_type ||= "bottom_check"
+          company.check_stock_type ||= "top_check"
           company.check_offset_x ||= 0.0
           company.check_offset_y ||= 0.0
           company.next_check_number ||= 1001
