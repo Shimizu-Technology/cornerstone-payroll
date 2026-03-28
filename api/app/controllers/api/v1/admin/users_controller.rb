@@ -11,7 +11,7 @@ module Api
 
         # GET /api/v1/admin/users
         def index
-          users = User.where(company_id: staff_company_id).order(:name)
+          users = User.where(company_id: staff_company_id).includes(:company_assignments).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -151,7 +151,7 @@ module Api
         end
 
         def set_user
-          @user = User.find_by(id: params[:id], company_id: staff_company_id)
+          @user = User.includes(:company_assignments).find_by(id: params[:id], company_id: staff_company_id)
           return if @user
 
           render json: { error: "User not found" }, status: :not_found
@@ -219,7 +219,11 @@ module Api
             updated_at: user.updated_at
           }
 
-          assigned = user.company_assignments.pluck(:company_id)
+          assigned = if user.association(:company_assignments).loaded?
+            user.company_assignments.map(&:company_id)
+          else
+            user.company_assignments.pluck(:company_id)
+          end
           data[:assigned_company_ids] = assigned if assigned.any?
 
           data
