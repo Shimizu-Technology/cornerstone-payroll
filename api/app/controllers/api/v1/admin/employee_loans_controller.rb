@@ -9,6 +9,7 @@ module Api
         # GET /api/v1/admin/employee_loans
         def index
           loans = EmployeeLoan.where(company_id: current_company_id)
+            .joins(:employee)
             .includes(:employee, :deduction_type, :loan_transactions)
 
           loans = loans.where(employee_id: params[:employee_id]) if params[:employee_id].present?
