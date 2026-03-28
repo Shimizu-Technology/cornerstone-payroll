@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { CompanyProvider } from '@/contexts/CompanyContext';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
 import { EmployeeList } from '@/pages/employees/EmployeeList';
@@ -14,6 +15,8 @@ import TaxConfigs from '@/pages/TaxConfigs';
 import { Users } from '@/pages/Users';
 import { AuditLogs } from '@/pages/AuditLogs';
 import { CheckSettingsPage } from '@/pages/CheckSettings';
+import EmployeeLoans from '@/pages/EmployeeLoans';
+import { Clients } from '@/pages/Clients';
 import { Login } from '@/pages/Login';
 // AuthCallback removed — Clerk handles auth flow
 import { Invite } from '@/pages/Invite';
@@ -77,10 +80,12 @@ function AppRoutes() {
         <Route path="pay-periods/:id" element={<PayPeriodDetail />} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="employee-loans" element={<EmployeeLoans />} />
         <Route path="settings/users" element={<Users />} />
         <Route path="settings/tax-config" element={<TaxConfigs />} />
         <Route path="settings/audit-logs" element={<AuditLogs />} />
         <Route path="settings/checks" element={<CheckSettingsPage />} />
+        <Route path="settings/clients" element={<Clients />} />
       </Route>
 
       {/* Catch-all redirect */}
@@ -108,7 +113,9 @@ function App() {
     <BrowserRouter>
       <AppWithClerk>
         <AuthProvider>
-          <AppRoutes />
+          <CompanyProvider>
+            <AppRoutes />
+          </CompanyProvider>
         </AuthProvider>
       </AppWithClerk>
     </BrowserRouter>

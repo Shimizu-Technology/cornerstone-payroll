@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
+import { Header } from '@/components/layout/Header';
+import { Button } from '@/components/ui/button';
 import {
   taxConfigsApi,
   type TaxConfig,
@@ -226,23 +228,19 @@ export default function TaxConfigs() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Tax Configuration</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Manage annual tax rates, brackets, and deductions
-          </p>
-        </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Create New Year
-        </button>
-      </div>
+    <div>
+      <Header
+        title="Tax Configuration"
+        description="Manage annual tax rates, brackets, and deductions"
+        actions={
+          <Button onClick={() => setShowCreateModal(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create New Year
+          </Button>
+        }
+      />
+
+      <div className="p-6 lg:p-8 space-y-6">
 
       {/* Tax Years List */}
       <div className="bg-white shadow rounded-lg overflow-hidden">
@@ -651,6 +649,8 @@ export default function TaxConfigs() {
           </div>
         </div>
       )}
+
+      </div>
 
       {/* Create Modal */}
       {showCreateModal && (

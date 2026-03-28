@@ -4,13 +4,14 @@ module Api
   module V1
     module Admin
       class EmployeesController < BaseController
+        include Auditable
         before_action :set_employee, only: [ :show, :update, :destroy ]
 
         # GET /api/v1/admin/employees
         def index
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
-          employees = employees.includes(:department).order(:last_name, :first_name)
+          employees = employees.includes(:department, :employee_wage_rates).order(:last_name, :first_name)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -85,8 +86,19 @@ module Api
             :filing_status,
             :allowances,
             :additional_withholding,
+            :w4_dependent_credit,
+            :w4_step2_multiple_jobs,
+            :w4_step4a_other_income,
+            :w4_step4b_deductions,
             :retirement_rate,
             :roth_retirement_rate,
+            :employer_retirement_match_rate,
+            :employer_roth_match_rate,
+            :business_name,
+            :contractor_ein,
+            :contractor_type,
+            :contractor_pay_type,
+            :w9_on_file,
             :address_line1,
             :address_line2,
             :city,
@@ -95,9 +107,10 @@ module Api
             :phone,
             :status
           ).tap do |permitted|
-            # Map :ssn to :ssn_encrypted for the encrypted field
             if permitted[:ssn].present?
               permitted[:ssn_encrypted] = permitted.delete(:ssn)
+            else
+              permitted.delete(:ssn)
             end
           end
         end
@@ -105,6 +118,7 @@ module Api
         def apply_filters(scope)
           scope = scope.where(department_id: params[:department_id]) if params[:department_id].present?
           scope = scope.where(status: params[:status]) if params[:status].present?
+          scope = scope.where(employment_type: params[:employment_type]) if params[:employment_type].present?
           if params[:search].present?
             search_term = "%#{params[:search]}%"
             scope = scope.where(
@@ -129,6 +143,16 @@ module Api
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
+          data["wage_rates"] = employee.active_wage_rates.map do |rate|
+            {
+              id: rate.id,
+              employee_id: rate.employee_id,
+              label: rate.label,
+              rate: rate.rate,
+              is_primary: rate.is_primary,
+              active: rate.active
+            }
+          end
 
           if include_department && employee.department
             data["department"] = {

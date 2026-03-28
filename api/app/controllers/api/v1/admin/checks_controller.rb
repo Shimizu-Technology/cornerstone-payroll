@@ -296,7 +296,14 @@ module Api
         # PATCH /api/v1/admin/companies/:company_id/check_settings
         # -----------------------------------------------------------------------
         def update_check_settings
-          permitted = params.permit(:check_stock_type, :check_offset_x, :check_offset_y, :bank_name, :bank_address)
+          permitted = params.permit(
+            :check_stock_type,
+            :check_offset_x,
+            :check_offset_y,
+            :bank_name,
+            :bank_address,
+            check_layout_config: {}
+          )
 
           [ :check_offset_x, :check_offset_y ].each do |key|
             next unless permitted.key?(key)
@@ -449,7 +456,8 @@ module Api
             check_offset_x: company.check_offset_x,
             check_offset_y: company.check_offset_y,
             bank_name: company.bank_name,
-            bank_address: company.bank_address
+            bank_address: company.bank_address,
+            check_layout_config: company.check_layout_config || {}
           }
         end
 

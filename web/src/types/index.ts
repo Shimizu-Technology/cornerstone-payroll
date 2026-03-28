@@ -33,7 +33,7 @@ export interface Department {
 // User & Auth
 // ----------------
 
-export type UserRole = 'admin' | 'manager' | 'employee';
+export type UserRole = 'admin' | 'manager' | 'employee' | 'accountant';
 
 export interface User {
   id: number;
@@ -43,6 +43,11 @@ export interface User {
   role: UserRole;
   company_id?: number;
   active?: boolean;
+  super_admin?: boolean;
+  assigned_company_ids?: number[];
+  invitation_status?: 'pending' | 'accepted';
+  invitation_pending?: boolean;
+  invited_at?: string | null;
   last_login_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -52,10 +57,21 @@ export interface User {
 // Employee
 // ----------------
 
-export type EmploymentType = 'hourly' | 'salary';
+export type EmploymentType = 'hourly' | 'salary' | 'contractor';
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 export type FilingStatus = 'single' | 'married' | 'married_separate' | 'head_of_household';
 export type EmployeeStatus = 'active' | 'inactive' | 'terminated';
+export type ContractorType = 'individual' | 'business';
+export type ContractorPayType = 'hourly' | 'flat_fee';
+
+export interface EmployeeWageRate {
+  id?: number;
+  employee_id?: number;
+  label: string;
+  rate: number;
+  is_primary: boolean;
+  active: boolean;
+}
 
 export interface Employee {
   id: number;
@@ -66,24 +82,36 @@ export interface Employee {
   middle_name?: string;
   last_name: string;
   email?: string;
-  // SSN is never sent to frontend for security
   date_of_birth?: string;
   hire_date: string;
   termination_date?: string;
   employment_type: EmploymentType;
-  pay_rate: number; // hourly rate or annual salary
+  pay_rate: number;
   pay_frequency: PayFrequency;
   filing_status: FilingStatus;
   allowances: number;
   additional_withholding: number;
-  retirement_rate: number; // percentage as decimal (0.04 = 4%)
+  w4_dependent_credit: number;
+  w4_step2_multiple_jobs: boolean;
+  w4_step4a_other_income: number;
+  w4_step4b_deductions: number;
+  retirement_rate: number;
   roth_retirement_rate: number;
+  employer_retirement_match_rate?: number;
+  employer_roth_match_rate?: number;
   status: EmployeeStatus;
+  // Contractor-specific fields
+  business_name?: string;
+  contractor_ein?: string;
+  contractor_type?: ContractorType;
+  contractor_pay_type?: ContractorPayType;
+  w9_on_file?: boolean;
   address_line1?: string;
   address_line2?: string;
   city?: string;
   state?: string;
   zip?: string;
+  wage_rates?: EmployeeWageRate[];
   created_at: string;
   updated_at: string;
 }
@@ -93,7 +121,7 @@ export interface EmployeeFormData {
   middle_name?: string;
   last_name: string;
   email?: string;
-  ssn?: string; // Only for create/update, never returned
+  ssn?: string;
   date_of_birth?: string;
   hire_date: string;
   employment_type: EmploymentType;
@@ -102,14 +130,25 @@ export interface EmployeeFormData {
   filing_status: FilingStatus;
   allowances: number;
   additional_withholding: number;
+  w4_dependent_credit: number;
+  w4_step2_multiple_jobs: boolean;
+  w4_step4a_other_income: number;
+  w4_step4b_deductions: number;
   retirement_rate: number;
   roth_retirement_rate: number;
   department_id?: number;
+  // Contractor-specific fields
+  business_name?: string;
+  contractor_ein?: string;
+  contractor_type?: ContractorType;
+  contractor_pay_type?: ContractorPayType;
+  w9_on_file?: boolean;
   address_line1?: string;
   address_line2?: string;
   city?: string;
   state?: string;
   zip?: string;
+  wage_rates?: EmployeeWageRate[];
 }
 
 // ----------------
@@ -203,6 +242,8 @@ export interface PayrollItem {
   // Additional earnings
   reported_tips?: number;
   bonus?: number;
+  salary_override?: number | null;
+  non_taxable_pay?: number;
   // Calculated pay
   gross_pay?: number;
   net_pay?: number;
@@ -248,6 +289,19 @@ export interface PayrollItem {
   updated_at?: string;
   // Included relations
   employee?: Employee;
+  wage_rate_hours?: PayrollItemWageRateHours[];
+}
+
+export interface PayrollItemWageRateHours {
+  employee_wage_rate_id?: number;
+  label: string;
+  rate: number;
+  regular_hours: number;
+  overtime_hours: number;
+  holiday_hours: number;
+  pto_hours: number;
+  is_primary?: boolean;
+  active?: boolean;
 }
 
 // ----------------
@@ -393,6 +447,7 @@ export interface CheckSettings {
   check_offset_y: number;
   bank_name: string | null;
   bank_address: string | null;
+  check_layout_config: Record<string, unknown>;
 }
 
 // ----------------
@@ -505,6 +560,85 @@ export interface W2GuMarkReadyResponse {
   revalidation?: W2GuRevalidationResult;
 }
 
+
+// ----------------
+// Employee Loans
+// ----------------
+
+export type LoanStatus = 'active' | 'paid_off' | 'suspended';
+
+export interface EmployeeLoan {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  name: string;
+  original_amount: number;
+  current_balance: number;
+  payment_amount?: number;
+  start_date?: string;
+  paid_off_date?: string;
+  status: LoanStatus;
+  deduction_type_id?: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  transactions?: LoanTransaction[];
+}
+
+export interface LoanTransaction {
+  id: number;
+  transaction_type: 'payment' | 'addition' | 'adjustment';
+  amount: number;
+  balance_before: number;
+  balance_after: number;
+  transaction_date: string;
+  notes?: string;
+  pay_period_id?: number;
+  created_at: string;
+}
+
+// ----------------
+// Non-Employee Checks
+// ----------------
+
+export type NonEmployeeCheckType = 'contractor' | 'tax_deposit' | 'child_support' | 'garnishment' | 'vendor' | 'reimbursement' | 'other';
+
+export interface NonEmployeeCheck {
+  id: number;
+  pay_period_id: number;
+  company_id: number;
+  check_number?: string;
+  payable_to: string;
+  amount: number;
+  check_type: NonEmployeeCheckType;
+  memo?: string;
+  description?: string;
+  reference_number?: string;
+  print_count: number;
+  printed_at?: string;
+  voided: boolean;
+  void_reason?: string;
+  voided_at?: string;
+  check_status: string;
+  created_by_id?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ----------------
+// Employee Wage Rates
+// ----------------
+
+export interface EmployeeWageRate {
+  id: number;
+  employee_id: number;
+  label: string;
+  rate?: number;
+  is_primary: boolean;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 // ----------------
 // Dashboard Stats

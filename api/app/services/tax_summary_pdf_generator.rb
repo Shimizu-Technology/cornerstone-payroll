@@ -14,7 +14,8 @@ require "prawn/table"
 #   send_data generator.generate, filename: generator.filename, type: "application/pdf", disposition: "attachment"
 #
 class TaxSummaryPdfGenerator
-  # Colors
+  include PdfFooter
+
   HEADER_BG    = "2B4090"
   SECTION_BG   = "F0F4FF"
   HIGHLIGHT_BG = "E8F5E9"
@@ -29,9 +30,8 @@ class TaxSummaryPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 36, 36, 36 ])
+    pdf = Prawn::Document.new(page_size: "LETTER", margin: [36, 36, 50, 36])
     render_document(pdf)
-    pdf.render
   end
 
   def filename
@@ -47,7 +47,13 @@ class TaxSummaryPdfGenerator
     render_header(pdf)
     render_period_block(pdf)
     render_totals_block(pdf)
-    render_footer(pdf)
+
+    period = report[:period] || {}
+    quarter_label = period[:quarter] ? "Q#{period[:quarter]} #{period[:year]}" : "#{period[:year]} Full Year"
+    render_with_footer(pdf,
+      "Tax Summary \u2014 #{quarter_label} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
+      font_size: 7
+    )
   end
 
   # ─── Header ────────────────────────────────────────────────────────────────
@@ -153,28 +159,6 @@ class TaxSummaryPdfGenerator
       )
     end
     pdf.fill_color TEXT_DARK
-  end
-
-  # ─── Footer ─────────────────────────────────────────────────────────────────
-
-  def render_footer(pdf)
-    period = report[:period] || {}
-    quarter_label = period[:quarter] ? "Q#{period[:quarter]} #{period[:year]}" : "#{period[:year]} Full Year"
-
-    pdf.repeat(:all) do
-      pdf.bounding_box([ pdf.bounds.left, pdf.bounds.bottom + 18 ], width: pdf.bounds.width) do
-        pdf.stroke_horizontal_rule
-        pdf.move_down 4
-        pdf.fill_color TEXT_MUTED
-        pdf.font_size(7) do
-          pdf.text(
-            "Tax Summary — #{quarter_label} — CONFIDENTIAL, FOR INTERNAL USE ONLY",
-            align: :center
-          )
-        end
-        pdf.fill_color TEXT_DARK
-      end
-    end
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────

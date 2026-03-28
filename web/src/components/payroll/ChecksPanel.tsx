@@ -41,6 +41,8 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
   const [reprintTarget, setReprintTarget] = useState<CheckItem | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewItem, setPreviewItem] = useState<CheckItem | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -93,22 +95,34 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
     }
   };
 
-  // ---- Download single check PDF (authenticated) ----
-  const handleDownloadPdf = async (item: CheckItem) => {
+  // ---- Preview single check PDF ----
+  const handlePreviewPdf = async (item: CheckItem) => {
     setActionLoading(item.id);
     try {
       const blob = await checksApi.checkPdf(item.id);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `check_${item.check_number || item.id}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
+      setPreviewUrl(url);
+      setPreviewItem(item);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download check PDF');
+      alert(err instanceof Error ? err.message : 'Failed to load check PDF');
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleClosePreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewItem(null);
+  };
+
+  const handleDownloadFromPreview = () => {
+    if (!previewUrl || !previewItem) return;
+    const a = document.createElement('a');
+    a.href = previewUrl;
+    a.download = `check_${previewItem.check_number || previewItem.id}.pdf`;
+    a.click();
   };
 
   // ---- Mark single printed ----
@@ -244,16 +258,16 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
-                      {/* Download single check PDF (including voided for audit/archival) */}
+                      {/* Preview check PDF */}
                       {item.check_number && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => handleDownloadPdf(item)}
+                          onClick={() => handlePreviewPdf(item)}
                           disabled={actionLoading === item.id}
                           className={`text-xs px-2 py-1 ${item.voided ? 'text-gray-500' : ''}`}
                         >
-                          {actionLoading === item.id ? '…' : item.voided ? 'VOID PDF' : 'PDF'}
+                          {actionLoading === item.id ? '…' : item.voided ? 'VOID PDF' : 'Preview'}
                         </Button>
                       )}
 
@@ -325,6 +339,39 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
           onClose={() => setReprintTarget(null)}
           onComplete={handleReprintComplete}
         />
+      )}
+
+      {/* Large centered PDF Preview */}
+      {previewUrl && previewItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 p-6">
+          <div className="flex h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Check #{previewItem.check_number} — {previewItem.employee_name}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Preview sized for desktop review and printing checks onto stock paper.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={handleDownloadFromPreview}>
+                  Download PDF
+                </Button>
+                <Button size="sm" onClick={handleClosePreview}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 bg-gray-100 p-5">
+              <iframe
+                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
+                className="h-full w-full rounded-xl border bg-white shadow-lg"
+                title="Check Preview"
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
