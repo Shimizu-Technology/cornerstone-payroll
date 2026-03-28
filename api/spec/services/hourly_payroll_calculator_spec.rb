@@ -144,6 +144,18 @@ RSpec.describe HourlyPayrollCalculator do
       # Total: 700
       expect(payroll_item.gross_pay).to eq(700.00)
     end
+
+    it "records non-taxable pay in the earnings breakdown" do
+      payroll_item.non_taxable_pay = 50.00
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      non_taxable = payroll_item.payroll_item_earnings.find { |earning| earning.category == "non_taxable" }
+      expect(non_taxable).to be_present
+      expect(non_taxable.label).to eq("Non-Taxable Pay")
+      expect(non_taxable.amount).to eq(50.00)
+    end
   end
 
   describe "with retirement deductions" do

@@ -65,6 +65,9 @@ class HourlyPayrollCalculator < PayrollCalculator
 
     build_earning("tips", "Tips", nil, nil, @tips_amount) if @tips_amount > 0
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
+
+    nontax = payroll_item.non_taxable_pay.to_f
+    build_earning("non_taxable", "Non-Taxable Pay", nil, nil, nontax) if nontax > 0
   end
 
   def calculate_single_rate_gross_pay
