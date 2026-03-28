@@ -474,8 +474,9 @@ module Api
             filename: "print_package_#{pp.start_date}_to_#{pp.end_date}.pdf",
             type: "application/pdf",
             disposition: "attachment"
-        rescue NameError => e
-          render json: { error: "combined_pdf gem not available; download reports individually" }, status: :unprocessable_entity
+        rescue StandardError => e
+          Rails.logger.error("[Reports] full_print_package_pdf failed for pay_period=#{pp&.id}: #{e.class}: #{e.message}")
+          render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/reports/ytd_summary
@@ -705,7 +706,9 @@ module Api
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
-            retirement_payment: item.retirement_payment.to_f + item.roth_retirement_payment.to_f,
+            retirement_payment: item.retirement_payment.to_f,
+            roth_retirement_payment: item.roth_retirement_payment.to_f,
+            total_retirement_payment: item.retirement_payment.to_f + item.roth_retirement_payment.to_f,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             check_number: item.check_number

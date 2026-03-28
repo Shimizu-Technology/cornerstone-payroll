@@ -732,7 +732,7 @@ export interface PayrollRegisterReport {
       total_deductions: number;
       total_net: number;
     };
-    employees: PayrollItem[];
+    employees: Array<PayrollItem & { total_retirement_payment?: number }>;
   };
 }
 
