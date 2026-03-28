@@ -157,9 +157,7 @@ module Api
           end
 
           ActiveRecord::Base.transaction do
-            ActiveRecord::Base.connection.execute(
-              "DELETE FROM payroll_imports WHERE pay_period_id = #{@pay_period.id}"
-            )
+            PayrollImportRecord.where(pay_period_id: @pay_period.id).delete_all
             @pay_period.destroy!
           end
           head :no_content
