@@ -236,4 +236,63 @@ RSpec.describe HourlyPayrollCalculator do
       )
     end
   end
+
+  describe "with imported loan deductions and itemized post-tax deductions" do
+    let(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single"
+      )
+    end
+
+    let(:payroll_item) do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        loan_deduction: 25.00,
+        import_source: "mosa_revel"
+      )
+    end
+
+    before do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Medical Insurance",
+        category: "post_tax",
+        sub_category: "insurance",
+        active: true
+      )
+
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 10.00,
+        is_percentage: false,
+        active: true
+      )
+    end
+
+    it "keeps imported loan deductions in total deductions and net pay" do
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.loan_payment).to eq(25.00)
+      expect(payroll_item.insurance_payment).to eq(10.00)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        35.00
+      )
+      expect(payroll_item.net_pay).to eq(
+        (payroll_item.gross_pay.to_f - payroll_item.total_deductions.to_f).round(2)
+      )
+    end
+  end
 end
