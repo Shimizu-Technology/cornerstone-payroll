@@ -3,6 +3,14 @@ import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
 import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
 import type {
@@ -866,11 +874,219 @@ function TotalBox({ label, value }: { label: string; value: number }) {
   );
 }
 
+// ─── 1099-NEC Panel ──────────────────────────────────────────────────────────
+
+interface NecContractor {
+  employee_id: number;
+  name: string;
+  business_name?: string;
+  contractor_type: string;
+  tin_type: string;
+  tin_last_four?: string;
+  total_compensation: number;
+  federal_withheld: number;
+  payment_count: number;
+  requires_filing: boolean;
+  w9_on_file: boolean;
+  compliance_issues: string[];
+}
+
+interface NecReport {
+  meta: {
+    report_type: string;
+    company_name: string;
+    year: number;
+    generated_at: string;
+    contractor_count: number;
+    reportable_count: number;
+    filing_threshold: number;
+  };
+  all_contractors: NecContractor[];
+  reportable_contractors: NecContractor[];
+  totals: {
+    total_compensation: number;
+    reportable_compensation: number;
+    total_federal_withheld: number;
+  };
+}
+
+function Form1099NecPanel() {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [report, setReport] = useState<NecReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadReport = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await reportsApi.form1099Nec(year);
+      setReport((res as { report: NecReport }).report);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const downloadPdf = async () => {
+    setExportingPdf(true);
+    try {
+      const blob = await reportsApi.form1099NecPdf(year);
+      const url = URL.createObjectURL(blob as Blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `1099-NEC_${year}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PDF');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">1099-NEC Annual Report</CardTitle>
+          <CardDescription>
+            Nonemployee compensation summary for 1099 contractor filing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tax Year</label>
+              <select
+                className="border rounded-md px-3 py-2 text-sm"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {Array.from({ length: 5 }, (_, i) => currentYear - i).map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading...' : 'Generate 1099-NEC Report'}
+            </Button>
+            {report && (
+              <Button variant="outline" onClick={downloadPdf} disabled={exportingPdf}>
+                {exportingPdf ? 'Exporting...' : 'Download PDF'}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">{error}</div>
+      )}
+
+      {report && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{report.meta.company_name} — {report.meta.year} 1099-NEC Summary</CardTitle>
+            <CardDescription>
+              {report.meta.contractor_count} contractor{report.meta.contractor_count !== 1 ? 's' : ''} &bull;{' '}
+              {report.meta.reportable_count} reportable (&ge; ${report.meta.filing_threshold}) &bull;{' '}
+              Generated {new Date(report.meta.generated_at).toLocaleString()}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-xs text-emerald-700">Total Compensation</p>
+                <p className="mt-1 text-lg font-semibold">{fmt(report.totals.total_compensation)}</p>
+              </div>
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-xs text-emerald-700">Reportable Compensation</p>
+                <p className="mt-1 text-lg font-semibold">{fmt(report.totals.reportable_compensation)}</p>
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-gray-500">Federal Tax Withheld</p>
+                <p className="mt-1 text-lg font-semibold">{fmt(report.totals.total_federal_withheld)}</p>
+              </div>
+            </div>
+
+            {report.all_contractors.length === 0 ? (
+              <p className="text-sm text-gray-500">No contractor payments found for {report.meta.year}.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Contractor</TableHead>
+                      <TableHead>TIN</TableHead>
+                      <TableHead className="text-center">Payments</TableHead>
+                      <TableHead className="text-right">Box 1 (Compensation)</TableHead>
+                      <TableHead className="text-right">Box 4 (Withheld)</TableHead>
+                      <TableHead className="text-center">W-9</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.all_contractors.map((c) => (
+                      <TableRow key={c.employee_id} className={c.compliance_issues.length > 0 ? 'bg-red-50/50' : undefined}>
+                        <TableCell>
+                          <p className="font-medium">{c.name}</p>
+                          {c.business_name && <p className="text-xs text-gray-500">{c.business_name}</p>}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-gray-600">{c.tin_type}: ***{c.tin_last_four || '????'}</span>
+                        </TableCell>
+                        <TableCell className="text-center">{c.payment_count}</TableCell>
+                        <TableCell className="text-right font-medium">{fmt(c.total_compensation)}</TableCell>
+                        <TableCell className="text-right">{fmt(c.federal_withheld)}</TableCell>
+                        <TableCell className="text-center">
+                          {c.w9_on_file ? (
+                            <span className="text-emerald-600 font-medium">Yes</span>
+                          ) : (
+                            <span className="text-red-600 font-bold">NO</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {c.requires_filing ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                              Reportable
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                              Below threshold
+                            </span>
+                          )}
+                          {c.compliance_issues.length > 0 && (
+                            <div className="mt-1">
+                              {c.compliance_issues.map((issue, i) => (
+                                <span key={i} className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 mr-1 mb-0.5">
+                                  {issue}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── Report Tiles ─────────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu';
+type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec';
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'tax-withholding-summary', 'w2-gu'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'tax-withholding-summary', 'w2-gu', '1099-nec'];
 
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
@@ -933,6 +1149,16 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
       </svg>
     ),
   },
+  {
+    id: '1099-nec',
+    title: '1099-NEC Annual Report',
+    description: 'Nonemployee compensation summary for 1099 contractor filing',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
 ];
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -991,6 +1217,7 @@ export function Reports() {
         {activeReport === 'payroll-register' && <PayrollRegisterPanel />}
         {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
         {activeReport === 'w2-gu' && <W2GuPanel />}
+        {activeReport === '1099-nec' && <Form1099NecPanel />}
 
         {/* Placeholder for other reports not yet wired */}
         {activeReport && !PANELS_WITH_UI.includes(activeReport) && (

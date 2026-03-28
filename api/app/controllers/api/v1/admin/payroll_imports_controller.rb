@@ -95,7 +95,7 @@ module Api
         private
 
         def set_pay_period
-          @pay_period = PayPeriod.includes(:payroll_items).find(params[:pay_period_id])
+          @pay_period = PayPeriod.includes(:payroll_items).find(params[:pay_period_id] || params[:id])
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found and return
@@ -125,6 +125,8 @@ module Api
             employee_name: item.employee_full_name,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
+            salary_override: item.salary_override,
+            non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             gross_pay: item.gross_pay,
@@ -133,6 +135,8 @@ module Api
             medicare_tax: item.medicare_tax,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
+            employer_social_security_tax: item.employer_social_security_tax,
+            employer_medicare_tax: item.employer_medicare_tax,
             reported_tips: item.reported_tips,
             tips: item.tips,
             tip_pool: item.tip_pool,

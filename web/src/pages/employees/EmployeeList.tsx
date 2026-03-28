@@ -210,6 +210,11 @@ export function EmployeeList() {
                   {employees.map((employee) => {
                     const statusConfig = employeeStatusConfig[employee.status];
                     const deptName = departments.find(d => d.id === employee.department_id)?.name;
+                    const activeWageRates = (employee.wage_rates || []).filter((rate) => rate.active !== false);
+                    const supportsHourlyMultiRate =
+                      employee.employment_type === 'hourly' ||
+                      (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+                    const hasMultipleRates = supportsHourlyMultiRate && activeWageRates.length > 1;
                     return (
                       <TableRow key={employee.id}>
                         <TableCell>
@@ -235,16 +240,47 @@ export function EmployeeList() {
                           </span>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm text-gray-700">
-                            {employmentTypeLabels[employee.employment_type]}
-                          </span>
+                          <div className="space-y-1">
+                            <span className="text-sm text-gray-700">
+                              {employmentTypeLabels[employee.employment_type]}
+                            </span>
+                            {hasMultipleRates && (
+                              <div>
+                                <span className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                                  Multi-rate
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
-                          <span className="font-medium text-gray-900">
-                            {employee.employment_type === 'hourly'
-                              ? `${formatCurrency(employee.pay_rate)}/hr`
-                              : `${formatCurrency(employee.pay_rate)}/yr`}
-                          </span>
+                          <div className="space-y-1">
+                            {hasMultipleRates ? (
+                              <div className="space-y-1">
+                                {activeWageRates.map((rate) => (
+                                  <div key={`${employee.id}-${rate.label}`} className="text-xs">
+                                    <span className="font-medium text-gray-900">{rate.label}</span>{' '}
+                                    <span className="text-gray-500">{formatCurrency(rate.rate)}/hr</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="font-medium text-gray-900">
+                                {employee.employment_type === 'hourly'
+                                  ? `${formatCurrency(employee.pay_rate)}/hr`
+                                  : employee.employment_type === 'contractor'
+                                  ? employee.contractor_pay_type === 'hourly'
+                                    ? `${formatCurrency(employee.pay_rate)}/hr`
+                                    : `${formatCurrency(employee.pay_rate)}/period`
+                                  : `${formatCurrency(employee.pay_rate)}/yr`}
+                              </span>
+                            )}
+                            {hasMultipleRates && (
+                              <p className="text-xs text-gray-500">
+                                {activeWageRates.length} hourly rates configured
+                              </p>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge

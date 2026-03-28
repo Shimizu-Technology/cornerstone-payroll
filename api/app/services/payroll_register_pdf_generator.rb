@@ -14,7 +14,8 @@ require "prawn/table"
 #   send_data generator.generate, filename: generator.filename, type: "application/pdf", disposition: "attachment"
 #
 class PayrollRegisterPdfGenerator
-  # Colors
+  include PdfFooter
+
   HEADER_BG   = "2B4090"
   SECTION_BG  = "F0F4FF"
   BORDER_GRAY = "CCCCCC"
@@ -28,9 +29,8 @@ class PayrollRegisterPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 36, 36, 36, 36 ])
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [36, 36, 50, 36])
     render_document(pdf)
-    pdf.render
   end
 
   def filename
@@ -51,7 +51,12 @@ class PayrollRegisterPdfGenerator
     render_pay_period_block(pdf)
     render_summary_block(pdf)
     render_employee_table(pdf)
-    render_footer(pdf)
+
+    pp = report[:pay_period] || {}
+    render_with_footer(pdf,
+      "Payroll Register \u2014 Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]} \u2014 Pay Date: #{pp[:pay_date]} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
+      font_size: 7
+    )
   end
 
   # ─── Header ────────────────────────────────────────────────────────────────
@@ -244,26 +249,6 @@ class PayrollRegisterPdfGenerator
       { content: fmt(emp[:net_pay]),             align: :right },
       { content: emp[:check_number].to_s }
     ]
-  end
-
-  # ─── Footer ─────────────────────────────────────────────────────────────────
-
-  def render_footer(pdf)
-    pp = report[:pay_period] || {}
-    pdf.repeat(:all) do
-      pdf.bounding_box([ pdf.bounds.left, pdf.bounds.bottom + 18 ], width: pdf.bounds.width) do
-        pdf.stroke_horizontal_rule
-        pdf.move_down 4
-        pdf.fill_color TEXT_MUTED
-        pdf.font_size(7) do
-          pdf.text(
-            "Payroll Register — Pay Period: #{pp[:start_date]} – #{pp[:end_date]} — Pay Date: #{pp[:pay_date]} — CONFIDENTIAL, FOR INTERNAL USE ONLY",
-            align: :center
-          )
-        end
-        pdf.fill_color TEXT_DARK
-      end
-    end
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────

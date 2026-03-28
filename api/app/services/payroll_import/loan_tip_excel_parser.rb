@@ -5,7 +5,7 @@ module PayrollImport
   #
   # Sheet structure:
   #   TIPS - BOH: Row 4=headers, data from row 5. Col C=Last Name, Col D=First Name, Col F=Tip Amount
-  #   TIPS - FOH: Row 4=headers, data from row 6. Col C=Last Name, Col D=First Name, Col F=Tip Amount
+  #   TIPS - FOH: Row 4=headers, data from row 5. Col C=Last Name, Col D=First Name, Col F=Tip Amount
   #   LOANS (NO INSTALLMENTS): Same structure, Col F=Loan Amount
   #   INSTALLMENT LOANS: Col C=Last, Col D=First, Col H=Payment This Period
   #   SUMMARY: Skip (broken)
@@ -98,15 +98,15 @@ module PayrollImport
       return unless xlsx.sheets.include?(sheet_name)
 
       sheet = xlsx.sheet(sheet_name)
-      # Data starts at row 5 for BOH, row 6 for FOH; scan from row 5 to be safe
-      start_row = pool == "foh" ? 6 : 5
+      # Row 4 is the header row in both BOH and FOH; data starts at row 5.
+      start_row = 5
 
       (start_row..sheet.last_row).each do |row_num|
         last_name = sheet.cell(row_num, 3)   # Col C
         first_name = sheet.cell(row_num, 4)  # Col D
         tip_amount = sheet.cell(row_num, 6)  # Col F
 
-        next if last_name.blank? && first_name.blank?
+        next if last_name.blank?
 
         amount = to_decimal(tip_amount)
         next if amount.zero?
@@ -133,7 +133,7 @@ module PayrollImport
         first_name = sheet.cell(row_num, 4)  # Col D
         loan_amount = sheet.cell(row_num, 6) # Col F
 
-        next if last_name.blank? && first_name.blank?
+        next if last_name.blank?
 
         amount = to_decimal(loan_amount)
         next if amount.zero?
@@ -153,7 +153,7 @@ module PayrollImport
         first_name = sheet.cell(row_num, 4)   # Col D
         payment = sheet.cell(row_num, 8)      # Col H = Payment This Period
 
-        next if last_name.blank? && first_name.blank?
+        next if last_name.blank?
 
         amount = to_decimal(payment)
         next if amount.zero?

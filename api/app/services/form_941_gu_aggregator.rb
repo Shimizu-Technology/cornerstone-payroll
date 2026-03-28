@@ -227,6 +227,7 @@ class Form941GuAggregator
     PayrollItem.includes(:pay_period)
                .where(company_id: company.id)
                .where(pay_period_id: committed_pay_periods.select(:id))
+               .where.not(employment_type: "contractor")
   end
 
   def sum(items, column)
@@ -350,6 +351,7 @@ class Form941GuAggregator
   def prior_ss_taxable_wages_by_employee
     prior_items = PayrollItem.joins(:pay_period)
                              .where(company_id: company.id)
+                             .where.not(employment_type: "contractor")
                              .where(pay_periods: {
                                id: PayPeriod.reportable_committed
                                  .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
@@ -371,6 +373,7 @@ class Form941GuAggregator
     # operators should verify year-to-date Medicare wages manually.
     PayrollItem.joins(:pay_period)
                .where(company_id: company.id)
+               .where.not(employment_type: "contractor")
                .where(pay_periods: {
                  id: PayPeriod.reportable_committed
                    .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
@@ -393,6 +396,7 @@ class Form941GuAggregator
                    .where(end_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                    .select(:id)
                })
+               .where.not(employment_type: "contractor")
                .distinct
                .count(:employee_id)
   end

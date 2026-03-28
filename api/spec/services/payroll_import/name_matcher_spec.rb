@@ -151,17 +151,17 @@ RSpec.describe PayrollImport::NameMatcher do
 
   # ── Levenshtein distance helper ────────────────────────────────────────────
 
-  describe "#levenshtein_distance (private)" do
+  describe "#ld (private)" do
     it "returns 0 for identical strings" do
-      expect(matcher.send(:levenshtein_distance, "hello", "hello")).to eq(0)
+      expect(matcher.send(:ld, "hello", "hello")).to eq(0)
     end
 
     it "returns 1 for single substitution" do
-      expect(matcher.send(:levenshtein_distance, "hello", "heLlo")).to eq(1)
+      expect(matcher.send(:ld, "hello", "heLlo")).to eq(1)
     end
 
     it "returns correct distance for typical name typo" do
-      d = matcher.send(:levenshtein_distance, "belleza", "beleeza")
+      d = matcher.send(:ld, "belleza", "beleeza")
       expect(d).to be <= 2
     end
   end
