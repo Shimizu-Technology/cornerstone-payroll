@@ -11,6 +11,7 @@ import {
   Calculator,
   FileBarChart2,
   HandCoins,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -74,7 +75,7 @@ const adminNavigation: NavItem[] = [
   {
     name: 'Tax Configuration',
     href: '/settings/tax-config',
-    icon: <Calculator className="h-[18px] w-[18px]" />,
+    icon: <SlidersHorizontal className="h-[18px] w-[18px]" />,
   },
   {
     name: 'User Management',
