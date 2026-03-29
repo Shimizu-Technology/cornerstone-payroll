@@ -130,25 +130,25 @@ module ClerkAuthenticatable
 
     email = clerk_user.dig("email_addresses", 0, "email_address")&.strip&.downcase
     return nil unless email
+    clerk_name = [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence
 
     # Check if user exists by email (invited user signing in for first time)
     user = User.find_by("LOWER(email) = ?", email)
     if user
       attrs = { clerk_id: payload["sub"] }
       attrs[:invitation_status] = "accepted" if user.invitation_pending?
-      clerk_name = [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence
       attrs[:name] = clerk_name if clerk_name.present?
       user.update!(attrs)
       return user
     end
 
     invitation = UserInvitation.active.where("LOWER(email) = ?", email).order(invited_at: :desc).first
-    return nil unless invitation
+    return bootstrap_first_user!(payload, email, clerk_name) unless invitation
 
     User.transaction do
       new_user = User.create!(
         email: email,
-        name: [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence || invitation.name || email,
+        name: clerk_name || invitation.name || email,
         clerk_id: payload["sub"],
         company_id: invitation.company_id,
         role: invitation.role
@@ -164,6 +164,26 @@ module ClerkAuthenticatable
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error("Failed to provision Clerk user: #{e.message}")
     nil
+  end
+
+  def bootstrap_first_user!(payload, email, clerk_name)
+    return nil if User.exists?
+
+    User.transaction do
+      company = Company.order(:id).first || Company.create!(name: "Cornerstone Payroll")
+
+      User.create!(
+        email: email,
+        name: clerk_name || email,
+        clerk_id: payload["sub"],
+        company: company,
+        role: "admin",
+        super_admin: true,
+        invitation_status: "accepted"
+      )
+    end.tap do |user|
+      Rails.logger.warn("Bootstrapped first production user #{user.email} as super admin")
+    end
   end
 
   def fetch_clerk_user(clerk_id)
