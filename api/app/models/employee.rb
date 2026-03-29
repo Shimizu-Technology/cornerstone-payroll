@@ -56,7 +56,8 @@ class Employee < ApplicationRecord
   end
 
   def primary_wage_rate
-    active_wage_rates.primary.first || active_wage_rates.first
+    rates = active_wage_rates
+    rates.find(&:is_primary) || rates.first
   end
 
   def full_name
