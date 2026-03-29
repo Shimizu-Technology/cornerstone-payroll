@@ -270,10 +270,16 @@ class PayrollCalculator
 
   def find_or_create_employer_deduction_type(label)
     company = payroll_item.company || pay_period.company
-    company.deduction_types.find_by(name: label) ||
-      company.deduction_types.create!(name: label, category: "pre_tax", sub_category: "retirement")
+    existing = company.deduction_types.find_by(name: label)
+    return ensure_employer_contribution_type!(existing) if existing
+
+    company.deduction_types.create!(
+      name: label,
+      category: "employer_contribution",
+      sub_category: "retirement"
+    )
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
-    company.deduction_types.find_by!(name: label)
+    ensure_employer_contribution_type!(company.deduction_types.find_by!(name: label))
   end
 
   def skip_employee_deduction?(deduction_type)
@@ -301,5 +307,12 @@ class PayrollCalculator
 
   def roth_retirement_deduction?(deduction_type)
     deduction_type.category == "post_tax" || deduction_type.name.to_s.match?(/roth/i)
+  end
+
+  def ensure_employer_contribution_type!(deduction_type)
+    return deduction_type if deduction_type.employer_contribution?
+
+    deduction_type.update!(category: "employer_contribution")
+    deduction_type
   end
 end

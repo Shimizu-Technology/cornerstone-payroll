@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class DeductionType < ApplicationRecord
+  CATEGORIES = %w[pre_tax post_tax employer_contribution].freeze
   SUB_CATEGORIES = %w[
     retirement insurance garnishment loan rent phone
     allotment reimbursement child_support other
@@ -14,12 +15,13 @@ class DeductionType < ApplicationRecord
 
   validates :name, presence: true
   validates :name, uniqueness: { scope: :company_id }
-  validates :category, inclusion: { in: %w[pre_tax post_tax] }
+  validates :category, inclusion: { in: CATEGORIES }
   validates :sub_category, inclusion: { in: SUB_CATEGORIES }, allow_nil: true
 
   scope :active, -> { where(active: true) }
   scope :pre_tax, -> { where(category: "pre_tax") }
   scope :post_tax, -> { where(category: "post_tax") }
+  scope :employer_contribution, -> { where(category: "employer_contribution") }
   scope :check_generating, -> { where(generates_check: true) }
   scope :by_sub_category, ->(sub) { where(sub_category: sub) }
 
@@ -29,6 +31,10 @@ class DeductionType < ApplicationRecord
 
   def post_tax?
     category == "post_tax"
+  end
+
+  def employer_contribution?
+    category == "employer_contribution"
   end
 
   def loan?
