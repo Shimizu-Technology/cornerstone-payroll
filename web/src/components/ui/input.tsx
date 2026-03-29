@@ -10,11 +10,11 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, helperText, id, type = 'text', ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
-    
+
     return (
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {label && (
-          <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
+          <label htmlFor={inputId} className="block text-sm font-medium text-neutral-700">
             {label}
           </label>
         )}
@@ -23,12 +23,12 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           id={inputId}
           type={type}
           className={cn(
-            'block w-full rounded-md border px-3 py-2 text-sm shadow-sm transition-colors',
-            'focus:outline-none focus:ring-2 focus:ring-offset-0',
+            'block w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm transition-all duration-200 placeholder:text-neutral-400',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 focus-visible:border-primary-400',
             error
-              ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-              : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500',
-            'disabled:bg-gray-50 disabled:text-gray-500 disabled:cursor-not-allowed',
+              ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200'
+              : 'border-neutral-300',
+            'disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-500',
             className
           )}
           aria-invalid={error ? 'true' : 'false'}
@@ -36,12 +36,12 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           {...props}
         />
         {error && (
-          <p id={`${inputId}-error`} className="text-sm text-red-600">
+          <p id={`${inputId}-error`} className="text-sm text-danger-600">
             {error}
           </p>
         )}
         {helperText && !error && (
-          <p id={`${inputId}-helper`} className="text-sm text-gray-500">
+          <p id={`${inputId}-helper`} className="text-sm text-neutral-500">
             {helperText}
           </p>
         )}
