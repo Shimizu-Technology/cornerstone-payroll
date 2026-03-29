@@ -19,7 +19,7 @@ export function Layout() {
     <div className="flex h-screen bg-transparent">
       <Sidebar className="hidden lg:flex" />
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
           <button
             type="button"
@@ -33,7 +33,7 @@ export function Layout() {
           <div className="h-9 w-9" />
         </div>
 
-        <main className="h-full overflow-y-auto">
+        <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>
       </div>
