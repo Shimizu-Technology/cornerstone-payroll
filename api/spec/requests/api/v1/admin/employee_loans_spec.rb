@@ -4,6 +4,24 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
   let!(:company) { create(:company) }
   let!(:other_company) { create(:company) }
   let!(:department) { create(:department, company: company) }
+  let!(:deduction_type) do
+    DeductionType.create!(
+      company: company,
+      name: "Employee Loan",
+      category: "post_tax",
+      sub_category: "loan",
+      active: true
+    )
+  end
+  let!(:foreign_deduction_type) do
+    DeductionType.create!(
+      company: other_company,
+      name: "Foreign Loan",
+      category: "post_tax",
+      sub_category: "loan",
+      active: true
+    )
+  end
   let!(:employee) do
     create(:employee,
       company: company,
@@ -80,6 +98,7 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
           original_amount: 150.00,
           payment_amount: 25.00,
           start_date: "2024-02-01",
+          deduction_type_id: deduction_type.id,
           status: "active"
         }
       }
@@ -134,6 +153,46 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
         as: :json
 
       expect(response).to have_http_status(:not_found)
+    end
+
+    it "rejects deduction types from another company" do
+      post "/api/v1/admin/employee_loans",
+        params: {
+          employee_loan: valid_params[:employee_loan].merge(deduction_type_id: foreign_deduction_type.id)
+        },
+        as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body["error"]).to eq("Deduction type not found")
+    end
+  end
+
+  describe "PATCH /api/v1/admin/employee_loans/:id" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        deduction_type: deduction_type,
+        name: "Tool Advance",
+        original_amount: 150.00,
+        current_balance: 150.00,
+        payment_amount: 25.00,
+        status: "active"
+      )
+    end
+
+    it "rejects foreign deduction types" do
+      patch "/api/v1/admin/employee_loans/#{loan.id}",
+        params: {
+          employee_loan: {
+            deduction_type_id: foreign_deduction_type.id
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body["error"]).to eq("Deduction type not found")
+      expect(loan.reload.deduction_type_id).to eq(deduction_type.id)
     end
   end
 end

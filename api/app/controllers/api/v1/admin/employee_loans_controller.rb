@@ -27,12 +27,15 @@ module Api
 
         # POST /api/v1/admin/employee_loans
         def create
-          employee = Employee.find_by(id: loan_params[:employee_id], company_id: current_company_id)
+          attributes = scoped_loan_attributes(loan_params)
+          return if performed?
+
+          employee = Employee.find_by(id: attributes[:employee_id], company_id: current_company_id)
           unless employee
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          loan = EmployeeLoan.new(loan_params)
+          loan = EmployeeLoan.new(attributes)
           loan.company_id = current_company_id
           loan.employee = employee
           loan.current_balance = loan.original_amount if loan.current_balance.zero?
@@ -58,7 +61,10 @@ module Api
 
         # PATCH /api/v1/admin/employee_loans/:id
         def update
-          if @loan.update(loan_update_params)
+          attributes = scoped_loan_attributes(loan_update_params)
+          return if performed?
+
+          if @loan.update(attributes)
             render json: { loan: loan_payload(@loan) }
           else
             render json: { errors: @loan.errors.full_messages }, status: :unprocessable_entity
@@ -120,6 +126,23 @@ module Api
           params.require(:employee_loan).permit(
             :name, :payment_amount, :status, :notes, :deduction_type_id
           )
+        end
+
+        def scoped_loan_attributes(raw_params)
+          attributes = raw_params.to_h.symbolize_keys
+          return attributes unless attributes[:deduction_type_id].present?
+
+          deduction_type = DeductionType.find_by(
+            id: attributes[:deduction_type_id],
+            company_id: current_company_id
+          )
+          unless deduction_type
+            render json: { error: "Deduction type not found" }, status: :not_found
+            return {}
+          end
+
+          attributes[:deduction_type_id] = deduction_type.id
+          attributes
         end
 
         def loan_payload(loan, include_transactions: false)
