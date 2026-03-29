@@ -347,7 +347,6 @@ export function PayPeriodDetail() {
   const canImportMosa = isDraft;
 
   // Summaries
-  const w2Items = payrollItems.filter(i => i.employment_type !== 'contractor');
   const contractorItems = payrollItems.filter(i => i.employment_type === 'contractor');
   const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
   const totalWithholding = payrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);

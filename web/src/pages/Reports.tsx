@@ -936,8 +936,8 @@ function Form1099NecPanel() {
   const downloadPdf = async () => {
     setExportingPdf(true);
     try {
-      const blob = await reportsApi.form1099NecPdf(year);
-      const url = URL.createObjectURL(blob as Blob);
+      const blobData = await reportsApi.form1099NecPdf(year);
+      const url = URL.createObjectURL(blobData.blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `1099-NEC_${year}.pdf`;

@@ -52,7 +52,7 @@ export default function EmployeeLoans() {
   const loadEmployees = useCallback(async () => {
     try {
       const res = await employeesApi.list();
-      setEmployees(Array.isArray(res) ? res : (res as { employees: Employee[] }).employees || []);
+      setEmployees(res.data);
     } catch {
       // ignore
     }

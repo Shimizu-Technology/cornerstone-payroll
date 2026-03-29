@@ -10,8 +10,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { companiesApi, ApiError } from '@/services/api';
-import type { CompanyListItem, CompanyDetail, CompanyFormData } from '@/services/api';
-import { useAuth } from '@/contexts/AuthContext';
+import type { CompanyListItem, CompanyFormData } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 
 const payFrequencyOptions = [
@@ -50,7 +49,6 @@ function formatEIN(value: string): string {
 }
 
 export function Clients() {
-  const { user } = useAuth();
   const { refreshCompanies } = useCompany();
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);

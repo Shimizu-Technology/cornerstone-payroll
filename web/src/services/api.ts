@@ -283,7 +283,6 @@ export const setAuthTokenProvider = (provider: (() => Promise<string | null>) | 
 // ========================================
 
 import type {
-  Company,
   Department,
   Employee,
   EmployeeFormData,

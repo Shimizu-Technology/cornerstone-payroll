@@ -71,6 +71,8 @@ export interface EmployeeWageRate {
   rate: number;
   is_primary: boolean;
   active: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Employee {
@@ -621,21 +623,6 @@ export interface NonEmployeeCheck {
   voided_at?: string;
   check_status: string;
   created_by_id?: number;
-  created_at: string;
-  updated_at: string;
-}
-
-// ----------------
-// Employee Wage Rates
-// ----------------
-
-export interface EmployeeWageRate {
-  id: number;
-  employee_id: number;
-  label: string;
-  rate?: number;
-  is_primary: boolean;
-  active: boolean;
   created_at: string;
   updated_at: string;
 }
