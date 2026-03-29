@@ -48,7 +48,11 @@ class Employee < ApplicationRecord
   scope :w2_employees, -> { where(employment_type: %w[hourly salary]) }
 
   def active_wage_rates
-    employee_wage_rates.active.order(is_primary: :desc, label: :asc)
+    if association(:employee_wage_rates).loaded?
+      employee_wage_rates.select(&:active?).sort_by { |rate| [ rate.is_primary ? 0 : 1, rate.label.to_s ] }
+    else
+      employee_wage_rates.active.order(is_primary: :desc, label: :asc)
+    end
   end
 
   def primary_wage_rate
