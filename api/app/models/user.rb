@@ -37,12 +37,18 @@ class User < ApplicationRecord
   # - staff with assignments: home company + assigned companies
   # - everyone else: just their home company
   def accessible_company_ids
-    if super_admin?
-      Company.pluck(:id)
-    elsif company_assignments.any?
-      ([company_id] + company_assignments.pluck(:company_id)).uniq
-    else
-      [company_id]
+    @accessible_company_ids ||= begin
+      if super_admin?
+        Company.ids
+      else
+        assigned_ids = if association(:company_assignments).loaded?
+          company_assignments.map(&:company_id)
+        else
+          company_assignments.pluck(:company_id)
+        end
+
+        ([company_id] + assigned_ids).uniq
+      end
     end
   end
 

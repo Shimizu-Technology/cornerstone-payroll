@@ -198,9 +198,20 @@ class PayrollCalculator
       payroll_item.non_taxable_pay.to_f
     ).round(2)
 
-    itemized_loan_payment = payroll_item.payroll_item_deductions
-      .select { |deduction| deduction.post_tax? && deduction.deduction_type&.loan? }
-      .sum(&:amount)
+    itemized_pre_tax = 0.0
+    itemized_post_tax = 0.0
+    itemized_loan_payment = 0.0
+
+    payroll_item.payroll_item_deductions.each do |deduction|
+      amount = deduction.amount.to_f
+
+      if deduction.post_tax?
+        itemized_post_tax += amount
+        itemized_loan_payment += amount if deduction.deduction_type&.loan?
+      elsif deduction.pre_tax?
+        itemized_pre_tax += amount
+      end
+    end
 
     imported_loan_payment = 0.0
 
@@ -213,15 +224,6 @@ class PayrollCalculator
         payroll_item.loan_payment = itemized_loan_payment
       end
     end
-
-    # Sum itemized deductions from payroll_item_deductions if present
-    itemized_post_tax = payroll_item.payroll_item_deductions
-      .select(&:post_tax?)
-      .sum(&:amount)
-
-    itemized_pre_tax = payroll_item.payroll_item_deductions
-      .select(&:pre_tax?)
-      .sum(&:amount)
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
     post_tax_deductions = if itemized_post_tax > 0

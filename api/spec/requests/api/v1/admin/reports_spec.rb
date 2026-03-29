@@ -1190,4 +1190,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(disposition).to include("q2")
     end
   end
+
+  describe "GET /api/v1/admin/reports/installment_loans_pdf" do
+    it "returns 422 for an invalid as_of_date" do
+      get "/api/v1/admin/reports/installment_loans_pdf", params: { as_of_date: "notadate" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Invalid as_of_date - expected YYYY-MM-DD")
+    end
+  end
 end

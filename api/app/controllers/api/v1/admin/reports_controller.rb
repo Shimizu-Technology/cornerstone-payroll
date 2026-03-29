@@ -419,7 +419,9 @@ module Api
         # GET /api/v1/admin/reports/installment_loans_pdf
         def installment_loans_pdf
           company = Company.find(current_company_id)
-          as_of = params[:as_of_date].present? ? Date.parse(params[:as_of_date]) : nil
+          as_of = parse_optional_iso_date(params[:as_of_date], param_name: "as_of_date")
+          return if performed?
+
           generator = InstallmentLoanReportPdfGenerator.new(company, as_of_date: as_of)
           send_data generator.generate,
             filename: generator.filename,
@@ -805,6 +807,15 @@ module Api
             findings: preflight[:findings],
             findings_source: "revalidation"
           }
+        end
+
+        def parse_optional_iso_date(value, param_name:)
+          return if value.blank?
+
+          Date.iso8601(value)
+        rescue ArgumentError, Date::Error
+          render json: { error: "Invalid #{param_name} - expected YYYY-MM-DD" }, status: :unprocessable_entity
+          nil
         end
       end
     end
