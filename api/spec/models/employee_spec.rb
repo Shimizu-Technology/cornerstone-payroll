@@ -69,4 +69,41 @@ RSpec.describe Employee, type: :model do
       expect(preloaded_employee.active_wage_rates).not_to include(inactive_rate)
     end
   end
+
+  describe "#primary_wage_rate" do
+    let!(:company) { create(:company) }
+    let!(:department) { create(:department, company: company) }
+    let!(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00
+      )
+    end
+    let!(:secondary_rate) do
+      EmployeeWageRate.create!(
+        employee: employee,
+        label: "Bravo",
+        rate: 22.00,
+        is_primary: false,
+        active: true
+      )
+    end
+    let!(:primary_rate) do
+      EmployeeWageRate.create!(
+        employee: employee,
+        label: "Alpha",
+        rate: 25.00,
+        is_primary: true,
+        active: true
+      )
+    end
+
+    it "returns the primary wage rate when wage rates are preloaded" do
+      preloaded_employee = described_class.includes(:employee_wage_rates).find(employee.id)
+
+      expect(preloaded_employee.primary_wage_rate).to eq(primary_rate)
+    end
+  end
 end
