@@ -6,6 +6,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
   let!(:staff_company) { create(:company, name: "Staff HQ") }
   let!(:client_company) { create(:company, name: "Accessible Client") }
   let!(:other_company) { create(:company, name: "Foreign Client") }
+  let!(:switched_staff_company) { create(:company, name: "Switched Staff HQ") }
 
   let!(:admin_user) do
     User.create!(
@@ -37,10 +38,25 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       active: true
     )
   end
+  let!(:switched_managed_user) do
+    User.create!(
+      company: switched_staff_company,
+      email: "switched-assignment-user@example.com",
+      name: "Switched User",
+      role: "accountant",
+      active: true
+    )
+  end
 
   let!(:admin_access_assignment) { CompanyAssignment.create!(user: admin_user, company: client_company) }
   let!(:managed_assignment) { CompanyAssignment.create!(user: managed_user, company: client_company) }
   let!(:foreign_assignment) { CompanyAssignment.create!(user: foreign_user, company: other_company) }
+  let!(:switched_assignment) { CompanyAssignment.create!(user: switched_managed_user, company: client_company) }
+
+  before do
+    allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user).and_return(admin_user)
+    allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user_id).and_return(admin_user.id)
+  end
 
   describe "GET /api/v1/admin/company_assignments" do
     it "does not leak assignments for users in other staff companies" do
@@ -50,6 +66,17 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       data = response.parsed_body.fetch("data")
       expect(data.map { |row| row.fetch("id") }).to eq([managed_assignment.id])
       expect(data.map { |row| row.fetch("user_id") }).not_to include(foreign_user.id)
+    end
+
+    it "uses the switched company context for super admins" do
+      admin_user.update!(super_admin: true)
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_company_id).and_return(switched_staff_company.id)
+
+      get "/api/v1/admin/company_assignments", params: { user_id: switched_managed_user.id }
+
+      expect(response).to have_http_status(:ok)
+      data = response.parsed_body.fetch("data")
+      expect(data.map { |row| row.fetch("id") }).to eq([switched_assignment.id])
     end
   end
 
