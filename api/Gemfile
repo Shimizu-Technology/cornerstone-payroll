@@ -48,7 +48,6 @@ gem "combine_pdf"
 gem "pdf-reader"
 gem "roo"
 gem "fuzzy_match"
-gem "levenshtein-ffi"
 
 # S3-compatible storage (for Cloudflare R2)
 gem "aws-sdk-s3"
