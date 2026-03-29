@@ -9,9 +9,11 @@ test:
   adapter: test
 
 production:
-  adapter: solid_cable
+  adapter: <%= ENV.fetch("USE_SOLID_CABLE", "false").to_s.downcase == "true" ? "solid_cable" : "async" %>
+  <% if ENV.fetch("USE_SOLID_CABLE", "false").to_s.downcase == "true" %>
   connects_to:
     database:
       writing: cable
   polling_interval: 0.1.seconds
   message_retention: 1.day
+  <% end %>
