@@ -215,6 +215,32 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/form_1099_nec
+        # Annual 1099-NEC summary for contractor filing preparation.
+        def form_1099_nec
+          year = params[:year]&.to_i || Date.current.year
+          company = Company.find(current_company_id)
+          report = Form1099NecAggregator.new(company, year).generate
+          render json: { report: report }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        end
+
+        # GET /api/v1/admin/reports/form_1099_nec_pdf
+        # Downloads 1099-NEC annual summary as PDF.
+        def form_1099_nec_pdf
+          year = params[:year]&.to_i || Date.current.year
+          company = Company.find(current_company_id)
+          report = Form1099NecAggregator.new(company, year).generate
+          generator = Form1099NecPdfGenerator.new(report)
+          send_data generator.generate,
+            filename: "1099-NEC_#{company.name.parameterize}_#{year}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        end
+
         # POST /api/v1/admin/reports/w2_gu_preflight
         # Runs preflight checks and persists filing readiness state for a given tax year.
         def w2_gu_preflight
@@ -342,6 +368,119 @@ module Api
           render json: { error: "Unable to persist W-2 filing readiness state" }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/payroll_summary_by_employee_pdf
+        def payroll_summary_by_employee_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          generator = PayrollSummaryByEmployeePdfGenerator.new(pp)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/deductions_contributions_pdf
+        def deductions_contributions_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          generator = DeductionsContributionsReportPdfGenerator.new(pp)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/paycheck_history_pdf
+        def paycheck_history_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          generator = PaycheckHistoryPdfGenerator.new(pp)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/retirement_plans_pdf
+        def retirement_plans_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          generator = RetirementPlansReportPdfGenerator.new(pp)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/installment_loans_pdf
+        def installment_loans_pdf
+          company = Company.find(current_company_id)
+          as_of = parse_optional_iso_date(params[:as_of_date], param_name: "as_of_date")
+          return if performed?
+
+          generator = InstallmentLoanReportPdfGenerator.new(company, as_of_date: as_of)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/transmittal_log_pdf
+        def transmittal_log_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          options = {}
+          options[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
+          options[:notes] = Array(params[:notes]) if params[:notes].present?
+
+          generator = TransmittalLogPdfGenerator.new(pp, options)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/full_print_package_pdf
+        # Combines all reports for a pay period into a single PDF download
+        def full_print_package_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          pdf = CombinePDF.new
+          company = pp.company
+
+          generators = [
+            TransmittalLogPdfGenerator.new(pp, preparer_name: params[:preparer_name]),
+            PayrollSummaryByEmployeePdfGenerator.new(pp),
+            DeductionsContributionsReportPdfGenerator.new(pp),
+            PaycheckHistoryPdfGenerator.new(pp),
+            RetirementPlansReportPdfGenerator.new(pp)
+          ]
+
+          # Add installment loans if company has any active loans
+          if company.employee_loans.active.any?
+            generators << InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
+          end
+
+          generators.each do |gen|
+            individual_pdf = CombinePDF.parse(gen.generate)
+            pdf << individual_pdf
+          end
+
+          send_data pdf.to_pdf,
+            filename: "print_package_#{pp.start_date}_to_#{pp.end_date}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue StandardError => e
+          Rails.logger.error("[Reports] full_print_package_pdf failed for pay_period=#{pp&.id}: #{e.class}: #{e.message}")
+          render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
@@ -362,6 +501,22 @@ module Api
         end
 
         private
+
+        def find_pay_period_for_report
+          pay_period_id = params[:pay_period_id]
+          if pay_period_id.blank?
+            render json: { error: "pay_period_id is required" }, status: :unprocessable_entity
+            return nil
+          end
+
+          pp = PayPeriod.find_by(id: pay_period_id)
+          unless pp && pp.company_id == current_company_id
+            render json: { error: "Pay period not found" }, status: :not_found
+            return nil
+          end
+
+          pp
+        end
 
         # Shared data builder for payroll register (JSON + CSV + PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
@@ -397,7 +552,7 @@ module Api
               total_withholding: items.sum(&:withholding_tax),
               total_social_security: items.sum(&:social_security_tax),
               total_medicare: items.sum(&:medicare_tax),
-              total_retirement: items.sum(&:retirement_payment),
+              total_retirement: items.sum(&:retirement_payment).to_f + items.sum(&:roth_retirement_payment).to_f,
               total_deductions: items.sum(&:total_deductions),
               total_net: items.sum(&:net_pay)
             },
@@ -431,7 +586,7 @@ module Api
             pay_periods = pay_periods.where(pay_date: start_date..end_date)
           end
 
-          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) })
+          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).where.not(employment_type: "contractor")
           employee_ss_total       = items.sum(:social_security_tax)
           employee_medicare_total = items.sum(:medicare_tax)
           employer_ss_total       = items.sum(:employer_social_security_tax)
@@ -553,7 +708,9 @@ module Api
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
-            retirement_payment: item.retirement_payment,
+            retirement_payment: item.retirement_payment.to_f,
+            roth_retirement_payment: item.roth_retirement_payment.to_f,
+            total_retirement_payment: item.retirement_payment.to_f + item.roth_retirement_payment.to_f,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             check_number: item.check_number
@@ -650,6 +807,15 @@ module Api
             findings: preflight[:findings],
             findings_source: "revalidation"
           }
+        end
+
+        def parse_optional_iso_date(value, param_name:)
+          return if value.blank?
+
+          Date.iso8601(value)
+        rescue ArgumentError, Date::Error
+          render json: { error: "Invalid #{param_name} - expected YYYY-MM-DD" }, status: :unprocessable_entity
+          nil
         end
       end
     end

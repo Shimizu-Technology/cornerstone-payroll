@@ -142,9 +142,10 @@ export const filingStatusLabels = {
 /**
  * Employment type labels
  */
-export const employmentTypeLabels = {
+export const employmentTypeLabels: Record<string, string> = {
   hourly: 'Hourly',
   salary: 'Salary',
+  contractor: '1099 Contractor',
 };
 
 /**

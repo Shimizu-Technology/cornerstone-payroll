@@ -30,7 +30,7 @@ export function AuditLogs() {
     setError(null);
     try {
       const response = await auditLogsApi.list({
-        action: actionFilter || undefined,
+        action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
         user_id: userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,

@@ -29,6 +29,10 @@ module PayrollImport
       pdf_records ||= (pdf_file ? RevelPdfParser.parse_file(pdf_file) : [])
       excel_records ||= (excel_file ? LoanTipExcelParser.parse_file(excel_file) : [])
 
+      # Pre-match all Excel records to employee IDs using the fuzzy NameMatcher
+      # so tips/loans are correctly linked even when names have middle initials or typos.
+      excel_by_employee_id = build_excel_lookup(excel_records, matcher)
+
       matched = []
       unmatched = []
 
@@ -39,7 +43,7 @@ module PayrollImport
           employee = employees_by_id[match[:employee_id]]
           next unless employee
 
-          excel_data = find_excel_data(excel_records, employee)
+          excel_data = excel_by_employee_id[employee.id]
           matched << build_preview_row(pdf_row, employee, match, excel_data)
         else
           unmatched << pdf_row[:employee_name]
@@ -47,15 +51,14 @@ module PayrollImport
       end
 
       # Handle Excel-only employees (have tips/loans but no PDF hours)
-      excel_records.each do |excel_row|
-        excel_match = matcher.match_excel_name(excel_row[:last_name], excel_row[:first_name])
-        next unless excel_match
-        next if matched.any? { |m| m[:employee_id] == excel_match[:employee_id] }
+      excel_by_employee_id.each do |emp_id, excel_data|
+        next if matched.any? { |m| m[:employee_id] == emp_id }
 
-        employee = employees_by_id[excel_match[:employee_id]]
+        employee = employees_by_id[emp_id]
         next unless employee
 
-        matched << build_preview_row(nil, employee, excel_match, excel_row)
+        excel_match = { employee_id: emp_id, confidence: 1.0, matched_name: employee.full_name }
+        matched << build_preview_row(nil, employee, excel_match, excel_data)
       end
 
       {
@@ -98,24 +101,7 @@ module PayrollImport
 
             # Set employment info
             payroll_item.employment_type = employee.employment_type
-
-            # Derive pay rate from PDF using BigDecimal for precision (scale: 6)
-            # Fall back to employee.pay_rate if PDF data is insufficient
-            pdf_rate = if row[:regular_hours].to_f > 0 && row[:regular_pay].to_f > 0
-              BigDecimal(row[:regular_pay].to_s) / BigDecimal(row[:regular_hours].to_s)
-            elsif row[:total_hours].to_f > 0 && row[:total_pay].to_f > 0 &&
-                  row[:overtime_hours].to_f.zero? && row[:overtime_pay].to_f.zero?
-              BigDecimal(row[:total_pay].to_s) / BigDecimal(row[:total_hours].to_s)
-            end
-
-            if pdf_rate
-              # Round to 6 decimal places for storage on payroll item only.
-              # Do NOT mutate canonical Employee pay_rate from a single import run.
-              rounded_rate = pdf_rate.round(6)
-              payroll_item.pay_rate = rounded_rate
-            else
-              payroll_item.pay_rate = employee.pay_rate
-            end
+            payroll_item.pay_rate = employee.pay_rate
 
             # Set hours from PDF
             payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]
@@ -154,17 +140,33 @@ module PayrollImport
 
     private
 
-    def find_excel_data(excel_records, employee)
-      return nil if excel_records.empty?
+    def build_excel_lookup(excel_records, matcher)
+      lookup = {}
+      excel_records.each do |row|
+        match = matcher.match_excel_name(row[:last_name], row[:first_name])
+        next unless match
 
-      employee_last = employee.last_name&.downcase
-      employee_first = employee.first_name&.downcase
-      return nil if employee_last.blank? || employee_first.blank?
-
-      excel_records.find do |row|
-        row[:last_name]&.strip&.downcase == employee_last &&
-          row[:first_name]&.strip&.downcase == employee_first
+        existing = lookup[match[:employee_id]]
+        lookup[match[:employee_id]] = existing ? merge_excel_rows(existing, row) : row.dup
       end
+      lookup
+    end
+
+    def merge_excel_rows(existing, incoming)
+      {
+        last_name: existing[:last_name] || incoming[:last_name],
+        first_name: existing[:first_name] || incoming[:first_name],
+        total_tips: existing[:total_tips].to_f + incoming[:total_tips].to_f,
+        loan_deduction: existing[:loan_deduction].to_f + incoming[:loan_deduction].to_f,
+        tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
+      }
+    end
+
+    def merge_tip_pool(existing_pool, incoming_pool)
+      return incoming_pool if existing_pool.blank?
+      return existing_pool if incoming_pool.blank? || incoming_pool == existing_pool
+
+      "mixed"
     end
 
     def build_preview_row(pdf_row, employee, match, excel_data)

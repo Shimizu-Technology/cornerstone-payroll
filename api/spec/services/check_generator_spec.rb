@@ -117,4 +117,30 @@ RSpec.describe CheckGenerator do
       expect { generator.generate }.not_to raise_error
     end
   end
+
+  describe "with layout overrides" do
+    before do
+      company.update!(
+        check_layout_config: {
+          check_face: {
+            date: { x: 486.0, y: 238.0 },
+            payee: { x: 48.0 }
+          },
+          stub: {
+            row1_y: 254.0,
+            summary_y_offset: -4.0,
+            table_padding_x: 2.0
+          }
+        }
+      )
+    end
+
+    it "generates without error" do
+      expect { generator.generate }.not_to raise_error
+    end
+
+    it "generates an alignment test without error" do
+      expect { generator.alignment_test }.not_to raise_error
+    end
+  end
 end

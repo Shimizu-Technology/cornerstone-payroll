@@ -7,6 +7,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { checksApi } from '@/services/api';
@@ -20,11 +21,12 @@ export function CheckSettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Editable form state
-  const [stockType, setStockType] = useState<'bottom_check' | 'top_check'>('bottom_check');
+  const [stockType, setStockType] = useState<'bottom_check' | 'top_check'>('top_check');
   const [offsetX, setOffsetX] = useState('0.000');
   const [offsetY, setOffsetY] = useState('0.000');
   const [bankName, setBankName] = useState('');
   const [bankAddress, setBankAddress] = useState('');
+  const [layoutOverridesJson, setLayoutOverridesJson] = useState('{}');
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
 
@@ -33,12 +35,19 @@ export function CheckSettingsPage() {
       try {
         const data = await checksApi.getSettings();
         const s = data.check_settings;
+        const normalizedOffsetX = typeof s.check_offset_x === 'number'
+          ? s.check_offset_x
+          : Number(s.check_offset_x || 0);
+        const normalizedOffsetY = typeof s.check_offset_y === 'number'
+          ? s.check_offset_y
+          : Number(s.check_offset_y || 0);
         setSettings(s);
         setStockType(s.check_stock_type);
-        setOffsetX(s.check_offset_x.toFixed(3));
-        setOffsetY(s.check_offset_y.toFixed(3));
+        setOffsetX(normalizedOffsetX.toFixed(3));
+        setOffsetY(normalizedOffsetY.toFixed(3));
         setBankName(s.bank_name ?? '');
         setBankAddress(s.bank_address ?? '');
+        setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
         setNextCheckNumber(String(s.next_check_number));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -53,14 +62,29 @@ export function CheckSettingsPage() {
     setError(null);
     setSuccess(null);
     try {
+      let parsedLayoutOverrides: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(layoutOverridesJson || '{}');
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('Advanced layout overrides must be a JSON object.');
+        }
+        parsedLayoutOverrides = parsed as Record<string, unknown>;
+      } catch (parseError) {
+        setError(parseError instanceof Error ? parseError.message : 'Invalid JSON in advanced layout overrides.');
+        setSaving(false);
+        return;
+      }
+
       const data = await checksApi.updateSettings({
         check_stock_type: stockType,
         check_offset_x: parseFloat(offsetX),
         check_offset_y: parseFloat(offsetY),
         bank_name: bankName.trim() || null,
         bank_address: bankAddress.trim() || null,
+        check_layout_config: parsedLayoutOverrides,
       });
       setSettings(data.check_settings);
+      setLayoutOverridesJson(JSON.stringify(data.check_settings.check_layout_config ?? {}, null, 2));
       setSuccess('Settings saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -106,6 +130,12 @@ export function CheckSettingsPage() {
     }
   };
 
+  const handleResetAdvancedOverrides = () => {
+    setLayoutOverridesJson('{}');
+    setSuccess(null);
+    setError(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -134,10 +164,21 @@ export function CheckSettingsPage() {
           <div className="p-4 border-b">
             <h2 className="font-semibold text-gray-900">Check Stock Configuration</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Configure for your pre-printed check stock. Changes take effect on the next PDF generation.
+              Use the simple controls below to line the PDF up with your check stock. Most people should not need the advanced section.
             </p>
           </div>
           <CardContent className="p-4 space-y-4">
+            <div className="rounded-lg border bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <p className="font-medium">Recommended workflow</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs sm:text-sm">
+                <li>Download the alignment test PDF.</li>
+                <li>Print it on plain paper.</li>
+                <li>Hold it behind your real check stock and see what is off.</li>
+                <li>Use X and Y offset for small overall shifts.</li>
+                <li>Only open Advanced Calibration if one specific area still needs fine tuning.</li>
+              </ol>
+            </div>
+
             {/* Stock Type */}
             <div className="space-y-1">
               <Label htmlFor="stock-type">Stock Type</Label>
@@ -147,11 +188,11 @@ export function CheckSettingsPage() {
                 onChange={(e) => setStockType(e.target.value as 'bottom_check' | 'top_check')}
                 className="w-64"
               >
-                <option value="bottom_check">Bottom Check (most common US payroll)</option>
                 <option value="top_check">Top Check</option>
+                <option value="bottom_check">Bottom Check</option>
               </Select>
               <p className="text-xs text-gray-500">
-                Bottom check: stubs on top, check face at bottom. Top check: reversed.
+                Top check: check face on top with stubs underneath. Bottom check: stubs on top, check face at bottom.
               </p>
             </div>
 
@@ -211,10 +252,44 @@ export function CheckSettingsPage() {
                 ⬇ Download Alignment Test PDF
               </Button>
               <p className="text-xs text-gray-500">
-                Print on plain paper and hold against your check stock to verify field positions
-                before using real checks.
+                The alignment test now marks the configured check-face anchors and stub row baselines.
+                Print on plain paper and hold it against your stock before using real checks.
               </p>
             </div>
+
+            {/* Advanced layout tuning */}
+            <details className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-medium text-gray-900">
+                Advanced Calibration
+              </summary>
+              <div className="mt-3 space-y-2">
+                <div>
+                  <Label htmlFor="layout-overrides">Exact Layout Overrides (JSON)</Label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    This is only for unusual printers or stock. Leave it as <span className="font-mono">{'{}'}</span> unless you know a specific field needs adjustment.
+                  </p>
+                </div>
+                <Textarea
+                  id="layout-overrides"
+                  value={layoutOverridesJson}
+                  onChange={(e) => setLayoutOverridesJson(e.target.value)}
+                  className="min-h-[260px] font-mono text-xs"
+                  spellCheck={false}
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button variant="outline" type="button" onClick={handleResetAdvancedOverrides}>
+                    Reset Advanced Overrides
+                  </Button>
+                  <p className="text-xs text-gray-500">
+                    Example keys: <span className="font-mono">check_face.date.x</span>,
+                    <span className="font-mono"> check_face.payee.y</span>,
+                    <span className="font-mono"> stub.row1_y</span>,
+                    <span className="font-mono"> stub.summary_y_offset</span>,
+                    <span className="font-mono"> stub.table_padding_x</span>.
+                  </p>
+                </div>
+              </div>
+            </details>
 
             <div className="flex justify-end pt-2">
               <Button onClick={handleSaveSettings} disabled={saving}>

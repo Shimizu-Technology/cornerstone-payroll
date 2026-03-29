@@ -12,10 +12,25 @@ Rails.application.routes.draw do
       get "auth/me", to: "auth#me"
 
       namespace :admin do
-        resources :users, only: [ :index, :show, :create, :update ] do
+        # CPR-66: Company check settings
+        # These must appear before `resources :companies` so paths like
+        # `/admin/companies/check_settings` do not get swallowed by `:id`.
+        get   "companies/check_settings",     to: "checks#check_settings"
+        patch "companies/check_settings",     to: "checks#update_check_settings"
+        patch "companies/next_check_number",  to: "checks#update_next_check_number"
+        get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
+
+        resources :companies, only: [:index, :show, :create, :update]
+        resources :company_assignments, only: [:index, :create, :destroy] do
+          collection do
+            put :bulk_update
+          end
+        end
+        resources :users, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :activate
             post :deactivate
+            post :resend_invitation
           end
         end
         resources :audit_logs, only: [ :index ]
@@ -57,12 +72,6 @@ Rails.application.routes.draw do
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
 
-        # CPR-66: Company check settings
-        get   "companies/check_settings",    to: "checks#check_settings"
-        patch "companies/check_settings",    to: "checks#update_check_settings"
-        patch "companies/next_check_number", to: "checks#update_next_check_number"
-        get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
-
         # Reports
         get "reports/dashboard", to: "reports#dashboard"
         get "reports/payroll_register", to: "reports#payroll_register"
@@ -80,6 +89,36 @@ Rails.application.routes.draw do
         post "reports/w2_gu_mark_ready", to: "reports#w2_gu_mark_ready"
         get "reports/w2_gu_csv", to: "reports#w2_gu_csv"
         get "reports/w2_gu_pdf", to: "reports#w2_gu_pdf"
+        get "reports/form_1099_nec", to: "reports#form_1099_nec"
+        get "reports/form_1099_nec_pdf", to: "reports#form_1099_nec_pdf"
+
+        # New payroll parity reports
+        get "reports/payroll_summary_by_employee_pdf", to: "reports#payroll_summary_by_employee_pdf"
+        get "reports/deductions_contributions_pdf", to: "reports#deductions_contributions_pdf"
+        get "reports/paycheck_history_pdf", to: "reports#paycheck_history_pdf"
+        get "reports/retirement_plans_pdf", to: "reports#retirement_plans_pdf"
+        get "reports/installment_loans_pdf", to: "reports#installment_loans_pdf"
+        get "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf"
+        get "reports/full_print_package_pdf", to: "reports#full_print_package_pdf"
+
+        # Employee Loans
+        resources :employee_loans do
+          member do
+            post :record_payment
+            post :record_addition
+          end
+        end
+
+        # Non-Employee Checks
+        resources :non_employee_checks, except: [:new, :edit] do
+          member do
+            post :mark_printed
+            post :void_check
+          end
+        end
+
+        # Employee Wage Rates
+        resources :employee_wage_rates, only: [:index, :create, :update, :destroy]
 
         # Pay Stubs
         get "pay_stubs/:id", to: "pay_stubs#show"

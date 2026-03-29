@@ -6,6 +6,7 @@ RSpec.describe PayrollItem, type: :model do
   let(:company) { create(:company, next_check_number: 5001) }
   let(:pay_period) { create(:pay_period, :committed, company: company) }
   let(:employee) { create(:employee, company: company) }
+  let!(:tax_table) { create(:tax_table) }
 
   let(:admin_user) do
     User.create!(
@@ -173,6 +174,60 @@ RSpec.describe PayrollItem, type: :model do
     it "printed returns items with a print timestamp" do
       item.update!(check_printed_at: Time.current)
       expect(PayrollItem.printed).to include(item)
+    end
+  end
+
+  describe "#calculate!" do
+    let(:department) { create(:department, company: company) }
+    let(:calc_employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single"
+      )
+    end
+    let(:calc_pay_period) { create(:pay_period, company: company) }
+    let(:calc_item) do
+      create(:payroll_item,
+        pay_period: calc_pay_period,
+        employee: calc_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+    end
+
+    it "rolls back deduction and earning clears if save fails" do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Medical Insurance",
+        category: "post_tax",
+        sub_category: "insurance",
+        active: true
+      )
+      calc_item.payroll_item_deductions.create!(
+        deduction_type: deduction_type,
+        amount: 15.00,
+        category: "post_tax",
+        label: "Medical Insurance"
+      )
+      calc_item.payroll_item_earnings.create!(
+        category: "regular",
+        label: "Existing Regular Pay",
+        hours: 40,
+        rate: 20,
+        amount: 800
+      )
+
+      allow(calc_item).to receive(:save!).and_raise(ActiveRecord::RecordInvalid.new(calc_item))
+
+      expect { calc_item.calculate! }.to raise_error(ActiveRecord::RecordInvalid)
+
+      calc_item.reload
+      expect(calc_item.payroll_item_deductions.pluck(:label)).to include("Medical Insurance")
+      expect(calc_item.payroll_item_earnings.pluck(:label)).to include("Existing Regular Pay")
     end
   end
 end

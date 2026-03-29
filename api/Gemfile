@@ -42,6 +42,7 @@ gem "kaminari"
 gem "prawn"
 gem "prawn-table"
 gem "matrix" # Required by prawn in Ruby 3.1+
+gem "combine_pdf"
 
 # PDF + Excel parsing for payroll imports
 gem "pdf-reader"

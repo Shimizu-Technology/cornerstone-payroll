@@ -9,6 +9,10 @@ class Company < ApplicationRecord
   has_many :company_ytd_totals, dependent: :destroy
   has_many :users, dependent: :destroy
   has_many :user_invitations, dependent: :destroy
+  has_many :non_employee_checks, dependent: :destroy
+  has_many :employee_loans, dependent: :destroy
+
+  before_validation :normalize_blanks
 
   validates :name, presence: true
   validates :ein, uniqueness: true, allow_blank: true
@@ -16,6 +20,7 @@ class Company < ApplicationRecord
   validates :check_stock_type, inclusion: { in: %w[bottom_check top_check] }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
+  validate :check_layout_config_must_be_hash
 
   scope :active, -> { where(active: true) }
 
@@ -65,5 +70,17 @@ class Company < ApplicationRecord
 
   def full_address
     [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
+  end
+
+  private
+
+  def normalize_blanks
+    self.ein = nil if ein.blank?
+  end
+
+  def check_layout_config_must_be_hash
+    return if check_layout_config.is_a?(Hash)
+
+    errors.add(:check_layout_config, "must be a JSON object")
   end
 end

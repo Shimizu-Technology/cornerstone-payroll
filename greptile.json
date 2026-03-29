@@ -1,0 +1,10 @@
+{
+  "strictness": 2,
+  "commentTypes": ["logic", "syntax"],
+  "triggerOnUpdates": true,
+  "statusCheck": true,
+  "statusCommentsEnabled": true,
+  "fileChangeLimit": 200,
+  "ignorePatterns": ".DS_Store\ndata/**\ndocs/**\nmarianas-open/**\noldTaxBusiness/**\napi/db/schema.rb\napi/Gemfile.lock\nweb/package-lock.json\n**/*.pdf\n**/*.png\n**/*.jpg\n**/*.jpeg\n**/*.xlsx",
+  "instructions": "Prioritize bugs, regressions, security issues, data integrity, payroll correctness, tenant isolation, and edge cases over style nitpicks. Be especially careful around payroll calculations, check printing/alignment, tax handling, imports, and admin authorization flows."
+}

@@ -41,8 +41,9 @@ class W2GuAggregator
           "This report is a preparation summary and should be reviewed before filing.",
           "Employees missing SSN are flagged in compliance_issues.",
           "Box labels map to W-2GU concepts but final filing format/export is separate.",
-          "Box 5 is derived from gross wages + reported tips (pre-tax exclusions not modeled yet).",
-          "Box 1 and Box 5 can match in this initial pass when no pre-tax exclusions are modeled.",
+          "Box 1 = Gross wages minus pre-tax 401(k) deferrals (Code D). Box 5 = Gross wages (not reduced by 401k).",
+          "Box 12 codes: D = 401(k) elective deferrals, AA = Roth 401(k) contributions.",
+          "Box 13 Retirement plan checkbox is set if the employee has a retirement contribution rate > 0.",
           "If payroll items were committed before tips were embedded in gross_pay, Box 1/Box 5 may understate total compensation for those periods. Verify transition-year rows manually."
         ]
       },
@@ -59,7 +60,10 @@ class W2GuAggregator
         box5_medicare_wages_tips: rows.sum { |r| r[:box5_medicare_wages_tips].to_f }.round(2),
         box6_medicare_tax_withheld: rows.sum { |r| r[:box6_medicare_tax_withheld].to_f }.round(2),
         box7_social_security_tips: rows.sum { |r| r[:box7_social_security_tips].to_f }.round(2),
-        reported_tips_total: rows.sum { |r| r[:reported_tips_total].to_f }.round(2)
+        reported_tips_total: rows.sum { |r| r[:reported_tips_total].to_f }.round(2),
+        box12_code_d_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "D" }.sum { |e| e[:amount] } }.round(2),
+        box12_code_aa_total: rows.sum { |r| (r[:box12] || []).select { |e| e[:code] == "AA" }.sum { |e| e[:amount] } }.round(2),
+        retirement_plan_participants: rows.count { |r| r[:box13_retirement_plan] }
       },
       compliance_issues: compliance_issues(rows),
       employees: rows
@@ -89,7 +93,10 @@ class W2GuAggregator
         "SUM(reported_tips) AS reported_tips",
         "SUM(withholding_tax) AS withholding_tax",
         "SUM(social_security_tax) AS ss_tax",
-        "SUM(medicare_tax) AS medicare_tax"
+        "SUM(medicare_tax) AS medicare_tax",
+        "SUM(COALESCE(retirement_payment, 0)) AS retirement_total",
+        "SUM(COALESCE(roth_retirement_payment, 0)) AS roth_retirement_total",
+        "SUM(COALESCE(non_taxable_pay, 0)) AS non_taxable_total"
       )
       .index_by(&:employee_id)
   end
@@ -97,6 +104,7 @@ class W2GuAggregator
   def employees
     @employees ||= Employee
       .where(company_id: company.id, id: aggregated_items.keys)
+      .where.not(employment_type: "contractor")
       .order(:last_name, :first_name)
   end
 
@@ -108,6 +116,9 @@ class W2GuAggregator
     withholding_tax = sums&.withholding_tax.to_f
     ss_tax = sums&.ss_tax.to_f
     medicare_tax = sums&.medicare_tax.to_f
+    retirement_total = sums&.retirement_total.to_f
+    roth_retirement_total = sums&.roth_retirement_total.to_f
+    non_taxable_total = sums&.non_taxable_total.to_f
 
     if reported_tips > gross_pay
       Rails.logger.warn(
@@ -117,9 +128,8 @@ class W2GuAggregator
     end
     wages_only = [ gross_pay - reported_tips, 0.0 ].max
 
-    # Approximation for box 1 until pre-tax exclusions are fully modeled.
-    # `gross_pay` already includes reported tips in the payroll calculators.
-    box1 = gross_pay.round(2)
+    # Box 1: Wages minus pre-tax retirement (401k) contributions
+    box1 = (gross_pay - retirement_total).round(2)
 
     # W-2 convention: allocate SS wage base to Box 3 (wages) first,
     # then Box 7 (tips) gets any remaining SS wage-base room.
@@ -127,9 +137,14 @@ class W2GuAggregator
     remaining_ss_base = [ ss_wage_base - box3, 0.0 ].max
     box7 = [ reported_tips, remaining_ss_base ].min.round(2)
 
-    # Box 5 should be wage-based, not back-calculated from medicare tax,
-    # because Additional Medicare Tax (> $200K) distorts the effective rate.
+    # Box 5: Medicare wages (gross pay, not reduced by pre-tax retirement)
     box5 = gross_pay.round(2)
+
+    # Box 12: Coded entries for retirement contributions
+    box12 = build_box12(retirement_total, roth_retirement_total)
+
+    # Box 13: Checkboxes
+    has_retirement_plan = (employee.retirement_rate.to_f > 0 || employee.roth_retirement_rate.to_f > 0)
 
     {
       employee_id: employee.id,
@@ -147,9 +162,27 @@ class W2GuAggregator
       reported_tips_total: reported_tips.round(2),
       box7_limited_by_wage_base: reported_tips.positive? && box7 < reported_tips,
 
+      # Box 12: Coded amounts (D=401k, AA=Roth 401k)
+      box12: box12,
+
+      # Box 13: Checkboxes
+      box13_retirement_plan: has_retirement_plan,
+      box13_statutory_employee: false,
+      box13_third_party_sick_pay: false,
+
+      # Non-taxable pay (informational)
+      non_taxable_total: non_taxable_total.round(2),
+
       has_missing_ssn: !employee.valid_filing_ssn?,
       has_missing_address: missing_employee_address?(employee)
     }
+  end
+
+  def build_box12(retirement_total, roth_retirement_total)
+    entries = []
+    entries << { code: "D", description: "401(k) elective deferrals", amount: retirement_total.round(2) } if retirement_total > 0
+    entries << { code: "AA", description: "Roth 401(k) contributions", amount: roth_retirement_total.round(2) } if roth_retirement_total > 0
+    entries
   end
 
   def compliance_issues(rows)

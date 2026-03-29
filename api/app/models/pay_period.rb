@@ -9,6 +9,8 @@ class PayPeriod < ApplicationRecord
 
   belongs_to :company
   has_many :payroll_items, dependent: :destroy
+  has_many :non_employee_checks, dependent: :destroy
+  has_many :loan_transactions, dependent: :nullify
 
   # CPR-71: correction chain associations
   belongs_to :source_pay_period,
