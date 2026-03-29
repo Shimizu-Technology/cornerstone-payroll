@@ -6,6 +6,9 @@ class PayrollItem < ApplicationRecord
   belongs_to :company
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
+  has_many :payroll_item_deductions, dependent: :destroy
+  has_many :payroll_item_earnings, dependent: :destroy
+  has_many :loan_transactions, dependent: :nullify
 
   # Sync on create only. On update, `company_matches_pay_period` enforces the
   # constraint instead, so operators cannot silently reassign across companies.
@@ -13,7 +16,7 @@ class PayrollItem < ApplicationRecord
   # is respected without triggering a pay_period reload query.
   before_validation :sync_company_from_pay_period, on: :create
 
-  validates :employment_type, inclusion: { in: %w[hourly salary] }
+  validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validates :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
             numericality: { greater_than_or_equal_to: 0 },
@@ -131,14 +134,71 @@ class PayrollItem < ApplicationRecord
     employment_type == "salary"
   end
 
+  def contractor?
+    employment_type == "contractor"
+  end
+
   # Calculate and store all values
   def calculate!
-    calculator = PayrollCalculator.for(employee, self)
-    calculator.calculate
-    save!
+    ApplicationRecord.transaction do
+      calculator = PayrollCalculator.for(employee, self)
+      calculator.calculate
+      save!
+    end
+  end
+
+  def wage_rate_hours
+    entries = custom_columns_data.is_a?(Hash) ? (custom_columns_data["wage_rate_hours"] || custom_columns_data[:wage_rate_hours]) : nil
+    Array(entries).map do |entry|
+      normalized = normalize_wage_rate_entry(entry)
+      {
+        "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
+        "label" => normalized["label"] || normalized[:label],
+        "rate" => (normalized["rate"] || normalized[:rate]).to_f,
+        "regular_hours" => (normalized["regular_hours"] || normalized[:regular_hours]).to_f,
+        "overtime_hours" => (normalized["overtime_hours"] || normalized[:overtime_hours]).to_f,
+        "holiday_hours" => (normalized["holiday_hours"] || normalized[:holiday_hours]).to_f,
+        "pto_hours" => (normalized["pto_hours"] || normalized[:pto_hours]).to_f,
+        "is_primary" => ActiveModel::Type::Boolean.new.cast(normalized["is_primary"] || normalized[:is_primary]),
+        "active" => normalized.key?("active") || normalized.key?(:active) ? ActiveModel::Type::Boolean.new.cast(normalized["active"] || normalized[:active]) : true
+      }
+    end
+  end
+
+  def wage_rate_hours=(entries)
+    payload = Array(entries).filter_map do |entry|
+      normalized = normalize_wage_rate_entry(entry)
+      label = (normalized["label"] || normalized[:label]).to_s.strip
+      next if label.blank?
+
+      {
+        "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
+        "label" => label,
+        "rate" => (normalized["rate"] || normalized[:rate]).to_f,
+        "regular_hours" => (normalized["regular_hours"] || normalized[:regular_hours]).to_f,
+        "overtime_hours" => (normalized["overtime_hours"] || normalized[:overtime_hours]).to_f,
+        "holiday_hours" => (normalized["holiday_hours"] || normalized[:holiday_hours]).to_f,
+        "pto_hours" => (normalized["pto_hours"] || normalized[:pto_hours]).to_f,
+        "is_primary" => ActiveModel::Type::Boolean.new.cast(normalized["is_primary"] || normalized[:is_primary]),
+        "active" => normalized.key?("active") || normalized.key?(:active) ? ActiveModel::Type::Boolean.new.cast(normalized["active"] || normalized[:active]) : true
+      }
+    end
+
+    self.custom_columns_data = (custom_columns_data || {}).merge("wage_rate_hours" => payload)
+  end
+
+  def clear_wage_rate_hours!
+    self.custom_columns_data = (custom_columns_data || {}).except("wage_rate_hours", :wage_rate_hours)
   end
 
   private
+
+  def normalize_wage_rate_entry(entry)
+    return entry.to_unsafe_h if entry.respond_to?(:to_unsafe_h)
+    return entry.to_h if entry.respond_to?(:to_h)
+
+    {}
+  end
 
   def sync_company_from_pay_period
     self.company_id ||= pay_period&.company_id

@@ -144,6 +144,18 @@ RSpec.describe HourlyPayrollCalculator do
       # Total: 700
       expect(payroll_item.gross_pay).to eq(700.00)
     end
+
+    it "records non-taxable pay in the earnings breakdown" do
+      payroll_item.non_taxable_pay = 50.00
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      non_taxable = payroll_item.payroll_item_earnings.find { |earning| earning.category == "non_taxable" }
+      expect(non_taxable).to be_present
+      expect(non_taxable.label).to eq("Non-Taxable Pay")
+      expect(non_taxable.amount).to eq(50.00)
+    end
   end
 
   describe "with retirement deductions" do
@@ -204,6 +216,250 @@ RSpec.describe HourlyPayrollCalculator do
       calculator.calculate
 
       expect(payroll_item.withholding_tax).to be < no_retirement_item.withholding_tax
+    end
+
+    it "does not double-count retirement sub-category employee deductions when percentage retirement is configured" do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "401(k) Pre-Tax",
+        category: "pre_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 64.00,
+        is_percentage: false,
+        active: true
+      )
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.retirement_payment).to eq(64.00)
+      expect(payroll_item.payroll_item_deductions.map(&:label)).not_to include("401(k) Pre-Tax")
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        payroll_item.retirement_payment.to_f +
+        payroll_item.roth_retirement_payment.to_f
+      )
+    end
+
+    it "keeps a fixed traditional 401(k) deduction when only roth_retirement_rate is configured" do
+      roth_only_employee = create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single",
+        retirement_rate: 0.0,
+        roth_retirement_rate: 0.05
+      )
+      roth_only_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: roth_only_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80
+      )
+      traditional_type = DeductionType.create!(
+        company: company,
+        name: "401(k) Fixed",
+        category: "pre_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: roth_only_employee,
+        deduction_type: traditional_type,
+        amount: 40.00,
+        is_percentage: false,
+        active: true
+      )
+
+      described_class.new(roth_only_employee, roth_only_item).calculate
+
+      expect(roth_only_item.roth_retirement_payment).to eq(80.00)
+      expect(roth_only_item.payroll_item_deductions.map(&:label)).to include("401(k) Fixed")
+    end
+
+    it "keeps a fixed roth deduction when only retirement_rate is configured" do
+      traditional_only_employee = create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single",
+        retirement_rate: 0.04,
+        roth_retirement_rate: 0.0
+      )
+      traditional_only_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: traditional_only_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80
+      )
+      roth_type = DeductionType.create!(
+        company: company,
+        name: "Roth 401(k) Fixed",
+        category: "post_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: traditional_only_employee,
+        deduction_type: roth_type,
+        amount: 30.00,
+        is_percentage: false,
+        active: true
+      )
+
+      described_class.new(traditional_only_employee, traditional_only_item).calculate
+
+      expect(traditional_only_item.retirement_payment).to eq(64.00)
+      expect(traditional_only_item.payroll_item_deductions.map(&:label)).to include("Roth 401(k) Fixed")
+    end
+  end
+
+  describe "with imported loan deductions and itemized post-tax deductions" do
+    let(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single"
+      )
+    end
+
+    let(:payroll_item) do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        loan_deduction: 25.00,
+        import_source: "mosa_revel"
+      )
+    end
+
+    before do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Medical Insurance",
+        category: "post_tax",
+        sub_category: "insurance",
+        active: true
+      )
+
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 10.00,
+        is_percentage: false,
+        active: true
+      )
+    end
+
+    it "keeps imported loan deductions in total deductions and net pay" do
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.loan_payment).to eq(25.00)
+      expect(payroll_item.insurance_payment).to eq(10.00)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        35.00
+      )
+      expect(payroll_item.net_pay).to eq(
+        (payroll_item.gross_pay.to_f - payroll_item.total_deductions.to_f).round(2)
+      )
+    end
+
+    it "does not double-count an imported loan when an employee loan deduction already exists" do
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Employee Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 25.00,
+        is_percentage: false,
+        active: true
+      )
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.loan_payment).to eq(25.00)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        payroll_item.insurance_payment.to_f +
+        25.00
+      )
+    end
+  end
+
+  describe "with pre-tax insurance deductions" do
+    let(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single"
+      )
+    end
+
+    let(:payroll_item) do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+    end
+
+    it "does not double-count pre-tax insurance in total deductions" do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Pre-Tax Medical",
+        category: "pre_tax",
+        sub_category: "insurance",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 10.00,
+        is_percentage: false,
+        active: true
+      )
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.insurance_payment).to eq(10.00)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        10.00
+      )
     end
   end
 end

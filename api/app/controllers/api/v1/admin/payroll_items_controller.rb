@@ -46,10 +46,14 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          @payroll_item = @pay_period.payroll_items.build(payroll_item_params)
+          attrs = payroll_item_params
+          wage_rate_hours = attrs.delete(:wage_rate_hours)
+
+          @payroll_item = @pay_period.payroll_items.build(attrs)
           @payroll_item.employee = employee
           @payroll_item.employment_type ||= employee.employment_type
-          @payroll_item.pay_rate ||= employee.pay_rate
+          @payroll_item.pay_rate ||= employee.primary_wage_rate&.rate || employee.pay_rate
+          apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if @payroll_item.save
             @payroll_item.calculate! if params[:auto_calculate]
@@ -65,7 +69,11 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
 
-          if @payroll_item.update(payroll_item_params)
+          attrs = payroll_item_params
+          wage_rate_hours = attrs.delete(:wage_rate_hours)
+          apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
+
+          if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
             render json: { payroll_item: payroll_item_json(@payroll_item) }
           else
@@ -108,11 +116,20 @@ module Api
         end
 
         def payroll_item_params
-          params.require(:payroll_item).permit(
+          permitted = params.require(:payroll_item).permit(
             :employee_id, :employment_type, :pay_rate,
             :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
-            :bonus, :additional_withholding, :check_number
+            :bonus, :additional_withholding, :check_number,
+            :salary_override, :non_taxable_pay, :reported_tips,
+            wage_rate_hours: [
+              :employee_wage_rate_id, :label, :rate, :regular_hours,
+              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
+            ]
           )
+
+          attrs = permitted.except(:wage_rate_hours).to_h.symbolize_keys
+          attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
+          attrs
         end
 
         def payroll_item_json(item, detailed: false)
@@ -122,6 +139,8 @@ module Api
             employee_name: item.employee_full_name,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
+            salary_override: item.salary_override,
+            non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
@@ -139,10 +158,16 @@ module Api
             net_pay: item.net_pay,
             employer_social_security_tax: item.employer_social_security_tax,
             employer_medicare_tax: item.employer_medicare_tax,
+            employer_retirement_match: item.employer_retirement_match,
+            employer_roth_retirement_match: item.employer_roth_retirement_match,
+            roth_retirement_payment: item.roth_retirement_payment,
+            loan_payment: item.loan_payment,
+            insurance_payment: item.insurance_payment,
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
             ytd_gross: item.ytd_gross,
-            ytd_net: item.ytd_net
+            ytd_net: item.ytd_net,
+            wage_rate_hours: item.wage_rate_hours
           }
 
           if detailed
@@ -158,6 +183,18 @@ module Api
           end
 
           json
+        end
+
+        def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          payroll_item.wage_rate_hours = wage_rate_hours
+          entries = payroll_item.wage_rate_hours
+          payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
+          payroll_item.overtime_hours = entries.sum { |entry| entry["overtime_hours"].to_f }
+          payroll_item.holiday_hours = entries.sum { |entry| entry["holiday_hours"].to_f }
+          payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
+
+          primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
+          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
         end
       end
     end

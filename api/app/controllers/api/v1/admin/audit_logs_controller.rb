@@ -7,12 +7,24 @@ module Api
         before_action :require_admin!
 
         # GET /api/v1/admin/audit_logs
+        # Super admins see audit logs across all companies they can access.
+        # Optionally filter by company_id param to scope to active client.
         def index
-          logs = AuditLog.where(company_id: current_company_id).order(created_at: :desc)
+          logs = if current_user.super_admin?
+            if params[:company_id].present?
+              AuditLog.where(company_id: params[:company_id])
+            else
+              AuditLog.all
+            end
+          else
+            AuditLog.where(company_id: current_user.accessible_company_ids)
+          end
+
+          logs = logs.order(created_at: :desc)
 
           logs = logs.where(user_id: params[:user_id]) if params[:user_id].present?
-          logs = logs.where(action: params[:action]) if params[:action].present?
-          logs = logs.where(record_type: params[:record_type]) if params[:record_type].present?
+          logs = logs.where("action ILIKE ?", "%#{params[:action_filter]}%") if params[:action_filter].present?
+          logs = logs.where("record_type ILIKE ?", "%#{params[:record_type]}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
 
           begin
@@ -39,6 +51,7 @@ module Api
             record_id: log.record_id,
             user_id: log.user_id,
             user_name: log.user&.name,
+            company_id: log.company_id,
             metadata: log.metadata,
             ip_address: log.ip_address,
             user_agent: log.user_agent,

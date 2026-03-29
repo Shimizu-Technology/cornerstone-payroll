@@ -10,6 +10,8 @@ interface User {
   role: string;
   company_id: number;
   company_name: string;
+  super_admin: boolean;
+  assigned_company_ids: number[];
 }
 
 interface AuthContextType {
@@ -18,6 +20,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isManager: boolean;
+  isAccountant: boolean;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -33,6 +36,8 @@ function mapAuthUser(user: AuthResponseUser): User {
     role: user.role,
     company_id: user.company_id,
     company_name: user.company_name,
+    super_admin: (user as Record<string, unknown>).super_admin as boolean || false,
+    assigned_company_ids: (user as Record<string, unknown>).assigned_company_ids as number[] || [],
   };
 }
 
@@ -72,6 +77,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!user,
         isAdmin: user?.role === 'admin',
         isManager: user?.role === 'manager' || user?.role === 'admin',
+        isAccountant: user?.role === 'accountant',
         signOut: async () => setUser(null),
         refreshUser: async () => {
           const res = await authApi.me();
@@ -168,6 +174,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!user && isSignedIn === true,
         isAdmin: user?.role === 'admin',
         isManager: user?.role === 'manager' || user?.role === 'admin',
+        isAccountant: user?.role === 'accountant',
         signOut: async () => {
           setUser(null);
           await clerkSignOut();

@@ -1,48 +1,145 @@
 # frozen_string_literal: true
 
 module PayrollImport
-  # Matches employee names from PDF/Excel to database Employee records
+  # Matches employee names from PDF/Excel to database Employee records.
   #
   # PDF format: "Last, First M." (e.g., "Arthur, Juile R.")
   # Excel format: separate last_name / first_name columns
   #
-  # Matching strategy:
-  # 1. Exact match on last_name + first_name
-  # 2. Fuzzy match using fuzzy_match gem (Levenshtein distance)
+  # Matching strategy (scored independently on last name + first name):
+  # 1. Exact last name match (or prefix match for multi-word last names)
+  # 2. First name: exact → first-token → nickname → fuzzy (Levenshtein ≤ 2)
+  # 3. Combined confidence from last + first name match quality
   class NameMatcher
-    CONFIDENCE_EXACT = 1.0
     CONFIDENCE_THRESHOLD = 0.6
 
-    FIRST_NAME_ALIASES = {
-      "kyle a" => "kyle",
-      "kyle richard" => "kyle",
-      "jayden m" => "jayden",
-      "maria carmella" => "maria"
+    NAME_SUFFIXES = %w[jr sr ii iii iv v].freeze
+
+    # Common English diminutives / nicknames (bidirectional).
+    # Each key maps to one or more canonical forms that should also match.
+    NICKNAMES = {
+      "doug"    => %w[douglas],
+      "douglas" => %w[doug],
+      "mike"    => %w[michael],
+      "michael" => %w[mike],
+      "bill"    => %w[william],
+      "william" => %w[bill will billy],
+      "will"    => %w[william],
+      "billy"   => %w[william],
+      "bob"     => %w[robert],
+      "robert"  => %w[bob rob bobby],
+      "rob"     => %w[robert],
+      "bobby"   => %w[robert],
+      "jim"     => %w[james],
+      "james"   => %w[jim jimmy],
+      "jimmy"   => %w[james],
+      "joe"     => %w[joseph],
+      "joseph"  => %w[joe],
+      "dan"     => %w[daniel],
+      "daniel"  => %w[dan danny],
+      "danny"   => %w[daniel],
+      "dave"    => %w[david],
+      "david"   => %w[dave],
+      "tom"     => %w[thomas],
+      "thomas"  => %w[tom tommy],
+      "tommy"   => %w[thomas],
+      "ed"      => %w[edward],
+      "edward"  => %w[ed eddie],
+      "eddie"   => %w[edward],
+      "dick"    => %w[richard],
+      "richard" => %w[dick rick],
+      "rick"    => %w[richard],
+      "steve"   => %w[steven stephen],
+      "steven"  => %w[steve],
+      "stephen" => %w[steve],
+      "chris"   => %w[christopher],
+      "christopher" => %w[chris],
+      "matt"    => %w[matthew],
+      "matthew" => %w[matt],
+      "pat"     => %w[patrick patricia],
+      "patrick" => %w[pat],
+      "patricia" => %w[pat patty],
+      "patty"   => %w[patricia],
+      "tony"    => %w[anthony],
+      "anthony" => %w[tony],
+      "sam"     => %w[samuel samantha],
+      "samuel"  => %w[sam],
+      "samantha" => %w[sam],
+      "charlie" => %w[charles],
+      "charles" => %w[charlie chuck],
+      "chuck"   => %w[charles],
+      "larry"   => %w[lawrence],
+      "lawrence" => %w[larry],
+      "jerry"   => %w[gerald jerome],
+      "gerald"  => %w[jerry],
+      "alex"    => %w[alexander alexandra],
+      "alexander" => %w[alex],
+      "alexandra" => %w[alex],
+      "beth"    => %w[elizabeth],
+      "elizabeth" => %w[beth liz],
+      "liz"     => %w[elizabeth],
+      "kate"    => %w[katherine catherine],
+      "katherine" => %w[kate kathy],
+      "catherine" => %w[kate cathy],
+      "kathy"   => %w[katherine],
+      "cathy"   => %w[catherine],
+      "jen"     => %w[jennifer],
+      "jennifer" => %w[jen jenny],
+      "jenny"   => %w[jennifer],
+      "sue"     => %w[susan suzanne],
+      "susan"   => %w[sue],
+      "suzanne" => %w[sue],
+      "barb"    => %w[barbara],
+      "barbara" => %w[barb],
+      "nick"    => %w[nicholas],
+      "nicholas" => %w[nick],
+      "nate"    => %w[nathan nathaniel],
+      "nathan"  => %w[nate],
+      "nathaniel" => %w[nate],
+      "ben"     => %w[benjamin],
+      "benjamin" => %w[ben],
+      "fred"    => %w[frederick],
+      "frederick" => %w[fred],
+      "ray"     => %w[raymond],
+      "raymond" => %w[ray],
+      "ron"     => %w[ronald],
+      "ronald"  => %w[ron],
+      "don"     => %w[donald],
+      "donald"  => %w[don],
+      "al"      => %w[albert alan alfred],
+      "albert"  => %w[al],
+      "alan"    => %w[al],
+      "phil"    => %w[philip phillip],
+      "philip"  => %w[phil],
+      "phillip" => %w[phil],
+      "ted"     => %w[theodore edward],
+      "theodore" => %w[ted],
+      "wally"   => %w[walter],
+      "walter"  => %w[wally],
+      "lenny"   => %w[leonard],
+      "leonard" => %w[lenny],
+      "tony"    => %w[antonio],
+      "antonio" => %w[tony],
     }.freeze
 
     attr_reader :employees
 
     def initialize(employees)
       @employees = employees
-      @matcher = build_fuzzy_matcher
+      @employee_index = build_employee_index
     end
 
     # Match a "Last, First M." formatted name from the PDF
-    # @param full_name [String] e.g., "Arthur, Juile R."
-    # @return [Hash, nil] { employee_id:, confidence:, matched_name: } or nil
     def match_pdf_name(full_name)
       parsed = parse_pdf_name(full_name)
       return nil unless parsed
 
-      match_name(parsed[:last_name], parsed[:first_name], parsed[:first_token])
+      find_best_match(parsed[:last_name], parsed[:first_name])
     end
 
     # Match separate last/first name from Excel
-    # @param last_name [String]
-    # @param first_name [String]
-    # @return [Hash, nil] { employee_id:, confidence:, matched_name: } or nil
     def match_excel_name(last_name, first_name)
-      match_name(normalize_token(last_name), normalize_first_name(first_name))
+      find_best_match(normalize(last_name), normalize(first_name))
     end
 
     private
@@ -53,88 +150,136 @@ module PayrollImport
       parts = full_name.split(",", 2)
       return nil if parts.length < 2
 
-      last_name = normalize_token(parts[0])
-      first_segment = normalize_token(parts[1])
+      last_name = normalize(parts[0])
+      first_name = normalize(parts[1])
       return nil if last_name.blank?
 
-      full_first = normalize_first_name(first_segment)
-      first_token = normalize_first_name(first_segment.split(/\s+/).first)
-
-      { last_name: last_name, first_name: full_first, first_token: first_token }
+      { last_name: last_name, first_name: first_name }
     end
 
-    def match_name(last_name, first_name, first_token = nil)
-      return nil if last_name.blank?
+    # Score each employee and return the best match above threshold
+    def find_best_match(input_last, input_first)
+      return nil if input_last.blank?
 
-      # Try exact match first (full first name then first token fallback)
-      exact = find_exact_match(last_name, first_name) || find_exact_match(last_name, first_token)
-      return exact if exact
+      best = nil
+      best_score = 0.0
 
-      # Try fuzzy match
-      fuzzy = find_fuzzy_match(last_name, first_name)
-      return fuzzy if fuzzy
+      employees.each do |emp|
+        last_score = score_last_name(input_last, normalize(emp.last_name))
+        next if last_score < 0.8
 
-      nil
-    end
+        first_score = score_first_name(input_first, normalize(emp.first_name))
+        next if first_score < 0.5
 
-    def find_exact_match(last_name, first_name)
-      match = employees.find do |emp|
-        emp_last = normalize_token(emp.last_name)
-        emp_first = normalize_first_name(emp.first_name)
+        # Weight: last name 40%, first name 60% (first name differentiates more)
+        combined = (last_score * 0.4 + first_score * 0.6).round(2)
 
-        emp_last == normalize_token(last_name) &&
-          first_name.present? &&
-          emp_first == normalize_first_name(first_name)
+        if combined > best_score
+          best_score = combined
+          best = emp
+        end
       end
 
-      return nil unless match
+      return nil unless best && best_score >= CONFIDENCE_THRESHOLD
 
       {
-        employee_id: match.id,
-        confidence: CONFIDENCE_EXACT,
-        matched_name: match.full_name
+        employee_id: best.id,
+        confidence: best_score,
+        matched_name: best.full_name
       }
     end
 
-    def find_fuzzy_match(last_name, first_name)
-      search_name = "#{normalize_token(last_name)} #{normalize_first_name(first_name)}".strip
-      result = @matcher.find(search_name)
-      return nil unless result
+    # Score last name match (0.0 - 1.0)
+    def score_last_name(input, employee)
+      return 1.0 if input == employee
 
-      # Find the employee that matches
-      match = employees.find { |emp| "#{normalize_token(emp.last_name)} #{normalize_first_name(emp.first_name)}".strip == result }
-      return nil unless match
+      # Strip generational suffixes (Jr., Sr., II, etc.) that may appear in
+      # either the source data or the DB but not both
+      input_base = strip_name_suffix(input)
+      emp_base = strip_name_suffix(employee)
+      return 1.0 if input_base == emp_base
 
-      # Calculate confidence based on Levenshtein distance
-      distance = levenshtein_distance(search_name, result)
-      max_len = [ search_name.length, result.length ].max
-      confidence = max_len.zero? ? 0.0 : (1.0 - (distance.to_f / max_len)).round(2)
+      # Prefix match for multi-word last names ("tubiera" matches "tubiera dunn")
+      emp_words = emp_base.split(/\s+/)
+      if emp_words.length > 1 && emp_words.first == input_base
+        return 0.95
+      end
 
-      return nil if confidence < CONFIDENCE_THRESHOLD
+      # Fuzzy match on base last names
+      dist = ld(input_base, emp_base)
+      max_len = [input_base.length, emp_base.length].max
+      return 0.0 if max_len.zero?
 
-      {
-        employee_id: match.id,
-        confidence: confidence,
-        matched_name: match.full_name
-      }
+      score = 1.0 - (dist.to_f / max_len)
+      score >= 0.8 ? score : 0.0
     end
 
-    def build_fuzzy_matcher
-      candidates = employees.map { |emp| "#{normalize_token(emp.last_name)} #{normalize_first_name(emp.first_name)}".strip }
-      FuzzyMatch.new(candidates)
+    # Score first name match (0.0 - 1.0)
+    def score_first_name(input, employee)
+      return 0.0 if input.blank?
+
+      input_tokens = input.split(/\s+/)
+      emp_tokens = employee.split(/\s+/)
+      input_first = input_tokens.first
+      emp_first = emp_tokens.first
+
+      # Exact full match
+      return 1.0 if input == employee
+
+      # Exact first-token match (handles "Aaron" = "Aaron-Michael" via "aaron" = "aaron michael".first)
+      return 1.0 if input_first == emp_first
+
+      # First token of input matches first token of employee
+      return 1.0 if input_first.present? && emp_first.present? && input_first == emp_first
+
+      # Nickname match on first tokens
+      if nickname_match?(input_first, emp_first)
+        return 0.95
+      end
+
+      # Fuzzy match on first tokens (handles typos like "Elaine" vs "Elain")
+      if input_first.present? && emp_first.present?
+        dist = ld(input_first, emp_first)
+        max_len = [input_first.length, emp_first.length].max
+        if max_len > 0
+          token_score = 1.0 - (dist.to_f / max_len)
+          return token_score if token_score >= 0.75
+        end
+      end
+
+      # Fuzzy match on full first name string
+      dist = ld(input, employee)
+      max_len = [input.length, employee.length].max
+      return 0.0 if max_len.zero?
+
+      full_score = 1.0 - (dist.to_f / max_len)
+      full_score >= 0.6 ? full_score : 0.0
     end
 
-    def normalize_token(value)
+    def nickname_match?(name_a, name_b)
+      return false if name_a.blank? || name_b.blank?
+
+      aliases_a = NICKNAMES[name_a] || []
+      aliases_b = NICKNAMES[name_b] || []
+
+      aliases_a.include?(name_b) || aliases_b.include?(name_a)
+    end
+
+    def build_employee_index
+      employees.index_by(&:id)
+    end
+
+    def normalize(value)
       value.to_s.downcase.gsub(/[^a-z0-9\s]/, " ").squeeze(" ").strip
     end
 
-    def normalize_first_name(value)
-      normalized = normalize_token(value)
-      FIRST_NAME_ALIASES.fetch(normalized, normalized)
+    def strip_name_suffix(name)
+      tokens = name.split(/\s+/)
+      tokens.reject { |t| NAME_SUFFIXES.include?(t) }.join(" ")
     end
 
-    # Pure Ruby Levenshtein distance (fallback if levenshtein-ffi native ext unavailable)
-    def levenshtein_distance(s, t)
+    # Levenshtein distance
+    def ld(s, t)
       return Levenshtein.distance(s, t) if defined?(Levenshtein)
 
       m = s.length
@@ -146,7 +291,7 @@ module PayrollImport
         (1..m).each do |i|
           cost = s[i - 1] == t[j - 1] ? 0 : 1
           temp = d[i]
-          d[i] = [ d[i] + 1, d[i - 1] + 1, prev + cost ].min
+          d[i] = [d[i] + 1, d[i - 1] + 1, prev + cost].min
           prev = temp
         end
       end

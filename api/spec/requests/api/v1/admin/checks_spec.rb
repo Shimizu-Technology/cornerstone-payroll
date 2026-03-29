@@ -314,17 +314,27 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       get "/api/v1/admin/companies/check_settings"
       expect(response).to have_http_status(:ok)
       json = response.parsed_body["check_settings"]
-      expect(json).to include("next_check_number", "check_stock_type", "check_offset_x", "check_offset_y")
+      expect(json).to include("next_check_number", "check_stock_type", "check_offset_x", "check_offset_y", "check_layout_config")
     end
   end
 
   describe "PATCH /api/v1/admin/companies/check_settings" do
-    it "updates offset and stock type" do
+    it "updates offset, stock type, and layout overrides" do
       patch "/api/v1/admin/companies/check_settings",
-        params: { check_offset_x: 0.1, check_offset_y: -0.05, check_stock_type: "top_check" }
+        params: {
+          check_offset_x: 0.1,
+          check_offset_y: -0.05,
+          check_stock_type: "top_check",
+          check_layout_config: {
+            check_face: {
+              date: { x: 480.0 }
+            }
+          }
+        }
       expect(response).to have_http_status(:ok)
       expect(company.reload.check_offset_x).to be_within(0.001).of(0.1)
       expect(company.reload.check_stock_type).to eq("top_check")
+      expect(company.reload.check_layout_config.dig("check_face", "date", "x")).to eq(480.0)
     end
   end
 

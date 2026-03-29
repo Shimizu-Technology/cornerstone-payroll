@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class PayPeriodsController < BaseController
+        include Auditable
+        audit_actions :approve, :commit, :run_payroll, :void, :create_correction_run
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :commit, :retry_tax_sync,
           :void, :create_correction_run, :correction_history
@@ -132,6 +134,7 @@ module Api
                   ip_address:  request.remote_ip,
                   user_agent:  request.user_agent
                 )
+                skip_default_audit_log!
               rescue StandardError => e
                 Rails.logger.error("[CPR-73] AuditLog delete_draft_correction_run failed for pay_period=#{deleted_run_id}: #{e.class}: #{e.message}")
               end
@@ -154,8 +157,13 @@ module Api
             return render json: { error: "Cannot delete a committed pay period" }, status: :unprocessable_entity
           end
 
-          @pay_period.destroy
+          ActiveRecord::Base.transaction do
+            PayrollImportRecord.where(pay_period_id: @pay_period.id).delete_all
+            @pay_period.destroy!
+          end
           head :no_content
+        rescue ActiveRecord::InvalidForeignKey, ActiveRecord::RecordNotDestroyed => e
+          render json: { error: "Could not delete pay period: #{e.message}" }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/run_payroll
@@ -165,8 +173,21 @@ module Api
             return render json: { error: "Can only run payroll on draft or calculated pay periods" }, status: :unprocessable_entity
           end
 
-          # Get employees to include (either from params or all active employees)
-          employee_ids = params[:employee_ids] || Employee.active.where(company_id: current_company_id).pluck(:id)
+          # Determine which employees to calculate:
+          # 1. If explicit employee_ids are passed, use those
+          # 2. If imported payroll items exist, use imported employees + salary + contractors
+          #    (don't auto-create hourly employees not present in the import)
+          # 3. Otherwise, include all active employees for normal payroll runs/recalculations
+          employee_ids = if params[:employee_ids].present?
+            Array(params[:employee_ids])
+          elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
+            imported_ids = @pay_period.payroll_items.pluck(:employee_id)
+            salary_ids = Employee.active.where(company_id: current_company_id, employment_type: "salary").pluck(:id)
+            contractor_ids = Employee.active.where(company_id: current_company_id, employment_type: "contractor").pluck(:id)
+            (imported_ids + salary_ids + contractor_ids).uniq
+          else
+            Employee.active.where(company_id: current_company_id).pluck(:id)
+          end
 
           results = { success: [], errors: [] }
 
@@ -180,18 +201,30 @@ module Api
 
               # Set defaults from employee if new record
               if payroll_item.new_record?
+                payroll_item.company_id = current_company_id
                 payroll_item.employment_type = employee.employment_type
-                payroll_item.pay_rate = employee.pay_rate
-                payroll_item.hours_worked = employee.salary? ? 0 : 80 # Default biweekly hours
+                payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+                payroll_item.hours_worked = if employee.salary? || employee.contractor_flat_fee?
+                                             0
+                                           else
+                                             80
+                                           end
               end
 
               # Use hours from params if provided
               if params[:hours] && params[:hours][employee_id.to_s]
                 hours_data = params[:hours][employee_id.to_s]
-                payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
-                payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
-                payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
-                payroll_item.pto_hours = hours_data[:pto] if hours_data[:pto]
+                wage_rate_hours = hours_data[:wage_rates] || hours_data["wage_rates"]
+
+                if wage_rate_hours.present?
+                  apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+                else
+                  payroll_item.clear_wage_rate_hours!
+                  payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
+                  payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
+                  payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
+                  payroll_item.pto_hours = hours_data[:pto] if hours_data[:pto]
+                end
               end
 
               # Calculate payroll
@@ -234,9 +267,15 @@ module Api
 
           ActiveRecord::Base.transaction do
             @pay_period.update!(status: "committed", committed_at: Time.current)
+            committed_items = @pay_period.payroll_items.includes(
+              :employee,
+              payroll_item_deductions: :deduction_type,
+              employee: { employee_loans: :loan_transactions }
+            )
 
             # Update YTD totals for all employees
-            @pay_period.payroll_items.each do |item|
+            committed_items.each do |item|
+              PayrollCalculator.for(item.employee, item).apply_loan_payments!
               update_ytd_totals(item)
             end
 
@@ -302,6 +341,7 @@ module Api
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent
               )
+              skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
@@ -357,6 +397,7 @@ module Api
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent
               )
+              skip_default_audit_log!
             rescue StandardError => e
               Rails.logger.error("[CPR-71] AuditLog create_correction_run failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
@@ -469,31 +510,55 @@ module Api
             employee_name: item.employee_full_name,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
+            salary_override: item.salary_override,
+            non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
             bonus: item.bonus,
+            reported_tips: item.reported_tips,
+            additional_withholding: item.additional_withholding,
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
             retirement_payment: item.retirement_payment,
+            roth_retirement_payment: item.roth_retirement_payment,
+            loan_payment: item.loan_payment,
+            insurance_payment: item.insurance_payment,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             employer_social_security_tax: item.employer_social_security_tax,
             employer_medicare_tax: item.employer_medicare_tax,
+            employer_retirement_match: item.employer_retirement_match,
+            employer_roth_retirement_match: item.employer_roth_retirement_match,
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
             check_print_count: item.check_print_count,
             check_status: item.check_status,
+            import_source: item.import_source,
             voided: item.voided,
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
             ytd_gross: item.ytd_gross,
-            ytd_net: item.ytd_net
+            ytd_net: item.ytd_net,
+            wage_rate_hours: item.wage_rate_hours
           }
+        end
+
+        def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
+          payroll_item.wage_rate_hours = wage_rate_hours
+          entries = payroll_item.wage_rate_hours
+
+          payroll_item.hours_worked = entries.sum { |entry| entry["regular_hours"].to_f }
+          payroll_item.overtime_hours = entries.sum { |entry| entry["overtime_hours"].to_f }
+          payroll_item.holiday_hours = entries.sum { |entry| entry["holiday_hours"].to_f }
+          payroll_item.pto_hours = entries.sum { |entry| entry["pto_hours"].to_f }
+
+          primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
+          payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
         end
 
         def correction_event_json(event)

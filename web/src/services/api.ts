@@ -17,6 +17,7 @@ class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
   private authTokenProvider: (() => Promise<string | null>) | null = null;
+  private activeCompanyId: number | null = null;
 
   constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
@@ -28,6 +29,14 @@ class ApiClient {
 
   setAuthTokenProvider(provider: (() => Promise<string | null>) | null) {
     this.authTokenProvider = provider;
+  }
+
+  setActiveCompanyId(companyId: number | null) {
+    this.activeCompanyId = companyId;
+  }
+
+  getActiveCompanyId(): number | null {
+    return this.activeCompanyId;
   }
 
   getAuthToken(): string | null {
@@ -74,6 +83,10 @@ class ApiClient {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
 
+    if (this.activeCompanyId) {
+      (headers as Record<string, string>)['X-Company-Id'] = String(this.activeCompanyId);
+    }
+
     const response = await fetch(url, {
       ...fetchOptions,
       headers,
@@ -114,6 +127,9 @@ class ApiClient {
     if (token) {
       (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
     }
+    if (this.activeCompanyId) {
+      (headers as Record<string, string>)['X-Company-Id'] = String(this.activeCompanyId);
+    }
 
     const response = await fetch(this.buildUrl(endpoint), {
       method: 'POST',
@@ -139,6 +155,7 @@ class ApiClient {
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint), {
       method: 'GET',
@@ -166,6 +183,7 @@ class ApiClient {
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint, params), {
       method: 'GET',
@@ -194,6 +212,7 @@ class ApiClient {
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
 
     const response = await fetch(this.buildUrl(endpoint), {
       method: 'POST',
@@ -268,8 +287,10 @@ import type {
   Department,
   Employee,
   EmployeeFormData,
+  EmployeeWageRate,
   PayPeriod,
   PayrollItem,
+  PayrollItemWageRateHours,
   TimeEntry,
   DashboardStats,
   PaginationMeta,
@@ -282,15 +303,6 @@ import type {
   W2GuFilingReadinessResponse,
   W2GuMarkReadyResponse,
 } from '@/types';
-
-// Companies
-export const companiesApi = {
-  list: () => api.get<Company[]>('/companies'),
-  get: (id: number) => api.get<Company>(`/companies/${id}`),
-  create: (data: Partial<Company>) => api.post<Company>('/companies', { company: data }),
-  update: (id: number, data: Partial<Company>) => api.patch<Company>(`/companies/${id}`, { company: data }),
-  delete: (id: number) => api.delete<void>(`/companies/${id}`),
-};
 
 // Employees (Admin API)
 export const employeesApi = {
@@ -313,6 +325,17 @@ export const employeesApi = {
     api.delete<void>(`/admin/employees/${id}`),
 };
 
+export const employeeWageRatesApi = {
+  list: (employeeId: number) =>
+    api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }),
+  create: (data: EmployeeWageRate & { employee_id: number }) =>
+    api.post<{ wage_rate: EmployeeWageRate }>('/admin/employee_wage_rates', { employee_wage_rate: data }),
+  update: (id: number, data: Partial<EmployeeWageRate>) =>
+    api.patch<{ wage_rate: EmployeeWageRate }>(`/admin/employee_wage_rates/${id}`, { employee_wage_rate: data }),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/employee_wage_rates/${id}`),
+};
+
 // Departments (Admin API)
 export const departmentsApi = {
   list: (params?: { company_id?: number; active?: boolean }) =>
@@ -324,19 +347,29 @@ export const departmentsApi = {
 };
 
 // Users (Admin API)
+interface UserCreateResponse {
+  data: User;
+  invitation_sent: boolean;
+  invitation_error?: string | null;
+}
+
 export const usersApi = {
   list: (params?: { search?: string }) =>
     api.get<{ data: User[] }>('/admin/users', params),
   get: (id: number) =>
     api.get<{ data: User }>(`/admin/users/${id}`),
   create: (data: { email: string; name: string; role: User['role'] }) =>
-    api.post<{ data: User }>('/admin/users', { user: data }),
+    api.post<UserCreateResponse>('/admin/users', { user: data }),
   update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>>) =>
     api.patch<{ data: User }>(`/admin/users/${id}`, { user: data }),
   activate: (id: number) =>
     api.post<{ data: User }>(`/admin/users/${id}/activate`),
   deactivate: (id: number) =>
     api.post<{ data: User }>(`/admin/users/${id}/deactivate`),
+  resendInvitation: (id: number) =>
+    api.post<UserCreateResponse>(`/admin/users/${id}/resend_invitation`),
+  delete: (id: number) =>
+    api.delete(`/admin/users/${id}`),
 };
 
 export interface UserInvitationResponse {
@@ -371,7 +404,7 @@ export interface AuditLogEntry {
 export const auditLogsApi = {
   list: (params?: {
     user_id?: number;
-    action?: string;
+    action_filter?: string;
     record_type?: string;
     record_id?: number;
     from?: string;
@@ -475,6 +508,14 @@ export interface RunPayrollResponse {
   };
 }
 
+export interface RunPayrollHoursEntry {
+  regular?: number;
+  overtime?: number;
+  holiday?: number;
+  pto?: number;
+  wage_rates?: PayrollItemWageRateHours[];
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }) =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params),
@@ -486,7 +527,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, { regular?: number; overtime?: number; holiday?: number; pto?: number }> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
@@ -617,7 +658,7 @@ export const payrollItemsApi = {
     api.get<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { payroll_item: data, auto_calculate: data.auto_calculate }),
-  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean }) =>
+  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean; wage_rate_hours?: PayrollItemWageRateHours[] }) =>
     api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate }),
   delete: (payPeriodId: number, id: number) =>
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
@@ -691,7 +732,7 @@ export interface PayrollRegisterReport {
       total_deductions: number;
       total_net: number;
     };
-    employees: PayrollItem[];
+    employees: Array<PayrollItem & { total_retirement_payment?: number }>;
   };
 }
 
@@ -782,6 +823,26 @@ export const reportsApi = {
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
   w2GuMarkReady: (year: number, notes?: string) =>
     api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
+  // 1099-NEC Annual Report
+  form1099Nec: (year: number) =>
+    api.get('/admin/reports/form_1099_nec', { year }),
+  form1099NecPdf: (year: number) =>
+    api.getBlobWithParams('/admin/reports/form_1099_nec_pdf', { year }),
+  // Payroll parity reports
+  payrollSummaryByEmployeePdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_pdf', { pay_period_id: payPeriodId }),
+  deductionsContributionsPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/deductions_contributions_pdf', { pay_period_id: payPeriodId }),
+  paycheckHistoryPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/paycheck_history_pdf', { pay_period_id: payPeriodId }),
+  retirementPlansPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
+  installmentLoansPdf: (asOfDate?: string) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
+  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
+    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
+    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
 };
 
 // Pay Stubs (Admin API)
@@ -856,6 +917,183 @@ export const checksApi = {
     api.getBlob('/admin/companies/alignment_test_pdf'),
 };
 
+// ============================================================
+// Companies API (Multi-tenant company switching)
+// ============================================================
+export interface CompanyListItem {
+  id: number;
+  name: string;
+  active: boolean;
+  active_employees: number;
+  total_employees: number;
+  pay_frequency: string;
+}
+
+export interface CompanyDetail extends CompanyListItem {
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  ein?: string;
+  phone?: string;
+  email?: string;
+  bank_name?: string;
+  bank_address?: string;
+  check_stock_type?: string;
+  check_offset_x?: number;
+  check_offset_y?: number;
+  check_layout_config?: Record<string, unknown>;
+  next_check_number?: number;
+}
+
+export interface CompanyFormData {
+  name: string;
+  ein?: string;
+  pay_frequency: string;
+  active?: boolean;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  phone?: string;
+  email?: string;
+  bank_name?: string;
+  bank_address?: string;
+  check_stock_type?: string;
+  check_layout_config?: Record<string, unknown>;
+  next_check_number?: number;
+}
+
+export const companiesApi = {
+  list: (params?: { active?: boolean }) => {
+    const query = params?.active !== undefined ? `?active=${params.active}` : '';
+    return api.get<{ companies: CompanyListItem[]; is_super_admin: boolean; can_switch_company: boolean; current_company_id: number }>(`/admin/companies${query}`);
+  },
+  get: (id: number) =>
+    api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`),
+  create: (data: CompanyFormData) =>
+    api.post<{ company: CompanyDetail }>('/admin/companies', { company: data }),
+  update: (id: number, data: Partial<CompanyFormData>) =>
+    api.put<{ company: CompanyDetail }>(`/admin/companies/${id}`, { company: data }),
+  switchCompany: (companyId: number) => {
+    api.setActiveCompanyId(companyId);
+    localStorage.setItem('activeCompanyId', String(companyId));
+  },
+  getActiveCompanyId: (): number | null => {
+    const stored = localStorage.getItem('activeCompanyId');
+    return stored ? parseInt(stored, 10) : null;
+  },
+  initFromStorage: () => {
+    const stored = localStorage.getItem('activeCompanyId');
+    if (stored) {
+      api.setActiveCompanyId(parseInt(stored, 10));
+    }
+  },
+};
+
+// Initialize from localStorage on module load
+companiesApi.initFromStorage();
+
+// ============================================================
+// Company Assignments (RBAC)
+// ============================================================
+export interface CompanyAssignment {
+  id: number;
+  user_id: number;
+  user_name: string;
+  user_email: string;
+  company_id: number;
+  company_name: string;
+  created_at: string;
+}
+
+export const companyAssignmentsApi = {
+  list: (userId?: number) =>
+    api.get<{ data: CompanyAssignment[] }>(`/admin/company_assignments${userId ? `?user_id=${userId}` : ''}`),
+  create: (data: { user_id: number; company_id: number }) =>
+    api.post<{ data: CompanyAssignment }>('/admin/company_assignments', { company_assignment: data }),
+  remove: (id: number) =>
+    api.delete(`/admin/company_assignments/${id}`),
+  bulkUpdate: (userId: number, companyIds: number[]) =>
+    api.put<{ data: CompanyAssignment[] }>('/admin/company_assignments/bulk_update', {
+      user_id: userId,
+      company_ids: companyIds,
+    }),
+};
+
+// ============================================================
+// Payroll Parity Reports (PDF Downloads)
+// ============================================================
+export const payrollReportsApi = {
+  payrollSummaryByEmployeePdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_pdf', { pay_period_id: payPeriodId }),
+  deductionsContributionsPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/deductions_contributions_pdf', { pay_period_id: payPeriodId }),
+  paycheckHistoryPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/paycheck_history_pdf', { pay_period_id: payPeriodId }),
+  retirementPlansPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
+  installmentLoansPdf: (asOfDate?: string) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
+  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
+    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
+    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+};
+
+// ============================================================
+// Employee Loans API
+// ============================================================
+import type { EmployeeLoan, NonEmployeeCheck } from '../types';
+
+export const employeeLoansApi = {
+  list: (params?: { employee_id?: number; status?: string }) =>
+    api.get<{ loans: EmployeeLoan[] }>('/admin/employee_loans', params),
+  get: (id: number) =>
+    api.get<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`),
+  create: (data: {
+    employee_id: number; name: string; original_amount: number;
+    payment_amount?: number; start_date?: string; deduction_type_id?: number; notes?: string;
+  }) =>
+    api.post<{ loan: EmployeeLoan }>('/admin/employee_loans', { employee_loan: data }),
+  update: (id: number, data: Partial<{ name: string; payment_amount: number; status: string; notes: string; deduction_type_id: number }>) =>
+    api.patch<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}`, { employee_loan: data }),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/employee_loans/${id}`),
+  recordPayment: (id: number, amount: number, date?: string) =>
+    api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date }),
+  recordAddition: (id: number, amount: number, date?: string, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/record_addition`, { amount, date, notes }),
+};
+
+// ============================================================
+// Non-Employee Checks API
+// ============================================================
+export const nonEmployeeChecksApi = {
+  list: (params?: { pay_period_id?: number; check_type?: string; active?: string }) =>
+    api.get<{ non_employee_checks: NonEmployeeCheck[] }>('/admin/non_employee_checks', params),
+  get: (id: number) =>
+    api.get<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}`),
+  create: (data: {
+    pay_period_id: number; payable_to: string; amount: number; check_type: string;
+    memo?: string; description?: string; reference_number?: string; check_number?: string;
+  }) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>('/admin/non_employee_checks', { non_employee_check: data }),
+  update: (id: number, data: Partial<{
+    payable_to: string; amount: number; check_type: string;
+    memo: string; description: string; reference_number: string;
+  }>) =>
+    api.patch<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}`, { non_employee_check: data }),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/non_employee_checks/${id}`),
+  markPrinted: (id: number) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
+  voidCheck: (id: number, reason: string) =>
+    api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
+};
+
 // Legacy dashboard (for migration)
 export const dashboardApi = {
   stats: (companyId: number) => api.get<DashboardStats>(`/companies/${companyId}/dashboard`),
@@ -863,10 +1101,10 @@ export const dashboardApi = {
 
 // Auth
 export const authApi = {
-  me: () => api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me'),
+  me: () => api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string; super_admin: boolean; home_company_id: number } }>('/auth/me'),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string } }>('/auth/me');
+    return api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string; super_admin: boolean; home_company_id: number } }>('/auth/me');
   },
   logout: () => {
     api.setAuthToken(null);

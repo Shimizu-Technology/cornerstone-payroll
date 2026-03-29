@@ -13,7 +13,8 @@ require "prawn/table"
 #   pdf_bytes   = W2GuPdfGenerator.new(report_data).generate
 #
 class W2GuPdfGenerator
-  # Colors
+  include PdfFooter
+
   HEADER_BG    = "2B4090"   # deep blue
   SECTION_BG   = "F0F4FF"   # light blue tint
   ALERT_BG     = "FFF3CD"   # amber for caveats
@@ -29,9 +30,8 @@ class W2GuPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 36, 36, 36 ])
+    pdf = Prawn::Document.new(page_size: "LETTER", margin: [36, 36, 50, 36])
     render_document(pdf)
-    pdf.render
   end
 
   def filename
@@ -45,10 +45,15 @@ class W2GuPdfGenerator
     render_header(pdf)
     render_employer_block(pdf)
     render_totals_block(pdf)
+    render_box12_13_block(pdf)
     render_compliance_block(pdf)
     render_caveats_block(pdf)
     render_employee_table(pdf)
-    render_footer(pdf)
+
+    render_with_footer(pdf,
+      "W-2GU Filing Preparation Summary \u2014 #{report.dig(:employer, :name)} \u2014 #{report.dig(:meta, :year)} \u2014 Generated #{report.dig(:meta, :generated_at)} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
+      font_size: 7
+    )
   end
 
   # ─── Header ────────────────────────────────────────────────────────────────
@@ -134,6 +139,42 @@ class W2GuPdfGenerator
       column(0).text_color = TEXT_DARK
       column(1).text_color = TEXT_DARK
       row(0).borders = [ :top, :left, :right, :bottom ]
+    end
+
+    pdf.fill_color TEXT_DARK
+    pdf.move_down 14
+  end
+
+  # ─── Box 12 & 13 Summary ────────────────────────────────────────────────────
+
+  def render_box12_13_block(pdf)
+    totals = report[:totals] || {}
+
+    has_box12 = (totals[:box12_code_d_total].to_f > 0 || totals[:box12_code_aa_total].to_f > 0)
+    has_box13 = totals[:retirement_plan_participants].to_i > 0
+
+    return unless has_box12 || has_box13
+
+    pdf.font_size(11) { pdf.text "Box 12 & 13 Summary", style: :bold }
+    pdf.move_down 4
+
+    rows = []
+    rows << [ "Box 12 Code D \u2014 401(k) Elective Deferrals", fmt(totals[:box12_code_d_total]) ] if totals[:box12_code_d_total].to_f > 0
+    rows << [ "Box 12 Code AA \u2014 Roth 401(k) Contributions", fmt(totals[:box12_code_aa_total]) ] if totals[:box12_code_aa_total].to_f > 0
+    rows << [ "Box 13 \u2014 Retirement Plan Participants", "#{totals[:retirement_plan_participants]} employee(s)" ] if has_box13
+
+    table_data = rows.map { |label, val|
+      [ { content: label, font_style: :bold }, { content: val, align: :right } ]
+    }
+
+    pdf.table(table_data,
+      width: pdf.bounds.width,
+      cell_style: { size: 9, padding: [ 4, 8 ], border_color: BORDER_GRAY }
+    ) do
+      column(0).width = 300
+      column(0).background_color = SECTION_BG
+      column(0).text_color = TEXT_DARK
+      column(1).text_color = TEXT_DARK
     end
 
     pdf.fill_color TEXT_DARK
@@ -296,26 +337,6 @@ class W2GuPdfGenerator
       { content: fmt(emp[:box6_medicare_tax_withheld]), align: :right },
       { content: "#{fmt(emp[:box7_social_security_tips])}#{tip_cap}", align: :right }
     ]
-  end
-
-  # ─── Footer ─────────────────────────────────────────────────────────────────
-
-  def render_footer(pdf)
-    pdf.repeat(:all) do
-      pdf.bounding_box([ pdf.bounds.left, pdf.bounds.bottom + 18 ], width: pdf.bounds.width) do
-        pdf.stroke_horizontal_rule
-        pdf.move_down 4
-        pdf.fill_color TEXT_MUTED
-        pdf.font_size(7) do
-          pdf.text(
-            "W-2GU Filing Preparation Summary — #{report.dig(:employer, :name)} — #{report.dig(:meta, :year)} — " \
-            "Generated #{report.dig(:meta, :generated_at)} — CONFIDENTIAL, FOR INTERNAL USE ONLY",
-            align: :center
-          )
-        end
-        pdf.fill_color TEXT_DARK
-      end
-    end
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────

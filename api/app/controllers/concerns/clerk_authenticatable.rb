@@ -131,11 +131,14 @@ module ClerkAuthenticatable
     email = clerk_user.dig("email_addresses", 0, "email_address")&.strip&.downcase
     return nil unless email
 
-    # Check if user exists by email (could have been invited before signing up)
-    # Use transaction + retry to handle race conditions on concurrent requests
+    # Check if user exists by email (invited user signing in for first time)
     user = User.find_by("LOWER(email) = ?", email)
     if user
-      user.update!(clerk_id: payload["sub"])
+      attrs = { clerk_id: payload["sub"] }
+      attrs[:invitation_status] = "accepted" if user.invitation_pending?
+      clerk_name = [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence
+      attrs[:name] = clerk_name if clerk_name.present?
+      user.update!(attrs)
       return user
     end
 
@@ -187,13 +190,5 @@ module ClerkAuthenticatable
 
   def current_user
     @current_user
-  end
-
-  def current_company
-    @current_company ||= current_user&.company
-  end
-
-  def current_company_id
-    current_user&.company_id
   end
 end

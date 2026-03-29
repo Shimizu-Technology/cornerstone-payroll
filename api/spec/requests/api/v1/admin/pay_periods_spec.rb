@@ -365,4 +365,72 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(JSON.parse(response.body)["error"]).to match(/missing source pay period linkage/)
     end
   end
+
+  describe "POST /api/v1/admin/pay_periods/:id/commit" do
+    before do
+      pay_period.update!(status: "approved")
+      TaxTable.find_or_create_by!(
+        tax_year: pay_period.pay_date.year,
+        filing_status: "single",
+        pay_frequency: "biweekly"
+      ) do |t|
+        t.ss_rate = 0.062
+        t.ss_wage_base = 184_500.00
+        t.medicare_rate = 0.0145
+        t.allowance_amount = 192.31
+        t.bracket_data = [
+          { min_income: 0, max_income: 476.92, rate: 0.10, base_tax: 0, threshold: 0 },
+          { min_income: 476.93, max_income: 1938.46, rate: 0.12, base_tax: 47.69, threshold: 476.93 },
+          { min_income: 1938.47, max_income: 999999999, rate: 0.22, base_tax: 223.07, threshold: 1938.47 }
+        ]
+      end
+    end
+
+    it "records loan payments when payroll is committed" do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Employee Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 50.0,
+        is_percentage: false,
+        active: true
+      )
+      loan = EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        deduction_type: deduction_type,
+        name: "Tool Advance",
+        original_amount: 200.0,
+        current_balance: 200.0,
+        payment_amount: 50.0,
+        status: "active"
+      )
+
+      payroll_item = PayrollItem.create!(
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 80,
+        overtime_hours: 0,
+        reported_tips: 0,
+        bonus: 0
+      )
+      payroll_item.calculate!
+
+      expect {
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+      }.to change { loan.reload.current_balance }.from(200.0).to(150.0)
+        .and change { loan.loan_transactions.payments.count }.by(1)
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
 end

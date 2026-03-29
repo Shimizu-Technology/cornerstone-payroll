@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_28_073942) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -68,6 +68,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.string "address_line2"
     t.string "bank_address"
     t.string "bank_name"
+    t.jsonb "check_layout_config", default: {}, null: false
     t.decimal "check_offset_x", precision: 5, scale: 3, default: "0.0", null: false
     t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
     t.string "check_stock_type", default: "bottom_check", null: false
@@ -84,6 +85,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.string "zip"
     t.index ["ein"], name: "index_companies_on_ein", unique: true
     t.index ["name"], name: "index_companies_on_name"
+  end
+
+  create_table "company_assignments", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["company_id"], name: "index_company_assignments_on_company_id"
+    t.index ["user_id", "company_id"], name: "index_company_assignments_on_user_id_and_company_id", unique: true
+    t.index ["user_id"], name: "index_company_assignments_on_user_id"
   end
 
   create_table "company_ytd_totals", force: :cascade do |t|
@@ -110,11 +121,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.decimal "default_amount", precision: 10, scale: 2
+    t.boolean "generates_check", default: false, null: false
     t.boolean "is_percentage", default: false
     t.string "name", null: false
+    t.string "payee_name"
+    t.string "reference_number"
+    t.string "sub_category"
     t.datetime "updated_at", null: false
     t.index ["category"], name: "index_deduction_types_on_category"
     t.index ["company_id", "name"], name: "index_deduction_types_on_company_id_and_name", unique: true
+    t.index ["company_id", "sub_category"], name: "index_deduction_types_on_company_id_and_sub_category"
     t.index ["company_id"], name: "index_deduction_types_on_company_id"
   end
 
@@ -156,6 +172,39 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.index ["employee_id"], name: "index_employee_deductions_on_employee_id"
   end
 
+  create_table "employee_loans", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.decimal "current_balance", precision: 10, scale: 2, default: "0.0", null: false
+    t.bigint "deduction_type_id"
+    t.bigint "employee_id", null: false
+    t.string "name", null: false
+    t.text "notes"
+    t.decimal "original_amount", precision: 10, scale: 2, null: false
+    t.date "paid_off_date"
+    t.decimal "payment_amount", precision: 10, scale: 2
+    t.date "start_date"
+    t.string "status", default: "active", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_employee_loans_on_company_id_and_status"
+    t.index ["company_id"], name: "index_employee_loans_on_company_id"
+    t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
+    t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
+    t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
+  end
+
+  create_table "employee_wage_rates", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.boolean "is_primary", default: false, null: false
+    t.string "label", null: false
+    t.decimal "rate", precision: 12, scale: 6
+    t.datetime "updated_at", null: false
+    t.index ["employee_id", "label"], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
+    t.index ["employee_id"], name: "index_employee_wage_rates_on_employee_id"
+  end
+
   create_table "employee_ytd_totals", force: :cascade do |t|
     t.decimal "bonus", precision: 14, scale: 2, default: "0.0"
     t.datetime "created_at", null: false
@@ -184,12 +233,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.integer "allowances", default: 0
     t.string "bank_account_number_encrypted"
     t.string "bank_routing_number_encrypted"
+    t.string "business_name"
     t.string "city"
     t.bigint "company_id", null: false
+    t.string "contractor_ein"
+    t.string "contractor_pay_type", default: "flat_fee"
+    t.string "contractor_type", default: "individual"
     t.datetime "created_at", null: false
     t.date "date_of_birth"
     t.bigint "department_id"
     t.string "email"
+    t.decimal "employer_retirement_match_rate", precision: 5, scale: 4, default: "0.0"
+    t.decimal "employer_roth_match_rate", precision: 5, scale: 4, default: "0.0"
     t.string "employment_type", default: "hourly", null: false
     t.string "filing_status", default: "single"
     t.string "first_name", null: false
@@ -206,6 +261,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.string "status", default: "active"
     t.date "termination_date"
     t.datetime "updated_at", null: false
+    t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
+    t.boolean "w4_step2_multiple_jobs", default: false, null: false
+    t.decimal "w4_step4a_other_income", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
+    t.boolean "w9_on_file", default: false, null: false
     t.string "zip"
     t.index ["company_id", "last_name", "first_name"], name: "index_employees_on_company_id_and_last_name_and_first_name"
     t.index ["company_id"], name: "index_employees_on_company_id"
@@ -222,6 +282,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.datetime "updated_at", null: false
     t.index ["annual_tax_config_id", "filing_status"], name: "idx_filing_status_configs_unique", unique: true
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
+  create_table "loan_transactions", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.decimal "balance_after", precision: 10, scale: 2, null: false
+    t.decimal "balance_before", precision: 10, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_loan_id", null: false
+    t.text "notes"
+    t.bigint "pay_period_id"
+    t.bigint "payroll_item_id"
+    t.date "transaction_date", null: false
+    t.string "transaction_type", null: false
+    t.datetime "updated_at", null: false
+    t.index ["employee_loan_id", "pay_period_id"], name: "idx_loan_txns_on_loan_and_pp"
+    t.index ["employee_loan_id"], name: "index_loan_transactions_on_employee_loan_id"
+    t.index ["pay_period_id"], name: "index_loan_transactions_on_pay_period_id"
+    t.index ["payroll_item_id"], name: "index_loan_transactions_on_payroll_item_id"
+    t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
+  end
+
+  create_table "non_employee_checks", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "check_number"
+    t.string "check_type", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.text "description"
+    t.string "memo"
+    t.bigint "pay_period_id", null: false
+    t.string "payable_to", null: false
+    t.integer "print_count", default: 0, null: false
+    t.datetime "printed_at"
+    t.string "reference_number"
+    t.datetime "updated_at", null: false
+    t.string "void_reason"
+    t.boolean "voided", default: false, null: false
+    t.datetime "voided_at"
+    t.index ["check_type"], name: "index_non_employee_checks_on_check_type"
+    t.index ["company_id", "check_number"], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
+    t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
+    t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
+    t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
   end
 
   create_table "pay_period_correction_events", force: :cascade do |t|
@@ -296,6 +400,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.index ["pay_period_id"], name: "index_payroll_imports_on_pay_period_id"
   end
 
+  create_table "payroll_item_deductions", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "category", null: false
+    t.datetime "created_at", null: false
+    t.bigint "deduction_type_id", null: false
+    t.string "label", null: false
+    t.bigint "payroll_item_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["deduction_type_id"], name: "index_payroll_item_deductions_on_deduction_type_id"
+    t.index ["payroll_item_id", "deduction_type_id"], name: "idx_pi_deductions_on_pi_and_dt", unique: true
+    t.index ["payroll_item_id"], name: "index_payroll_item_deductions_on_payroll_item_id"
+  end
+
+  create_table "payroll_item_earnings", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "category", null: false
+    t.datetime "created_at", null: false
+    t.decimal "hours", precision: 8, scale: 2, default: "0.0"
+    t.string "label", null: false
+    t.bigint "payroll_item_id", null: false
+    t.decimal "rate", precision: 12, scale: 6
+    t.datetime "updated_at", null: false
+    t.index ["payroll_item_id", "category", "label"], name: "idx_pi_earnings_on_pi_cat_label", unique: true
+    t.index ["payroll_item_id"], name: "index_payroll_item_earnings_on_payroll_item_id"
+  end
+
   create_table "payroll_items", force: :cascade do |t|
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
@@ -307,6 +437,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.jsonb "custom_columns_data", default: {}
     t.bigint "employee_id", null: false
     t.decimal "employer_medicare_tax", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "employer_retirement_match", precision: 10, scale: 2, default: "0.0"
+    t.decimal "employer_roth_retirement_match", precision: 10, scale: 2, default: "0.0"
     t.decimal "employer_social_security_tax", precision: 10, scale: 2, default: "0.0", null: false
     t.string "employment_type", null: false
     t.decimal "gross_pay", precision: 12, scale: 2, default: "0.0"
@@ -318,6 +450,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.decimal "loan_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "medicare_tax", precision: 10, scale: 2, default: "0.0"
     t.decimal "net_pay", precision: 12, scale: 2, default: "0.0"
+    t.decimal "non_taxable_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
     t.bigint "pay_period_id", null: false
     t.decimal "pay_rate", precision: 12, scale: 6, null: false
@@ -326,6 +459,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
     t.string "reprint_of_check_number"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
+    t.decimal "salary_override", precision: 12, scale: 2
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
     t.string "tip_pool"
     t.decimal "tips", precision: 10, scale: 2, default: "0.0"
@@ -433,12 +567,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   create_table "users", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.string "clerk_id"
+    t.string "clerk_invitation_id"
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.string "email", null: false
+    t.string "invitation_status", default: "accepted", null: false
+    t.datetime "invited_at"
+    t.bigint "invited_by_id"
     t.datetime "last_login_at"
     t.string "name", null: false
     t.integer "role", default: 0, null: false
+    t.boolean "super_admin", default: false, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
     t.index ["clerk_id"], name: "index_users_on_clerk_id", unique: true
@@ -469,16 +608,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   add_foreign_key "audit_logs", "users"
   add_foreign_key "check_events", "payroll_items"
   add_foreign_key "check_events", "users", on_delete: :nullify
+  add_foreign_key "company_assignments", "companies"
+  add_foreign_key "company_assignments", "users"
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "departments", "companies"
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
+  add_foreign_key "employee_loans", "companies"
+  add_foreign_key "employee_loans", "deduction_types"
+  add_foreign_key "employee_loans", "employees"
+  add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
+  add_foreign_key "loan_transactions", "employee_loans"
+  add_foreign_key "loan_transactions", "pay_periods"
+  add_foreign_key "loan_transactions", "payroll_items"
+  add_foreign_key "non_employee_checks", "companies"
+  add_foreign_key "non_employee_checks", "pay_periods"
+  add_foreign_key "non_employee_checks", "users", column: "created_by_id"
   add_foreign_key "pay_period_correction_events", "companies", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
@@ -488,6 +639,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
+  add_foreign_key "payroll_item_deductions", "deduction_types"
+  add_foreign_key "payroll_item_deductions", "payroll_items"
+  add_foreign_key "payroll_item_earnings", "payroll_items"
   add_foreign_key "payroll_items", "companies", on_delete: :restrict
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
@@ -498,6 +652,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_16_000104) do
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
+  add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
 end

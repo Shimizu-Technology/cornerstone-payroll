@@ -19,11 +19,11 @@ class ApplicationController < ActionController::API
   end
 
   def current_company
-    @current_company ||= current_user&.company
+    @current_company ||= Company.find_by(id: current_company_id)
   end
 
   def current_company_id
-    current_user&.company_id
+    @current_company_id ||= resolve_company_id
   end
 
   def current_user_id
@@ -45,5 +45,20 @@ class ApplicationController < ActionController::API
   # Backward-compatible alias used by admin base controller.
   def require_admin_or_manager!
     require_manager_or_admin!
+  end
+
+  # Super admins can switch to any company via X-Company-Id header.
+  # Accountants can switch to their assigned companies.
+  # Regular users are always scoped to their own company.
+  def resolve_company_id
+    header_company_id = request.headers["X-Company-Id"].presence&.to_i
+
+    if header_company_id && current_user
+      if current_user.can_access_company?(header_company_id)
+        return header_company_id
+      end
+    end
+
+    current_user&.company_id
   end
 end

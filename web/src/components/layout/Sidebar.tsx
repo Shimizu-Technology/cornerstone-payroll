@@ -1,7 +1,8 @@
 import { NavLink } from 'react-router-dom';
-import { UserCog, ClipboardList } from 'lucide-react';
+import { UserCog, ClipboardList, Shield, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { CompanySwitcher } from './CompanySwitcher';
 
 interface NavItem {
   name: string;
@@ -9,7 +10,7 @@ interface NavItem {
   icon: React.ReactNode;
 }
 
-const navigation: NavItem[] = [
+const clientNavigation: NavItem[] = [
   {
     name: 'Dashboard',
     href: '/',
@@ -65,6 +66,23 @@ const navigation: NavItem[] = [
     ),
   },
   {
+    name: 'Employee Loans',
+    href: '/employee-loans',
+    icon: (
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+];
+
+const adminNavigation: NavItem[] = [
+  {
+    name: 'Client Management',
+    href: '/settings/clients',
+    icon: <Building2 className="w-5 h-5" />,
+  },
+  {
     name: 'Tax Configuration',
     href: '/settings/tax-config',
     icon: (
@@ -74,24 +92,45 @@ const navigation: NavItem[] = [
       </svg>
     ),
   },
+  {
+    name: 'User Management',
+    href: '/settings/users',
+    icon: <UserCog className="w-5 h-5" />,
+  },
+  {
+    name: 'Audit Logs',
+    href: '/settings/audit-logs',
+    icon: <ClipboardList className="w-5 h-5" />,
+  },
 ];
+
+function NavSection({ items }: { items: NavItem[] }) {
+  return (
+    <>
+      {items.map((item) => (
+        <NavLink
+          key={item.name}
+          to={item.href}
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+              isActive
+                ? 'bg-primary-50 text-primary-700'
+                : 'text-gray-700 hover:bg-gray-100'
+            )
+          }
+        >
+          {item.icon}
+          {item.name}
+        </NavLink>
+      ))}
+    </>
+  );
+}
 
 export function Sidebar() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-
-  const adminNavigation: NavItem[] = [
-    {
-      name: 'User Management',
-      href: '/settings/users',
-      icon: <UserCog className="w-5 h-5" />,
-    },
-    {
-      name: 'Audit Logs',
-      href: '/settings/audit-logs',
-      icon: <ClipboardList className="w-5 h-5" />,
-    },
-  ];
 
   return (
     <div className="flex flex-col w-64 bg-white border-r border-gray-200">
@@ -105,42 +144,32 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* Company Switcher */}
+      <CompanySwitcher />
+
       {/* Navigation */}
-      <nav className="flex-1 px-4 py-4 space-y-1 overflow-y-auto">
-        {navigation.map((item) => (
-          <NavLink
-            key={item.name}
-            to={item.href}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-                isActive
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-700 hover:bg-gray-100'
-              )
-            }
-          >
-            {item.icon}
-            {item.name}
-          </NavLink>
-        ))}
-        {isAdmin && adminNavigation.map((item) => (
-          <NavLink
-            key={item.name}
-            to={item.href}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors',
-                isActive
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-700 hover:bg-gray-100'
-              )
-            }
-          >
-            {item.icon}
-            {item.name}
-          </NavLink>
-        ))}
+      <nav className="flex-1 px-4 py-4 overflow-y-auto">
+        {/* Client-scoped navigation */}
+        <div className="space-y-1">
+          <NavSection items={clientNavigation} />
+        </div>
+
+        {/* Administration section — global, not client-scoped */}
+        {isAdmin && (
+          <>
+            <div className="my-4 px-3">
+              <div className="flex items-center gap-2 border-t border-gray-200 pt-4">
+                <Shield className="w-3.5 h-3.5 text-gray-400" />
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Administration
+                </span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <NavSection items={adminNavigation} />
+            </div>
+          </>
+        )}
       </nav>
 
       {/* User info */}
