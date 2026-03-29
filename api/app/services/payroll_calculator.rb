@@ -198,12 +198,20 @@ class PayrollCalculator
       payroll_item.non_taxable_pay.to_f
     ).round(2)
 
+    itemized_loan_payment = payroll_item.payroll_item_deductions
+      .select { |deduction| deduction.post_tax? && deduction.deduction_type&.loan? }
+      .sum(&:amount)
+
     imported_loan_payment = 0.0
 
     # Sync loan_deduction from import for imported rows
     if payroll_item.import_source.present? && payroll_item.loan_deduction.to_f > 0
-      imported_loan_payment = payroll_item.loan_deduction.to_f
-      payroll_item.loan_payment = payroll_item.loan_payment.to_f + imported_loan_payment
+      if itemized_loan_payment.zero?
+        imported_loan_payment = payroll_item.loan_deduction.to_f
+        payroll_item.loan_payment = imported_loan_payment
+      else
+        payroll_item.loan_payment = itemized_loan_payment
+      end
     end
 
     # Sum itemized deductions from payroll_item_deductions if present
@@ -270,16 +278,22 @@ class PayrollCalculator
 
   def find_or_create_employer_deduction_type(label)
     company = payroll_item.company || pay_period.company
-    existing = company.deduction_types.find_by(name: label)
-    return ensure_employer_contribution_type!(existing) if existing
+    existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
+    return existing if existing
+
+    legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
+    return ensure_employer_contribution_type!(legacy) if legacy
 
     company.deduction_types.create!(
       name: label,
       category: "employer_contribution",
       sub_category: "retirement"
     )
-  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
-    ensure_employer_contribution_type!(company.deduction_types.find_by!(name: label))
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+    existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
+    return existing if existing
+
+    raise e
   end
 
   def skip_employee_deduction?(deduction_type)
@@ -311,6 +325,11 @@ class PayrollCalculator
 
   def ensure_employer_contribution_type!(deduction_type)
     return deduction_type if deduction_type.employer_contribution?
+
+    if deduction_type.employee_deductions.exists?
+      deduction_type.errors.add(:base, "#{deduction_type.name} is already used by employee deductions and cannot be repurposed as an employer contribution")
+      raise ActiveRecord::RecordInvalid.new(deduction_type)
+    end
 
     deduction_type.update!(category: "employer_contribution")
     deduction_type

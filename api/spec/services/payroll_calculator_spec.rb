@@ -25,11 +25,11 @@ RSpec.describe PayrollCalculator do
       relation = company.deduction_types
       allow(payroll_item).to receive(:company).and_return(company)
       allow(company).to receive(:deduction_types).and_return(relation)
-      allow(relation).to receive(:find_by).with(name: label).and_return(nil)
+      allow(relation).to receive(:find_by).with(name: label, category: "employer_contribution").and_return(nil, existing)
+      allow(relation).to receive(:find_by).with(name: label, category: "pre_tax", sub_category: "retirement").and_return(nil)
       allow(relation).to receive(:create!)
         .with(name: label, category: "employer_contribution", sub_category: "retirement")
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value"))
-      allow(relation).to receive(:find_by!).with(name: label).and_return(existing)
 
       result = calculator.send(:find_or_create_employer_deduction_type, label)
 
@@ -49,6 +49,30 @@ RSpec.describe PayrollCalculator do
       result = calculator.send(:find_or_create_employer_deduction_type, legacy.name)
 
       expect(result.reload.category).to eq("employer_contribution")
+    end
+
+    it "does not mutate a same-name deduction type that is already assigned to employees" do
+      calculator = described_class.new(employee, payroll_item)
+      conflicting = DeductionType.create!(
+        company: company,
+        name: "401(k) Employer Match",
+        category: "pre_tax",
+        sub_category: "retirement",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: conflicting,
+        amount: 10.00,
+        is_percentage: false,
+        active: true
+      )
+
+      expect {
+        calculator.send(:find_or_create_employer_deduction_type, conflicting.name)
+      }.to raise_error(ActiveRecord::RecordInvalid)
+
+      expect(conflicting.reload.category).to eq("pre_tax")
     end
   end
 end
