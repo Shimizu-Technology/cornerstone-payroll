@@ -412,4 +412,54 @@ RSpec.describe HourlyPayrollCalculator do
       )
     end
   end
+
+  describe "with pre-tax insurance deductions" do
+    let(:employee) do
+      create(:employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        filing_status: "single"
+      )
+    end
+
+    let(:payroll_item) do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40
+      )
+    end
+
+    it "does not double-count pre-tax insurance in total deductions" do
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Pre-Tax Medical",
+        category: "pre_tax",
+        sub_category: "insurance",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 10.00,
+        is_percentage: false,
+        active: true
+      )
+
+      calculator = described_class.new(employee, payroll_item)
+      calculator.calculate
+
+      expect(payroll_item.insurance_payment).to eq(10.00)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax.to_f +
+        payroll_item.social_security_tax.to_f +
+        payroll_item.medicare_tax.to_f +
+        10.00
+      )
+    end
+  end
 end
