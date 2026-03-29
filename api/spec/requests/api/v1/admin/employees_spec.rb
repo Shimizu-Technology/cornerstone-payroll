@@ -14,6 +14,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       active: true
     )
   end
+  let!(:accountant_user) do
+    User.create!(
+      company: company,
+      email: "accountant-#{company.id}@example.com",
+      name: "Accountant User",
+      role: "accountant",
+      active: true
+    )
+  end
 
   before do
     allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_company_id).and_return(company.id)
@@ -221,6 +230,27 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         json = response.parsed_body
         expect(json["details"]).to have_key("pay_rate")
       end
+    end
+
+    it "forbids accountants from creating employees" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+      expect {
+        post "/api/v1/admin/employees", params: valid_params
+      }.not_to change(Employee, :count)
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq("Manager or admin access required")
+    end
+  end
+
+  describe "GET /api/v1/admin/employees as accountant" do
+    it "still allows read access" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+      get "/api/v1/admin/employees"
+
+      expect(response).to have_http_status(:ok)
     end
   end
 

@@ -225,8 +225,10 @@ class PayrollCalculator
       end
     end
 
+    has_itemized_deductions = payroll_item.payroll_item_deductions.any?
+
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
-    post_tax_deductions = if itemized_post_tax > 0
+    post_tax_deductions = if has_itemized_deductions
       itemized_post_tax + imported_loan_payment
     else
       payroll_item.loan_payment.to_f + payroll_item.insurance_payment.to_f
