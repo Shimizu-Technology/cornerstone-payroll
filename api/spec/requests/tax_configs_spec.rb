@@ -3,6 +3,31 @@
 require "rails_helper"
 
 RSpec.describe "Tax Configs Admin API", type: :request do
+  let!(:company) { create(:company, name: "Tax Config Staff HQ") }
+  let!(:admin_user) do
+    User.create!(
+      company: company,
+      email: "tax-admin@example.com",
+      name: "Tax Admin",
+      role: "admin",
+      active: true
+    )
+  end
+  let!(:accountant_user) do
+    User.create!(
+      company: company,
+      email: "tax-accountant@example.com",
+      name: "Tax Accountant",
+      role: "accountant",
+      active: true
+    )
+  end
+
+  before do
+    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(admin_user)
+    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(admin_user.id)
+  end
+
   describe "GET /api/v1/admin/tax_configs" do
     it "returns all tax configs" do
       create(:annual_tax_config, tax_year: 2500)
@@ -88,6 +113,23 @@ RSpec.describe "Tax Configs Admin API", type: :request do
                additional_medicare_threshold: 200_000
              }
       }.to change(TaxConfigAuditLog, :count).by(1)
+    end
+
+    it "forbids accountants from creating tax configs" do
+      allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(accountant_user)
+
+      post "/api/v1/admin/tax_configs",
+           params: {
+             tax_year: 2810,
+             ss_wage_base: 175_000,
+             ss_rate: 0.062,
+             medicare_rate: 0.0145,
+             additional_medicare_rate: 0.009,
+             additional_medicare_threshold: 200_000
+           }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq("Admin access required")
     end
   end
 

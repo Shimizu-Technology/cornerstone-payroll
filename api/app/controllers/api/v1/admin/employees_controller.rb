@@ -120,11 +120,16 @@ module Api
           scope = scope.where(status: params[:status]) if params[:status].present?
           scope = scope.where(employment_type: params[:employment_type]) if params[:employment_type].present?
           if params[:search].present?
-            search_term = "%#{params[:search]}%"
-            scope = scope.where(
-              "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q",
-              q: search_term
-            )
+            tokens = params[:search].to_s.strip.split(/\s+/).map do |token|
+              "%#{ActiveRecord::Base.sanitize_sql_like(token)}%"
+            end
+
+            tokens.each do |token|
+              scope = scope.where(
+                "first_name ILIKE :q OR last_name ILIKE :q OR email ILIKE :q OR CONCAT_WS(' ', first_name, last_name) ILIKE :q",
+                q: token
+              )
+            end
           end
           scope
         end

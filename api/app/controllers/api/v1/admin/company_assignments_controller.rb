@@ -86,7 +86,7 @@ module Api
         private
 
         def staff_company_id
-          current_user.super_admin? ? current_company_id : current_user.company_id
+          current_user.company_id
         end
 
         def scoped_users

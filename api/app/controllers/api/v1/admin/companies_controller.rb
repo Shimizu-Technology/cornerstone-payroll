@@ -9,11 +9,21 @@ module Api
         # regular users see only their own.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
-          companies = Company.where(id: accessible_ids).includes(:employees).order(:name)
+          companies = Company.where(id: accessible_ids).order(:name)
           companies = companies.where(active: true) if params[:active] == "true"
 
+          company_ids = companies.pluck(:id)
+          total_employee_counts = employee_counts_by_company(company_ids)
+          active_employee_counts = employee_counts_by_company(company_ids, active_only: true)
+
           render json: {
-            companies: companies.map { |c| company_payload(c) },
+            companies: companies.map do |company|
+              company_payload(
+                company,
+                total_employee_counts: total_employee_counts,
+                active_employee_counts: active_employee_counts
+              )
+            end,
             is_super_admin: current_user&.super_admin? || false,
             can_switch_company: current_user&.super_admin? || accessible_ids.length > 1,
             current_company_id: current_company_id
@@ -81,15 +91,13 @@ module Api
           )
         end
 
-        def company_payload(company, detailed: false)
-          employees = company.association(:employees).loaded? ? company.employees.to_a : nil
-
+        def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)
           payload = {
             id: company.id,
             name: company.name,
             active: company.active,
-            active_employees: employees ? employees.count(&:active?) : company.employees.active.count,
-            total_employees: employees ? employees.length : company.employees.count,
+            active_employees: active_employee_counts&.fetch(company.id, 0) || company.employees.active.count,
+            total_employees: total_employee_counts&.fetch(company.id, 0) || company.employees.count,
             pay_frequency: company.pay_frequency
           }
 
@@ -114,6 +122,14 @@ module Api
           end
 
           payload
+        end
+
+        def employee_counts_by_company(company_ids, active_only: false)
+          return {} if company_ids.empty?
+
+          scope = Employee.where(company_id: company_ids)
+          scope = scope.active if active_only
+          scope.group(:company_id).count
         end
       end
     end

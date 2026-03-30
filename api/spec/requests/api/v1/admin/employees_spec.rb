@@ -76,6 +76,29 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["data"].first["first_name"]).to eq("Searchable")
       end
 
+      it "searches by full name across first and last name" do
+        create(:employee, company: company, first_name: "Mindy", last_name: "Wilson")
+
+        get "/api/v1/admin/employees", params: { company_id: company.id, search: "mindy wilson" }
+
+        expect(response).to have_http_status(:ok)
+        json = response.parsed_body
+        expect(json["data"].length).to eq(1)
+        expect(json["data"].first["first_name"]).to eq("Mindy")
+        expect(json["data"].first["last_name"]).to eq("Wilson")
+      end
+
+      it "treats wildcard characters in search as literal input" do
+        create(:employee, company: company, first_name: "100%Real", last_name: "Person")
+
+        get "/api/v1/admin/employees", params: { company_id: company.id, search: "100%" }
+
+        expect(response).to have_http_status(:ok)
+        json = response.parsed_body
+        expect(json["data"].length).to eq(1)
+        expect(json["data"].first["first_name"]).to eq("100%Real")
+      end
+
       it "paginates results" do
         get "/api/v1/admin/employees", params: { company_id: company.id, per_page: 2 }
 
@@ -232,15 +255,14 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       end
     end
 
-    it "forbids accountants from creating employees" do
+    it "allows accountants to create employees for their assigned client scope" do
       allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
 
       expect {
         post "/api/v1/admin/employees", params: valid_params
-      }.not_to change(Employee, :count)
+      }.to change(Employee, :count).by(1)
 
-      expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["error"]).to eq("Manager or admin access required")
+      expect(response).to have_http_status(:created)
     end
   end
 
@@ -289,6 +311,17 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         json = response.parsed_body
         expect(json["details"]).to have_key("pay_rate")
       end
+    end
+
+    it "allows accountants to update employees" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+      patch "/api/v1/admin/employees/#{employee.id}", params: {
+        employee: { first_name: "Accountant Updated" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.first_name).to eq("Accountant Updated")
     end
   end
 

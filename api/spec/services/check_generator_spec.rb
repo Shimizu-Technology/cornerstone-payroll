@@ -167,8 +167,8 @@ RSpec.describe CheckGenerator do
 
     it "uses compact stub row positions that stay within each third" do
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row1_y)).to eq(252.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row2_y)).to eq(188.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row3_y)).to eq(128.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row2_y)).to eq(176.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row3_y)).to eq(118.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :table_height)).to eq(56.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_box_h)).to eq(48.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(-18.0)
