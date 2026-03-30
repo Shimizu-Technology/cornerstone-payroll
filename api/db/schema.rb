@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_30_081250) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_30_233203) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -66,6 +66,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_30_081250) do
     t.boolean "active", default: true
     t.string "address_line1"
     t.string "address_line2"
+    t.boolean "auto_create_fit_check", default: false, null: false
     t.string "bank_address"
     t.string "bank_name"
     t.jsonb "check_layout_config", default: {}, null: false

@@ -53,6 +53,9 @@ Rails.application.routes.draw do
             # Payroll import (MoSa Revel PDF + Excel)
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"
+            # Timecard OCR CSV import
+            post :preview_timecard_import, to: "timecard_imports#preview"
+            post :apply_timecard_import, to: "timecard_imports#apply"
           end
 
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
@@ -99,8 +102,8 @@ Rails.application.routes.draw do
         get "reports/paycheck_history_pdf", to: "reports#paycheck_history_pdf"
         get "reports/retirement_plans_pdf", to: "reports#retirement_plans_pdf"
         get "reports/installment_loans_pdf", to: "reports#installment_loans_pdf"
-        get "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf"
-        get "reports/full_print_package_pdf", to: "reports#full_print_package_pdf"
+        match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
+        match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
 
         # Employee Loans
         resources :employee_loans do

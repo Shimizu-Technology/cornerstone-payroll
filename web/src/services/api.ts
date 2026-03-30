@@ -175,6 +175,40 @@ class ApiClient {
     return response.blob();
   }
 
+  // POST with JSON body returning a Blob (for reports with complex params like arrays)
+  async postBlob(endpoint: string, body?: Record<string, unknown>): Promise<BlobDownload> {
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details,
+        errorData
+      );
+    }
+
+    const contentDisposition = response.headers.get('Content-Disposition');
+    let filename: string | undefined;
+    if (contentDisposition) {
+      const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
+      if (match) filename = match[1];
+    }
+
+    const blob = await response.blob();
+    return { blob, filename };
+  }
+
   // GET raw Blob with query params (for authenticated file downloads with year/filters)
   async getBlobWithParams(
     endpoint: string,
@@ -564,7 +598,48 @@ export const payPeriodsApi = {
   // CPR-73: Delete a draft correction run (undoes correction run creation without voiding).
   deleteDraftCorrectionRun: (id: number, data: { reason: string }) =>
     api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
+
+  // Timecard OCR import
+  previewTimecardImport: async (id: number, csvFile: File) => {
+    const formData = new FormData();
+    formData.append('file', csvFile);
+    return api.postForm<TimecardImportPreviewResponse>(`/admin/pay_periods/${id}/preview_timecard_import`, formData);
+  },
+  applyTimecardImport: (id: number, mappings: TimecardImportMapping[]) =>
+    api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
 };
+
+// Timecard OCR import types
+export interface TimecardImportPreviewRow {
+  csv_name: string;
+  regular_hours: string;
+  overtime_hours: string;
+  total_hours: string;
+  flags: string;
+  employee_id: number | null;
+  employee_name: string | null;
+  match_score: number;
+  all_employees: { id: number; name: string }[];
+}
+
+export interface TimecardImportPreviewResponse {
+  preview: TimecardImportPreviewRow[];
+  total_rows: number;
+  matched: number;
+  unmatched: number;
+}
+
+export interface TimecardImportMapping {
+  employee_id: number;
+  regular_hours: number;
+  overtime_hours: number;
+}
+
+export interface TimecardImportApplyResponse {
+  applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
+  skipped: unknown[];
+  errors: { employee_id: number; error: string }[];
+}
 
 // CPR-71: Correction response types
 export interface VoidPayPeriodResponse {
@@ -840,11 +915,27 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
-  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/transmittal_log_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
+  fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/full_print_package_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
 };
+
+export interface TransmittalOptions {
+  preparerName?: string;
+  notes?: string[];
+  reportList?: string[];
+}
 
 // Pay Stubs (Admin API)
 export interface PayStubInfo {
@@ -1038,10 +1129,20 @@ export const payrollReportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
-  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/transmittal_log_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
+  fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/full_print_package_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
 };
 
 // ============================================================

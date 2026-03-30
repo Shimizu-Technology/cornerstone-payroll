@@ -28,6 +28,7 @@ export function CheckSettingsPage() {
   const [bankAddress, setBankAddress] = useState('');
   const [layoutOverridesJson, setLayoutOverridesJson] = useState('{}');
   const [memoTemplate, setMemoTemplate] = useState('');
+  const [autoCreateFitCheck, setAutoCreateFitCheck] = useState(false);
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
 
@@ -50,6 +51,7 @@ export function CheckSettingsPage() {
         setBankAddress(s.bank_address ?? '');
         setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
         setMemoTemplate(s.check_memo_template ?? '');
+        setAutoCreateFitCheck(s.auto_create_fit_check ?? false);
         setNextCheckNumber(String(s.next_check_number));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -84,6 +86,7 @@ export function CheckSettingsPage() {
         bank_name: bankName.trim() || null,
         bank_address: bankAddress.trim() || null,
         check_memo_template: memoTemplate.trim() || null,
+        auto_create_fit_check: autoCreateFitCheck,
         check_layout_config: parsedLayoutOverrides,
       });
       setSettings(data.check_settings);
@@ -316,6 +319,47 @@ export function CheckSettingsPage() {
               </div>
             </details>
 
+            <div className="flex justify-end pt-2">
+              <Button onClick={handleSaveSettings} disabled={saving}>
+                {saving ? 'Saving…' : 'Save Settings'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Payroll Automation */}
+        <Card>
+          <div className="p-4 border-b">
+            <h2 className="font-semibold text-gray-900">Payroll Automation</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Configure automatic actions that happen when payroll is committed.
+            </p>
+          </div>
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-medium text-gray-900">Auto-Create FIT Tax Deposit Check</Label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  When enabled, committing payroll automatically creates a non-employee check
+                  for the total Federal Income Tax withheld, payable to &quot;EFTPS - Federal Income Tax&quot;.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoCreateFitCheck}
+                onClick={() => setAutoCreateFitCheck(!autoCreateFitCheck)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                  autoCreateFitCheck ? 'bg-blue-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    autoCreateFitCheck ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
             <div className="flex justify-end pt-2">
               <Button onClick={handleSaveSettings} disabled={saving}>
                 {saving ? 'Saving…' : 'Save Settings'}

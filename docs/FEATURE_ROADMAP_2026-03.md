@@ -1,125 +1,100 @@
 # Feature Roadmap — March 2026
 
 Comprehensive tracker for all planned improvements, bug fixes, and new features.
-Audited against codebase on 2026-03-30.
+Audited against codebase on 2026-03-30. Updated 2026-03-30.
 
 ---
 
-## Tier 1 — Critical for Daily Operations
+## Tier 1 — Critical for Daily Operations (ALL COMPLETE)
 
 ### 1. Roll Back Approved Pay Period
-- **Status:** NOT IMPLEMENTED
-- **Problem:** Once a pay period is approved, there's no way to undo it without voiding (which requires committing first). If you approve by mistake, you're stuck.
-- **Solution:** Add an `unapprove` action on `PayPeriodsController` that moves `approved → calculated`. Simple status change, no YTD impact since nothing has been committed.
-- **Files:** `api/app/controllers/api/v1/admin/pay_periods_controller.rb`, `web/src/pages/PayPeriodDetail.tsx`
-- **Effort:** Small
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Added `unapprove` action on `PayPeriodsController` that moves `approved → calculated`, clears `approved_by_id`. UI button on PayPeriodDetail.
+- **Files:** `api/app/controllers/api/v1/admin/pay_periods_controller.rb`, `api/config/routes.rb`, `web/src/pages/PayPeriodDetail.tsx`, `web/src/services/api.ts`
 
 ### 2. Skip $0 Net Pay Checks When Printing
-- **Status:** NOT IMPLEMENTED
-- **Problem:** `batch_pdf` includes all payroll items with check numbers, even if net pay is $0. Wastes paper and causes confusion.
-- **Solution:** Filter out items where `net_pay <= 0` in `checks_controller#batch_pdf` (or don't assign check numbers to $0 items in the first place).
-- **Files:** `api/app/controllers/api/v1/admin/checks_controller.rb`, `api/app/models/company.rb` (`assign_check_numbers!`)
-- **Effort:** Small
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** $0 net pay items are excluded from check number assignment at commit time (`net_pay.to_d > 0` filter) and from batch PDF generation (`printable_items` filtering). Uses in-memory filtering with bulk `insert_all!` for audit events.
+- **Files:** `api/app/controllers/api/v1/admin/pay_periods_controller.rb`, `api/app/controllers/api/v1/admin/checks_controller.rb`
 
 ### 3. User Management Scoping Bug
-- **Status:** BUG — NEEDS FIX
-- **Problem:** `UsersController` always scopes to `current_user.company_id` (the admin's home company) via `staff_company_id`, not the currently selected company (`X-Company-Id` header / `resolve_company_id`). Creating a user while viewing Company B assigns them to Company A (admin's home). Users don't appear under the company you're looking at.
-- **Solution:** Change `staff_company_id` to use `current_company_id` (which respects the `X-Company-Id` header) for super_admin users, or always scope user CRUD to the selected company context. Need to be careful about security — only super_admins should be able to manage users across companies.
-- **Files:** `api/app/controllers/api/v1/admin/users_controller.rb`, `api/app/controllers/application_controller.rb`
-- **Effort:** Medium (security implications)
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Admin users now see all users globally (not company-scoped). `set_user` finds any user by ID. New user creation assigns to admin's home company. Global safety checks for last-admin protections.
+- **Files:** `api/app/controllers/api/v1/admin/users_controller.rb`
 
 ### 4. Invite Link Goes to Clerk Instead of App
-- **Status:** NEEDS INVESTIGATION
-- **Problem:** When users click the invite link, they end up on Clerk's hosted page instead of the app's login page.
-- **Solution:** Verify `FRONTEND_URL` is set correctly on Render. Also check Clerk dashboard → Paths → "After sign-up URL" and "After sign-in URL" to ensure they redirect to the app. The code in `build_redirect_url` looks correct (`#{frontend}/login`), so this is likely a Clerk dashboard or env var configuration issue.
-- **Files:** `api/app/controllers/api/v1/admin/users_controller.rb` (`build_redirect_url`), Clerk dashboard settings, Render env vars
-- **Effort:** Small (config check)
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** `UserInviteEmailService` now always links to `#{frontend_url}/login` instead of the Clerk-hosted invitation URL.
+- **Files:** `api/app/services/user_invite_email_service.rb`
 
 ### 5. Check Memo Configurability
-- **Status:** NOT IMPLEMENTED
-- **Problem:** Check memo is hardcoded as `"Payroll {start} - {end}"`. For some clients, you want employee name/address or custom text (like the stateside address use case from QuickBooks).
-- **Solution:** Add a `check_memo_template` field to company check_settings. Support placeholders like `{employee_name}`, `{employee_address}`, `{period_start}`, `{period_end}`, `{pay_date}`. Default to current format for backward compatibility.
-- **Files:** `api/app/services/check_generator.rb`, `api/app/controllers/api/v1/admin/checks_controller.rb` (check_settings), `web/src/components/checks/` (settings UI)
-- **Effort:** Medium
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Added `check_memo_template` column to companies table. `CheckGenerator#resolve_memo_text` supports placeholders: `{employee_name}`, `{employee_first_name}`, `{employee_last_name}`, `{period_start}`, `{period_end}`, `{pay_date}`, `{check_number}`, `{company_name}`. UI field in Check Settings page.
+- **Files:** `api/app/services/check_generator.rb`, `api/db/migrate/20260330081250_add_check_memo_template_to_companies.rb`, `web/src/pages/CheckSettings.tsx`
 
 ---
 
-## Tier 2 — Important for Accuracy & Compliance
+## Tier 2 — Important for Accuracy & Compliance (ALL COMPLETE)
 
 ### 6. W-4 Transparency on Check Stubs & Reports
-- **Status:** PARTIALLY DONE
-- **Current state:** Check stubs show FIT override asterisk and "Addtl W/H (W-4 4c)" when > 0. Step 2 checkbox, Step 4a (other income), and Step 4b (deductions) are NOT shown on stubs or reports.
-- **Solution:** Add a W-4 summary section to check stubs showing all active W-4 modifiers. Include in payroll register and summary reports. Makes it clear why one employee's FIT differs from another's.
-- **Files:** `api/app/services/check_generator.rb`, `api/app/services/pay_stub_generator.rb`, `api/app/services/payroll_register_pdf_generator.rb`, report generators
-- **Effort:** Medium
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** W-4 indicators (Step2, 4a, 4b, Override) integrated into the Federal Income Tax line within the TAXES table on check stubs. W-4 transparency badges (FIT Override, Step 2, additional withholding) shown on PayPeriodDetail next to employee names.
+- **Files:** `api/app/services/check_generator.rb`, `web/src/pages/PayPeriodDetail.tsx`
 
 ### 7. 1099 Contractor Separation in Reports
-- **Status:** PARTIALLY DONE
-- **Current state:** Payroll register excludes contractors in at least one code path. UI separates them visually. But other reports may still mix contractors with W-2 employees.
-- **Solution:** Audit every report generator to ensure contractors are either excluded from tax-related reports or shown in a clearly separate section. 1099-NEC generation already exists.
-- **Files:** All files in `api/app/services/*_generator.rb`, `api/app/controllers/api/v1/admin/reports_controller.rb`
-- **Effort:** Medium
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Payroll register separates W-2 employees from 1099 contractors with distinct summary sections (`employees` vs `contractors` arrays, separate totals). Payroll summary by employee excludes contractors entirely (W-2 tax report).
+- **Files:** `api/app/controllers/api/v1/admin/reports_controller.rb`, `api/app/services/payroll_summary_by_employee_pdf_generator.rb`
 
 ### 8. Payroll by Employee Report — Employee Names in Breakdown
-- **Status:** PARTIALLY DONE
-- **Problem:** `PayrollSummaryByEmployeePdfGenerator` creates columns per employee but doesn't render clear employee name headers per column.
-- **Solution:** Add employee name header row at the top of each column or group.
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Added `render_employee_name_header` method that draws a blue header row with employee names (including "(1099)" for contractors) as column headers.
 - **Files:** `api/app/services/payroll_summary_by_employee_pdf_generator.rb`
-- **Effort:** Small
 
 ### 9. Accountant Permission Scoping
-- **Status:** NOT IMPLEMENTED
-- **Problem:** Accountants can access all companies through the admin API. `company_assignments` data exists but isn't enforced as a filter for non-super-admin users.
-- **Solution:** Add a `before_action` filter in `BaseController` that, for accountant-role users, restricts `current_company_id` to only companies they're assigned to. Admin and super_admin users would be unaffected.
-- **Files:** `api/app/controllers/api/v1/admin/base_controller.rb`, `api/app/controllers/application_controller.rb`
-- **Effort:** Medium
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** `enforce_company_access!` added as before_action in BaseController. `accessible_company_ids` for accountants/managers returns only explicitly assigned companies. `resolve_company_id` gracefully falls back to first accessible company when home company is inaccessible. Company switcher shows all accessible companies (including inactive). `companies#index` skips `enforce_company_access!` (discovery endpoint).
+- **Files:** `api/app/controllers/api/v1/admin/base_controller.rb`, `api/app/controllers/application_controller.rb`, `api/app/models/user.rb`, `api/app/controllers/api/v1/admin/companies_controller.rb`, `web/src/contexts/CompanyContext.tsx`, `web/src/components/layout/CompanySwitcher.tsx`
 
 ### 10. 1099 Separation in Hour Input List
-- **Status:** NOT IMPLEMENTED (separate from #7)
-- **Problem:** When inputting hours on the pay period page, contractors and W-2 employees are mixed together (though contractors have a green tint).
-- **Solution:** Group the hours input list by employment type — all W-2 hourly employees first, then W-2 salary, then 1099 contractors. Add section headers.
+- **Status:** ✅ DONE (PR #28)
+- **What was done:** Hours input table groups employees by type (Salary → Hourly → 1099 Contractors) with descriptive section headers. Alphabetical sorting within each group.
 - **Files:** `web/src/pages/PayPeriodDetail.tsx`
-- **Effort:** Small
 
 ---
 
-## Tier 3 — Nice to Have / Larger Effort
+## Tier 3 — Next Up (ALL COMPLETE)
 
 ### 11. Transmittal Editing Before Printing
-- **Status:** PARTIALLY DONE
-- **Current state:** Can pass `preparer_name` and `notes` at generation time. No persistent draft or preview/edit UI.
-- **Solution:** Add a modal or page where you can preview the transmittal, edit preparer name, add/remove notes lines, then generate the PDF.
-- **Files:** `web/src/components/checks/TransmittalPanel.tsx` (or new), `api/app/controllers/api/v1/admin/checks_controller.rb`
-- **Effort:** Medium
+- **Status:** ✅ DONE
+- **What was done:** Added `TransmittalEditorModal` in `ReportsDownloadPanel` that opens before generating Transmittal Log or Full Print Package PDFs. Users can edit preparer name, add/remove/edit notes, and customize the reports list. Backend `transmittal_options` helper extracts `preparer_name`, `notes[]`, and `report_list[]` from params. Routes now accept both GET and POST for transmittal/full-package endpoints. Frontend API uses `postBlob` to send complex JSON bodies.
+- **Files:** `web/src/components/reports/ReportsDownloadPanel.tsx`, `web/src/services/api.ts`, `api/app/controllers/api/v1/admin/reports_controller.rb`, `api/config/routes.rb`
 
 ### 12. Auto-Create FIT Check with Payroll
-- **Status:** NOT IMPLEMENTED
-- **Problem:** After running payroll, you manually create a non-employee check for the total FIT amount. This should be automated.
-- **Solution:** When payroll is committed, auto-generate a non-employee check for "Federal Income Tax" with the sum of all FIT from that pay period. Make it optional/configurable per company.
-- **Files:** `api/app/controllers/api/v1/admin/pay_periods_controller.rb` (commit action), `api/app/models/non_employee_check.rb`
-- **Effort:** Medium
+- **Status:** ✅ DONE
+- **What was done:** Added `auto_create_fit_check` boolean column to companies (default false). When enabled, committing payroll auto-creates a `NonEmployeeCheck` of type `tax_deposit` for total FIT (W-2 employees only), payable to "EFTPS - Federal Income Tax". Toggle added to Check Settings page under "Payroll Automation" section.
+- **Files:** `api/db/migrate/20260330233203_add_auto_create_fit_check_to_companies.rb`, `api/app/controllers/api/v1/admin/pay_periods_controller.rb`, `api/app/controllers/api/v1/admin/checks_controller.rb`, `web/src/pages/CheckSettings.tsx`, `web/src/types/index.ts`
 
-### 13. WebSockets for Real-Time Updates
-- **Status:** NOT IMPLEMENTED (infrastructure exists)
+### 13. Timecard OCR Import
+- **Status:** ✅ DONE
+- **What was done:** Added CSV import flow for Timecard OCR exports. Backend `TimecardImportsController` parses CSV, fuzzy-matches employee names using trigram similarity, and returns a preview with match scores. Frontend `TimecardImportModal` provides a 3-step flow: upload CSV → review/remap employee mappings → apply. Hours are imported as `import_source: "timecard_ocr"`. Accessible from PayPeriodDetail via "Import (Timecard OCR)" button on draft pay periods.
+- **Files:** `api/app/controllers/api/v1/admin/timecard_imports_controller.rb`, `api/config/routes.rb`, `web/src/components/payroll/TimecardImportModal.tsx`, `web/src/pages/PayPeriodDetail.tsx`, `web/src/services/api.ts`
+
+---
+
+## Tier 3 — Deferred
+
+### 14. WebSockets for Real-Time Updates
+- **Status:** NOT STARTED (infrastructure exists)
 - **Current state:** `solid_cable` gem is in Gemfile, `cable.yml` exists, but zero channels are implemented.
 - **Problem:** When multiple users are working simultaneously, changes don't appear until page refresh. Risk of race conditions (e.g., two people editing the same pay period).
 - **Solution:** Implement ActionCable channels for: pay period status changes, payroll item updates, lock/unlock mechanism for pay periods being edited.
 - **Files:** New `api/app/channels/`, `web/` WebSocket client integration
 - **Effort:** Large
 
-### 14. Timecard OCR Integration
-- **Status:** SEPARATE PROJECT
-- **Location:** `~/Desktop/ShimizuTechnology/timecard-ocr`
-- **Description:** Full Rails + React app that uses OCR to extract hours from Pyramid-style paper timecards. Currently standalone.
-- **Solution options:**
-  1. **API bridge:** Timecard OCR exports CSV/JSON, payroll app imports it (like the existing MoSa import)
-  2. **Embedded module:** Mount as a Rails engine within the payroll app
-  3. **Standalone with link:** Keep separate, add a "Import from Timecard OCR" button
-- **Effort:** Large (option 1 is smallest)
-
 ### 15. Production Performance (Infrastructure)
 - **Status:** IN PROGRESS
-- **Current state:** Code-level optimizations deployed (N+1 fixes, batch operations). Database is on Neon with auto-suspend causing cold starts.
+- **Current state:** Code-level optimizations deployed (N+1 fixes, batch operations, PR #27). Database is on Neon with auto-suspend causing cold starts.
 - **Solution:** Configure Neon: disable scale-to-zero, set minimum compute to 1 CU. Consider Render region proximity to Neon region. Monitor after changes.
 - **Files:** Neon dashboard, Render dashboard
 - **Effort:** Small (config changes)
@@ -136,6 +111,8 @@ Audited against codebase on 2026-03-30.
 | Reports tab/page with pay period selection | DONE | Sidebar link, `Reports.tsx` with pay period selector |
 | Check number tracking/management | DONE | Auto-increment, admin settings, `next_check_number` |
 | 1099 separation in UI (pay period detail) | DONE | Green-tinted rows, separate contractor sections |
+| Check Settings in sidebar | DONE | "Settings" section with Check Settings link |
+| Check preview modal (z-index/size) | DONE | React Portal, 95vw/92vh, z-[9999] |
 
 ---
 
@@ -144,3 +121,4 @@ Audited against codebase on 2026-03-30.
 - Tax Sync "Failed" badge is a known non-critical issue (documented in `PRODUCTION_FOLLOWUP_ROADMAP_2026-03-29.md`). Will resolve when CST_INGEST_URL is configured.
 - Check printing layout was extensively tuned in a previous session and is working correctly with browser print offsets.
 - Correction/void workflow is fully implemented for committed pay periods.
+- Greptile reviews: PR #28 received 5/5 confidence score on all three reviews.
