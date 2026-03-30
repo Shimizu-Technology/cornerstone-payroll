@@ -18,6 +18,7 @@ import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
+import { TimecardImportModal } from '@/components/payroll/TimecardImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
@@ -122,6 +123,7 @@ export function PayPeriodDetail() {
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [timecardImportOpen, setTimecardImportOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
 
   const loadAllActiveEmployees = useCallback(async () => {
@@ -402,6 +404,9 @@ export function PayPeriodDetail() {
                     Import (MoSa)
                   </Button>
                 )}
+                <Button variant="outline" onClick={() => setTimecardImportOpen(true)}>
+                  Import (Timecard OCR)
+                </Button>
                 <Button onClick={handleRunPayroll} disabled={processing}>
                   {processing ? 'Calculating...' : 'Calculate Payroll'}
                 </Button>
@@ -1067,6 +1072,14 @@ export function PayPeriodDetail() {
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
         onImportComplete={handleImportComplete}
+      />
+
+      {/* Timecard OCR Import Modal */}
+      <TimecardImportModal
+        open={timecardImportOpen}
+        onClose={() => setTimecardImportOpen(false)}
+        payPeriodId={payPeriod.id}
+        onImportComplete={() => loadPayPeriod(payPeriod.id)}
       />
 
       {/* Payroll Item Edit Modal */}
