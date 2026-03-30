@@ -237,6 +237,7 @@ class PayPeriodCorrectionService
         tip_pool:                 source_item.tip_pool,
         loan_deduction:           source_item.loan_deduction,
         additional_withholding:   source_item.additional_withholding,
+        withholding_tax_override: source_item.withholding_tax_override,
         import_source:            source_item.import_source,
         custom_columns_data:      source_item.custom_columns_data
         # Calculated fields (gross_pay, taxes, etc.) start at zero —

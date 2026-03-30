@@ -350,6 +350,7 @@ export function PayPeriodDetail() {
   const contractorItems = payrollItems.filter(i => i.employment_type === 'contractor');
   const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
   const totalWithholding = payrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
+  const totalAddlWH = payrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
   const totalSS = payrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
   const totalMedicare = payrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
   const totalDeductions = payrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
@@ -688,6 +689,7 @@ export function PayPeriodDetail() {
                     <TableHead className="text-right">Rate</TableHead>
                     <TableHead className="text-right">Gross</TableHead>
                     <TableHead className="text-right">FIT</TableHead>
+                    <TableHead className="text-right">Addtl W/H</TableHead>
                     <TableHead className="text-right">SS (6.2%)</TableHead>
                     <TableHead className="text-right">Medicare</TableHead>
                     <TableHead className="text-right">Total Ded.</TableHead>
@@ -714,21 +716,21 @@ export function PayPeriodDetail() {
                       <Fragment key={item.id}>
                         {showSalaryDivider && (
                           <TableRow className="bg-indigo-50">
-                            <TableCell colSpan={isCalculated ? 10 : 9} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
                               Salary Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showHourlyDivider && (
                           <TableRow className="bg-gray-100">
-                            <TableCell colSpan={isCalculated ? 10 : 9} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                               Hourly Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showContractorDivider && (
                           <TableRow className="bg-emerald-50">
-                            <TableCell colSpan={isCalculated ? 10 : 9} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
                               1099 Contractors
                             </TableCell>
                           </TableRow>
@@ -822,7 +824,15 @@ export function PayPeriodDetail() {
                             })()}
                           </TableCell>
                           <TableCell className="text-right font-medium">{formatCurrency(toNumber(item.gross_pay))}</TableCell>
-                          <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.withholding_tax))}</TableCell>
+                          <TableCell className="text-right text-red-600">
+                            {formatCurrency(toNumber(item.withholding_tax))}
+                            {item.withholding_tax_override != null && (
+                              <span className="ml-0.5 text-[10px] text-amber-600" title="FIT manually overridden">*</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-red-600">
+                            {toNumber(item.additional_withholding) > 0 ? formatCurrency(toNumber(item.additional_withholding)) : '—'}
+                          </TableCell>
                           <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
                           <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
                           <TableCell className="text-right text-red-600 font-medium">{formatCurrency(toNumber(item.total_deductions))}</TableCell>
@@ -846,6 +856,7 @@ export function PayPeriodDetail() {
                     <TableCell colSpan={3}>Totals ({payrollItems.length} employees)</TableCell>
                     <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                     <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
+                    <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>
                     <TableCell className="text-right text-red-600">{formatCurrency(totalSS)}</TableCell>
                     <TableCell className="text-right text-red-600">{formatCurrency(totalMedicare)}</TableCell>
                     <TableCell className="text-right text-red-600">{formatCurrency(totalDeductions)}</TableCell>

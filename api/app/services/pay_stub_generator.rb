@@ -235,12 +235,20 @@ class PayStubGenerator
       format_currency(payroll_item.ytd_medicare_tax)
     ]
 
-    # Additional withholding
-    if payroll_item.additional_withholding.to_f > 0
+    if payroll_item.withholding_tax_override.present?
       deductions_data << [
-        "Additional Withholding",
+        "  (FIT Override Applied)",
+        "",
+        ""
+      ]
+    end
+
+    if payroll_item.additional_withholding.to_f > 0
+      ytd_addl = employee_ytd_additional_withholding
+      deductions_data << [
+        "Additional Withholding (W-4 4c)",
         format_currency(payroll_item.additional_withholding),
-        "—"
+        format_currency(ytd_addl)
       ]
     end
 
@@ -355,6 +363,15 @@ class PayStubGenerator
       pdf.text "This is your official earnings statement. Please retain for your records.", align: :center, color: "666666"
       pdf.text "Generated on #{Time.current.strftime('%B %d, %Y at %I:%M %p')}", align: :center, color: "999999"
     end
+  end
+
+  def employee_ytd_additional_withholding
+    year = payroll_item.pay_period.pay_date&.year || Date.current.year
+    PayrollItem.joins(:pay_period)
+      .where(employee_id: payroll_item.employee_id)
+      .where(pay_periods: { status: "committed", company_id: payroll_item.company_id })
+      .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", year)
+      .sum(:additional_withholding).to_f
   end
 
   def format_currency(amount)
