@@ -325,7 +325,7 @@ class CheckGenerator
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6.5) do
         pdf.table(data, column_widths: col_widths, cell_style: {
-          padding: [padding_y, padding_x], borders: [], size: 6.5
+          padding: [padding_y, padding_x], borders: [], size: 6.5, overflow: :shrink_to_fit
         }) do
           row(0).borders = [:bottom]
           row(0).border_color = "999999"
@@ -353,7 +353,7 @@ class CheckGenerator
         hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
         if hourly_earnings.any?
           hourly_earnings.each do |earning|
-            rows << [earning.label, fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+            rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
           end
         else
           rp = payroll_item.hours_worked.to_f * payroll_item.pay_rate.to_f
@@ -371,7 +371,7 @@ class CheckGenerator
       hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
       if hourly_earnings.any?
         hourly_earnings.each do |earning|
-          rows << [earning.label, fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
+          rows << [truncate_label(earning.label), fh(earning.hours), fn(earning.rate), fn(earning.amount), fn(earning.amount)]
         end
       else
         dept = employee.department&.name || "Regular"
@@ -574,6 +574,10 @@ class CheckGenerator
 
   def label_or(default)
     default
+  end
+
+  def truncate_label(text, max = 18)
+    text.to_s.length > max ? "#{text[0, max - 1]}…" : text.to_s
   end
 
   def layout_section(name)
