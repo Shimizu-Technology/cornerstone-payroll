@@ -336,6 +336,25 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(company.reload.check_stock_type).to eq("top_check")
       expect(company.reload.check_layout_config.dig("check_face", "date", "x")).to eq(480.0)
     end
+
+    it "forbids accountants from updating check settings" do
+      accountant_user = User.create!(
+        company: company,
+        email: "checks-accountant@example.com",
+        name: "Checks Accountant",
+        role: "accountant",
+        active: true
+      )
+      allow_any_instance_of(Api::V1::Admin::ChecksController).to receive(:current_user).and_return(accountant_user)
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: 0.1
+        }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq("Admin access required")
+    end
   end
 
   describe "PATCH /api/v1/admin/companies/next_check_number" do

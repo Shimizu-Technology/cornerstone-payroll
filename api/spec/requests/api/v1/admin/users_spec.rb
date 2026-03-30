@@ -49,7 +49,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(managed_payload).to include("assigned_company_ids" => [client_company.id])
     end
 
-    it "uses the switched company context for super admins" do
+    it "keeps super admins scoped to their staff company" do
       admin_user.update!(super_admin: true)
       allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_company_id).and_return(other_company.id)
 
@@ -57,7 +57,8 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
 
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
-      expect(data.map { |row| row.fetch("id") }).to eq([switched_company_user.id])
+      expect(data.map { |row| row.fetch("id") }).to match_array([admin_user.id, managed_user.id])
+      expect(data.map { |row| row.fetch("id") }).not_to include(switched_company_user.id)
     end
   end
 end

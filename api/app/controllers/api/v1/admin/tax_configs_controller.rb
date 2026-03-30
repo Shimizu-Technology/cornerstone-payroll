@@ -6,6 +6,7 @@ module Api
       class TaxConfigsController < BaseController
         include Auditable
         audit_actions :activate, :update_filing_status, :update_brackets
+        before_action :require_admin!
         before_action :set_tax_config, only: [ :show, :update, :destroy, :activate, :audit_logs ]
 
         # GET /api/v1/admin/tax_configs

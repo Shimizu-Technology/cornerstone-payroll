@@ -68,15 +68,16 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       expect(data.map { |row| row.fetch("user_id") }).not_to include(foreign_user.id)
     end
 
-    it "uses the switched company context for super admins" do
+    it "keeps super admins scoped to their staff company" do
       admin_user.update!(super_admin: true)
       allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_company_id).and_return(switched_staff_company.id)
 
-      get "/api/v1/admin/company_assignments", params: { user_id: switched_managed_user.id }
+      get "/api/v1/admin/company_assignments", params: { user_id: managed_user.id }
 
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
-      expect(data.map { |row| row.fetch("id") }).to eq([switched_assignment.id])
+      expect(data.map { |row| row.fetch("id") }).to eq([managed_assignment.id])
+      expect(data.map { |row| row.fetch("user_id") }).not_to include(switched_managed_user.id)
     end
   end
 

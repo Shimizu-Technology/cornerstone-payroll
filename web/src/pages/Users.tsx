@@ -21,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const roleOptions: { value: UserRole; label: string; description: string }[] = [
   { value: 'admin', label: 'Admin', description: 'Full access to all payroll clients, user management, tax config, and audit logs' },
   { value: 'manager', label: 'Manager', description: 'Can run payroll and manage employees for assigned clients' },
-  { value: 'accountant', label: 'Accountant', description: 'Can view and manage payroll for assigned clients' },
+  { value: 'accountant', label: 'Accountant', description: 'Can manage employees and payroll operations for assigned clients' },
   { value: 'employee', label: 'Employee', description: 'View-only access (future: self-service portal)' },
 ];
 
