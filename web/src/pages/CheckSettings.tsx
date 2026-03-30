@@ -27,6 +27,7 @@ export function CheckSettingsPage() {
   const [bankName, setBankName] = useState('');
   const [bankAddress, setBankAddress] = useState('');
   const [layoutOverridesJson, setLayoutOverridesJson] = useState('{}');
+  const [memoTemplate, setMemoTemplate] = useState('');
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
 
@@ -48,6 +49,7 @@ export function CheckSettingsPage() {
         setBankName(s.bank_name ?? '');
         setBankAddress(s.bank_address ?? '');
         setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
+        setMemoTemplate(s.check_memo_template ?? '');
         setNextCheckNumber(String(s.next_check_number));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -81,6 +83,7 @@ export function CheckSettingsPage() {
         check_offset_y: parseFloat(offsetY),
         bank_name: bankName.trim() || null,
         bank_address: bankAddress.trim() || null,
+        check_memo_template: memoTemplate.trim() || null,
         check_layout_config: parsedLayoutOverrides,
       });
       setSettings(data.check_settings);
@@ -244,6 +247,28 @@ export function CheckSettingsPage() {
                 placeholder="e.g., 111 W Marine Corps Dr, Tamuning, GU 96913"
                 className="max-w-md"
               />
+            </div>
+
+            {/* Memo template */}
+            <div className="space-y-1">
+              <Label htmlFor="memo-template">Check Memo Text</Label>
+              <Input
+                id="memo-template"
+                value={memoTemplate}
+                onChange={(e) => setMemoTemplate(e.target.value)}
+                placeholder="Leave blank for default: Payroll {period_start} - {period_end}"
+                className="max-w-lg"
+              />
+              <p className="text-xs text-gray-500">
+                Available placeholders: <span className="font-mono">{'{employee_name}'}</span>,{' '}
+                <span className="font-mono">{'{employee_first_name}'}</span>,{' '}
+                <span className="font-mono">{'{employee_last_name}'}</span>,{' '}
+                <span className="font-mono">{'{period_start}'}</span>,{' '}
+                <span className="font-mono">{'{period_end}'}</span>,{' '}
+                <span className="font-mono">{'{pay_date}'}</span>,{' '}
+                <span className="font-mono">{'{check_number}'}</span>,{' '}
+                <span className="font-mono">{'{company_name}'}</span>
+              </p>
             </div>
 
             {/* Alignment test */}

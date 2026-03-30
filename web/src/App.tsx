@@ -112,7 +112,7 @@ function AppRoutes() {
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
-        <Route path="settings/checks" element={<AdminOnlyRoute><CheckSettingsPage /></AdminOnlyRoute>} />
+        <Route path="check-settings" element={<CheckSettingsPage />} />
         <Route path="settings/clients" element={<AdminOnlyRoute><Clients /></AdminOnlyRoute>} />
       </Route>
 

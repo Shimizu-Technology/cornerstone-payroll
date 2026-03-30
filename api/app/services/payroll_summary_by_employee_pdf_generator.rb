@@ -62,6 +62,9 @@ class PayrollSummaryByEmployeePdfGenerator
     col_width = (pdf.bounds.width - 140) / group.size
     label_width = 140
 
+    # Employee name column headers
+    render_employee_name_header(pdf, group, label_width, col_width)
+
     # Hours section
     render_section_header(pdf, "Hours")
     render_employee_earnings_rows(pdf, group, label_width, col_width, "hours")
@@ -114,6 +117,28 @@ class PayrollSummaryByEmployeePdfGenerator
     period_text = "Pay Period: #{pay_period.start_date.strftime('%b %d, %Y')} – #{pay_period.end_date.strftime('%b %d, %Y')}  |  Pay Date: #{pay_period.pay_date.strftime('%b %d, %Y')}"
     pdf.font_size(8) { pdf.text period_text, color: TEXT_MUTED }
     pdf.move_down 10
+  end
+
+  def render_employee_name_header(pdf, group, label_width, col_width)
+    y = pdf.cursor
+    pdf.fill_color HEADER_BG
+    pdf.fill_rectangle([0, y + 2], pdf.bounds.width, 16)
+    pdf.font_size(8) do
+      pdf.bounding_box([0, y], width: label_width, height: 14) do
+        pdf.text "Employee", style: :bold, color: "FFFFFF", valign: :center
+      end
+      group.each_with_index do |item, idx|
+        x = label_width + (idx * col_width)
+        name = item.employee&.full_name || "Unknown"
+        type_label = item.employment_type == "contractor" ? " (1099)" : ""
+        pdf.bounding_box([x, y], width: col_width, height: 14) do
+          pdf.text "#{name}#{type_label}", align: :right, style: :bold, color: "FFFFFF",
+                   size: 7, overflow: :shrink_to_fit
+        end
+      end
+    end
+    pdf.fill_color TEXT_DARK
+    pdf.move_down 6
   end
 
   def render_section_header(pdf, title)
