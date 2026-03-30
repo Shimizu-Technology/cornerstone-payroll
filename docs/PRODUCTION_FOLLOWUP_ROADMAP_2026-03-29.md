@@ -208,6 +208,19 @@ Status values:
 3. Add employee total count and improve employee search semantics.
 4. Then start the permission-model rewrite for accountants and managers.
 
+## Known Non-Critical Issues
+
+### Tax Sync "Failed" Badge
+
+- `confirmed` - After committing or voiding a pay period, a "Tax Sync Failed" badge appears in the UI.
+- Root cause: `PayrollTaxSyncJob` fires on commit/void and immediately fails because the `CST_INGEST_URL` environment variable is not configured on Render. The job is discarded via `discard_on PayrollTaxSyncService::ConfigurationError`.
+- Impact: **None on payroll calculations, checks, or reports.** This is a cosmetic/informational issue only.
+- The tax sync feature is a placeholder for future integration with Cornerstone's external tax filing ingest API. Until that integration is set up, the sync will always fail.
+- Options to address:
+  1. **Leave as-is**: The badge is harmless and serves as a reminder that the integration is not yet configured.
+  2. **Suppress when unconfigured**: Skip enqueuing `PayrollTaxSyncJob` entirely when `CST_INGEST_URL` is blank, so the pay period never enters a "failed" sync state.
+- Decision: Leaving as-is for now. Will revisit when the tax filing integration is ready.
+
 ## Notes
 
 - A local-only patch was previously started to hide employee write flows from accountants, but that should not be pushed if the desired product direction is that accountants can create and edit employees.
