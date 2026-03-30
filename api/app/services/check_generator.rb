@@ -608,19 +608,6 @@ class CheckGenerator
     d&.strftime("%m/%d/%Y") || "N/A"
   end
 
-  def w4_transparency_lines
-    return [] if employee.contractor?
-    lines = []
-    lines << "Filing: #{employee.filing_status&.titleize}"
-    lines << "Step 2: Yes (two jobs)" if employee.w4_step2_multiple_jobs?
-    lines << "Step 3: #{fn(employee.w4_dependent_credit)} dep. credit" if employee.w4_dependent_credit.to_f > 0
-    lines << "Step 4a: #{fn(employee.w4_step4a_other_income)} other income" if employee.w4_step4a_other_income.to_f > 0
-    lines << "Step 4b: #{fn(employee.w4_step4b_deductions)} deductions" if employee.w4_step4b_deductions.to_f > 0
-    lines << "Step 4c: #{fn(payroll_item.additional_withholding)} addtl W/H" if payroll_item.additional_withholding.to_f > 0
-    lines << "* FIT Override: #{fn(payroll_item.withholding_tax_override)}" if payroll_item.withholding_tax_override.present?
-    lines
-  end
-
   def resolve_memo_text
     template = company&.check_memo_template.presence
     return "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" unless template
