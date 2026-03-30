@@ -229,8 +229,10 @@ class CheckGenerator
       pdf.draw_text employee.full_name, at: [lx, row1_top], style: :bold
     end
 
+    table_y1 = row1_top + stub_cfg["pay_table_y_offset"].to_f
+
     draw_section_table(pdf,
-      x: lx, y: row1_top + stub_cfg["pay_table_y_offset"].to_f, w: left_w - 8,
+      x: lx, y: table_y1, w: left_w - 8,
       title: "PAY",
       columns: %w[Hours Rate Current YTD],
       col_ratios: [0.28, 0.14, 0.14, 0.22, 0.22],
@@ -241,7 +243,7 @@ class CheckGenerator
     )
 
     draw_section_table(pdf,
-      x: rx, y: row1_top, w: right_w,
+      x: rx, y: table_y1, w: right_w,
       title: "TAXES",
       columns: %w[Current YTD],
       col_ratios: [0.46, 0.27, 0.27],
@@ -258,10 +260,10 @@ class CheckGenerator
       pdf.draw_text company.name, at: [lx, row2_top], style: :bold
     end
 
+    table_y2 = row2_top + stub_cfg["other_pay_y_offset"].to_f
+
     draw_section_table(pdf,
-      x: lx + stub_cfg["other_pay_x_offset"].to_f,
-      y: row2_top + stub_cfg["other_pay_y_offset"].to_f,
-      w: left_w - (stub_cfg["other_pay_x_offset"].to_f + 8),
+      x: lx, y: table_y2, w: left_w - 8,
       title: "OTHER PAY",
       columns: %w[Current YTD],
       col_ratios: [0.46, 0.27, 0.27],
@@ -272,7 +274,7 @@ class CheckGenerator
     )
 
     draw_section_table(pdf,
-      x: rx, y: row2_top, w: right_w,
+      x: rx, y: table_y2, w: right_w,
       title: "DEDUCTIONS",
       columns: %w[Current YTD],
       col_ratios: [0.46, 0.27, 0.27],
@@ -321,6 +323,8 @@ class CheckGenerator
 
     data = [header] + rows
     col_widths = col_ratios.map { |r| w * r }
+    last_idx = data.length - 1
+    has_total = rows.last.is_a?(Array) && rows.last.first.is_a?(Hash) && rows.last.first[:content] == "TOTAL"
 
     pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6.5) do
@@ -331,6 +335,10 @@ class CheckGenerator
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1..-1).align = :right
+          if has_total
+            row(last_idx).borders = [:top]
+            row(last_idx).border_color = "999999"
+          end
         end
       end
     end
@@ -397,6 +405,12 @@ class CheckGenerator
 
     rows << ["Bonus", "-", "-", fn(payroll_item.bonus), fn(payroll_item.bonus)] if payroll_item.bonus.to_f > 0
     rows << ["Paycheck Tips", "-", "-", fn(payroll_item.reported_tips), fn(payroll_item.reported_tips)] if payroll_item.reported_tips.to_f > 0
+
+    rows << [
+      { content: "TOTAL", font_style: :bold }, "", "",
+      { content: fn(payroll_item.gross_pay), font_style: :bold },
+      { content: fn(ytd[:gross]), font_style: :bold }
+    ]
     rows
   end
 
@@ -408,6 +422,12 @@ class CheckGenerator
     rows << ["Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss])]
     rows << ["Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med])]
     rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])] if payroll_item.additional_withholding.to_f > 0
+
+    rows << [
+      { content: "TOTAL", font_style: :bold },
+      { content: fn(cur_taxes), font_style: :bold },
+      { content: fn(ytd[:taxes]), font_style: :bold }
+    ]
     rows
   end
 
@@ -427,6 +447,14 @@ class CheckGenerator
     rows << ["Roth 401(k)", fn(payroll_item.roth_retirement_payment), fn(ytd[:roth])] if payroll_item.roth_retirement_payment.to_f > 0
     rows << ["Health Insurance", fn(payroll_item.insurance_payment), fn(ytd[:ins])] if payroll_item.insurance_payment.to_f > 0
     rows << ["Loan", fn(payroll_item.loan_payment), fn(ytd[:loan])] if payroll_item.loan_payment.to_f > 0
+
+    if rows.any?
+      rows << [
+        { content: "TOTAL", font_style: :bold },
+        { content: fn(cur_deds), font_style: :bold },
+        { content: fn(ytd[:deds]), font_style: :bold }
+      ]
+    end
     rows
   end
 
