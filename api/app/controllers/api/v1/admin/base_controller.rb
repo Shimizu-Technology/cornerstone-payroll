@@ -19,9 +19,9 @@ module Api
         # Accountants can only access companies they're assigned to.
         # Super admins and regular admins bypass this check.
         def enforce_company_access!
-          return if current_user&.super_admin?
-          return if current_user&.admin?
           return if current_user.nil?
+          return if current_user.super_admin?
+          return if current_user.admin?
 
           unless current_user.can_access_company?(current_company_id)
             render json: { error: "You do not have access to this company" }, status: :forbidden

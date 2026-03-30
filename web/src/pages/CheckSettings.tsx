@@ -261,6 +261,8 @@ export function CheckSettingsPage() {
               />
               <p className="text-xs text-gray-500">
                 Available placeholders: <span className="font-mono">{'{employee_name}'}</span>,{' '}
+                <span className="font-mono">{'{employee_first_name}'}</span>,{' '}
+                <span className="font-mono">{'{employee_last_name}'}</span>,{' '}
                 <span className="font-mono">{'{period_start}'}</span>,{' '}
                 <span className="font-mono">{'{period_end}'}</span>,{' '}
                 <span className="font-mono">{'{pay_date}'}</span>,{' '}
