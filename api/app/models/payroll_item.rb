@@ -22,6 +22,7 @@ class PayrollItem < ApplicationRecord
             numericality: { greater_than_or_equal_to: 0 },
             allow_nil: true
   validates :company_id, presence: true
+  validates :withholding_tax_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :company_matches_pay_period
 
   # Validate that each employee only appears once per pay period

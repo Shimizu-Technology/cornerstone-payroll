@@ -147,7 +147,7 @@ export function PayrollItemEditModal({
         reported_tips: parseFloat(String(fields.reported_tips)) || 0,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding: parseFloat(String(fields.additional_withholding)) || 0,
-        withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : parseFloat(fields.withholding_tax_override),
+        withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
       };
 
       if (hasMultiRate) {
