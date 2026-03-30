@@ -5,14 +5,26 @@ module Api
     module Admin
       class BaseController < ApplicationController
         before_action :require_staff_access!
+        before_action :enforce_company_access!
 
         private
 
         # Allow admin, manager, and accountant roles to access the admin namespace.
-        # Accountants have restricted company scope enforced via resolve_company_id.
         def require_staff_access!
           unless current_user&.admin? || current_user&.manager? || current_user&.accountant?
             render json: { error: "Staff access required" }, status: :forbidden
+          end
+        end
+
+        # Accountants can only access companies they're assigned to.
+        # Super admins and regular admins bypass this check.
+        def enforce_company_access!
+          return if current_user.nil?
+          return if current_user.super_admin?
+          return if current_user.admin?
+
+          unless current_user.can_access_company?(current_company_id)
+            render json: { error: "You do not have access to this company" }, status: :forbidden
           end
         end
 

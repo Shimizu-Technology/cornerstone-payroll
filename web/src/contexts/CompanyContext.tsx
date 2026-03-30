@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -28,6 +28,29 @@ export function useCompany() {
   return useContext(CompanyContext);
 }
 
+function applyCompanyResponse(
+  res: { companies: CompanyListItem[]; is_super_admin: boolean; can_switch_company: boolean; current_company_id: number },
+  setCompanies: (c: CompanyListItem[]) => void,
+  setIsSuperAdmin: (v: boolean) => void,
+  setCanSwitchCompany: (v: boolean) => void,
+  setActiveCompanyId: (id: number | null) => void,
+  setFetched: (v: boolean) => void,
+) {
+  setCompanies(res.companies);
+  setIsSuperAdmin(res.is_super_admin);
+  setCanSwitchCompany(res.can_switch_company ?? res.is_super_admin);
+
+  const storedId = companiesApi.getActiveCompanyId();
+  if (storedId && res.companies.some(c => c.id === storedId)) {
+    setActiveCompanyId(storedId);
+    companiesApi.switchCompany(storedId);
+  } else if (res.current_company_id) {
+    setActiveCompanyId(res.current_company_id);
+    companiesApi.switchCompany(res.current_company_id);
+  }
+  setFetched(true);
+}
+
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, user } = useAuth();
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
@@ -38,28 +61,31 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const [canSwitchCompany, setCanSwitchCompany] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fetched, setFetched] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const refreshCompanies = useCallback(async () => {
     try {
-      const res = await companiesApi.list({ active: true });
-      setCompanies(res.companies);
-      setIsSuperAdmin(res.is_super_admin);
-      setCanSwitchCompany(res.can_switch_company ?? res.is_super_admin);
-
-      const storedId = companiesApi.getActiveCompanyId();
-      if (storedId && res.companies.some(c => c.id === storedId)) {
-        setActiveCompanyId(storedId);
-        companiesApi.switchCompany(storedId);
-      } else if (res.current_company_id) {
-        setActiveCompanyId(res.current_company_id);
-        companiesApi.switchCompany(res.current_company_id);
-      }
-      setFetched(true);
+      const res = await companiesApi.list();
+      if (!mountedRef.current) return;
+      applyCompanyResponse(res, setCompanies, setIsSuperAdmin, setCanSwitchCompany, setActiveCompanyId, setFetched);
     } catch {
-      // Will retry when auth becomes available
-    } finally {
-      setLoading(false);
+      // Retry once after a short delay (handles race with auth/server startup)
+      setTimeout(async () => {
+        try {
+          const res = await companiesApi.list();
+          if (!mountedRef.current) return;
+          applyCompanyResponse(res, setCompanies, setIsSuperAdmin, setCanSwitchCompany, setActiveCompanyId, setFetched);
+        } catch { /* give up */ }
+        if (mountedRef.current) setLoading(false);
+      }, 1500);
+      return;
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {

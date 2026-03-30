@@ -530,6 +530,8 @@ export const payPeriodsApi = {
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
+  unapprove: (id: number) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
   retryTaxSync: (id: number) =>

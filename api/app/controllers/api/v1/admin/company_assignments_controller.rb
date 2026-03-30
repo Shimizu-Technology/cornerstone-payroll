@@ -68,9 +68,6 @@ module Api
             return render json: { error: "One or more companies are not accessible" }, status: :forbidden
           end
 
-          # Home company access already comes from the user's primary company_id.
-          company_ids -= [ user.company_id ]
-
           CompanyAssignment.transaction do
             user.company_assignments.destroy_all
             company_ids.each do |cid|
