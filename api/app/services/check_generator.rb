@@ -36,7 +36,6 @@ class CheckGenerator
       payee:        { x: 64.0,  y: 180.0, width: 320.0, font_size: 10.0 },
       amount:       { x: 467.0, y: 182.0, width: 120.0, font_size: 10.0 },
       amount_words: { x: 52.0,  y: 156.0, width: 492.0, font_size: 9.0 },
-      pay_period:   { x: 42.0,  y: 76.0,  width: 360.0, font_size: 9.0 },
       memo:         { x: 22.0,  y: 64.0,  width: 260.0, font_size: 7.5 },
       signature:    { x: 322.0, y: 10.0,  width: 246.0 }
     },
@@ -51,7 +50,6 @@ class CheckGenerator
       pay_table_y_offset: -10.0,
       other_pay_x_offset: 100.0,
       other_pay_y_offset: -10.0,
-      benefits_x_ratio: 0.42,
       memo_y_offset: -36.0,
       summary_x_offset: -18.0,
       summary_y_offset: 0.0,
@@ -179,7 +177,6 @@ class CheckGenerator
     amount_cfg = layout_field(:check_face, :amount)
     words_cfg = layout_field(:check_face, :amount_words)
     memo_cfg = layout_field(:check_face, :memo)
-    signature_cfg = layout_field(:check_face, :signature)
 
     # ---- Date (top-right) ----
     pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do

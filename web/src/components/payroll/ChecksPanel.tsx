@@ -132,6 +132,8 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       printWindow.addEventListener('load', () => {
         printWindow.print();
       });
+    } else {
+      alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
     }
   };
 
