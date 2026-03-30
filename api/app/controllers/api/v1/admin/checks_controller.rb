@@ -25,6 +25,7 @@ module Api
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
+        before_action :require_admin!,    only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
         # GET /api/v1/admin/pay_periods/:pay_period_id/checks
