@@ -125,6 +125,38 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
     a.click();
   };
 
+  const handlePrintFromPreview = () => {
+    if (!previewUrl) return;
+    const printWindow = window.open(previewUrl);
+    if (printWindow) {
+      printWindow.addEventListener('load', () => {
+        printWindow.print();
+      });
+    }
+  };
+
+  const handlePrintAll = async () => {
+    setBatchLoading(true);
+    try {
+      const blob = await checksApi.batchPdf(payPeriod.id);
+      const url = URL.createObjectURL(blob);
+      const printWindow = window.open(url);
+      if (printWindow) {
+        printWindow.addEventListener('load', () => {
+          printWindow.print();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        });
+      } else {
+        URL.revokeObjectURL(url);
+        alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to generate PDF for printing');
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
   // ---- Mark single printed ----
   const handleMarkPrinted = async (item: CheckItem) => {
     setActionLoading(item.id);
@@ -210,10 +242,18 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
           )}
           <Button
             size="sm"
+            variant="outline"
+            onClick={handlePrintAll}
+            disabled={batchLoading || checks.length === 0}
+          >
+            {batchLoading ? 'Generating…' : 'Print All Checks'}
+          </Button>
+          <Button
+            size="sm"
             onClick={handleBatchDownload}
             disabled={batchLoading || checks.length === 0}
           >
-            {batchLoading ? 'Generating…' : '⬇ Download All Checks PDF'}
+            {batchLoading ? 'Generating…' : 'Download All Checks PDF'}
           </Button>
         </div>
       </div>
@@ -355,6 +395,9 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={handlePrintFromPreview}>
+                  Print
+                </Button>
                 <Button variant="outline" size="sm" onClick={handleDownloadFromPreview}>
                   Download PDF
                 </Button>
