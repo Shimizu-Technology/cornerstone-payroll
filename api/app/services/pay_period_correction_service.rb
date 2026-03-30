@@ -69,8 +69,17 @@ class PayPeriodCorrectionService
       )
 
       # Reverse all payroll items; paper-check void state must not affect payroll correction math.
-      locked.payroll_items.find_each(batch_size: 500) do |item|
-        reverse_ytd_for_item!(item, locked.pay_date.year, locked.company_id)
+      # Preload YTD records to avoid 2×N queries in the loop.
+      year = locked.pay_date.year
+      all_items = locked.payroll_items.to_a
+      employee_ids = all_items.map(&:employee_id).uniq
+
+      emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
+      co_ytd = CompanyYtdTotal.find_by(company_id: locked.company_id, year: year)
+
+      all_items.each do |item|
+        emp_ytds[item.employee_id]&.subtract_payroll_item!(item)
+        co_ytd&.subtract_payroll_item!(item)
       end
 
       void_time = Time.current
@@ -203,20 +212,6 @@ class PayPeriodCorrectionService
   # ----------------------------------------------------------------
   # Private helpers
   # ----------------------------------------------------------------
-  private_class_method def self.reverse_ytd_for_item!(item, year, company_id)
-    employee_ytd = EmployeeYtdTotal.find_by(
-      employee_id: item.employee_id,
-      year:        year
-    )
-    employee_ytd&.subtract_payroll_item!(item)
-
-    company_ytd = CompanyYtdTotal.find_by(
-      company_id: company_id,
-      year:       year
-    )
-    company_ytd&.subtract_payroll_item!(item)
-  end
-
   private_class_method def self.copy_payroll_items!(source:, target:)
     # Copy every payroll row into the correction run, even if the original paper
     # check was voided. Check voiding is an issuance/audit concern, not a payroll

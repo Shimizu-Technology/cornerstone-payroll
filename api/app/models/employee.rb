@@ -41,6 +41,8 @@ class Employee < ApplicationRecord
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
   end
 
+  attr_writer :cached_ytd_gross, :cached_ytd_social_security
+
   scope :active, -> { where(status: "active") }
   scope :hourly, -> { where(employment_type: "hourly") }
   scope :salary, -> { where(employment_type: "salary") }
@@ -110,8 +112,11 @@ class Employee < ApplicationRecord
     employee_ytd_totals.find_or_create_by(year: year)
   end
 
-  # Calculate YTD gross from payroll items
+  # Calculate YTD gross from payroll items.
+  # Returns the precomputed cache when set by batch operations (e.g. run_payroll).
   def calculate_ytd_gross(year)
+    return @cached_ytd_gross if defined?(@cached_ytd_gross) && @cached_ytd_gross
+
     payroll_items
       .joins(:pay_period)
       .where(pay_periods: {
@@ -122,8 +127,11 @@ class Employee < ApplicationRecord
       .sum(:gross_pay)
   end
 
-  # Calculate YTD Social Security tax withheld
+  # Calculate YTD Social Security tax withheld.
+  # Returns the precomputed cache when set by batch operations.
   def calculate_ytd_social_security(year)
+    return @cached_ytd_social_security if defined?(@cached_ytd_social_security) && @cached_ytd_social_security
+
     payroll_items
       .joins(:pay_period)
       .where(pay_periods: {
