@@ -5,7 +5,6 @@ module Api
     module Admin
       class BaseController < ApplicationController
         before_action :require_staff_access!
-        before_action :require_manager_or_admin!, unless: :read_only_request?
 
         private
 
@@ -26,10 +25,6 @@ module Api
           unless current_user&.admin? || current_user&.manager?
             render json: { error: "Manager or admin access required" }, status: :forbidden
           end
-        end
-
-        def read_only_request?
-          request.get? || request.head?
         end
       end
     end

@@ -309,32 +309,36 @@ export function EmployeeList() {
               </Table>
             </Card>
 
-            {/* Pagination */}
-            {meta && meta.total_pages > 1 && (
+            {/* Result Summary / Pagination */}
+            {meta && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-gray-500">
                   Showing {((meta.current_page - 1) * meta.per_page) + 1} to{' '}
                   {Math.min(meta.current_page * meta.per_page, meta.total_count)} of{' '}
                   {meta.total_count} employees
                 </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={meta.current_page === 1}
-                    onClick={() => updateFilter('page', String(meta.current_page - 1))}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={meta.current_page === meta.total_pages}
-                    onClick={() => updateFilter('page', String(meta.current_page + 1))}
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                </div>
+                {meta.total_pages > 1 ? (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={meta.current_page === 1}
+                      onClick={() => updateFilter('page', String(meta.current_page - 1))}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={meta.current_page === meta.total_pages}
+                      onClick={() => updateFilter('page', String(meta.current_page + 1))}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <span className="text-sm text-gray-400">1 page</span>
+                )}
               </div>
             )}
           </>

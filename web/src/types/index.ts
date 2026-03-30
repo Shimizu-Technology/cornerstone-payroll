@@ -256,6 +256,7 @@ export interface PayrollItem {
   social_security_tax?: number;
   medicare_tax?: number;
   additional_withholding?: number;
+  withholding_tax_override?: number | null;
   // Deductions
   retirement_payment?: number;
   roth_retirement_payment?: number;

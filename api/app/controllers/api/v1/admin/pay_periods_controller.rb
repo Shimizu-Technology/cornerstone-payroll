@@ -519,6 +519,7 @@ module Api
             bonus: item.bonus,
             reported_tips: item.reported_tips,
             additional_withholding: item.additional_withholding,
+            withholding_tax_override: item.withholding_tax_override,
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
