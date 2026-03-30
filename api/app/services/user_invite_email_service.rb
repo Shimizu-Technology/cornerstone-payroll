@@ -9,7 +9,10 @@ class UserInviteEmailService
     def send_invite(user:, invited_by:, invitation_url: nil)
       return false unless configured?
 
-      button_link = invitation_url.presence || "#{frontend_url}/login"
+      # Always link to the app's login page, not Clerk's hosted invitation URL.
+      # Users sign up via the Clerk widget embedded in the app, which is less confusing
+      # than being redirected through clerk.com first.
+      button_link = "#{frontend_url}/login"
       display_url = frontend_url
 
       response = Resend::Emails.send(

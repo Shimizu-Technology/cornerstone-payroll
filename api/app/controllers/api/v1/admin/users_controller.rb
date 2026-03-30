@@ -10,8 +10,9 @@ module Api
         before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation ]
 
         # GET /api/v1/admin/users
+        # Admins see ALL staff users across all companies (staff is global, not per-client).
         def index
-          users = User.where(company_id: staff_company_id).includes(:company_assignments).order(:name)
+          users = User.includes(:company_assignments).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -28,7 +29,7 @@ module Api
         # POST /api/v1/admin/users
         def create
           user = User.new(create_params)
-          user.company_id = staff_company_id
+          user.company_id = current_user.company_id
           user.clerk_id = "pending_#{SecureRandom.uuid}"
           user.invitation_status = "pending"
           user.invited_by = current_user
@@ -61,7 +62,7 @@ module Api
           end
 
           if @user.role == "admin" && user_params.key?(:role) && user_params[:role].present? && user_params[:role] != "admin"
-            if User.where(company_id: staff_company_id, role: "admin", active: true).where.not(id: @user.id).none?
+            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
               return render json: { error: "Cannot demote the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -85,7 +86,7 @@ module Api
           end
 
           if @user.role == "admin"
-            if User.where(company_id: staff_company_id, role: "admin", active: true).where.not(id: @user.id).none?
+            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
               return render json: { error: "Cannot deactivate the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -101,7 +102,7 @@ module Api
           end
 
           if @user.role == "admin"
-            if User.where(company_id: staff_company_id, role: "admin", active: true).where.not(id: @user.id).none?
+            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
               return render json: { error: "Cannot delete the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -146,12 +147,8 @@ module Api
 
         private
 
-        def staff_company_id
-          current_user.company_id
-        end
-
         def set_user
-          @user = User.includes(:company_assignments).find_by(id: params[:id], company_id: staff_company_id)
+          @user = User.includes(:company_assignments).find_by(id: params[:id])
           return if @user
 
           render json: { error: "User not found" }, status: :not_found

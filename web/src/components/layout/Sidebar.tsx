@@ -12,6 +12,8 @@ import {
   FileBarChart2,
   HandCoins,
   SlidersHorizontal,
+  Printer,
+  Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -63,6 +65,14 @@ const clientNavigation: NavItem[] = [
     name: 'Employee Loans',
     href: '/employee-loans',
     icon: <HandCoins className="h-[18px] w-[18px]" />,
+  },
+];
+
+const clientSettingsNavigation: NavItem[] = [
+  {
+    name: 'Check Settings',
+    href: '/check-settings',
+    icon: <Printer className="h-[18px] w-[18px]" />,
   },
 ];
 
@@ -137,6 +147,18 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
       <nav className="flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-1.5">
           <NavSection items={clientNavigation} onNavigate={onNavigate} />
+        </div>
+
+        <div className="my-5 px-2">
+          <div className="flex items-center gap-2 border-t border-neutral-200 pt-4">
+            <Settings className="h-3.5 w-3.5 text-neutral-400" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">
+              Settings
+            </span>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <NavSection items={clientSettingsNavigation} onNavigate={onNavigate} />
         </div>
 
         {isAdmin && (

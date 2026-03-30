@@ -283,6 +283,21 @@ export function PayPeriodDetail() {
     }
   };
 
+  const handleUnapprove = async () => {
+    if (!payPeriod) return;
+    if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.')) return;
+    try {
+      setProcessing(true);
+      setError(null);
+      const response = await payPeriodsApi.unapprove(payPeriod.id);
+      setPayPeriod(response.pay_period);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unapprove');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const handleCommit = async () => {
     if (!payPeriod) return;
     if (!confirm('Commit this payroll? This will update YTD totals and cannot be undone.')) return;
@@ -403,9 +418,14 @@ export function PayPeriodDetail() {
               </>
             )}
             {isApproved && (
-              <Button onClick={handleCommit} disabled={processing}>
-                {processing ? 'Committing...' : 'Commit & Finalize'}
-              </Button>
+              <>
+                <Button variant="outline" onClick={handleUnapprove} disabled={processing}>
+                  Roll Back Approval
+                </Button>
+                <Button onClick={handleCommit} disabled={processing}>
+                  {processing ? 'Committing...' : 'Commit & Finalize'}
+                </Button>
+              </>
             )}
           </div>
         }
@@ -541,10 +561,19 @@ export function PayPeriodDetail() {
                 <TableBody>
                   {(() => {
                     const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-                    const displayEmployees = isCalculated
+                    const filtered = isCalculated
                       ? employees.filter((emp) => payrollEmployeeIds.has(emp.id))
                       : employees;
+                    const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
+                    const displayEmployees = [...filtered].sort((a, b) => {
+                      const orderDiff = (typeOrder[a.employment_type] ?? 9) - (typeOrder[b.employment_type] ?? 9);
+                      if (orderDiff !== 0) return orderDiff;
+                      return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`);
+                    });
+                    let prevType: string | null = null;
                     return displayEmployees.map((emp) => {
+                    const showDivider = emp.employment_type !== prevType;
+                    prevType = emp.employment_type;
                     const hours = hoursMap[String(emp.id)] || { regular: 80, overtime: 0 };
                     const payRate = toNumber(emp.pay_rate);
                     const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
@@ -563,7 +592,17 @@ export function PayPeriodDetail() {
                         )
                       : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
                     return (
-                      <TableRow key={emp.id} className={emp.employment_type === 'contractor' ? 'bg-emerald-50/30' : undefined}>
+                      <Fragment key={emp.id}>
+                      {showDivider && (
+                        <TableRow className={emp.employment_type === 'contractor' ? 'bg-emerald-50' : emp.employment_type === 'hourly' ? 'bg-gray-100' : 'bg-indigo-50'}>
+                          <TableCell colSpan={5} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${
+                            emp.employment_type === 'contractor' ? 'text-emerald-700' : emp.employment_type === 'hourly' ? 'text-gray-600' : 'text-indigo-700'
+                          }`}>
+                            {emp.employment_type === 'contractor' ? '1099 Contractors' : emp.employment_type === 'hourly' ? 'Hourly Employees' : 'Salary Employees'}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      <TableRow className={emp.employment_type === 'contractor' ? 'bg-emerald-50/30' : undefined}>
                         <TableCell>
                           <div>
                             <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
@@ -662,6 +701,7 @@ export function PayPeriodDetail() {
                           {formatCurrency(estGross)}
                         </TableCell>
                       </TableRow>
+                      </Fragment>
                     );
                     });
                   })()}
@@ -759,6 +799,21 @@ export function PayPeriodDetail() {
                                   {(isManual || (isSalary && item.salary_override)) && !isContractor && (
                                     <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                                       Manual
+                                    </span>
+                                  )}
+                                  {item.withholding_tax_override != null && (
+                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title="FIT manually overridden for this pay period">
+                                      FIT Override
+                                    </span>
+                                  )}
+                                  {toNumber(item.additional_withholding) > 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={`W-4 Step 4c: Additional withholding of ${formatCurrency(toNumber(item.additional_withholding))} per period`}>
+                                      +{formatCurrency(toNumber(item.additional_withholding))} W/H
+                                    </span>
+                                  )}
+                                  {empRecord?.w4_step2_multiple_jobs && (
+                                    <span className="inline-flex items-center rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-700" title="W-4 Step 2: Two jobs or spouse works">
+                                      Step 2
                                     </span>
                                   )}
                                 </div>

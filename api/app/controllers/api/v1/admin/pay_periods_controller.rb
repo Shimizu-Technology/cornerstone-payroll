@@ -5,9 +5,9 @@ module Api
     module Admin
       class PayPeriodsController < BaseController
         include Auditable
-        audit_actions :approve, :commit, :run_payroll, :void, :create_correction_run
+        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run
         before_action :set_pay_period, only: [
-          :show, :update, :destroy, :run_payroll, :approve, :commit, :retry_tax_sync,
+          :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
           :void, :create_correction_run, :correction_history
         ]
 
@@ -254,6 +254,17 @@ module Api
           render json: { pay_period: pay_period_json(@pay_period) }
         end
 
+        # POST /api/v1/admin/pay_periods/:id/unapprove
+        # Roll back an approved pay period to calculated status.
+        def unapprove
+          unless @pay_period.approved?
+            return render json: { error: "Can only unapprove an approved pay period" }, status: :unprocessable_entity
+          end
+
+          @pay_period.update!(status: "calculated", approved_by_id: nil)
+          render json: { pay_period: pay_period_json(@pay_period) }
+        end
+
         # POST /api/v1/admin/pay_periods/:id/commit
         # Final lock - no more changes allowed
         def commit
@@ -279,9 +290,9 @@ module Api
               update_ytd_totals(item)
             end
 
-            # Auto-assign check numbers to payroll items that don't have one yet.
-            # Uses company-level row lock to prevent collisions across concurrent commits.
-            unassigned = @pay_period.payroll_items.where(check_number: nil)
+            # Auto-assign check numbers to payroll items with positive net pay.
+            # $0 net pay items don't get checks (no point wasting a check number).
+            unassigned = @pay_period.payroll_items.where(check_number: nil).where("net_pay > 0")
             @pay_period.company.assign_check_numbers!(unassigned) if unassigned.exists?
 
             # Prepare tax sync with a fresh idempotency key for this commit event.
