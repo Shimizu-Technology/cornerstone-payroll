@@ -33,6 +33,7 @@ interface EditableFields {
   salary_override: string;
   non_taxable_pay: number;
   additional_withholding: number;
+  withholding_tax_override: string;
   wage_rate_hours: PayrollItemWageRateHours[];
 }
 
@@ -55,6 +56,7 @@ export function PayrollItemEditModal({
     salary_override: '',
     non_taxable_pay: 0,
     additional_withholding: 0,
+    withholding_tax_override: '',
     wage_rate_hours: [],
   });
   const [saving, setSaving] = useState(false);
@@ -86,6 +88,7 @@ export function PayrollItemEditModal({
         salary_override: item.salary_override != null ? String(item.salary_override) : '',
         non_taxable_pay: item.non_taxable_pay || 0,
         additional_withholding: item.additional_withholding || 0,
+        withholding_tax_override: item.withholding_tax_override != null ? String(item.withholding_tax_override) : '',
         wage_rate_hours: initialWageRateHours,
       });
       setError(null);
@@ -144,6 +147,7 @@ export function PayrollItemEditModal({
         reported_tips: parseFloat(String(fields.reported_tips)) || 0,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding: parseFloat(String(fields.additional_withholding)) || 0,
+        withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : parseFloat(fields.withholding_tax_override),
       };
 
       if (hasMultiRate) {
@@ -405,14 +409,14 @@ export function PayrollItemEditModal({
             </div>
           </div>
 
-          {/* Tax Overrides — not applicable to contractors */}
+          {/* Tax Adjustments — not applicable to contractors */}
           {!isContractor && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">Tax Adjustments</h4>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">
-                    Additional Withholding (per period)
+                    Additional Withholding (W-4 4c)
                   </label>
                   <Input
                     type="number"
@@ -421,6 +425,25 @@ export function PayrollItemEditModal({
                     value={fields.additional_withholding}
                     onChange={(e) => handleChange('additional_withholding', e.target.value)}
                   />
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Extra $ withheld each pay period per W-4
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    FIT Override
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Auto-calculated"
+                    value={fields.withholding_tax_override}
+                    onChange={(e) => handleChange('withholding_tax_override', e.target.value)}
+                  />
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Leave blank for normal calculation; set to override FIT (e.g. 0 for exempt)
+                  </p>
                 </div>
               </div>
             </div>

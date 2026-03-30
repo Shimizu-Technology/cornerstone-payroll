@@ -169,6 +169,7 @@ class PayrollRegisterPdfGenerator
       { content: "OT Hrs",       background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Gross Pay",    background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Withholding",  background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
+      { content: "Addtl W/H",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Soc Sec",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Medicare",     background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Retirement",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
@@ -186,13 +187,14 @@ class PayrollRegisterPdfGenerator
       { content: "", background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG },
-      { content: fmt(s[:total_gross]),        align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_withholding]),   align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_social_security]), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_medicare]),      align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_retirement]),    align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_deductions]),    align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_net]),           align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_gross]),                  align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_withholding]),             align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_additional_withholding]),  align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_social_security]),         align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_medicare]),                align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_retirement]),              align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_deductions]),              align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_net]),                     align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG }
     ]
 
@@ -200,18 +202,19 @@ class PayrollRegisterPdfGenerator
 
     page_width = pdf.bounds.width
     width_fractions = [
-      0.15,      # Employee
-      0.06,      # Type
+      0.13,      # Employee
+      0.05,      # Type
       0.05,      # Hours
       0.05,      # OT Hrs
-      0.085,     # Gross
-      0.085,     # Withholding
-      0.085,     # Soc Sec
-      0.08,      # Medicare
-      0.08,      # Retirement
-      0.08,      # Deductions
-      0.095,     # Net Pay
-      0.10       # Check #
+      0.08,      # Gross
+      0.075,     # Withholding
+      0.065,     # Addtl W/H
+      0.075,     # Soc Sec
+      0.07,      # Medicare
+      0.07,      # Retirement
+      0.075,     # Deductions
+      0.085,     # Net Pay
+      0.085      # Check #
     ]
     col_widths = width_fractions.map { |fraction| page_width * fraction }
     # Ensure widths sum to exactly page_width (float drift safety)
@@ -240,13 +243,14 @@ class PayrollRegisterPdfGenerator
       { content: emp[:employment_type].to_s },
       { content: emp[:hours_worked].to_f.to_s, align: :right },
       { content: emp[:overtime_hours].to_f.to_s, align: :right },
-      { content: fmt(emp[:gross_pay]),          align: :right },
-      { content: fmt(emp[:withholding_tax]),     align: :right },
-      { content: fmt(emp[:social_security_tax]), align: :right },
-      { content: fmt(emp[:medicare_tax]),        align: :right },
-      { content: fmt(emp[:retirement_payment]),  align: :right },
-      { content: fmt(emp[:total_deductions]),    align: :right },
-      { content: fmt(emp[:net_pay]),             align: :right },
+      { content: fmt(emp[:gross_pay]),               align: :right },
+      { content: fmt(emp[:withholding_tax]),          align: :right },
+      { content: fmt(emp[:additional_withholding]),   align: :right },
+      { content: fmt(emp[:social_security_tax]),      align: :right },
+      { content: fmt(emp[:medicare_tax]),             align: :right },
+      { content: fmt(emp[:retirement_payment]),       align: :right },
+      { content: fmt(emp[:total_deductions]),         align: :right },
+      { content: fmt(emp[:net_pay]),                  align: :right },
       { content: emp[:check_number].to_s }
     ]
   end

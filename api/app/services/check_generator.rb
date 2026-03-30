@@ -403,10 +403,11 @@ class CheckGenerator
   def tax_rows
     return [] if employee.contractor?
     rows = []
-    rows << ["Federal Income Tax", fn(payroll_item.withholding_tax), fn(ytd[:fit])]
+    fit_label = payroll_item.withholding_tax_override.present? ? "Federal Income Tax *" : "Federal Income Tax"
+    rows << [fit_label, fn(payroll_item.withholding_tax), fn(ytd[:fit])]
     rows << ["Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss])]
     rows << ["Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med])]
-    rows << ["Additional W/H", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])] if payroll_item.additional_withholding.to_f > 0
+    rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])] if payroll_item.additional_withholding.to_f > 0
     rows
   end
 

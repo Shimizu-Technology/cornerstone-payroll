@@ -238,6 +238,7 @@ function PayrollRegisterPanel() {
                     <th className="pb-2 pr-4 font-medium text-right">Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
                     <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Addtl W/H</th>
                     <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
                     <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
                     <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
@@ -253,6 +254,7 @@ function PayrollRegisterPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">{emp.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.additional_withholding ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">
@@ -264,7 +266,7 @@ function PayrollRegisterPanel() {
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="py-6 text-center text-gray-400">
+                      <td colSpan={11} className="py-6 text-center text-gray-400">
                         No payroll items found for this pay period.
                       </td>
                     </tr>
