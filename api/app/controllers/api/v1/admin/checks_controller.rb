@@ -82,17 +82,21 @@ module Api
             end
           )
 
+          # Log batch download event for each printable item in a single INSERT
           user = User.find(current_user_id)
-          ActiveRecord::Base.transaction do
-            printable_items.each do |item|
-              item.check_events.create!(
-                user: user,
-                event_type: "batch_downloaded",
-                check_number: item.check_number,
-                ip_address: request.remote_ip
-              )
-            end
+          now = Time.current
+          event_records = printable_items.map do |item|
+            {
+              payroll_item_id: item.id,
+              user_id: user.id,
+              event_type: "batch_downloaded",
+              check_number: item.check_number,
+              ip_address: request.remote_ip,
+              created_at: now,
+              updated_at: now
+            }
           end
+          CheckEvent.insert_all!(event_records)
 
           pay_date_token = @pay_period.pay_date&.strftime('%Y-%m-%d') || "undated"
           filename = "checks_#{pay_date_token}_batch.pdf"
