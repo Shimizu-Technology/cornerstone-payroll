@@ -23,10 +23,11 @@ module Api
           # Filter by year
           @pay_periods = @pay_periods.for_year(params[:year].to_i) if params[:year].present?
 
+          loaded = @pay_periods.to_a
           render json: {
-            pay_periods: @pay_periods.map { |pp| pay_period_json(pp) },
+            pay_periods: loaded.map { |pp| pay_period_json(pp) },
             meta: {
-              total: @pay_periods.count,
+              total: loaded.size,
               statuses: PayPeriod.where(company_id: current_company_id).group(:status).count
             }
           }
@@ -191,9 +192,16 @@ module Api
 
           results = { success: [], errors: [] }
 
+          employees_by_id = Employee.where(id: employee_ids, company_id: current_company_id)
+                                     .active
+                                     .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_wage_rates, :employee_ytd_totals)
+                                     .index_by(&:id)
+
+          preload_ytd_caches!(employees_by_id.values, @pay_period)
+
           employee_ids.each do |employee_id|
-            employee = Employee.find_by(id: employee_id, company_id: current_company_id)
-            next unless employee&.active?
+            employee = employees_by_id[employee_id.to_i]
+            next unless employee
 
             begin
               # Find or create payroll item for this employee
@@ -282,18 +290,29 @@ module Api
               :employee,
               payroll_item_deductions: :deduction_type,
               employee: { employee_loans: :loan_transactions }
-            )
+            ).to_a
 
-            # Update YTD totals for all employees
+            # Preload YTD records to avoid N find_or_create_by calls per item
+            year = @pay_period.pay_date.year
+            employee_ids = committed_items.map(&:employee_id).uniq
+
+            emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
+            employee_ids.each do |eid|
+              emp_ytds[eid] ||= EmployeeYtdTotal.find_or_create_by!(employee_id: eid, year: year)
+            end
+
+            co_ytd = CompanyYtdTotal.find_or_create_by!(company_id: @pay_period.company_id, year: year)
+
             committed_items.each do |item|
               PayrollCalculator.for(item.employee, item).apply_loan_payments!
-              update_ytd_totals(item)
+              emp_ytds[item.employee_id].add_payroll_item!(item)
+              co_ytd.add_payroll_item!(item)
             end
 
             # Auto-assign check numbers to payroll items with positive net pay.
-            # $0 net pay items don't get checks (no point wasting a check number).
-            unassigned = @pay_period.payroll_items.where(check_number: nil).where("net_pay > 0")
-            @pay_period.company.assign_check_numbers!(unassigned) if unassigned.exists?
+            # $0 net pay items don't get checks. Uses company-level row lock to prevent collisions.
+            unassigned = committed_items.select { |i| i.check_number.nil? && i.net_pay.to_d > 0 }
+            @pay_period.company.assign_check_numbers!(unassigned) if unassigned.any?
 
             # Prepare tax sync with a fresh idempotency key for this commit event.
             @pay_period.prepare_tax_sync!
@@ -458,6 +477,35 @@ module Api
 
         private
 
+        def pay_period_aggregates(pay_period)
+          items = pay_period.payroll_items
+          if items.loaded?
+            arr = items.to_a
+            {
+              count: arr.size,
+              gross: arr.sum { |i| i.gross_pay.to_f },
+              net: arr.sum { |i| i.net_pay.to_f },
+              employer_ss: arr.sum { |i| i.employer_social_security_tax.to_f },
+              employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
+            }
+          else
+            row = items.pick(
+              Arel.sql("COUNT(*)"),
+              Arel.sql("COALESCE(SUM(gross_pay), 0)"),
+              Arel.sql("COALESCE(SUM(net_pay), 0)"),
+              Arel.sql("COALESCE(SUM(employer_social_security_tax), 0)"),
+              Arel.sql("COALESCE(SUM(employer_medicare_tax), 0)")
+            )
+            {
+              count: row[0].to_i,
+              gross: row[1].to_f,
+              net: row[2].to_f,
+              employer_ss: row[3].to_f,
+              employer_medicare: row[4].to_f
+            }
+          end
+        end
+
         def set_pay_period
           @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events).find(params[:id])
 
@@ -471,6 +519,8 @@ module Api
         end
 
         def pay_period_json(pay_period, include_items: false)
+          agg = pay_period_aggregates(pay_period)
+
           json = {
             id: pay_period.id,
             company_id: pay_period.company_id,
@@ -480,11 +530,11 @@ module Api
             status: pay_period.status,
             notes: pay_period.notes,
             period_description: pay_period.period_description,
-            employee_count: pay_period.payroll_items.count,
-            total_gross: pay_period.payroll_items.sum(:gross_pay),
-            total_net: pay_period.payroll_items.sum(:net_pay),
-            total_employer_ss: pay_period.payroll_items.sum(:employer_social_security_tax),
-            total_employer_medicare: pay_period.payroll_items.sum(:employer_medicare_tax),
+            employee_count: agg[:count],
+            total_gross: agg[:gross],
+            total_net: agg[:net],
+            total_employer_ss: agg[:employer_ss],
+            total_employer_medicare: agg[:employer_medicare],
             committed_at: pay_period.committed_at,
             tax_sync_status: pay_period.tax_sync_status,
             tax_sync_attempts: pay_period.tax_sync_attempts,
@@ -601,24 +651,46 @@ module Api
           }
         end
 
-        def update_ytd_totals(payroll_item)
-          employee_ytd = EmployeeYtdTotal.find_or_create_by!(
-            employee_id: payroll_item.employee_id,
-            year: @pay_period.pay_date.year
-          )
-          employee_ytd.add_payroll_item!(payroll_item)
-
-          company_ytd = CompanyYtdTotal.find_or_create_by!(
-            company_id: @pay_period.company_id,
-            year: @pay_period.pay_date.year
-          )
-          company_ytd.add_payroll_item!(payroll_item)
-        end
-
         def parse_iso_date_param(value)
           return nil if value.blank?
 
           Date.strptime(value.to_s, "%Y-%m-%d")
+        end
+
+        # Precompute YTD gross and social security for all employees in one query
+        # and cache the values on the Employee instances so PayrollCalculator
+        # doesn't issue 2×N individual queries during run_payroll.
+        def preload_ytd_caches!(employees, pay_period)
+          return if employees.empty?
+
+          year = pay_period.pay_date.year
+          eids = employees.map(&:id)
+
+          committed_period_ids = PayPeriod.reportable_committed
+                                          .where(company_id: current_company_id)
+                                          .for_year(year)
+                                          .pluck(:id)
+
+          if committed_period_ids.any?
+            rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
+                              .group(:employee_id)
+                              .pluck(
+                                :employee_id,
+                                Arel.sql("COALESCE(SUM(gross_pay), 0)"),
+                                Arel.sql("COALESCE(SUM(social_security_tax), 0)")
+                              )
+            ytd_map = rows.each_with_object({}) do |(eid, gross, ss), h|
+              h[eid] = { gross: gross.to_f, ss: ss.to_f }
+            end
+          else
+            ytd_map = {}
+          end
+
+          employees.each do |emp|
+            data = ytd_map[emp.id] || { gross: 0.0, ss: 0.0 }
+            emp.cached_ytd_gross = data[:gross]
+            emp.cached_ytd_social_security = data[:ss]
+          end
         end
       end
     end

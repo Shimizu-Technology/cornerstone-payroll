@@ -40,10 +40,16 @@ class Company < ApplicationRecord
     self.class.transaction do
       lock!  # SELECT … FOR UPDATE on this company row
       starting = next_check_number
-      items.each_with_index do |item, idx|
-        item.update_column(:check_number, (starting + idx).to_s)
-        assigned += 1
-      end
+
+      conn = self.class.connection
+      case_clauses = items.each_with_index.map { |item, idx|
+        "WHEN #{conn.quote(item.id)} THEN #{conn.quote((starting + idx).to_s)}"
+      }.join(" ")
+
+      PayrollItem.where(id: items.map(&:id))
+                 .update_all(Arel.sql("check_number = CASE id #{case_clauses} END"))
+
+      assigned = items.size
       update_column(:next_check_number, starting + assigned)
     end
     assigned
