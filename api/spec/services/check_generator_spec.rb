@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe CheckGenerator do
   let(:company) do
@@ -65,6 +66,16 @@ RSpec.describe CheckGenerator do
 
     it "returns a String (binary)" do
       expect(pdf).to be_a(String)
+    end
+
+    it "does not print decorative markers or a duplicate memo label on the check face" do
+      text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+      expect(text).not_to include("**")
+      expect(text).not_to include("*****")
+      expect(text).not_to include("Memo:")
+      expect(text).not_to include("BENEFITS")
+      expect(text).not_to include("Pay Period:")
     end
   end
 
@@ -141,6 +152,26 @@ RSpec.describe CheckGenerator do
 
     it "generates an alignment test without error" do
       expect { generator.alignment_test }.not_to raise_error
+    end
+  end
+
+  describe "default check face layout" do
+    it "uses the tuned default field coordinates" do
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :date, :y)).to eq(216.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee, :x)).to eq(64.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee, :y)).to eq(180.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :amount, :y)).to eq(182.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :amount_words, :y)).to eq(156.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :memo, :y)).to eq(64.0)
+    end
+
+    it "uses compact stub row positions that stay within each third" do
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row1_y)).to eq(252.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row2_y)).to eq(188.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :row3_y)).to eq(128.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :table_height)).to eq(56.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_box_h)).to eq(48.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:stub, :summary_x_offset)).to eq(-18.0)
     end
   end
 end

@@ -5,7 +5,7 @@ require "prawn/table"
 require "active_support/number_helper"
 require_relative "../../lib/number_to_words"
 
-# Generates a 3-part letter-size PDF matching Cornerstone's check format.
+# Generates a 3-part letter-size PDF matching QuickBooks-style check stock.
 #
 # Layout (top-check, Cornerstone default):
 #   Top section    : Check face (payee, date, amount, pay period)
@@ -18,8 +18,9 @@ require_relative "../../lib/number_to_words"
 #   ├────────────────────────────────┤──────────────────────────┤
 #   │ Company        OTHER PAY C YTD │ DEDUCTIONS   Current YTD │
 #   ├────────────────────────────────┤──────────────────────────┤
-#   │ Period / Date / BENEFITS/MEMO  │ ┌SUMMARY    Cur    YTD┐ │
-#   │                                │ │NET PAY:    $xxx.xx  │ │
+#   │ Period / Date / Memo           │ ┌SUMMARY    Cur    YTD┐ │
+#   │                                │ │rows only            │ │
+#   │                                │ NET PAY:    $xxx.xx    │
 #   │                                │ └─────────────────────┘ │
 #   └────────────────────────────────┴──────────────────────────┘
 #
@@ -31,34 +32,32 @@ class CheckGenerator
   M              = 16.0               # inner margin for all sections
   DEFAULT_LAYOUT = {
     check_face: {
-      date:         { x: 474.0, y: 242.0, width: 112.0, font_size: 10.0 },
-      payee:        { x: 42.0,  y: 192.0, width: 320.0, font_size: 10.0 },
-      amount:       { x: 467.0, y: 192.0, width: 120.0, font_size: 10.0 },
-      amount_words: { x: 52.0,  y: 158.0, width: 492.0, font_size: 9.0 },
-      pay_period:   { x: 42.0,  y: 76.0,  width: 360.0, font_size: 9.0 },
-      memo:         { x: 22.0,  y: 30.0,  width: 260.0, font_size: 7.5 },
-      signature:    { x: 322.0, y: 22.0,  width: 246.0 }
+      date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
+      payee:        { x: 64.0,  y: 180.0, width: 320.0, font_size: 10.0 },
+      amount:       { x: 467.0, y: 182.0, width: 120.0, font_size: 10.0 },
+      amount_words: { x: 52.0,  y: 156.0, width: 492.0, font_size: 9.0 },
+      memo:         { x: 22.0,  y: 64.0,  width: 260.0, font_size: 7.5 },
+      signature:    { x: 322.0, y: 10.0,  width: 246.0 }
     },
     stub: {
       left: 16.0,
       right: 16.0,
       y: 0.0,
       left_ratio: 0.56,
-      row1_y: 258.0,
-      row2_y: 164.0,
-      row3_y: 80.0,
-      pay_table_y_offset: -12.0,
+      row1_y: 252.0,
+      row2_y: 188.0,
+      row3_y: 128.0,
+      pay_table_y_offset: -10.0,
       other_pay_x_offset: 100.0,
-      other_pay_y_offset: -12.0,
-      benefits_x_ratio: 0.42,
-      memo_y_offset: -48.0,
-      summary_x_offset: 0.0,
+      other_pay_y_offset: -10.0,
+      memo_y_offset: -36.0,
+      summary_x_offset: -18.0,
       summary_y_offset: 0.0,
-      table_height: 82.0,
-      table_padding_y: 1.5,
-      table_padding_x: 3.0,
-      summary_box_h: 76.0,
-      summary_padding_y: 2.0,
+      table_height: 56.0,
+      table_padding_y: 1.0,
+      table_padding_x: 2.0,
+      summary_box_h: 48.0,
+      summary_padding_y: 1.5,
       summary_padding_x: 2.0
     }
   }.freeze
@@ -169,7 +168,7 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # CHECK FACE  – positioned for QuickBooks-style stock overlay
+  # CHECK FACE  – keep the top third clean like QuickBooks
   # -----------------------------------------------------------------------
   def draw_check_face(pdf, sect_bot, voided)
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
@@ -177,9 +176,7 @@ class CheckGenerator
     payee_cfg = layout_field(:check_face, :payee)
     amount_cfg = layout_field(:check_face, :amount)
     words_cfg = layout_field(:check_face, :amount_words)
-    period_cfg = layout_field(:check_face, :pay_period)
     memo_cfg = layout_field(:check_face, :memo)
-    signature_cfg = layout_field(:check_face, :signature)
 
     # ---- Date (top-right) ----
     pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
@@ -191,32 +188,21 @@ class CheckGenerator
       pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.full_name }
     end
     pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
-      pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text "**#{fn(payroll_item.net_pay)}", align: :right }
+      pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(payroll_item.net_pay), align: :right }
     end
 
     # ---- Amount in words ----
     pdf.bounding_box([words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy], width: words_cfg["width"].to_f) do
-      pdf.font_size(words_cfg["font_size"].to_f) { pdf.text "*****#{NumberToWords.convert(payroll_item.net_pay)}" }
+      pdf.font_size(words_cfg["font_size"].to_f) { pdf.text NumberToWords.convert(payroll_item.net_pay) }
     end
 
-    # ---- Pay Period ----
-    pdf.bounding_box([period_cfg["x"].to_f + ox, sect_bot + period_cfg["y"].to_f + oy], width: period_cfg["width"].to_f) do
-      pdf.font_size(period_cfg["font_size"].to_f) do
-        pdf.text "Pay Period:  #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
+    # ---- Memo (bottom of check stock face) ----
+    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
+      pdf.font_size(memo_cfg["font_size"].to_f) do
+        pdf.text "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
       end
     end
 
-    # ---- Memo + Signature (bottom of check stock face) ----
-    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
-      pdf.font_size(7) { pdf.text "Memo:" }
-      pdf.font_size(memo_cfg["font_size"].to_f) { pdf.text "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" }
-    end
-
-    sig_x = signature_cfg["x"].to_f + ox
-    sig_y = sect_bot + signature_cfg["y"].to_f + oy
-    sig_w = signature_cfg["width"].to_f
-    pdf.stroke_color "333333"; pdf.line_width 0.5
-    pdf.stroke_line [sig_x, sig_y], [sig_x + sig_w, sig_y]
   end
 
   # -----------------------------------------------------------------------
@@ -239,8 +225,7 @@ class CheckGenerator
     # ================================================================
     # ROW 1:  PAY (left)  |  TAXES (right)
     # ================================================================
-    # Employee name on same line as PAY header
-    pdf.font_size(8) do
+    pdf.font_size(7) do
       pdf.draw_text employee.full_name, at: [lx, row1_top], style: :bold
     end
 
@@ -269,7 +254,7 @@ class CheckGenerator
     # ================================================================
     # ROW 2:  Company + OTHER PAY (left)  |  DEDUCTIONS (right)
     # ================================================================
-    pdf.font_size(8) do
+    pdf.font_size(7) do
       pdf.draw_text company.name, at: [lx, row2_top], style: :bold
     end
 
@@ -298,45 +283,21 @@ class CheckGenerator
     )
 
     # ================================================================
-    # ROW 3:  Period/Date/Benefits/Memo (left)  |  SUMMARY (right)
+    # ROW 3:  Period/Date/Memo (left)  |  SUMMARY (right)
     # ================================================================
-    pdf.bounding_box([lx, row3_top], width: left_w * stub_cfg["benefits_x_ratio"].to_f) do
-      pdf.font_size(7.5) do
+    pdf.bounding_box([lx, row3_top], width: left_w) do
+      pdf.font_size(6.5) do
         pdf.text "Pay Period", style: :bold
         pdf.text "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
-        pdf.move_down 4
+        pdf.move_down 3
         pdf.text "Pay Date", style: :bold
         pdf.text format_date(pay_period.pay_date)
       end
     end
 
-    # BENEFITS header (empty but present for format compatibility)
-    benefits_x = lx + left_w * stub_cfg["benefits_x_ratio"].to_f
-    benefits_w = left_w * (1 - stub_cfg["benefits_x_ratio"].to_f) - 8
-    pdf.bounding_box([benefits_x, row3_top], width: benefits_w) do
-      pdf.font_size(7) do
-        benefits_data = [
-          [
-            { content: "BENEFITS", font_style: :bold },
-            { content: "Used", font_style: :bold, align: :right },
-            { content: "Available", font_style: :bold, align: :right }
-          ]
-        ]
-        bw = benefits_w
-        pdf.table(benefits_data,
-          column_widths: [bw * 0.46, bw * 0.27, bw * 0.27],
-          cell_style: { padding: [1.5, 3], borders: [:bottom], border_color: "999999", size: 7 }
-        ) do
-          row(0).background_color = "EEEEEE"
-        end
-      rescue Prawn::Errors::CannotFit
-        # skip
-      end
-    end
-
     # MEMO label
     pdf.bounding_box([lx, row3_top + stub_cfg["memo_y_offset"].to_f], width: left_w) do
-      pdf.font_size(7.5) { pdf.text "MEMO:", style: :bold }
+      pdf.font_size(6.5) { pdf.text "MEMO:", style: :bold }
     end
 
     # SUMMARY box (bordered)
@@ -361,10 +322,10 @@ class CheckGenerator
     data = [header] + rows
     col_widths = col_ratios.map { |r| w * r }
 
-    pdf.bounding_box([x, y], width: w, height: table_height) do
-      pdf.font_size(7) do
+    pdf.bounding_box([x, y], width: w) do
+      pdf.font_size(6.5) do
         pdf.table(data, column_widths: col_widths, cell_style: {
-          padding: [padding_y, padding_x], borders: [], size: 7
+          padding: [padding_y, padding_x], borders: [], size: 6.5
         }) do
           row(0).borders = [:bottom]
           row(0).border_color = "999999"
@@ -374,7 +335,7 @@ class CheckGenerator
       end
     end
   rescue Prawn::Errors::CannotFit
-    pdf.bounding_box([x, y], width: w, height: 20) do
+    pdf.bounding_box([x, y], width: w) do
       pdf.font_size(6) { pdf.text "[TABLE]", color: "CC0000" }
     end
   end
@@ -469,12 +430,11 @@ class CheckGenerator
   end
 
   # -----------------------------------------------------------------------
-  # SUMMARY box (bottom-right, bordered like Cornerstone)
+  # SUMMARY box (bottom-right, with NET PAY below like QuickBooks)
   # -----------------------------------------------------------------------
   def draw_summary_box(pdf, x:, y:, w:, stub_cfg:)
     box_h = stub_cfg["summary_box_h"].to_f
 
-    # Draw outer border
     pdf.stroke_color "333333"
     pdf.line_width 0.8
     pdf.stroke_rectangle [x, y], w, box_h
@@ -494,29 +454,31 @@ class CheckGenerator
       ["Deductions", fd(cur_deds), fd(ytd[:deds])]
     ]
 
-    net_row = [
-      { content: "NET PAY:", font_style: :bold },
-      "",
-      { content: fd(payroll_item.net_pay), font_style: :bold }
-    ]
+    data = [header] + data_rows
 
-    data = [header] + data_rows + [net_row]
-
-    pdf.bounding_box([x + 3, y - 3], width: inner_w, height: box_h - 6) do
-      pdf.font_size(7) do
+    pdf.bounding_box([x + 3, y - 3], width: inner_w) do
+      pdf.font_size(6.5) do
         pdf.table(data, column_widths: cw, cell_style: {
-          padding: [stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f], borders: [], size: 7
+          padding: [stub_cfg["summary_padding_y"].to_f, stub_cfg["summary_padding_x"].to_f], borders: [], size: 6.5
         }) do
           row(0).borders = [:bottom]
           row(0).border_color = "999999"
           row(0).background_color = "EEEEEE"
           columns(1..2).align = :right
-          row(-1).borders = [:top]
-          row(-1).border_color = "333333"
         end
       rescue Prawn::Errors::CannotFit
         pdf.text "[SUMMARY]", size: 6, color: "CC0000"
       end
+    end
+
+    net_y = y - box_h - 8
+    amount_text = fd(payroll_item.net_pay)
+    pdf.font_size(7) do
+      pdf.draw_text "NET PAY:", at: [x + 3, net_y], style: :bold
+    end
+    pdf.font_size(9) do
+      amount_w = pdf.width_of(amount_text, style: :bold)
+      pdf.draw_text amount_text, at: [x + w - amount_w - 3, net_y], style: :bold
     end
   end
 
@@ -557,7 +519,7 @@ class CheckGenerator
           pdf.font_size(10) { pdf.text label, style: :bold, color: "0000AA", align: :center }
         end
       end
-      %i[date payee amount amount_words pay_period memo signature].each do |field|
+      %i[date payee amount amount_words memo signature].each do |field|
         cfg = layout_field(:check_face, field)
         draw_alignment_marker(
           pdf,
