@@ -3,6 +3,7 @@
  * Shows all checks for a committed pay period with print/void/reprint controls.
  */
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
 import { checksApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
@@ -383,10 +384,10 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
         />
       )}
 
-      {/* Large centered PDF Preview */}
-      {previewUrl && previewItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 p-6">
-          <div className="flex h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      {/* Large centered PDF Preview — rendered as portal to avoid z-index/overflow issues */}
+      {previewUrl && previewItem && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-6 py-4">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">
@@ -416,7 +417,8 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
               />
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

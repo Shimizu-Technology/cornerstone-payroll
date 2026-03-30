@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class CompaniesController < BaseController
+        skip_before_action :enforce_company_access!, only: [:index]
+
         # GET /api/v1/admin/companies
         # Super admins see all companies; accountants see assigned companies;
         # regular users see only their own.
@@ -25,7 +27,7 @@ module Api
               )
             end,
             is_super_admin: current_user&.super_admin? || false,
-            can_switch_company: current_user&.super_admin? || accessible_ids.length > 1,
+            can_switch_company: current_user&.super_admin? || company_ids.length > 1,
             current_company_id: current_company_id
           }
         end

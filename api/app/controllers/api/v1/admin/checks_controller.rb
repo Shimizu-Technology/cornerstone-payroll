@@ -25,7 +25,6 @@ module Api
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
-        before_action :require_admin!,    only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
         # GET /api/v1/admin/pay_periods/:pay_period_id/checks
@@ -69,22 +68,23 @@ module Api
                              .order(Arel.sql("check_number::integer ASC"))
                              .to_a
 
-          if items.empty?
-            return render json: { error: "No checks to print for this pay period" }, status: :unprocessable_entity
+          # Skip $0 net pay checks unless they're voided (voided checks still print with watermark for traceability)
+          printable_items = items.reject { |item| !item.voided? && item.net_pay.to_d <= 0 }
+
+          if printable_items.empty?
+            return render json: { error: "No checks to print for this pay period (all items have $0 net pay)" }, status: :unprocessable_entity
           end
 
-          # Build combined PDF: include voided checks with VOID watermark for traceability.
           combined_pdf = combine_pdfs(
-            items.map do |item|
+            printable_items.map do |item|
               generator = CheckGenerator.new(item)
               item.voided? ? generator.generate_voided : generator.generate
             end
           )
 
-          # Log batch download event for each item (all-or-nothing)
           user = User.find(current_user_id)
           ActiveRecord::Base.transaction do
-            items.each do |item|
+            printable_items.each do |item|
               item.check_events.create!(
                 user: user,
                 event_type: "batch_downloaded",
@@ -303,6 +303,7 @@ module Api
             :check_offset_y,
             :bank_name,
             :bank_address,
+            :check_memo_template,
             check_layout_config: {}
           )
 
@@ -458,6 +459,7 @@ module Api
             check_offset_y: company.check_offset_y,
             bank_name: company.bank_name,
             bank_address: company.bank_address,
+            check_memo_template: company.check_memo_template,
             check_layout_config: company.check_layout_config || {}
           }
         end

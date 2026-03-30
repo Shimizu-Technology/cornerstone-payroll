@@ -199,7 +199,7 @@ class CheckGenerator
     # ---- Memo (bottom of check stock face) ----
     pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
       pdf.font_size(memo_cfg["font_size"].to_f) do
-        pdf.text "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
+        pdf.text resolve_memo_text
       end
     end
 
@@ -413,8 +413,20 @@ class CheckGenerator
   def tax_rows
     return [] if employee.contractor?
     rows = []
-    fit_label = payroll_item.withholding_tax_override.present? ? "Federal Income Tax *" : "Federal Income Tax"
-    rows << [fit_label, fn(payroll_item.withholding_tax), fn(ytd[:fit])]
+
+    # Build FIT label with W-4 context
+    fit_parts = ["Federal Income Tax"]
+    w4_notes = []
+    w4_notes << "Step2" if employee.w4_step2_multiple_jobs?
+    w4_notes << "4a" if employee.w4_step4a_other_income.to_f > 0
+    w4_notes << "4b" if employee.w4_step4b_deductions.to_f > 0
+    if payroll_item.withholding_tax_override.present?
+      fit_parts << "*Override"
+    elsif w4_notes.any?
+      fit_parts << "(#{w4_notes.join(',')})"
+    end
+    rows << [fit_parts.join(" "), fn(payroll_item.withholding_tax), fn(ytd[:fit])]
+
     rows << ["Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss])]
     rows << ["Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med])]
     rows << ["Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh])] if payroll_item.additional_withholding.to_f > 0
@@ -594,6 +606,34 @@ class CheckGenerator
 
   def format_date(d)
     d&.strftime("%m/%d/%Y") || "N/A"
+  end
+
+  def w4_transparency_lines
+    return [] if employee.contractor?
+    lines = []
+    lines << "Filing: #{employee.filing_status&.titleize}"
+    lines << "Step 2: Yes (two jobs)" if employee.w4_step2_multiple_jobs?
+    lines << "Step 3: #{fn(employee.w4_dependent_credit)} dep. credit" if employee.w4_dependent_credit.to_f > 0
+    lines << "Step 4a: #{fn(employee.w4_step4a_other_income)} other income" if employee.w4_step4a_other_income.to_f > 0
+    lines << "Step 4b: #{fn(employee.w4_step4b_deductions)} deductions" if employee.w4_step4b_deductions.to_f > 0
+    lines << "Step 4c: #{fn(payroll_item.additional_withholding)} addtl W/H" if payroll_item.additional_withholding.to_f > 0
+    lines << "* FIT Override: #{fn(payroll_item.withholding_tax_override)}" if payroll_item.withholding_tax_override.present?
+    lines
+  end
+
+  def resolve_memo_text
+    template = company&.check_memo_template.presence
+    return "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" unless template
+
+    template
+      .gsub("{employee_name}", employee.full_name)
+      .gsub("{employee_first_name}", employee.first_name.to_s)
+      .gsub("{employee_last_name}", employee.last_name.to_s)
+      .gsub("{period_start}", format_date(pay_period.start_date))
+      .gsub("{period_end}", format_date(pay_period.end_date))
+      .gsub("{pay_date}", format_date(pay_period.pay_date))
+      .gsub("{check_number}", payroll_item.check_number.to_s)
+      .gsub("{company_name}", company&.name.to_s)
   end
 
   def label_or(default)

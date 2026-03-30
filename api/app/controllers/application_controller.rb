@@ -47,18 +47,23 @@ class ApplicationController < ActionController::API
     require_manager_or_admin!
   end
 
-  # Super admins can switch to any company via X-Company-Id header.
-  # Accountants can switch to their assigned companies.
-  # Regular users are always scoped to their own company.
+  # Resolve the active company for this request.
+  # Priority: X-Company-Id header (if user can access it) → user's home company → first accessible company.
   def resolve_company_id
+    return current_user&.company_id unless current_user
+
     header_company_id = request.headers["X-Company-Id"].presence&.to_i
 
-    if header_company_id && current_user
-      if current_user.can_access_company?(header_company_id)
-        return header_company_id
-      end
+    if header_company_id && current_user.can_access_company?(header_company_id)
+      return header_company_id
     end
 
-    current_user&.company_id
+    # Fall back to home company if accessible, otherwise first assigned company
+    home = current_user.company_id
+    if current_user.can_access_company?(home)
+      home
+    else
+      current_user.accessible_company_ids.first || home
+    end
   end
 end

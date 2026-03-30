@@ -38,7 +38,7 @@ class User < ApplicationRecord
   # - everyone else: just their home company
   def accessible_company_ids
     @accessible_company_ids ||= begin
-      if super_admin?
+      if super_admin? || admin?
         Company.ids
       else
         assigned_ids = if association(:company_assignments).loaded?
@@ -47,15 +47,19 @@ class User < ApplicationRecord
           company_assignments.pluck(:company_id)
         end
 
-        ([company_id] + assigned_ids).uniq
+        if accountant? || manager?
+          # Accountants/managers only see companies explicitly assigned to them
+          assigned_ids.presence || [company_id]
+        else
+          ([company_id] + assigned_ids).uniq
+        end
       end
     end
   end
 
   def can_access_company?(cid)
-    return true if super_admin?
-    return true if self.company_id == cid
+    return true if super_admin? || admin?
 
-    company_assignments.exists?(company_id: cid)
+    accessible_company_ids.include?(cid)
   end
 end

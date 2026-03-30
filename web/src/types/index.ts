@@ -450,6 +450,7 @@ export interface CheckSettings {
   check_offset_y: number;
   bank_name: string | null;
   bank_address: string | null;
+  check_memo_template: string | null;
   check_layout_config: Record<string, unknown>;
 }
 

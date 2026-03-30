@@ -41,7 +41,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const refreshCompanies = useCallback(async () => {
     try {
-      const res = await companiesApi.list({ active: true });
+      const res = await companiesApi.list();
       setCompanies(res.companies);
       setIsSuperAdmin(res.is_super_admin);
       setCanSwitchCompany(res.can_switch_company ?? res.is_super_admin);
@@ -56,7 +56,24 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       }
       setFetched(true);
     } catch {
-      // Will retry when auth becomes available
+      // Retry once after a short delay (handles race with auth/server startup)
+      setTimeout(() => {
+        companiesApi.list().then(res => {
+          setCompanies(res.companies);
+          setIsSuperAdmin(res.is_super_admin);
+          setCanSwitchCompany(res.can_switch_company ?? res.is_super_admin);
+
+          const storedId = companiesApi.getActiveCompanyId();
+          if (storedId && res.companies.some(c => c.id === storedId)) {
+            setActiveCompanyId(storedId);
+            companiesApi.switchCompany(storedId);
+          } else if (res.current_company_id) {
+            setActiveCompanyId(res.current_company_id);
+            companiesApi.switchCompany(res.current_company_id);
+          }
+          setFetched(true);
+        }).catch(() => { /* give up */ });
+      }, 1500);
     } finally {
       setLoading(false);
     }

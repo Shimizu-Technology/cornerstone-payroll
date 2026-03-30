@@ -535,6 +535,8 @@ module Api
           end
 
           items = pay_period.payroll_items
+          w2_items = items.reject { |i| i.employment_type == "contractor" }
+          contractor_items = items.select { |i| i.employment_type == "contractor" }
 
           report_data = {
             type: "payroll_register",
@@ -547,17 +549,21 @@ module Api
               status: pay_period.status
             },
             summary: {
-              employee_count: items.size,
-              total_gross: items.sum(&:gross_pay),
-              total_withholding: items.sum(&:withholding_tax),
-              total_additional_withholding: items.sum(&:additional_withholding),
-              total_social_security: items.sum(&:social_security_tax),
-              total_medicare: items.sum(&:medicare_tax),
-              total_retirement: items.sum(&:retirement_payment).to_f + items.sum(&:roth_retirement_payment).to_f,
-              total_deductions: items.sum(&:total_deductions),
-              total_net: items.sum(&:net_pay)
+              employee_count: w2_items.size,
+              contractor_count: contractor_items.size,
+              total_gross: w2_items.sum(&:gross_pay),
+              total_withholding: w2_items.sum(&:withholding_tax),
+              total_additional_withholding: w2_items.sum(&:additional_withholding),
+              total_social_security: w2_items.sum(&:social_security_tax),
+              total_medicare: w2_items.sum(&:medicare_tax),
+              total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_deductions: w2_items.sum(&:total_deductions),
+              total_net: w2_items.sum(&:net_pay),
+              contractor_total_gross: contractor_items.sum(&:gross_pay),
+              contractor_total_net: contractor_items.sum(&:net_pay)
             },
-            employees: items.map { |item| payroll_item_detail(item) }
+            employees: w2_items.map { |item| payroll_item_detail(item) },
+            contractors: contractor_items.map { |item| payroll_item_detail(item) }
           }
 
           [ report_data, nil ]
