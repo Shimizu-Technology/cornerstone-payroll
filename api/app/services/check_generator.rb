@@ -45,8 +45,8 @@ class CheckGenerator
       y: 0.0,
       left_ratio: 0.56,
       row1_y: 252.0,
-      row2_y: 188.0,
-      row3_y: 128.0,
+      row2_y: 176.0,
+      row3_y: 118.0,
       pay_table_y_offset: -10.0,
       other_pay_x_offset: 100.0,
       other_pay_y_offset: -10.0,
@@ -576,8 +576,8 @@ class CheckGenerator
     default
   end
 
-  def truncate_label(text, max = 18)
-    text.to_s.length > max ? "#{text[0, max - 1]}…" : text.to_s
+  def truncate_label(text, max = 20)
+    text.to_s.length > max ? "#{text[0, max - 2]}.." : text.to_s
   end
 
   def layout_section(name)
