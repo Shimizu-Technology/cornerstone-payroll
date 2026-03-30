@@ -254,13 +254,9 @@ class CheckGenerator
     )
 
     # ================================================================
-    # ROW 2:  Company + OTHER PAY (left)  |  DEDUCTIONS (right)
+    # ROW 2:  OTHER PAY (left)  |  DEDUCTIONS (right)
     # ================================================================
-    pdf.font_size(7) do
-      pdf.draw_text company.name, at: [lx, row2_top], style: :bold
-    end
-
-    table_y2 = row2_top + stub_cfg["other_pay_y_offset"].to_f
+    table_y2 = row2_top
 
     draw_section_table(pdf,
       x: lx, y: table_y2, w: left_w - 8,
