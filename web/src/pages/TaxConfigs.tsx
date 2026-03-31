@@ -39,7 +39,7 @@ export default function TaxConfigs() {
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [activatingId, setActivatingId] = useState<number | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingDetailId, setLoadingDetailId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchConfigs();
@@ -58,14 +58,17 @@ export default function TaxConfigs() {
 
   const fetchConfigDetails = async (id: number) => {
     setSelectedConfig(null);
-    setLoadingDetail(true);
+    setLoadingDetailId(id);
     try {
       const data = await taxConfigsApi.get(id);
-      setSelectedConfig(data.tax_config);
+      setLoadingDetailId((prev) => {
+        if (prev === id) setSelectedConfig(data.tax_config);
+        return prev;
+      });
     } catch (error) {
       console.error('Failed to fetch config details:', error);
     } finally {
-      setLoadingDetail(false);
+      setLoadingDetailId((prev) => (prev === id ? null : prev));
     }
   };
 
@@ -362,7 +365,7 @@ export default function TaxConfigs() {
       </div>
 
       {/* Selected Config Details */}
-      {loadingDetail && !selectedConfig && (
+      {loadingDetailId && !selectedConfig && (
         <div className="bg-white shadow rounded-lg p-6 flex items-center justify-center py-12">
           <div className="text-center">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mx-auto" />
@@ -375,7 +378,7 @@ export default function TaxConfigs() {
           <div className="flex justify-between items-start mb-6">
             <h2 className="text-xl font-bold text-gray-900">
               {selectedConfig.tax_year} Configuration
-              {loadingDetail && <span className="ml-2 inline-block w-4 h-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600 align-middle" />}
+              {loadingDetailId && <span className="ml-2 inline-block w-4 h-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600 align-middle" />}
             </h2>
             <button
               onClick={() => setSelectedConfig(null)}
