@@ -1,0 +1,7 @@
+# Cornerstone Payroll
+# https://payroll.cornerstonetaxservices.com
+
+User-agent: *
+Disallow: /
+
+# This is a private payroll application — no public pages to index.
