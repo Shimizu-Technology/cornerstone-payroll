@@ -60,7 +60,7 @@ module Api
             if existing
               if existing.failed?
                 existing.update!(ocr_status: :pending)
-                OcrProcessJob.perform_later(existing.id)
+                enqueue_ocr(existing.id)
               end
               next existing
             end
@@ -75,7 +75,7 @@ module Api
               image_hash: image_hash,
               ocr_status: :pending
             )
-            OcrProcessJob.perform_later(timecard.id)
+            enqueue_ocr(timecard.id)
             timecard
           end
 
@@ -131,7 +131,7 @@ module Api
           end
 
           @timecard.update!(ocr_status: :pending)
-          OcrProcessJob.perform_later(@timecard.id)
+          enqueue_ocr(@timecard.id)
           render json: timecard_json(@timecard.reload)
         end
 
@@ -188,6 +188,16 @@ module Api
           unless @timecard.company_id == current_company_id
             render json: { error: "Not found" }, status: :not_found
           end
+        end
+
+        def enqueue_ocr(timecard_id)
+          OcrProcessJob.perform_later(timecard_id)
+        rescue SolidQueue::Job::EnqueueError, ActiveRecord::StatementInvalid => e
+          Rails.logger.error("Failed to enqueue OCR job for timecard #{timecard_id}: #{e.class}: #{e.message}")
+          Timecard.where(id: timecard_id).update_all(
+            ocr_status: Timecard.ocr_statuses[:failed],
+            raw_ocr_response: { "error" => "Background job queue unavailable. Please contact support or retry later." }
+          )
         end
 
         def timecard_params

@@ -44,6 +44,7 @@ export function Departments() {
   const [editName, setEditName] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const fetchDepartments = useCallback(async () => {
     setIsLoading(true);
@@ -131,11 +132,14 @@ export function Departments() {
   };
 
   const handleToggleActive = async (dept: DepartmentWithCount): Promise<void> => {
+    setTogglingId(dept.id);
     try {
       await departmentsApi.update(dept.id, { active: !dept.active });
       fetchDepartments();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update department');
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -301,8 +305,14 @@ export function Departments() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleToggleActive(dept)}
+                            disabled={togglingId === dept.id}
                           >
-                            {dept.active ? 'Deactivate' : 'Activate'}
+                            {togglingId === dept.id ? (
+                              <span className="flex items-center gap-1">
+                                <div className="w-3 h-3 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                {dept.active ? 'Deactivating...' : 'Activating...'}
+                              </span>
+                            ) : dept.active ? 'Deactivate' : 'Activate'}
                           </Button>
                         </div>
                       )}
