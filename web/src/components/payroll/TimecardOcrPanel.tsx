@@ -73,19 +73,11 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  const [fileName, setFileName] = useState('');
-  const [elapsed, setElapsed] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
     setUploading(true);
     setError('');
-    setFileName(Array.from(files).map(f => f.name).join(', '));
-    setElapsed(0);
-    timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000);
 
     try {
       for (const file of Array.from(files)) {
@@ -96,8 +88,6 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
       setError(e instanceof Error ? e.message : 'Upload failed');
     } finally {
       setUploading(false);
-      setFileName('');
-      if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
@@ -113,14 +103,8 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
       {uploading ? (
         <div className="flex flex-col items-center gap-3 py-4">
           <Spinner size="lg" />
-          <div>
-            <p className="font-medium text-indigo-900">Processing OCR...</p>
-            <p className="text-sm text-indigo-600">{fileName}</p>
-            <p className="text-xs text-gray-500 mt-1">
-              {elapsed}s elapsed — GPT is extracting punch times from the image.
-              This typically takes 60-90 seconds per card.
-            </p>
-          </div>
+          <p className="font-medium text-indigo-900">Uploading &amp; segmenting...</p>
+          <p className="text-xs text-gray-500">This should only take a few seconds.</p>
         </div>
       ) : (
         <>
@@ -152,34 +136,48 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete }: {
   onReprocess: () => void;
   onDelete: () => void;
 }) {
+  const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
+
   return (
     <div
-      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 cursor-pointer"
-      onClick={onSelect}
+      className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
+        isProcessing ? 'bg-indigo-50/50 border-indigo-200' : 'hover:bg-gray-50'
+      }`}
+      onClick={isProcessing ? undefined : onSelect}
     >
       <div className="flex items-center gap-3 flex-1">
-        {tc.image_url && (
+        {isProcessing ? (
+          <div className="w-12 h-16 flex items-center justify-center rounded border border-indigo-200 bg-indigo-50">
+            <Spinner size="sm" />
+          </div>
+        ) : tc.image_url ? (
           <img src={tc.image_url} alt="Timecard" className="w-12 h-16 object-cover rounded border" />
-        )}
+        ) : null}
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">{tc.employee_name || 'Unknown Employee'}</span>
+            <span className="font-medium text-sm">
+              {isProcessing ? 'Processing with GPT...' : (tc.employee_name || 'Unknown Employee')}
+            </span>
             {statusBadge(tc.ocr_status)}
-            {tc.overall_confidence !== null && (
+            {!isProcessing && tc.overall_confidence !== null && (
               <Badge className={confidenceColor(tc.overall_confidence)}>
                 {(tc.overall_confidence * 100).toFixed(0)}%
               </Badge>
             )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            {tc.period_start && tc.period_end
-              ? `${tc.period_start} – ${tc.period_end}`
-              : 'Period not detected'}
-            {tc.review_summary.attention_count > 0 && (
-              <span className="text-orange-600 ml-2">
-                {tc.review_summary.attention_count} items need attention
-              </span>
-            )}
+            {isProcessing ? (
+              'OCR is running in the background. This takes 60-90 seconds per card.'
+            ) : tc.period_start && tc.period_end ? (
+              <>
+                {tc.period_start} – {tc.period_end}
+                {tc.review_summary.attention_count > 0 && (
+                  <span className="text-orange-600 ml-2">
+                    {tc.review_summary.attention_count} items need attention
+                  </span>
+                )}
+              </>
+            ) : 'Period not detected'}
           </p>
         </div>
       </div>
@@ -187,7 +185,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete }: {
         {tc.ocr_status === 'failed' && (
           <Button size="sm" variant="outline" onClick={onReprocess}>Retry OCR</Button>
         )}
-        <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete}>Delete</Button>
+        {!isProcessing && (
+          <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete}>Delete</Button>
+        )}
       </div>
     </div>
   );
@@ -617,6 +617,70 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
 
   useEffect(() => { loadTimecards(); loadEmployees(); }, [loadTimecards, loadEmployees]);
 
+  // Track processing IDs independently from filtered view so polling doesn't
+  // stop when a status filter hides pending/processing cards.
+  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // When timecards load, update the set of known processing IDs
+  useEffect(() => {
+    const activeIds = timecards
+      .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+      .map(tc => tc.id);
+    if (activeIds.length > 0) {
+      setProcessingIds(prev => {
+        const next = new Set(prev);
+        activeIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  }, [timecards]);
+
+  const hasProcessing = processingIds.size > 0;
+
+  useEffect(() => {
+    if (!hasProcessing) return;
+
+    pollRef.current = setInterval(async () => {
+      try {
+        if (isStandalone) {
+          const resp = await timecardsApi.listPaginated({
+            page, perPage, search: activeSearch || undefined, status: statusFilter || undefined,
+          });
+          setTimecards(resp.timecards);
+          setTotalPages(resp.meta.total_pages);
+          setTotalCount(resp.meta.total_count);
+
+          // Clear IDs that are no longer processing (check unfiltered)
+          const stillProcessing = resp.timecards
+            .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+            .map(tc => tc.id);
+          // If we have a filter active, also check the known IDs individually
+          if (statusFilter && processingIds.size > 0) {
+            const checkResp = await timecardsApi.listPaginated({ page: 1, perPage: 100, status: 'processing' });
+            const pendingResp = await timecardsApi.listPaginated({ page: 1, perPage: 100, status: 'pending' });
+            const allActive = new Set([
+              ...checkResp.timecards.map(tc => tc.id),
+              ...pendingResp.timecards.map(tc => tc.id),
+            ]);
+            setProcessingIds(allActive);
+          } else {
+            setProcessingIds(new Set(stillProcessing));
+          }
+        } else {
+          const data = await timecardsApi.list(payPeriodId);
+          setTimecards(data);
+          const stillProcessing = data
+            .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+            .map(tc => tc.id);
+          setProcessingIds(new Set(stillProcessing));
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter]);
+
   const handleSearch = () => {
     setPage(1);
     setActiveSearch(searchQuery);
@@ -695,6 +759,20 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
                 Clear filters
               </Button>
             )}
+          </div>
+        )}
+
+        {hasProcessing && (
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-indigo-50 border border-indigo-200">
+            <Spinner size="sm" />
+            <div>
+              <p className="text-sm font-medium text-indigo-900">
+                OCR processing {processingIds.size} timecard(s) in the background...
+              </p>
+              <p className="text-xs text-indigo-600 mt-0.5">
+                You can continue using the app. Cards will appear when ready (60-90s each).
+              </p>
+            </div>
           </div>
         )}
 
