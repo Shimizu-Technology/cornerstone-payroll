@@ -58,7 +58,10 @@ module Api
             image_hash = Digest::SHA256.hexdigest(File.read(segment.path))
             existing = Timecard.find_by(company_id: current_company_id, image_hash: image_hash)
             if existing
-              OcrProcessJob.perform_later(existing.id) if existing.failed?
+              if existing.failed?
+                existing.update!(ocr_status: :pending)
+                OcrProcessJob.perform_later(existing.id)
+              end
               next existing
             end
 

@@ -767,7 +767,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
             <Spinner size="sm" />
             <div>
               <p className="text-sm font-medium text-indigo-900">
-                OCR processing {timecards.filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing').length} timecard(s) in the background...
+                OCR processing {processingIds.size} timecard(s) in the background...
               </p>
               <p className="text-xs text-indigo-600 mt-0.5">
                 You can continue using the app. Cards will appear when ready (60-90s each).
