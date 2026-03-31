@@ -165,7 +165,6 @@ module Api
           end
 
           item.hours_worked = total_hours.round(2)
-          item.overtime_hours = 0
           item.import_source = "timecard_ocr"
           item.save!
 
