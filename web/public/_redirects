@@ -1,1 +1,9 @@
+# SEO & PWA files — serve directly
+/robots.txt       /robots.txt       200
+/sitemap.xml      /sitemap.xml      200
+/manifest.json    /manifest.json    200
+/sw.js            /sw.js            200
+/offline.html     /offline.html     200
+
+# SPA fallback
 /*    /index.html   200
