@@ -146,11 +146,11 @@ class R2StorageService
   end
 
   def bucket_name
-    ENV.fetch("R2_BUCKET", "cornerstone-payroll-paystubs")
+    ENV.fetch("R2_BUCKET_NAME", ENV.fetch("R2_BUCKET", "cornerstone-payroll"))
   end
 
   def endpoint
-    "https://#{account_id}.r2.cloudflarestorage.com"
+    ENV.fetch("R2_ENDPOINT", "https://#{account_id}.r2.cloudflarestorage.com")
   end
 
   def public_url

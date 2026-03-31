@@ -121,6 +121,16 @@ Rails.application.routes.draw do
           end
         end
 
+        # Timecard OCR
+        resources :timecards, only: [:index, :show, :create, :update, :destroy] do
+          member do
+            patch :review
+            patch :reprocess
+            post :apply_to_payroll
+          end
+        end
+        resources :punch_entries, only: [:update]
+
         # Employee Wage Rates
         resources :employee_wage_rates, only: [:index, :create, :update, :destroy]
 

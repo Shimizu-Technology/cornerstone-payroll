@@ -75,3 +75,7 @@ end
 gem "jwt", "~> 3.1"
 
 gem "resend", "~> 1.0"
+
+# Timecard OCR integration
+gem "httparty"
+gem "mini_magick"

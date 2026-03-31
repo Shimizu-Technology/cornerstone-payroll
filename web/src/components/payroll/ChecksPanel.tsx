@@ -65,11 +65,11 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   const handleBatchDownload = async () => {
     setBatchLoading(true);
     try {
-      const blob = await checksApi.batchPdf(payPeriod.id);
-      const url = URL.createObjectURL(blob);
+      const result = await checksApi.batchPdf(payPeriod.id);
+      const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `checks_${payPeriod.pay_date ?? 'undated'}_batch.pdf`;
+      a.download = result.filename || `checks_${payPeriod.pay_date ?? 'undated'}_batch.pdf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
@@ -141,8 +141,8 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   const handlePrintAll = async () => {
     setBatchLoading(true);
     try {
-      const blob = await checksApi.batchPdf(payPeriod.id);
-      const url = URL.createObjectURL(blob);
+      const result = await checksApi.batchPdf(payPeriod.id);
+      const url = URL.createObjectURL(result.blob);
       const printWindow = window.open(url);
       if (printWindow) {
         printWindow.addEventListener('load', () => {
