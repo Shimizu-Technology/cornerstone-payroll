@@ -423,7 +423,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
             </div>
             <div className="flex-1 bg-gray-100 p-5">
               <iframe
-                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
+                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
                 className="h-full w-full rounded-xl border bg-white shadow-lg"
                 title="Check Preview"
               />

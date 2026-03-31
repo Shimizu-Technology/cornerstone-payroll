@@ -74,8 +74,17 @@ class PunchEntry < ApplicationRecord
   end
 
   def punch_pairs
-    ordered = [clock_in, lunch_out, lunch_in, clock_out, in3, out3].compact
-    ordered.each_slice(2).select { |pair| pair.size == 2 }
+    pairs = []
+    if lunch_out.present? && lunch_in.present?
+      # Full day with lunch break: morning + afternoon segments (+ optional 3rd shift)
+      pairs << [clock_in, lunch_out] if clock_in.present? && lunch_out.present?
+      pairs << [lunch_in, clock_out] if lunch_in.present? && clock_out.present?
+    elsif clock_in.present? && clock_out.present?
+      # No lunch break: single continuous shift
+      pairs << [clock_in, clock_out]
+    end
+    pairs << [in3, out3] if in3.present? && out3.present?
+    pairs
   end
 
   def reset_review_state_if_attention_changed

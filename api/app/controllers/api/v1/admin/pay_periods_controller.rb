@@ -483,6 +483,13 @@ module Api
         private
 
         def create_fit_tax_deposit_check!(items)
+          return if NonEmployeeCheck.exists?(
+            pay_period: @pay_period,
+            company_id: @pay_period.company_id,
+            check_type: "tax_deposit",
+            payable_to: "EFTPS - Federal Income Tax"
+          )
+
           w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
           total_fit = w2_items.sum { |i| i.withholding_tax.to_d }
           return if total_fit <= 0

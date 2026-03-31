@@ -597,11 +597,11 @@ export interface TimecardImportPreviewRow {
   employee_id: number | null;
   employee_name: string | null;
   match_score: number;
-  all_employees: { id: number; name: string }[];
 }
 
 export interface TimecardImportPreviewResponse {
   preview: TimecardImportPreviewRow[];
+  all_employees: { id: number; name: string }[];
   total_rows: number;
   matched: number;
   unmatched: number;
