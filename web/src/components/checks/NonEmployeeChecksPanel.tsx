@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -43,6 +44,7 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
   const [formError, setFormError] = useState<string | null>(null);
   const [voidingId, setVoidingId] = useState<number | null>(null);
   const [voidReason, setVoidReason] = useState('');
+  const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -180,6 +182,9 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => setPreviewCheck(check)}>
+                    Preview
+                  </Button>
                   {!check.voided && !check.printed_at && (
                     <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)}>
                       Mark Printed
@@ -208,11 +213,83 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
 
             <div className="pt-2 border-t flex justify-between text-sm font-semibold">
               <span>Total ({checks.filter(c => !c.voided).length} checks)</span>
-              <span>{fmt(checks.filter(c => !c.voided).reduce((sum, c) => sum + c.amount, 0))}</span>
+              <span>{fmt(checks.filter(c => !c.voided).reduce((sum, c) => sum + Number(c.amount), 0))}</span>
             </div>
           </div>
         )}
       </div>
+
+      {/* Preview modal */}
+      {previewCheck && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4" onClick={() => setPreviewCheck(null)}>
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <h2 className="text-lg font-semibold text-gray-900">Check Preview</h2>
+              <Button size="sm" onClick={() => setPreviewCheck(null)}>Close</Button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className={`border-2 rounded-xl p-6 ${previewCheck.voided ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}>
+                {previewCheck.voided && (
+                  <div className="text-center mb-4">
+                    <span className="text-3xl font-bold text-red-400 tracking-widest">VOID</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-start mb-4">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Pay To The Order Of</p>
+                    <p className="text-xl font-semibold text-gray-900">{previewCheck.payable_to}</p>
+                  </div>
+                  <div className="text-right">
+                    {previewCheck.check_number && (
+                      <p className="text-sm text-gray-500">Check #{previewCheck.check_number}</p>
+                    )}
+                    <p className="text-xs text-gray-400">{new Date(previewCheck.created_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center border-t border-b py-3 my-3">
+                  <span className="text-sm text-gray-600">Amount</span>
+                  <span className="text-2xl font-bold text-gray-900">{fmt(previewCheck.amount)}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-gray-500">Type</p>
+                    <p className="font-medium">{CHECK_TYPE_LABELS[previewCheck.check_type as NonEmployeeCheckType] || previewCheck.check_type}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Status</p>
+                    <Badge className={STATUS_COLORS[previewCheck.check_status] || 'bg-gray-100'}>{previewCheck.check_status}</Badge>
+                  </div>
+                  {previewCheck.memo && (
+                    <div className="col-span-2">
+                      <p className="text-gray-500">Memo</p>
+                      <p className="font-medium">{previewCheck.memo}</p>
+                    </div>
+                  )}
+                  {previewCheck.description && (
+                    <div className="col-span-2">
+                      <p className="text-gray-500">Description</p>
+                      <p className="font-medium">{previewCheck.description}</p>
+                    </div>
+                  )}
+                  {previewCheck.reference_number && (
+                    <div>
+                      <p className="text-gray-500">Reference #</p>
+                      <p className="font-medium">{previewCheck.reference_number}</p>
+                    </div>
+                  )}
+                  {previewCheck.void_reason && (
+                    <div className="col-span-2">
+                      <p className="text-gray-500">Void Reason</p>
+                      <p className="font-medium text-red-600">{previewCheck.void_reason}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </Card>
   );
 }

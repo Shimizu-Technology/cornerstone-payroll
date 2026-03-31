@@ -75,7 +75,7 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState('');
   const [elapsed, setElapsed] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 

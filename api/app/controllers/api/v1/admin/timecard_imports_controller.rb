@@ -6,6 +6,8 @@ module Api
   module V1
     module Admin
       class TimecardImportsController < BaseController
+        include TrigramMatching
+
         before_action :set_pay_period
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_timecard_import
@@ -115,7 +117,7 @@ module Api
           best_score = 0
 
           employees.each do |emp|
-            score = name_similarity(name, emp.full_name)
+            score = trigram_similarity(name, emp.full_name)
             if score > best_score
               best_score = score
               best_match = emp
@@ -123,7 +125,7 @@ module Api
 
             # Also try last_name, first_name format
             reversed = "#{emp.last_name}, #{emp.first_name}"
-            rev_score = name_similarity(name, reversed)
+            rev_score = trigram_similarity(name, reversed)
             if rev_score > best_score
               best_score = rev_score
               best_match = emp
@@ -146,25 +148,6 @@ module Api
           }
         end
 
-        # Simple trigram-based similarity score (0.0 to 1.0)
-        def name_similarity(a, b)
-          a_norm = a.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-          b_norm = b.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-
-          return 1.0 if a_norm == b_norm
-          return 0.0 if a_norm.blank? || b_norm.blank?
-
-          a_tri = trigrams(a_norm)
-          b_tri = trigrams(b_norm)
-          intersection = (a_tri & b_tri).size.to_f
-          union = (a_tri | b_tri).size.to_f
-          union.zero? ? 0.0 : intersection / union
-        end
-
-        def trigrams(str)
-          padded = "  #{str} "
-          (0..padded.length - 3).map { |i| padded[i, 3] }
-        end
       end
     end
   end

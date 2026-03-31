@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class TimecardsController < BaseController
+        include TrigramMatching
+
         before_action :set_timecard, only: [:show, :update, :review, :reprocess, :destroy]
 
         # GET /api/v1/admin/timecards?pay_period_id=123&status=complete&page=1&per_page=20&search=smith
@@ -137,15 +139,15 @@ module Api
 
         # POST /api/v1/admin/timecards/:id/apply_to_payroll
         def apply_to_payroll
-          timecard = Timecard.find(params[:id])
-          pay_period = PayPeriod.find(params[:pay_period_id])
+          timecard = Timecard.find_by!(id: params[:id], company_id: current_company_id)
+          pay_period = PayPeriod.find_by!(id: params[:pay_period_id], company_id: current_company_id)
 
           unless timecard.reviewed?
             return render json: { error: "Timecard must be reviewed before applying to payroll" }, status: :unprocessable_entity
           end
 
-          unless pay_period.company_id == current_company_id
-            return render json: { error: "Pay period not found" }, status: :not_found
+          unless pay_period.can_edit?
+            return render json: { error: "Cannot apply to a non-draft pay period" }, status: :unprocessable_entity
           end
 
           employee = find_or_match_employee(timecard)
@@ -262,24 +264,6 @@ module Api
           end
 
           best_score >= 0.6 ? best : nil
-        end
-
-        def trigram_similarity(a, b)
-          a_norm = a.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-          b_norm = b.to_s.downcase.gsub(/[^a-z0-9\s]/, "").squish
-          return 1.0 if a_norm == b_norm
-          return 0.0 if a_norm.blank? || b_norm.blank?
-
-          a_tri = trigrams(a_norm)
-          b_tri = trigrams(b_norm)
-          intersection = (a_tri & b_tri).size.to_f
-          union_size = (a_tri | b_tri).size.to_f
-          union_size.zero? ? 0.0 : intersection / union_size
-        end
-
-        def trigrams(str)
-          padded = "  #{str} "
-          (0..padded.length - 3).map { |i| padded[i, 3] }
         end
 
         def timecard_json(timecard)
