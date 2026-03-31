@@ -3,12 +3,17 @@
 class OcrProcessJob < ApplicationJob
   queue_as :ocr
 
-  def perform(timecard_id)
-    timecard = Timecard.find_by(id: timecard_id)
-    return unless timecard
-    return unless timecard.pending? || timecard.processing? || timecard.failed?
+  retry_on StandardError, wait: :polynomially_longer, attempts: 3
 
-    timecard.update!(ocr_status: :processing)
+  def perform(timecard_id)
+    # Atomic guard: only proceed if we can claim the timecard for processing.
+    # Prevents duplicate work if concurrency is ever increased.
+    updated = Timecard
+      .where(id: timecard_id, ocr_status: [:pending, :processing, :failed])
+      .update_all(ocr_status: Timecard.ocr_statuses[:processing])
+    return if updated == 0
+
+    timecard = Timecard.find(timecard_id)
 
     result = TimecardOcr::OcrService.process(timecard)
     entries = Array(result["entries"])
@@ -44,11 +49,17 @@ class OcrProcessJob < ApplicationJob
 
       timecard.update!(ocr_status: :complete)
     end
-  rescue => e
-    Rails.logger.error("OCR failed for timecard #{timecard_id}: #{e.class}: #{e.message}")
-    timecard&.update!(
-      ocr_status: :failed,
-      raw_ocr_response: { "error" => e.message }
-    )
+  rescue StandardError => e
+    # Only mark as permanently failed after all retries are exhausted.
+    # ActiveJob will re-raise after the last attempt, landing here.
+    if executions >= 3
+      Rails.logger.error("OCR permanently failed for timecard #{timecard_id}: #{e.class}: #{e.message}")
+      Timecard.where(id: timecard_id).update_all(
+        ocr_status: Timecard.ocr_statuses[:failed],
+        raw_ocr_response: { "error" => e.message }
+      )
+    else
+      raise
+    end
   end
 end

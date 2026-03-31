@@ -617,28 +617,67 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
 
   useEffect(() => { loadTimecards(); loadEmployees(); }, [loadTimecards, loadEmployees]);
 
-  // Poll when any timecards are still processing
-  const hasProcessing = timecards.some(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing');
+  // Track processing IDs independently from filtered view so polling doesn't
+  // stop when a status filter hides pending/processing cards.
+  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // When timecards load, update the set of known processing IDs
   useEffect(() => {
-    if (hasProcessing) {
-      pollRef.current = setInterval(async () => {
-        try {
-          if (isStandalone) {
-            const resp = await timecardsApi.listPaginated({
-              page, perPage, search: activeSearch || undefined, status: statusFilter || undefined,
-            });
-            setTimecards(resp.timecards);
-            setTotalPages(resp.meta.total_pages);
-            setTotalCount(resp.meta.total_count);
-          } else {
-            const data = await timecardsApi.list(payPeriodId);
-            setTimecards(data);
-          }
-        } catch { /* ignore */ }
-      }, 5000);
+    const activeIds = timecards
+      .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+      .map(tc => tc.id);
+    if (activeIds.length > 0) {
+      setProcessingIds(prev => {
+        const next = new Set(prev);
+        activeIds.forEach(id => next.add(id));
+        return next;
+      });
     }
+  }, [timecards]);
+
+  const hasProcessing = processingIds.size > 0;
+
+  useEffect(() => {
+    if (!hasProcessing) return;
+
+    pollRef.current = setInterval(async () => {
+      try {
+        if (isStandalone) {
+          const resp = await timecardsApi.listPaginated({
+            page, perPage, search: activeSearch || undefined, status: statusFilter || undefined,
+          });
+          setTimecards(resp.timecards);
+          setTotalPages(resp.meta.total_pages);
+          setTotalCount(resp.meta.total_count);
+
+          // Clear IDs that are no longer processing (check unfiltered)
+          const stillProcessing = resp.timecards
+            .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+            .map(tc => tc.id);
+          // If we have a filter active, also check the known IDs individually
+          if (statusFilter && processingIds.size > 0) {
+            const checkResp = await timecardsApi.listPaginated({ page: 1, perPage: 100, status: 'processing' });
+            const pendingResp = await timecardsApi.listPaginated({ page: 1, perPage: 100, status: 'pending' });
+            const allActive = new Set([
+              ...checkResp.timecards.map(tc => tc.id),
+              ...pendingResp.timecards.map(tc => tc.id),
+            ]);
+            setProcessingIds(allActive);
+          } else {
+            setProcessingIds(new Set(stillProcessing));
+          }
+        } else {
+          const data = await timecardsApi.list(payPeriodId);
+          setTimecards(data);
+          const stillProcessing = data
+            .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
+            .map(tc => tc.id);
+          setProcessingIds(new Set(stillProcessing));
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter]);
 
