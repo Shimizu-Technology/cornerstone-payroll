@@ -31,6 +31,7 @@ export function CheckSettingsPage() {
   const [autoCreateFitCheck, setAutoCreateFitCheck] = useState(false);
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
+  const [downloadingAlignment, setDownloadingAlignment] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -123,6 +124,7 @@ export function CheckSettingsPage() {
 
   const handleAlignmentTest = async () => {
     setError(null);
+    setDownloadingAlignment(true);
     try {
       const blob = await checksApi.alignmentTestPdf();
       const url = URL.createObjectURL(blob);
@@ -133,6 +135,8 @@ export function CheckSettingsPage() {
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download alignment test PDF');
+    } finally {
+      setDownloadingAlignment(false);
     }
   };
 
@@ -276,8 +280,8 @@ export function CheckSettingsPage() {
 
             {/* Alignment test */}
             <div className="pt-2 border-t flex flex-wrap items-center gap-3">
-              <Button variant="outline" onClick={handleAlignmentTest} type="button">
-                ⬇ Download Alignment Test PDF
+              <Button variant="outline" onClick={handleAlignmentTest} type="button" disabled={downloadingAlignment}>
+                {downloadingAlignment ? 'Downloading...' : '⬇ Download Alignment Test PDF'}
               </Button>
               <p className="text-xs text-gray-500">
                 The alignment test now marks the configured check-face anchors and stub row baselines.

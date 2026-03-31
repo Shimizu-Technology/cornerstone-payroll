@@ -53,6 +53,8 @@ export function Users() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [resendingId, setResendingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   // Inline client assignment (for existing users)
   const [assigningUserId, setAssigningUserId] = useState<number | null>(null);
@@ -187,24 +189,30 @@ export function Users() {
 
   // --- Activate / Deactivate ---
   const handleToggleActive = async (user: User): Promise<void> => {
+    setTogglingId(user.id);
     try {
       if (user.active === false) { await usersApi.activate(user.id); }
       else { await usersApi.deactivate(user.id); }
       fetchUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update user');
+    } finally {
+      setTogglingId(null);
     }
   };
 
   // --- Delete ---
   const handleDeleteUser = async (user: User): Promise<void> => {
     if (!window.confirm(`Are you sure you want to delete ${user.name} (${user.email})? This cannot be undone.`)) return;
+    setDeletingId(user.id);
     try {
       await usersApi.delete(user.id);
       setSuccessMessage(`${user.name} has been deleted`);
       fetchUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -472,15 +480,21 @@ export function Users() {
                             )}
                             {user.id !== currentUser?.id && (
                               <>
-                                <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)}>
-                                  {user.active === false ? (
+                                <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
+                                  {togglingId === user.id ? (
+                                    <span className="flex items-center"><div className="w-4 h-4 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />{user.active === false ? 'Activating...' : 'Deactivating...'}</span>
+                                  ) : user.active === false ? (
                                     <span className="flex items-center"><UserCheck className="w-4 h-4 mr-1" />Activate</span>
                                   ) : (
                                     <span className="flex items-center text-danger-700"><UserX className="w-4 h-4 mr-1" />Deactivate</span>
                                   )}
                                 </Button>
-                                <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(user)}>
-                                  <span className="flex items-center text-danger-700"><Trash2 className="w-4 h-4" /></span>
+                                <Button size="sm" variant="ghost" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                  {deletingId === user.id ? (
+                                    <div className="w-4 h-4 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
+                                  ) : (
+                                    <span className="flex items-center text-danger-700"><Trash2 className="w-4 h-4" /></span>
+                                  )}
                                 </Button>
                               </>
                             )}
