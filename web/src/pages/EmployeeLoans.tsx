@@ -33,6 +33,10 @@ export default function EmployeeLoans() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [additionAmount, setAdditionAmount] = useState('');
   const [additionNotes, setAdditionNotes] = useState('');
+  const [creatingLoan, setCreatingLoan] = useState(false);
+  const [recordingPayment, setRecordingPayment] = useState(false);
+  const [recordingAddition, setRecordingAddition] = useState(false);
+  const [expandingId, setExpandingId] = useState<number | null>(null);
 
   const loadLoans = useCallback(async () => {
     setLoading(true);
@@ -67,12 +71,15 @@ export default function EmployeeLoans() {
       setExpandedLoan(null);
       return;
     }
+    setExpandingId(id);
+    setExpandedLoanId(id);
     try {
       const res = await employeeLoansApi.get(id);
       setExpandedLoan(res.loan);
-      setExpandedLoanId(id);
     } catch {
-      // ignore
+      setExpandedLoanId(null);
+    } finally {
+      setExpandingId(null);
     }
   };
 
@@ -82,6 +89,7 @@ export default function EmployeeLoans() {
       setFormError('Employee, Name, and Amount are required');
       return;
     }
+    setCreatingLoan(true);
     try {
       await employeeLoansApi.create({
         employee_id: parseInt(formData.employee_id),
@@ -96,11 +104,14 @@ export default function EmployeeLoans() {
       loadLoans();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create loan');
+    } finally {
+      setCreatingLoan(false);
     }
   };
 
   const handleRecordPayment = async (loanId: number) => {
     if (!paymentAmount) return;
+    setRecordingPayment(true);
     try {
       const res = await employeeLoansApi.recordPayment(loanId, parseFloat(paymentAmount));
       setExpandedLoan(res.loan);
@@ -108,11 +119,14 @@ export default function EmployeeLoans() {
       loadLoans();
     } catch {
       // ignore
+    } finally {
+      setRecordingPayment(false);
     }
   };
 
   const handleRecordAddition = async (loanId: number) => {
     if (!additionAmount) return;
+    setRecordingAddition(true);
     try {
       const res = await employeeLoansApi.recordAddition(loanId, parseFloat(additionAmount), undefined, additionNotes || undefined);
       setExpandedLoan(res.loan);
@@ -121,6 +135,8 @@ export default function EmployeeLoans() {
       loadLoans();
     } catch {
       // ignore
+    } finally {
+      setRecordingAddition(false);
     }
   };
 
@@ -174,8 +190,10 @@ export default function EmployeeLoans() {
               <input className="border rounded px-3 py-2 text-sm" placeholder="Notes" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} />
             </div>
             <div className="mt-3 flex gap-2">
-              <Button onClick={handleCreate}>Create Loan</Button>
-              <Button variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+              <Button onClick={handleCreate} disabled={creatingLoan}>
+                {creatingLoan ? 'Creating...' : 'Create Loan'}
+              </Button>
+              <Button variant="outline" onClick={() => setShowForm(false)} disabled={creatingLoan}>Cancel</Button>
             </div>
           </Card>
         )}
@@ -226,19 +244,32 @@ export default function EmployeeLoans() {
                   <span className="text-gray-400">{expandedLoanId === loan.id ? '▼' : '▶'}</span>
                 </div>
 
-                {expandedLoanId === loan.id && expandedLoan && (
+                {expandedLoanId === loan.id && (
                   <div className="border-t p-4 bg-gray-50">
+                    {expandingId === loan.id ? (
+                      <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
+                        <div className="w-4 h-4 animate-spin rounded-full border-2 border-gray-300 border-t-indigo-600" />
+                        Loading loan details...
+                      </div>
+                    ) : !expandedLoan ? (
+                      <p className="text-sm text-gray-400">Failed to load details</p>
+                    ) : (
+                    <>
                     {/* Quick Actions */}
                     {loan.status === 'active' && (
                       <div className="flex flex-wrap gap-4 mb-4">
                         <div className="flex items-center gap-2">
                           <input className="border rounded px-2 py-1 text-sm w-28" type="number" step="0.01" placeholder="Payment $" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
-                          <Button size="sm" onClick={() => handleRecordPayment(loan.id)} disabled={!paymentAmount}>Record Payment</Button>
+                          <Button size="sm" onClick={() => handleRecordPayment(loan.id)} disabled={!paymentAmount || recordingPayment}>
+                            {recordingPayment ? 'Recording...' : 'Record Payment'}
+                          </Button>
                         </div>
                         <div className="flex items-center gap-2">
                           <input className="border rounded px-2 py-1 text-sm w-28" type="number" step="0.01" placeholder="Addition $" value={additionAmount} onChange={e => setAdditionAmount(e.target.value)} />
                           <input className="border rounded px-2 py-1 text-sm w-32" placeholder="Notes" value={additionNotes} onChange={e => setAdditionNotes(e.target.value)} />
-                          <Button size="sm" variant="outline" onClick={() => handleRecordAddition(loan.id)} disabled={!additionAmount}>Add to Loan</Button>
+                          <Button size="sm" variant="outline" onClick={() => handleRecordAddition(loan.id)} disabled={!additionAmount || recordingAddition}>
+                            {recordingAddition ? 'Adding...' : 'Add to Loan'}
+                          </Button>
                         </div>
                       </div>
                     )}
@@ -278,6 +309,8 @@ export default function EmployeeLoans() {
                       </table>
                     ) : (
                       <p className="text-gray-500 text-sm italic">No transactions recorded</p>
+                    )}
+                    </>
                     )}
                   </div>
                 )}

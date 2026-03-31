@@ -60,6 +60,7 @@ export function Clients() {
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [loadingEditId, setLoadingEditId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -85,6 +86,7 @@ export function Clients() {
   };
 
   const handleEdit = async (id: number) => {
+    setLoadingEditId(id);
     try {
       const data = await companiesApi.get(id);
       const c = data.company;
@@ -110,6 +112,8 @@ export function Clients() {
       setShowForm(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load client details');
+    } finally {
+      setLoadingEditId(null);
     }
   };
 
@@ -430,8 +434,16 @@ export function Clients() {
                             variant="outline"
                             onClick={() => handleEdit(c.id)}
                             className="text-xs"
+                            disabled={loadingEditId === c.id}
                           >
-                            <Pencil className="w-3 h-3 mr-1" /> Edit
+                            {loadingEditId === c.id ? (
+                              <>
+                                <div className="w-3 h-3 mr-1 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                Loading...
+                              </>
+                            ) : (
+                              <><Pencil className="w-3 h-3 mr-1" /> Edit</>
+                            )}
                           </Button>
                         </TableCell>
                       )}
