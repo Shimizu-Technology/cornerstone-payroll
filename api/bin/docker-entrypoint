@@ -1,8 +1,9 @@
 #!/bin/bash -e
 
-# If running the rails server then create or migrate existing database
+# Prepare primary + queue databases on web server boot
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
   ./bin/rails db:prepare
+  ./bin/rails db:prepare:queue 2>/dev/null || true
 fi
 
 exec "${@}"
