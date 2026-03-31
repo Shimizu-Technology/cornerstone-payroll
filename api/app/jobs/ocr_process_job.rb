@@ -50,14 +50,18 @@ class OcrProcessJob < ApplicationJob
       timecard.update!(ocr_status: :complete)
     end
   rescue StandardError => e
-    # Only mark as permanently failed after all retries are exhausted.
-    # ActiveJob will re-raise after the last attempt, landing here.
     if executions >= 3
       Rails.logger.error("OCR permanently failed for timecard #{timecard_id}: #{e.class}: #{e.message}")
-      Timecard.where(id: timecard_id).update_all(
-        ocr_status: Timecard.ocr_statuses[:failed],
-        raw_ocr_response: { "error" => e.message }
-      )
+      begin
+        Timecard.where(id: timecard_id).update_all(
+          ocr_status: Timecard.ocr_statuses[:failed],
+          raw_ocr_response: { "error" => e.message }
+        )
+      rescue StandardError => cleanup_error
+        # Last resort: ensure status is never left stuck as :processing
+        Rails.logger.error("OCR cleanup also failed for #{timecard_id}: #{cleanup_error.message}")
+        Timecard.where(id: timecard_id).update_all(ocr_status: Timecard.ocr_statuses[:failed])
+      end
     else
       raise
     end
