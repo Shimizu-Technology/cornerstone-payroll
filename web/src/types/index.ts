@@ -451,6 +451,7 @@ export interface CheckSettings {
   bank_name: string | null;
   bank_address: string | null;
   check_memo_template: string | null;
+  auto_create_fit_check: boolean;
   check_layout_config: Record<string, unknown>;
 }
 

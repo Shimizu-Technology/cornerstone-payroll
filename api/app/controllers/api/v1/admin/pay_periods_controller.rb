@@ -314,6 +314,11 @@ module Api
             unassigned = committed_items.select { |i| i.check_number.nil? && i.net_pay.to_d > 0 }
             @pay_period.company.assign_check_numbers!(unassigned) if unassigned.any?
 
+            # Auto-create FIT tax deposit check if company setting is enabled
+            if @pay_period.company.auto_create_fit_check?
+              create_fit_tax_deposit_check!(committed_items)
+            end
+
             # Prepare tax sync with a fresh idempotency key for this commit event.
             @pay_period.prepare_tax_sync!
 
@@ -476,6 +481,30 @@ module Api
         end
 
         private
+
+        def create_fit_tax_deposit_check!(items)
+          return if NonEmployeeCheck.exists?(
+            pay_period: @pay_period,
+            company_id: @pay_period.company_id,
+            check_type: "tax_deposit",
+            payable_to: "EFTPS - Federal Income Tax"
+          )
+
+          w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
+          total_fit = w2_items.sum { |i| i.withholding_tax.to_d }
+          return if total_fit <= 0
+
+          NonEmployeeCheck.create!(
+            pay_period: @pay_period,
+            company_id: @pay_period.company_id,
+            payable_to: "EFTPS - Federal Income Tax",
+            amount: total_fit,
+            check_type: "tax_deposit",
+            memo: "FIT deposit for PPE #{@pay_period.end_date.strftime('%m/%d/%Y')}",
+            description: "Auto-generated FIT tax deposit for payroll commit",
+            created_by: current_user
+          )
+        end
 
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items

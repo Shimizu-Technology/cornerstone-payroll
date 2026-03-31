@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi } from '@/services/api';
-import type { BlobDownload } from '@/services/api';
+import type { BlobDownload, TransmittalOptions } from '@/services/api';
 
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
@@ -30,6 +30,213 @@ const REPORTS: { key: ReportKey; label: string; description: string }[] = [
   { key: 'fullPrintPackage', label: 'Full Print Package', description: 'All reports combined into a single PDF' },
 ];
 
+const DEFAULT_REPORT_LIST = [
+  'Payroll Summary by Employee',
+  'Deductions and Contributions Report',
+  'Paycheck History',
+  'Retirement Plans Report',
+  'Employee Installment Loan Report',
+];
+
+const DEFAULT_NOTES = [
+  'EFTPS payment to be done by client',
+  '401K upload to be submitted by client',
+];
+
+function TransmittalEditorModal({
+  open,
+  onClose,
+  onGenerate,
+  targetLabel,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onGenerate: (options: TransmittalOptions) => void;
+  targetLabel: string;
+}) {
+  const [preparerName, setPreparerName] = useState('Cornerstone Tax Services');
+  const [notes, setNotes] = useState<string[]>(DEFAULT_NOTES);
+  const [reportList, setReportList] = useState<string[]>(DEFAULT_REPORT_LIST);
+  const [newNote, setNewNote] = useState('');
+  const [newReport, setNewReport] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const handleAddNote = () => {
+    const trimmed = newNote.trim();
+    if (trimmed) {
+      setNotes(prev => [...prev, trimmed]);
+      setNewNote('');
+    }
+  };
+
+  const handleRemoveNote = (idx: number) => {
+    setNotes(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleAddReport = () => {
+    const trimmed = newReport.trim();
+    if (trimmed) {
+      setReportList(prev => [...prev, trimmed]);
+      setNewReport('');
+    }
+  };
+
+  const handleRemoveReport = (idx: number) => {
+    setReportList(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleGenerate = () => {
+    onGenerate({
+      preparerName: preparerName.trim() || undefined,
+      notes: notes.length > 0 ? notes : undefined,
+      reportList: reportList.length > 0 ? reportList : undefined,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-50 bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
+        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg">
+          <h3 className="text-lg font-semibold text-gray-900">Edit {targetLabel}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-6">
+          {/* Preparer Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Preparer Name</label>
+            <input
+              type="text"
+              value={preparerName}
+              onChange={(e) => setPreparerName(e.target.value)}
+              placeholder="e.g. Cornerstone Tax Services"
+              className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            <p className="text-xs text-gray-500 mb-2">Instructions or reminders for the client</p>
+            <div className="space-y-2">
+              {notes.map((note, idx) => (
+                <div key={idx} className="flex items-center gap-2 group">
+                  <input
+                    type="text"
+                    value={note}
+                    onChange={(e) => {
+                      const updated = [...notes];
+                      updated[idx] = e.target.value;
+                      setNotes(updated);
+                    }}
+                    className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                  />
+                  <button
+                    onClick={() => handleRemoveNote(idx)}
+                    className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                    title="Remove"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
+                  placeholder="Add a note..."
+                  className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
+                />
+                <button
+                  onClick={handleAddNote}
+                  disabled={!newNote.trim()}
+                  className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Report List */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Reports Included</label>
+            <p className="text-xs text-gray-500 mb-2">Listed on the transmittal as documents provided to client</p>
+            <div className="space-y-2">
+              {reportList.map((report, idx) => (
+                <div key={idx} className="flex items-center gap-2 group">
+                  <span className="text-sm text-gray-500 w-6 text-right">{idx + 1}.</span>
+                  <input
+                    type="text"
+                    value={report}
+                    onChange={(e) => {
+                      const updated = [...reportList];
+                      updated[idx] = e.target.value;
+                      setReportList(updated);
+                    }}
+                    className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                  />
+                  <button
+                    onClick={() => handleRemoveReport(idx)}
+                    className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                    title="Remove"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400 w-6 text-right">{reportList.length + 1}.</span>
+                <input
+                  type="text"
+                  value={newReport}
+                  onChange={(e) => setNewReport(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddReport(); }}
+                  placeholder="Add a report..."
+                  className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
+                />
+                <button
+                  onClick={handleAddReport}
+                  disabled={!newReport.trim()}
+                  className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
+                >
+                  + Add
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleGenerate}>Generate {targetLabel}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function downloadBlob(blobData: BlobDownload, fallbackName: string) {
   const url = URL.createObjectURL(blobData.blob);
   const a = document.createElement('a');
@@ -41,7 +248,11 @@ function downloadBlob(blobData: BlobDownload, fallbackName: string) {
   URL.revokeObjectURL(url);
 }
 
-async function fetchReport(reportKey: ReportKey, payPeriodId: number): Promise<BlobDownload> {
+async function fetchReport(
+  reportKey: ReportKey,
+  payPeriodId: number,
+  transmittalOptions?: TransmittalOptions
+): Promise<BlobDownload> {
   switch (reportKey) {
     case 'payrollRegister':
       return reportsApi.payrollRegisterPdf(payPeriodId);
@@ -54,11 +265,11 @@ async function fetchReport(reportKey: ReportKey, payPeriodId: number): Promise<B
     case 'retirementPlans':
       return reportsApi.retirementPlansPdf(payPeriodId);
     case 'transmittalLog':
-      return reportsApi.transmittalLogPdf(payPeriodId);
+      return reportsApi.transmittalLogPdf(payPeriodId, transmittalOptions);
     case 'installmentLoans':
       return reportsApi.installmentLoansPdf();
     case 'fullPrintPackage':
-      return reportsApi.fullPrintPackagePdf(payPeriodId);
+      return reportsApi.fullPrintPackagePdf(payPeriodId, transmittalOptions);
   }
 }
 
@@ -164,8 +375,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     pdfUrl: string | null;
     blobData: BlobDownload | null;
   }>({ open: false, key: null, label: '', pdfUrl: null, blobData: null });
+  const [transmittalEditor, setTransmittalEditor] = useState<{
+    open: boolean;
+    key: ReportKey | null;
+    label: string;
+    mode: 'preview' | 'download';
+  }>({ open: false, key: null, label: '', mode: 'preview' });
 
   const isReady = payPeriodStatus !== 'draft';
+
+  const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
   const cleanupPreview = useCallback(() => {
     if (previewState.pdfUrl) {
@@ -174,13 +393,18 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     setPreviewState({ open: false, key: null, label: '', pdfUrl: null, blobData: null });
   }, [previewState.pdfUrl]);
 
-  const handlePreview = async (reportKey: ReportKey, label: string) => {
+  const handlePreview = async (reportKey: ReportKey, label: string, transmittalOpts?: TransmittalOptions) => {
+    if (needsTransmittalEditor(reportKey) && !transmittalOpts) {
+      setTransmittalEditor({ open: true, key: reportKey, label, mode: 'preview' });
+      return;
+    }
+
     setLoading(prev => ({ ...prev, [reportKey]: true }));
     setError(null);
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
     try {
-      const blobData = await fetchReport(reportKey, payPeriodId);
+      const blobData = await fetchReport(reportKey, payPeriodId, transmittalOpts);
       const url = URL.createObjectURL(blobData.blob);
       setPreviewState(prev => ({ ...prev, pdfUrl: url, blobData }));
     } catch (err) {
@@ -191,17 +415,34 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
-  const handleDownload = async (reportKey: ReportKey) => {
+  const handleDownload = async (reportKey: ReportKey, transmittalOpts?: TransmittalOptions) => {
+    if (needsTransmittalEditor(reportKey) && !transmittalOpts) {
+      setTransmittalEditor({ open: true, key: reportKey, label: REPORTS.find(r => r.key === reportKey)?.label || '', mode: 'download' });
+      return;
+    }
+
     setLoading(prev => ({ ...prev, [reportKey]: true }));
     setError(null);
 
     try {
-      const blobData = await fetchReport(reportKey, payPeriodId);
+      const blobData = await fetchReport(reportKey, payPeriodId, transmittalOpts);
       downloadBlob(blobData, `${reportKey}.pdf`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download report');
     } finally {
       setLoading(prev => ({ ...prev, [reportKey]: false }));
+    }
+  };
+
+  const handleTransmittalGenerate = (options: TransmittalOptions) => {
+    const { key, mode } = transmittalEditor;
+    setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' });
+    if (!key) return;
+
+    if (mode === 'preview') {
+      handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+    } else {
+      handleDownload(key, options);
     }
   };
 
@@ -298,6 +539,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         title={previewState.label}
         onDownload={handlePreviewDownload}
         onPrint={handlePreviewPrint}
+      />
+
+      <TransmittalEditorModal
+        open={transmittalEditor.open}
+        onClose={() => setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' })}
+        onGenerate={handleTransmittalGenerate}
+        targetLabel={transmittalEditor.label}
       />
     </>
   );

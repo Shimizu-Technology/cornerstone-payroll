@@ -13,6 +13,17 @@ export interface BlobDownload {
   filename?: string;
 }
 
+function parseContentDispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined;
+  // RFC 5987: filename*=UTF-8''encoded_name
+  const rfc5987 = header.match(/filename\*\s*=\s*(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+  if (rfc5987) return decodeURIComponent(rfc5987[1].trim());
+  // Standard: filename="name" or filename=name
+  const standard = header.match(/filename\s*=\s*"?([^";\n]+)"?/i);
+  if (standard) return standard[1].trim();
+  return undefined;
+}
+
 class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -175,6 +186,34 @@ class ApiClient {
     return response.blob();
   }
 
+  // POST with JSON body returning a Blob (for reports with complex params like arrays)
+  async postBlob(endpoint: string, body?: Record<string, unknown>): Promise<BlobDownload> {
+    const token = await this.resolveAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
+
+    const response = await fetch(this.buildUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new ApiError(
+        errorData.error || `HTTP ${response.status}`,
+        response.status,
+        errorData.details,
+        errorData
+      );
+    }
+
+    const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
+    const blob = await response.blob();
+    return { blob, filename };
+  }
+
   // GET raw Blob with query params (for authenticated file downloads with year/filters)
   async getBlobWithParams(
     endpoint: string,
@@ -200,38 +239,11 @@ class ApiClient {
       );
     }
 
-    const contentDisposition = response.headers.get('content-disposition') || '';
-    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
-    const filename = match ? decodeURIComponent(match[1].replace(/"/g, '').trim()) : undefined;
-
+    const filename = parseContentDispositionFilename(response.headers.get('content-disposition'));
     return { blob: await response.blob(), filename };
   }
 
-  // CPR-66: Post and receive a raw Blob (for PDF download)
-  async postBlob(endpoint: string, data?: unknown): Promise<Blob> {
-    const token = await this.resolveAuthToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
-
-    const response = await fetch(this.buildUrl(endpoint), {
-      method: 'POST',
-      headers,
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
-
-    return response.blob();
-  }
+  // (postBlob is defined above — unified for all POST-to-Blob calls)
 
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
@@ -564,6 +576,160 @@ export const payPeriodsApi = {
   // CPR-73: Delete a draft correction run (undoes correction run creation without voiding).
   deleteDraftCorrectionRun: (id: number, data: { reason: string }) =>
     api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
+
+  // Timecard OCR import
+  previewTimecardImport: async (id: number, csvFile: File) => {
+    const formData = new FormData();
+    formData.append('file', csvFile);
+    return api.postForm<TimecardImportPreviewResponse>(`/admin/pay_periods/${id}/preview_timecard_import`, formData);
+  },
+  applyTimecardImport: (id: number, mappings: TimecardImportMapping[]) =>
+    api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
+};
+
+// Timecard OCR import types
+export interface TimecardImportPreviewRow {
+  csv_name: string;
+  regular_hours: string;
+  overtime_hours: string;
+  total_hours: string;
+  flags: string;
+  employee_id: number | null;
+  employee_name: string | null;
+  match_score: number;
+}
+
+export interface TimecardImportPreviewResponse {
+  preview: TimecardImportPreviewRow[];
+  all_employees: { id: number; name: string }[];
+  total_rows: number;
+  matched: number;
+  unmatched: number;
+}
+
+export interface TimecardImportMapping {
+  employee_id: number;
+  regular_hours: number;
+  overtime_hours: number;
+}
+
+export interface TimecardImportApplyResponse {
+  applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
+  skipped: unknown[];
+  errors: { employee_id: number; error: string }[];
+}
+
+// ──── Full Timecard OCR types ────────────────────────────────
+export interface PunchEntryData {
+  id: number;
+  card_day: number | null;
+  date: string | null;
+  day_of_week: string | null;
+  clock_in: string | null;
+  lunch_out: string | null;
+  lunch_in: string | null;
+  clock_out: string | null;
+  in3: string | null;
+  out3: string | null;
+  hours_worked: number | null;
+  confidence: number | null;
+  notes: string | null;
+  manually_edited: boolean;
+  review_state: 'unresolved' | 'approved';
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  needs_attention: boolean;
+  blank_day: boolean;
+}
+
+export interface ReviewSummary {
+  severity: 'critical' | 'warning' | 'info' | 'ok';
+  priority_rank: number;
+  attention_count: number;
+  approved_attention_count: number;
+  low_confidence_count: number;
+  noted_entry_count: number;
+  missing_punch_count: number;
+  manual_edit_count: number;
+  reason_codes: string[];
+}
+
+export interface TimecardData {
+  id: number;
+  company_id: number;
+  pay_period_id: number | null;
+  employee_name: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  image_url: string | null;
+  preprocessed_image_url: string | null;
+  ocr_status: 'pending' | 'processing' | 'complete' | 'failed' | 'reviewed';
+  overall_confidence: number | null;
+  ocr_error: string | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_summary: ReviewSummary;
+  created_at: string;
+  punch_entries: PunchEntryData[];
+}
+
+export interface ApplyToPayrollResponse {
+  employee_id: number;
+  employee_name: string;
+  hours_worked: number;
+  overtime_hours: number;
+  timecard_id: number;
+}
+
+export interface TimecardListMeta {
+  page: number;
+  per_page: number;
+  total_count: number;
+  total_pages: number;
+}
+
+export interface TimecardListResponse {
+  timecards: TimecardData[];
+  meta: TimecardListMeta;
+}
+
+export const timecardsApi = {
+  list: (payPeriodId?: number) => {
+    const params = payPeriodId ? `?pay_period_id=${payPeriodId}` : '';
+    return api.get<TimecardData[]>(`/admin/timecards${params}`);
+  },
+  listPaginated: (opts: { page?: number; perPage?: number; search?: string; status?: string; payPeriodId?: number }) => {
+    const params = new URLSearchParams();
+    params.set('page', String(opts.page || 1));
+    params.set('per_page', String(opts.perPage || 20));
+    if (opts.search) params.set('search', opts.search);
+    if (opts.status) params.set('status', opts.status);
+    if (opts.payPeriodId) params.set('pay_period_id', String(opts.payPeriodId));
+    return api.get<TimecardListResponse>(`/admin/timecards?${params.toString()}`);
+  },
+  show: (id: number) => api.get<TimecardData>(`/admin/timecards/${id}`),
+  upload: async (file: File, payPeriodId?: number) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    if (payPeriodId) formData.append('pay_period_id', String(payPeriodId));
+    return api.postForm<TimecardData[]>(`/admin/timecards`, formData);
+  },
+  update: (id: number, data: Partial<Pick<TimecardData, 'employee_name' | 'period_start' | 'period_end' | 'pay_period_id'>>) =>
+    api.patch<TimecardData>(`/admin/timecards/${id}`, { timecard: data }),
+  review: (id: number, reviewedByName: string) =>
+    api.patch<TimecardData>(`/admin/timecards/${id}/review`, { review: { reviewed_by_name: reviewedByName } }),
+  reprocess: (id: number) => api.patch<TimecardData>(`/admin/timecards/${id}/reprocess`),
+  delete: (id: number) => api.delete(`/admin/timecards/${id}`),
+  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number) =>
+    api.post<ApplyToPayrollResponse>(`/admin/timecards/${id}/apply_to_payroll`, {
+      pay_period_id: payPeriodId,
+      ...(employeeId ? { employee_id: employeeId } : {}),
+    }),
+};
+
+export const punchEntriesApi = {
+  update: (id: number, data: Partial<PunchEntryData>) =>
+    api.patch<PunchEntryData>(`/admin/punch_entries/${id}`, { punch_entry: data }),
 };
 
 // CPR-71: Correction response types
@@ -840,11 +1006,27 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
-  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/transmittal_log_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
+  fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/full_print_package_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
 };
+
+export interface TransmittalOptions {
+  preparerName?: string;
+  notes?: string[];
+  reportList?: string[];
+}
 
 // Pay Stubs (Admin API)
 export interface PayStubInfo {
@@ -1038,10 +1220,20 @@ export const payrollReportsApi = {
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
-  transmittalLogPdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/transmittal_log_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
-  fullPrintPackagePdf: (payPeriodId: number, preparerName?: string) =>
-    api.getBlobWithParams('/admin/reports/full_print_package_pdf', { pay_period_id: payPeriodId, preparer_name: preparerName }),
+  transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/transmittal_log_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
+  fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
+    api.postBlob('/admin/reports/full_print_package_pdf', {
+      pay_period_id: payPeriodId,
+      preparer_name: options?.preparerName,
+      notes: options?.notes,
+      report_list: options?.reportList,
+    }),
 };
 
 // ============================================================
@@ -1093,6 +1285,8 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
+  checkPdf: (id: number) =>
+    api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`),
 };
 
 // Legacy dashboard (for migration)

@@ -308,6 +308,7 @@ module Api
             :bank_name,
             :bank_address,
             :check_memo_template,
+            :auto_create_fit_check,
             check_layout_config: {}
           )
 
@@ -464,6 +465,7 @@ module Api
             bank_name: company.bank_name,
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
+            auto_create_fit_check: company.auto_create_fit_check,
             check_layout_config: company.check_layout_config || {}
           }
         end

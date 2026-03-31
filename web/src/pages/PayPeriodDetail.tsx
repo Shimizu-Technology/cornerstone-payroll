@@ -18,6 +18,7 @@ import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
+import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
@@ -144,12 +145,11 @@ export function PayPeriodDetail() {
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number) => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
-      // Load pay period and employees in parallel
       const [ppResponse, empResponse] = await Promise.all([
         payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
@@ -162,7 +162,7 @@ export function PayPeriodDetail() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [loadAllActiveEmployees]);
 
@@ -1010,6 +1010,14 @@ export function PayPeriodDetail() {
               <ChecksPanel payPeriod={payPeriod} />
             </div>
           </Card>
+        )}
+
+        {/* Timecard OCR Panel — for draft pay periods */}
+        {isDraft && (
+          <TimecardOcrPanel
+            payPeriodId={payPeriod.id}
+            onPayrollUpdated={() => loadPayPeriod(payPeriod.id, true)}
+          />
         )}
 
         {/* Non-Employee Checks — for committed pay periods */}

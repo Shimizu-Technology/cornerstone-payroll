@@ -3,6 +3,7 @@
  * Confirms void with required written reason (10+ chars).
  */
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CheckItem } from '@/types';
 import { checksApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -35,10 +36,9 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-        {/* Header */}
         <div>
           <h2 className="text-lg font-semibold text-red-700">Void Check #{item.check_number}</h2>
           <p className="text-sm text-gray-600 mt-1">
@@ -50,14 +50,12 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
           </p>
         </div>
 
-        {/* Warning */}
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
           <strong>This action cannot be undone.</strong> The check will be permanently voided.
           The payroll obligation remains in the system — only the physical check is voided.
           Use <em>Reprint</em> to issue a replacement.
         </div>
 
-        {/* Reason */}
         <div className="space-y-1">
           <Label htmlFor="void-reason">
             Void Reason <span className="text-red-500">*</span>
@@ -76,12 +74,10 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
           <p className="text-xs text-gray-500">{reason.trim().length} / 10 characters minimum</p>
         </div>
 
-        {/* Error */}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</p>
         )}
 
-        {/* Actions */}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
@@ -95,6 +91,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
