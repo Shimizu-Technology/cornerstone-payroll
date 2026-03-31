@@ -3,8 +3,21 @@ import { Outlet } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 
+const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
+
 export function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
+  });
+
+  const toggleCollapse = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   useEffect(() => {
     const onEscape = (event: KeyboardEvent) => {
@@ -17,7 +30,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-transparent">
-      <Sidebar className="hidden lg:flex" />
+      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">

@@ -114,7 +114,7 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
     }
   };
 
-  const fmt = (v: number) => `$${v.toFixed(2)}`;
+  const fmt = (v: number | string) => `$${Number(v).toFixed(2)}`;
 
   return (
     <Card>

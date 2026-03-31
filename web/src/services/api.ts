@@ -241,31 +241,7 @@ class ApiClient {
     return { blob: await response.blob(), filename };
   }
 
-  // CPR-66: Post and receive a raw Blob (for PDF download)
-  async postBlob(endpoint: string, data?: unknown): Promise<Blob> {
-    const token = await this.resolveAuthToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
-
-    const response = await fetch(this.buildUrl(endpoint), {
-      method: 'POST',
-      headers,
-      body: data ? JSON.stringify(data) : undefined,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
-        response.status,
-        errorData.details,
-        errorData
-      );
-    }
-
-    return response.blob();
-  }
+  // (postBlob is defined above — unified for all POST-to-Blob calls)
 
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
@@ -640,6 +616,119 @@ export interface TimecardImportApplyResponse {
   skipped: unknown[];
   errors: { employee_id: number; error: string }[];
 }
+
+// ──── Full Timecard OCR types ────────────────────────────────
+export interface PunchEntryData {
+  id: number;
+  card_day: number | null;
+  date: string | null;
+  day_of_week: string | null;
+  clock_in: string | null;
+  lunch_out: string | null;
+  lunch_in: string | null;
+  clock_out: string | null;
+  in3: string | null;
+  out3: string | null;
+  hours_worked: number | null;
+  confidence: number | null;
+  notes: string | null;
+  manually_edited: boolean;
+  review_state: 'unresolved' | 'approved';
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  needs_attention: boolean;
+  blank_day: boolean;
+}
+
+export interface ReviewSummary {
+  severity: 'critical' | 'warning' | 'info' | 'ok';
+  priority_rank: number;
+  attention_count: number;
+  approved_attention_count: number;
+  low_confidence_count: number;
+  noted_entry_count: number;
+  missing_punch_count: number;
+  manual_edit_count: number;
+  reason_codes: string[];
+}
+
+export interface TimecardData {
+  id: number;
+  company_id: number;
+  pay_period_id: number | null;
+  employee_name: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  image_url: string | null;
+  preprocessed_image_url: string | null;
+  ocr_status: 'pending' | 'processing' | 'complete' | 'failed' | 'reviewed';
+  overall_confidence: number | null;
+  ocr_error: string | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  review_summary: ReviewSummary;
+  created_at: string;
+  punch_entries: PunchEntryData[];
+}
+
+export interface ApplyToPayrollResponse {
+  employee_id: number;
+  employee_name: string;
+  hours_worked: number;
+  overtime_hours: number;
+  timecard_id: number;
+}
+
+export interface TimecardListMeta {
+  page: number;
+  per_page: number;
+  total_count: number;
+  total_pages: number;
+}
+
+export interface TimecardListResponse {
+  timecards: TimecardData[];
+  meta: TimecardListMeta;
+}
+
+export const timecardsApi = {
+  list: (payPeriodId?: number) => {
+    const params = payPeriodId ? `?pay_period_id=${payPeriodId}` : '';
+    return api.get<TimecardData[]>(`/admin/timecards${params}`);
+  },
+  listPaginated: (opts: { page?: number; perPage?: number; search?: string; status?: string; payPeriodId?: number }) => {
+    const params = new URLSearchParams();
+    params.set('page', String(opts.page || 1));
+    params.set('per_page', String(opts.perPage || 20));
+    if (opts.search) params.set('search', opts.search);
+    if (opts.status) params.set('status', opts.status);
+    if (opts.payPeriodId) params.set('pay_period_id', String(opts.payPeriodId));
+    return api.get<TimecardListResponse>(`/admin/timecards?${params.toString()}`);
+  },
+  show: (id: number) => api.get<TimecardData>(`/admin/timecards/${id}`),
+  upload: async (file: File, payPeriodId?: number) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    if (payPeriodId) formData.append('pay_period_id', String(payPeriodId));
+    return api.postForm<TimecardData[]>(`/admin/timecards`, formData);
+  },
+  update: (id: number, data: Partial<Pick<TimecardData, 'employee_name' | 'period_start' | 'period_end' | 'pay_period_id'>>) =>
+    api.patch<TimecardData>(`/admin/timecards/${id}`, { timecard: data }),
+  review: (id: number, reviewedByName: string) =>
+    api.patch<TimecardData>(`/admin/timecards/${id}/review`, { review: { reviewed_by_name: reviewedByName } }),
+  reprocess: (id: number) => api.patch<TimecardData>(`/admin/timecards/${id}/reprocess`),
+  delete: (id: number) => api.delete(`/admin/timecards/${id}`),
+  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number) =>
+    api.post<ApplyToPayrollResponse>(`/admin/timecards/${id}/apply_to_payroll`, {
+      pay_period_id: payPeriodId,
+      ...(employeeId ? { employee_id: employeeId } : {}),
+    }),
+};
+
+export const punchEntriesApi = {
+  update: (id: number, data: Partial<PunchEntryData>) =>
+    api.patch<PunchEntryData>(`/admin/punch_entries/${id}`, { punch_entry: data }),
+};
 
 // CPR-71: Correction response types
 export interface VoidPayPeriodResponse {

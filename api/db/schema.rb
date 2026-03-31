@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_30_233203) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -491,6 +491,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_30_233203) do
     t.index ["voided"], name: "index_payroll_items_on_voided"
   end
 
+  create_table "punch_entries", force: :cascade do |t|
+    t.integer "card_day"
+    t.time "clock_in"
+    t.time "clock_out"
+    t.float "confidence"
+    t.datetime "created_at", null: false
+    t.date "date"
+    t.string "day_of_week", limit: 3
+    t.float "hours_worked"
+    t.time "in3"
+    t.time "lunch_in"
+    t.time "lunch_out"
+    t.boolean "manually_edited", default: false
+    t.text "notes"
+    t.time "out3"
+    t.integer "review_state", default: 0, null: false
+    t.datetime "reviewed_at"
+    t.string "reviewed_by_name"
+    t.bigint "timecard_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["timecard_id"], name: "index_punch_entries_on_timecard_id"
+  end
+
   create_table "tax_brackets", force: :cascade do |t|
     t.integer "bracket_order", null: false
     t.datetime "created_at", null: false
@@ -532,6 +555,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_30_233203) do
     t.integer "tax_year", null: false
     t.datetime "updated_at", null: false
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
+  end
+
+  create_table "timecards", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.string "employee_name"
+    t.string "image_hash"
+    t.text "image_url"
+    t.integer "ocr_status", default: 0, null: false
+    t.float "overall_confidence"
+    t.bigint "pay_period_id"
+    t.date "period_end"
+    t.date "period_start"
+    t.text "preprocessed_image_url"
+    t.jsonb "raw_ocr_response"
+    t.datetime "reviewed_at"
+    t.string "reviewed_by_name"
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "image_hash"], name: "index_timecards_on_company_id_and_image_hash", unique: true, where: "(image_hash IS NOT NULL)"
+    t.index ["company_id"], name: "index_timecards_on_company_id"
+    t.index ["pay_period_id"], name: "index_timecards_on_pay_period_id"
   end
 
   create_table "user_invitations", force: :cascade do |t|
@@ -649,8 +693,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_30_233203) do
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
+  add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "timecards", "companies"
+  add_foreign_key "timecards", "pay_periods"
   add_foreign_key "user_invitations", "companies"
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_sessions", "users"
