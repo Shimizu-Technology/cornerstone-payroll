@@ -434,10 +434,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          options = {}
-          options[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
-          options[:notes] = Array(params[:notes]) if params[:notes].present?
-
+          options = transmittal_options
           generator = TransmittalLogPdfGenerator.new(pp, options)
           send_data generator.generate,
             filename: generator.filename,
@@ -455,7 +452,7 @@ module Api
           company = pp.company
 
           generators = [
-            TransmittalLogPdfGenerator.new(pp, preparer_name: params[:preparer_name]),
+            TransmittalLogPdfGenerator.new(pp, transmittal_options),
             PayrollSummaryByEmployeePdfGenerator.new(pp),
             DeductionsContributionsReportPdfGenerator.new(pp),
             PaycheckHistoryPdfGenerator.new(pp),
@@ -501,6 +498,14 @@ module Api
         end
 
         private
+
+        def transmittal_options
+          opts = {}
+          opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
+          opts[:notes] = Array(params[:notes]) if params[:notes].present?
+          opts[:report_list] = Array(params[:report_list]) if params[:report_list].present?
+          opts
+        end
 
         def find_pay_period_for_report
           pay_period_id = params[:pay_period_id]

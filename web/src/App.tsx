@@ -17,6 +17,7 @@ import { AuditLogs } from '@/pages/AuditLogs';
 import { CheckSettingsPage } from '@/pages/CheckSettings';
 import EmployeeLoans from '@/pages/EmployeeLoans';
 import { Clients } from '@/pages/Clients';
+import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
 import { Login } from '@/pages/Login';
 // AuthCallback removed — Clerk handles auth flow
 import { Invite } from '@/pages/Invite';
@@ -109,6 +110,7 @@ function AppRoutes() {
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={<Reports />} />
         <Route path="employee-loans" element={<EmployeeLoans />} />
+        <Route path="tools/timecard-ocr" element={<TimecardOcrTool />} />
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
