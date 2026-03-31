@@ -17,6 +17,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TimecardImportPreviewRow[]>([]);
+  const [allEmployees, setAllEmployees] = useState<{ id: number; name: string }[]>([]);
   const [mappings, setMappings] = useState<Map<number, number | null>>(new Map());
   const [result, setResult] = useState<{ applied: number; errors: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -26,6 +27,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
     setLoading(false);
     setError(null);
     setPreview([]);
+    setAllEmployees([]);
     setMappings(new Map());
     setResult(null);
     if (fileRef.current) fileRef.current.value = '';
@@ -42,6 +44,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
     try {
       const res = await payPeriodsApi.previewTimecardImport(payPeriodId, file);
       setPreview(res.preview);
+      setAllEmployees(res.all_employees || []);
 
       const initialMappings = new Map<number, number | null>();
       res.preview.forEach((row, idx) => {
@@ -212,7 +215,7 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
                               className="w-full border rounded px-2 py-1 text-sm"
                             >
                               <option value="">-- Skip --</option>
-                              {row.all_employees.map(emp => (
+                              {allEmployees.map(emp => (
                                 <option key={emp.id} value={emp.id}>{emp.name}</option>
                               ))}
                             </select>
