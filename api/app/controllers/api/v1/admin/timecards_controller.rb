@@ -58,7 +58,7 @@ module Api
             image_hash = Digest::SHA256.hexdigest(File.read(segment.path))
             existing = Timecard.find_by(company_id: current_company_id, image_hash: image_hash)
             if existing
-              run_ocr!(existing) if existing.failed?
+              OcrProcessJob.perform_later(existing.id) if existing.failed?
               next existing
             end
 
@@ -72,11 +72,11 @@ module Api
               image_hash: image_hash,
               ocr_status: :pending
             )
-            run_ocr!(timecard)
+            OcrProcessJob.perform_later(timecard.id)
             timecard
           end
 
-          render json: timecards.map { |tc| timecard_json(tc.reload) }
+          render json: timecards.map { |tc| timecard_json(tc) }
         ensure
           segments&.each do |segment|
             segment&.close
@@ -127,7 +127,8 @@ module Api
             return render json: { error: "Timecard cannot be reprocessed right now" }, status: :unprocessable_entity
           end
 
-          run_ocr!(@timecard)
+          @timecard.update!(ocr_status: :pending)
+          OcrProcessJob.perform_later(@timecard.id)
           render json: timecard_json(@timecard.reload)
         end
 
@@ -192,51 +193,6 @@ module Api
 
         def review_params
           params.fetch(:review, ActionController::Parameters.new).permit(:reviewed_by_name)
-        end
-
-        def run_ocr!(timecard)
-          timecard.update!(ocr_status: :processing)
-
-          result = TimecardOcr::OcrService.process(timecard)
-          entries = Array(result["entries"])
-          raise "OCR returned no entries" if entries.empty?
-
-          timecard.transaction do
-            timecard.punch_entries.delete_all
-
-            timecard.update!(
-              employee_name: result["employee_name"],
-              period_start: result["period_start"],
-              period_end: result["period_end"],
-              overall_confidence: result["overall_confidence"],
-              preprocessed_image_url: result["preprocessed_image_key"],
-              raw_ocr_response: result
-            )
-
-            entries.each do |entry|
-              timecard.punch_entries.create!(
-                card_day: entry["card_day"],
-                date: entry["date"],
-                day_of_week: entry["day_of_week"],
-                clock_in: entry["clock_in"],
-                lunch_out: entry["lunch_out"],
-                lunch_in: entry["lunch_in"],
-                clock_out: entry["clock_out"],
-                in3: entry["in3"],
-                out3: entry["out3"],
-                confidence: entry["confidence"],
-                notes: entry["notes"]
-              )
-            end
-
-            timecard.update!(ocr_status: :complete)
-          end
-        rescue => e
-          Rails.logger.error("OCR failed for timecard #{timecard.id}: #{e.class}: #{e.message}")
-          timecard.update!(
-            ocr_status: :failed,
-            raw_ocr_response: { "error" => e.message }
-          )
         end
 
         def header_changed?(timecard, attrs)
