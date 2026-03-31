@@ -1,6 +1,20 @@
 #!/usr/bin/env ruby
 
 require_relative "../config/environment"
-require "solid_queue/cli"
 
+# Ensure Solid Queue tables exist before starting the worker.
+# When the queue DB shares the primary DATABASE_URL, db:prepare won't
+# load queue_schema.rb because the database already exists.
+schema_file = Rails.root.join("db/queue_schema.rb")
+unless ActiveRecord::Base.connection.table_exists?("solid_queue_jobs")
+  if schema_file.exist?
+    puts "[bin/jobs] Solid Queue tables missing — loading queue schema..."
+    load(schema_file)
+    puts "[bin/jobs] Queue schema loaded."
+  else
+    abort "[bin/jobs] solid_queue_jobs table missing and no queue_schema.rb found!"
+  end
+end
+
+require "solid_queue/cli"
 SolidQueue::Cli.start(ARGV)

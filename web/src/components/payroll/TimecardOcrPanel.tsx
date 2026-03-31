@@ -130,20 +130,22 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
 }
 
 // ──── Timecard List Item ────────────────────────────────
-function TimecardListItem({ tc, onSelect, onReprocess, onDelete }: {
+function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting }: {
   tc: TimecardData;
   onSelect: () => void;
   onReprocess: () => void;
   onDelete: () => void;
+  isDeleting: boolean;
 }) {
   const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
 
   return (
     <div
-      className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-colors ${
+      className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-all ${
+        isDeleting ? 'opacity-50 pointer-events-none scale-[0.98]' :
         isProcessing ? 'bg-indigo-50/50 border-indigo-200' : 'hover:bg-gray-50'
       }`}
-      onClick={isProcessing ? undefined : onSelect}
+      onClick={isProcessing || isDeleting ? undefined : onSelect}
     >
       <div className="flex items-center gap-3 flex-1">
         {isProcessing ? (
@@ -166,7 +168,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete }: {
             )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            {isProcessing ? (
+            {isDeleting ? (
+              'Deleting...'
+            ) : isProcessing ? (
               'OCR is running in the background. This takes 60-90 seconds per card.'
             ) : tc.period_start && tc.period_end ? (
               <>
@@ -186,7 +190,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete }: {
           <Button size="sm" variant="outline" onClick={onReprocess}>Retry OCR</Button>
         )}
         {!isProcessing && (
-          <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete}>Delete</Button>
+          <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete} disabled={isDeleting}>
+            {isDeleting ? <><Spinner size="sm" /> Deleting...</> : 'Delete'}
+          </Button>
         )}
       </div>
     </div>
@@ -247,6 +253,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [reviewing, setReviewing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [nameValue, setNameValue] = useState(tc.employee_name || '');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
   const [error, setError] = useState('');
@@ -359,11 +366,14 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveName = async () => {
+    setSavingName(true);
     try {
       const updated = await timecardsApi.update(tc.id, { employee_name: nameValue });
       setTc(updated);
       setEditingName(false);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setSavingName(false);
+    }
   };
 
   return (
@@ -375,8 +385,10 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           {editingName ? (
             <span className="flex items-center gap-2">
               <input className="border rounded px-2 py-1 text-sm" value={nameValue} onChange={(e) => setNameValue(e.target.value)} />
-              <Button size="sm" onClick={handleSaveName}>Save</Button>
-              <Button size="sm" variant="outline" onClick={() => setEditingName(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
+                {savingName ? <><Spinner size="sm" /> Saving...</> : 'Save'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setEditingName(false)} disabled={savingName}>Cancel</Button>
             </span>
           ) : (
             <span className="cursor-pointer hover:underline" onClick={() => setEditingName(true)}>
@@ -580,6 +592,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   // Standalone pagination state
   const [page, setPage] = useState(1);
@@ -688,12 +701,15 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('Delete this timecard?')) return;
+    setDeletingId(id);
     try {
       await timecardsApi.delete(id);
       setTimecards((prev) => prev.filter((tc) => tc.id !== id));
       if (selectedId === id) setSelectedId(null);
       if (isStandalone) setTotalCount((c) => c - 1);
-    } catch { /* ignore */ }
+    } catch { /* ignore */ } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleReprocess = async (id: number) => {
@@ -798,6 +814,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
                 onSelect={() => setSelectedId(tc.id)}
                 onReprocess={() => handleReprocess(tc.id)}
                 onDelete={() => handleDelete(tc.id)}
+                isDeleting={deletingId === tc.id}
               />
             ))}
             {isStandalone && (

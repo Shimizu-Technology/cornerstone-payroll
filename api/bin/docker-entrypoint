@@ -1,13 +1,9 @@
 #!/bin/bash -e
 
-# Prepare all databases (primary + queue) on web server boot
+# Prepare all databases on web server boot
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
   ./bin/rails db:prepare
-  if ./bin/rails db:prepare:queue 2>&1; then
-    echo "Queue database prepared successfully"
-  else
-    echo "WARNING: Queue database preparation failed — Solid Queue may not work" >&2
-  fi
+  ./bin/rails solid_queue:setup
 fi
 
 exec "${@}"

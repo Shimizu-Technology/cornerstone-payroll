@@ -36,6 +36,10 @@ export default function TaxConfigs() {
   const [editingBrackets, setEditingBrackets] = useState<string | null>(null);
   const [editableBrackets, setEditableBrackets] = useState<TaxConfigBracket[]>([]);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [activatingId, setActivatingId] = useState<number | null>(null);
+  const [loadingDetailId, setLoadingDetailId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchConfigs();
@@ -53,11 +57,18 @@ export default function TaxConfigs() {
   };
 
   const fetchConfigDetails = async (id: number) => {
+    setSelectedConfig(null);
+    setLoadingDetailId(id);
     try {
       const data = await taxConfigsApi.get(id);
-      setSelectedConfig(data.tax_config);
+      setLoadingDetailId((prev) => {
+        if (prev === id) setSelectedConfig(data.tax_config);
+        return prev;
+      });
     } catch (error) {
       console.error('Failed to fetch config details:', error);
+    } finally {
+      setLoadingDetailId((prev) => (prev === id ? null : prev));
     }
   };
 
@@ -72,6 +83,7 @@ export default function TaxConfigs() {
   };
 
   const createConfig = async () => {
+    setCreating(true);
     try {
       await taxConfigsApi.create({
         tax_year: newYear,
@@ -81,21 +93,26 @@ export default function TaxConfigs() {
       fetchConfigs();
     } catch (error) {
       console.error('Failed to create config:', error);
+    } finally {
+      setCreating(false);
     }
   };
 
   const activateConfig = async (id: number) => {
+    setActivatingId(id);
     try {
       await taxConfigsApi.activate(id);
       fetchConfigs();
     } catch (error) {
       console.error('Failed to activate config:', error);
+    } finally {
+      setActivatingId(null);
     }
   };
 
   const deleteConfig = async (id: number, year: number) => {
     if (!confirm(`Are you sure you want to delete the ${year} tax configuration?`)) return;
-    
+    setDeletingId(id);
     try {
       await taxConfigsApi.delete(id);
       fetchConfigs();
@@ -104,6 +121,8 @@ export default function TaxConfigs() {
       }
     } catch (error) {
       console.error('Failed to delete config:', error);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -307,8 +326,13 @@ export default function TaxConfigs() {
                         onClick={() => activateConfig(config.id)}
                         className="text-green-600 hover:text-green-900"
                         title="Activate"
+                        disabled={activatingId === config.id}
                       >
-                        <CheckCircle className="h-5 w-5" />
+                        {activatingId === config.id ? (
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-green-300 border-t-green-600" />
+                        ) : (
+                          <CheckCircle className="h-5 w-5" />
+                        )}
                       </button>
                     )}
                     <button
@@ -323,8 +347,13 @@ export default function TaxConfigs() {
                         onClick={() => deleteConfig(config.id, config.tax_year)}
                         className="text-red-600 hover:text-red-900"
                         title="Delete"
+                        disabled={deletingId === config.id}
                       >
-                        <Trash2 className="h-5 w-5" />
+                        {deletingId === config.id ? (
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-red-300 border-t-red-600" />
+                        ) : (
+                          <Trash2 className="h-5 w-5" />
+                        )}
                       </button>
                     )}
                   </div>
@@ -336,11 +365,20 @@ export default function TaxConfigs() {
       </div>
 
       {/* Selected Config Details */}
+      {loadingDetailId && !selectedConfig && (
+        <div className="bg-white shadow rounded-lg p-6 flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mx-auto" />
+            <p className="mt-2 text-sm text-gray-500">Loading configuration...</p>
+          </div>
+        </div>
+      )}
       {selectedConfig && (
         <div className="bg-white shadow rounded-lg p-6">
           <div className="flex justify-between items-start mb-6">
             <h2 className="text-xl font-bold text-gray-900">
               {selectedConfig.tax_year} Configuration
+              {loadingDetailId && <span className="ml-2 inline-block w-4 h-4 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-600 align-middle" />}
             </h2>
             <button
               onClick={() => setSelectedConfig(null)}
@@ -699,15 +737,26 @@ export default function TaxConfigs() {
               <button
                 onClick={() => setShowCreateModal(false)}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                disabled={creating}
               >
                 Cancel
               </button>
               <button
                 onClick={createConfig}
-                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700"
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                disabled={creating}
               >
-                <Copy className="h-4 w-4 inline mr-2" />
-                Create
+                {creating ? (
+                  <>
+                    <div className="h-4 w-4 inline-block animate-spin rounded-full border-2 border-white/30 border-t-white mr-2 align-middle" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-4 w-4 inline mr-2" />
+                    Create
+                  </>
+                )}
               </button>
             </div>
           </div>

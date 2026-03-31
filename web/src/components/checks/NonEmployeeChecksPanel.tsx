@@ -47,6 +47,10 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [voidConfirming, setVoidConfirming] = useState(false);
+  const [markingPrintedId, setMarkingPrintedId] = useState<number | null>(null);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -68,6 +72,7 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
       setFormError('Payable To and Amount are required');
       return;
     }
+    setCreating(true);
     try {
       await nonEmployeeChecksApi.create({
         pay_period_id: payPeriodId,
@@ -84,11 +89,14 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
       loadChecks();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create check');
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleVoid = async (id: number) => {
     if (!voidReason) return;
+    setVoidConfirming(true);
     try {
       await nonEmployeeChecksApi.voidCheck(id, voidReason);
       setVoidingId(null);
@@ -96,25 +104,33 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
       loadChecks();
     } catch {
       // ignore
+    } finally {
+      setVoidConfirming(false);
     }
   };
 
   const handleMarkPrinted = async (id: number) => {
+    setMarkingPrintedId(id);
     try {
       await nonEmployeeChecksApi.markPrinted(id);
       loadChecks();
     } catch {
       // ignore
+    } finally {
+      setMarkingPrintedId(null);
     }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm('Delete this non-employee check?')) return;
+    setDeletingId(id);
     try {
       await nonEmployeeChecksApi.delete(id);
       loadChecks();
     } catch {
       // ignore
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -214,8 +230,10 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
           </div>
           <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
           <div className="mt-3 flex gap-2">
-            <Button size="sm" onClick={handleCreate}>Create Check</Button>
-            <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button size="sm" onClick={handleCreate} disabled={creating}>
+              {creating ? 'Creating...' : 'Create Check'}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
           </div>
         </div>
       )}
@@ -264,8 +282,8 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
                     Print
                   </Button>
                   {!check.voided && !check.printed_at && (
-                    <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)}>
-                      Mark Printed
+                    <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
+                      {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
                     </Button>
                   )}
                   {!check.voided && voidingId !== check.id && (
@@ -276,13 +294,15 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
                   {voidingId === check.id && (
                     <div className="flex gap-1">
                       <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
-                      <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)}>Confirm</Button>
-                      <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }}>Cancel</Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
+                        {voidConfirming ? 'Voiding...' : 'Confirm'}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
                     </div>
                   )}
                   {!check.printed_at && !check.voided && (
-                    <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)}>
-                      Delete
+                    <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
+                      {deletingId === check.id ? 'Deleting...' : 'Delete'}
                     </Button>
                   )}
                 </div>
