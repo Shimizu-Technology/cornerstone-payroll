@@ -13,7 +13,7 @@ if (isPostHogEnabled && typeof window !== 'undefined') {
     api_host: POSTHOG_HOST,
     capture_pageview: false,
     capture_pageleave: true,
-    autocapture: true,
+    autocapture: false,
     loaded: (ph) => {
       if (import.meta.env.DEV) {
         ph.opt_out_capturing();

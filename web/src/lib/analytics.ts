@@ -1,12 +1,8 @@
 import posthog from 'posthog-js';
-
-const isEnabled = Boolean(
-  import.meta.env.VITE_PUBLIC_POSTHOG_KEY &&
-    import.meta.env.VITE_PUBLIC_POSTHOG_KEY !== 'YOUR_POSTHOG_KEY'
-);
+import { isPostHogEnabled } from '@/providers/PostHogProvider';
 
 function capture(event: string, properties?: Record<string, unknown>) {
-  if (isEnabled && !import.meta.env.DEV) {
+  if (isPostHogEnabled && !import.meta.env.DEV) {
     posthog.capture(event, properties);
   }
 }
