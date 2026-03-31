@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class OcrProcessJob < ApplicationJob
-  queue_as :default
+  queue_as :ocr
 
   def perform(timecard_id)
     timecard = Timecard.find_by(id: timecard_id)
