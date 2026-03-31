@@ -73,6 +73,7 @@ export default function EmployeeLoans() {
     }
     setExpandingId(id);
     setExpandedLoanId(id);
+    setExpandedLoan(null);
     try {
       const res = await employeeLoansApi.get(id);
       setExpandedLoan(res.loan);

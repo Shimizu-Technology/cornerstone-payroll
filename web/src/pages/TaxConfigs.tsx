@@ -57,6 +57,7 @@ export default function TaxConfigs() {
   };
 
   const fetchConfigDetails = async (id: number) => {
+    setSelectedConfig(null);
     setLoadingDetail(true);
     try {
       const data = await taxConfigsApi.get(id);
