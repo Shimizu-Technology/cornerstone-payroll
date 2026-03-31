@@ -3,6 +3,7 @@
  * Confirms reprint: voids the old check number, assigns a new one in-place.
  */
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CheckItem } from '@/types';
 import { checksApi } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -32,10 +33,9 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+  return createPortal(
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-        {/* Header */}
         <div>
           <h2 className="text-lg font-semibold text-orange-700">Reprint Check #{item.check_number}</h2>
           <p className="text-sm text-gray-600 mt-1">
@@ -47,7 +47,6 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           </p>
         </div>
 
-        {/* Info */}
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 text-sm text-orange-800">
           <strong>What happens:</strong>
           <ul className="list-disc list-inside mt-1 space-y-1">
@@ -58,7 +57,6 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           </ul>
         </div>
 
-        {/* Optional reason */}
         <div className="space-y-1">
           <Label htmlFor="reprint-reason">Reason (optional)</Label>
           <Textarea
@@ -71,12 +69,10 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           />
         </div>
 
-        {/* Error */}
         {error && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{error}</p>
         )}
 
-        {/* Actions */}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={loading}>
             Cancel
@@ -90,6 +86,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

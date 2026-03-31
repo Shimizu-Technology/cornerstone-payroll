@@ -13,6 +13,17 @@ export interface BlobDownload {
   filename?: string;
 }
 
+function parseContentDispositionFilename(header: string | null): string | undefined {
+  if (!header) return undefined;
+  // RFC 5987: filename*=UTF-8''encoded_name
+  const rfc5987 = header.match(/filename\*\s*=\s*(?:UTF-8|utf-8)''(.+?)(?:;|$)/i);
+  if (rfc5987) return decodeURIComponent(rfc5987[1].trim());
+  // Standard: filename="name" or filename=name
+  const standard = header.match(/filename\s*=\s*"?([^";\n]+)"?/i);
+  if (standard) return standard[1].trim();
+  return undefined;
+}
+
 class ApiClient {
   private baseUrl: string;
   private authToken: string | null = null;
@@ -198,13 +209,7 @@ class ApiClient {
       );
     }
 
-    const contentDisposition = response.headers.get('Content-Disposition');
-    let filename: string | undefined;
-    if (contentDisposition) {
-      const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
-      if (match) filename = match[1];
-    }
-
+    const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
     const blob = await response.blob();
     return { blob, filename };
   }
@@ -234,10 +239,7 @@ class ApiClient {
       );
     }
 
-    const contentDisposition = response.headers.get('content-disposition') || '';
-    const match = contentDisposition.match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
-    const filename = match ? decodeURIComponent(match[1].replace(/"/g, '').trim()) : undefined;
-
+    const filename = parseContentDispositionFilename(response.headers.get('content-disposition'));
     return { blob: await response.blob(), filename };
   }
 
@@ -1283,6 +1285,8 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
+  checkPdf: (id: number) =>
+    api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`),
 };
 
 // Legacy dashboard (for migration)
