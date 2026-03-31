@@ -193,8 +193,11 @@ module Api
         def enqueue_ocr(timecard_id)
           OcrProcessJob.perform_later(timecard_id)
         rescue SolidQueue::Job::EnqueueError, ActiveRecord::StatementInvalid => e
-          Rails.logger.warn("Solid Queue unavailable (#{e.class}), falling back to inline OCR for timecard #{timecard_id}")
-          OcrProcessJob.perform_now(timecard_id)
+          Rails.logger.error("Failed to enqueue OCR job for timecard #{timecard_id}: #{e.class}: #{e.message}")
+          Timecard.where(id: timecard_id).update_all(
+            ocr_status: Timecard.ocr_statuses[:failed],
+            raw_ocr_response: { "error" => "Background job queue unavailable. Please contact support or retry later." }
+          )
         end
 
         def timecard_params
