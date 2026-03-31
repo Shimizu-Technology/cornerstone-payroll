@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
+import { analytics } from '@/lib/analytics';
 
 export function CompanySwitcher() {
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
@@ -17,11 +18,10 @@ export function CompanySwitcher() {
   }, []);
 
   if (!canSwitchCompany || companies.length <= 1) {
-    // Single-company user — just show company name
     return (
-      <div className="px-4 py-3 border-b border-gray-200">
-        <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Company</p>
-        <p className="text-sm font-semibold text-gray-900 truncate mt-0.5">
+      <div className="border-b border-neutral-200/70 px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Company</p>
+        <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
           {activeCompany?.name || 'Loading...'}
         </p>
       </div>
@@ -29,22 +29,22 @@ export function CompanySwitcher() {
   }
 
   return (
-    <div className="px-4 py-3 border-b border-gray-200 relative" ref={dropdownRef}>
-      <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">Active Client</p>
+    <div className="relative border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="mt-1 w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors text-left"
+        className="mt-1 flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50/70 px-3 py-2 text-left transition-colors hover:bg-neutral-100"
       >
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-gray-900 truncate">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-neutral-900">
             {activeCompany?.name || 'Select Company'}
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-neutral-500">
             {activeCompany?.active_employees || 0} employees
           </p>
         </div>
         <svg
-          className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+          className={`h-4 w-4 text-neutral-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24"
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -52,28 +52,29 @@ export function CompanySwitcher() {
       </button>
 
       {isOpen && (
-        <div className="absolute left-2 right-2 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
+        <div className="absolute left-2 right-2 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
           {companies.map(company => (
             <button
               key={company.id}
               onClick={() => {
                 switchCompany(company.id);
+                analytics.companySwitch(company.id);
                 setIsOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-4 py-3 text-left hover:bg-blue-50 transition-colors border-b last:border-0 ${
-                company.id === activeCompany?.id ? 'bg-blue-50 border-l-2 border-l-blue-600' : ''
+              className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-3 text-left transition-colors last:border-0 hover:bg-primary-50 ${
+                company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''
               }`}
             >
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm truncate ${company.id === activeCompany?.id ? 'font-bold text-blue-700' : 'font-medium text-gray-900'}`}>
+              <div className="min-w-0 flex-1">
+                <p className={`truncate text-sm ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
                   {company.name}
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-neutral-500">
                   {company.active_employees} active employees &middot; {company.pay_frequency}
                 </p>
               </div>
               {company.id === activeCompany?.id && (
-                <svg className="w-4 h-4 text-blue-600 shrink-0 ml-2" fill="currentColor" viewBox="0 0 20 20">
+                <svg className="ml-2 h-4 w-4 shrink-0 text-primary-600" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
               )}

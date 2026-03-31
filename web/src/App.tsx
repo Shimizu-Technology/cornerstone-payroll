@@ -1,7 +1,9 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider } from '@/contexts/CompanyContext';
+import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
 import { Dashboard } from '@/pages/Dashboard';
 import { EmployeeList } from '@/pages/employees/EmployeeList';
@@ -9,7 +11,6 @@ import { EmployeeForm } from '@/pages/employees/EmployeeForm';
 import { Departments } from '@/pages/Departments';
 import { PayPeriods } from '@/pages/PayPeriods';
 import { PayPeriodDetail } from '@/pages/PayPeriodDetail';
-// PayrollRun removed — workflow lives in PayPeriodDetail
 import { Reports } from '@/pages/Reports';
 import TaxConfigs from '@/pages/TaxConfigs';
 import { Users } from '@/pages/Users';
@@ -19,7 +20,6 @@ import EmployeeLoans from '@/pages/EmployeeLoans';
 import { Clients } from '@/pages/Clients';
 import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
 import { Login } from '@/pages/Login';
-// AuthCallback removed — Clerk handles auth flow
 import { Invite } from '@/pages/Invite';
 
 // Environment flag to bypass auth in development
@@ -83,6 +83,27 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function PostHogIdentify() {
+  const { user } = useAuth();
+  const posthog = usePostHog();
+
+  useEffect(() => {
+    if (!isPostHogEnabled || !posthog) return;
+    if (user) {
+      posthog.identify(String(user.id), {
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        company_id: user.company_id,
+      });
+    } else {
+      posthog.reset();
+    }
+  }, [user, posthog]);
+
+  return null;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -141,8 +162,10 @@ function AppWithClerk({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
+      <PostHogPageView />
       <AppWithClerk>
         <AuthProvider>
+          <PostHogIdentify />
           <CompanyProvider>
             <AppRoutes />
           </CompanyProvider>
