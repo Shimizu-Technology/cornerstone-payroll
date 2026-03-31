@@ -118,6 +118,7 @@ Rails.application.routes.draw do
           member do
             post :mark_printed
             post :void_check
+            get :check_pdf
           end
         end
 

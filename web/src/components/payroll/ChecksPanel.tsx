@@ -38,6 +38,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
+  const [batchAction, setBatchAction] = useState<string | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -64,8 +65,10 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   // ---- Batch PDF download ----
   const handleBatchDownload = async () => {
     setBatchLoading(true);
+    setBatchAction('Generating PDF...');
     try {
       const result = await checksApi.batchPdf(payPeriod.id);
+      setBatchAction('Downloading...');
       const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
       a.href = url;
@@ -76,6 +79,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       alert(err instanceof Error ? err.message : 'Failed to download PDF');
     } finally {
       setBatchLoading(false);
+      setBatchAction(null);
     }
   };
 
@@ -83,6 +87,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   const handleMarkAllPrinted = async () => {
     if (!window.confirm('Mark all unprinted checks as printed?')) return;
     setBatchLoading(true);
+    setBatchAction('Marking as printed...');
     try {
       const result = await checksApi.markAllPrinted(payPeriod.id);
       await load();
@@ -93,6 +98,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       alert(err instanceof Error ? err.message : 'Failed to mark checks as printed');
     } finally {
       setBatchLoading(false);
+      setBatchAction(null);
     }
   };
 
@@ -140,8 +146,10 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
 
   const handlePrintAll = async () => {
     setBatchLoading(true);
+    setBatchAction('Generating checks for printing...');
     try {
       const result = await checksApi.batchPdf(payPeriod.id);
+      setBatchAction('Opening print dialog...');
       const url = URL.createObjectURL(result.blob);
       const printWindow = window.open(url);
       if (printWindow) {
@@ -157,6 +165,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       alert(err instanceof Error ? err.message : 'Failed to generate PDF for printing');
     } finally {
       setBatchLoading(false);
+      setBatchAction(null);
     }
   };
 
@@ -232,7 +241,10 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          {batchAction && (
+            <span className="text-sm text-blue-600 animate-pulse mr-2">{batchAction}</span>
+          )}
           {unprintedCount > 0 && (
             <Button
               size="sm"
@@ -249,14 +261,14 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
             onClick={handlePrintAll}
             disabled={batchLoading || checks.length === 0}
           >
-            {batchLoading ? 'Generating…' : 'Print All Checks'}
+            Print All Checks
           </Button>
           <Button
             size="sm"
             onClick={handleBatchDownload}
             disabled={batchLoading || checks.length === 0}
           >
-            {batchLoading ? 'Generating…' : 'Download All Checks PDF'}
+            Download All Checks PDF
           </Button>
         </div>
       </div>

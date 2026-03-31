@@ -25,6 +25,7 @@ module Api
 
           render json: {
             preview: mapped,
+            all_employees: employees.map { |e| { id: e.id, name: e.full_name } },
             total_rows: mapped.size,
             matched: mapped.count { |m| m[:employee_id].present? },
             unmatched: mapped.count { |m| m[:employee_id].nil? }
@@ -35,22 +36,26 @@ module Api
         # Applies confirmed timecard mappings to the pay period's payroll items.
         # Body: { mappings: [{ employee_id: 123, regular_hours: 80, overtime_hours: 4 }, ...] }
         def apply
+          unless @pay_period.can_edit?
+            return render json: { error: "Cannot apply to a non-draft pay period" }, status: :unprocessable_entity
+          end
+
           mappings = Array(params[:mappings])
           return render json: { error: "No mappings provided" }, status: :unprocessable_entity if mappings.empty?
 
           results = { applied: [], skipped: [], errors: [] }
 
-          mappings.each do |mapping|
-            eid = mapping[:employee_id].to_i
-            next if eid.zero?
+          ActiveRecord::Base.transaction do
+            mappings.each do |mapping|
+              eid = mapping[:employee_id].to_i
+              next if eid.zero?
 
-            employee = Employee.active.find_by(id: eid, company_id: current_company_id)
-            unless employee
-              results[:errors] << { employee_id: eid, error: "Employee not found or inactive" }
-              next
-            end
+              employee = Employee.active.find_by(id: eid, company_id: current_company_id)
+              unless employee
+                results[:errors] << { employee_id: eid, error: "Employee not found or inactive" }
+                next
+              end
 
-            begin
               item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
               if item.new_record?
                 item.company_id = current_company_id
@@ -69,12 +74,12 @@ module Api
                 hours_worked: item.hours_worked,
                 overtime_hours: item.overtime_hours
               }
-            rescue StandardError => e
-              results[:errors] << { employee_id: eid, error: e.message }
             end
           end
 
           render json: results
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -143,8 +148,7 @@ module Api
             flags: row[:flags],
             employee_id: matched ? best_match&.id : nil,
             employee_name: matched ? best_match&.full_name : nil,
-            match_score: best_score.round(2),
-            all_employees: employees.map { |e| { id: e.id, name: e.full_name } }
+            match_score: best_score.round(2)
           }
         end
 

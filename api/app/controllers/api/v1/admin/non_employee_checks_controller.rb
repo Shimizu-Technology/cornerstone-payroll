@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class NonEmployeeChecksController < BaseController
-        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check]
+        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf]
 
         # GET /api/v1/admin/non_employee_checks
         def index
@@ -91,6 +91,17 @@ module Api
           render json: { non_employee_check: check_payload(@check.reload) }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/non_employee_checks/:id/check_pdf
+        def check_pdf
+          generator = NonEmployeeCheckGenerator.new(@check)
+          pdf_data  = @check.voided? ? generator.generate_voided : generator.generate
+
+          send_data pdf_data,
+            type: "application/pdf",
+            disposition: "inline",
+            filename: generator.filename
         end
 
         private
