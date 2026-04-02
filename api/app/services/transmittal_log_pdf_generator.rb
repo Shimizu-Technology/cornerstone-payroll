@@ -131,7 +131,7 @@ class TransmittalLogPdfGenerator
     end
 
     # Reports section
-    reports = options[:report_list] || default_report_list
+    reports = options.key?(:report_list) ? options[:report_list] : default_report_list
     if reports.any?
       item_num += 1
       pdf.font_size(10) do

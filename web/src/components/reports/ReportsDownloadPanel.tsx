@@ -146,7 +146,7 @@ function TransmittalEditorModal({
     onGenerate({
       preparerName: preparerName.trim() || undefined,
       notes: notes.length > 0 ? notes : undefined,
-      reportList: reportList.length > 0 ? reportList : undefined,
+      reportList: reportList,
       checkNumberFirst: checkFirst.trim() || undefined,
       checkNumberLast: checkLast.trim() || undefined,
       nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
