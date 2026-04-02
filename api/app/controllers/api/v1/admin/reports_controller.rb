@@ -548,7 +548,7 @@ module Api
           opts = {}
           opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
           opts[:notes] = Array(params[:notes]) if params[:notes].present?
-          opts[:report_list] = Array(params[:report_list]) if params[:report_list].present?
+          opts[:report_list] = Array(params[:report_list]) if params.key?(:report_list)
           opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
           opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
           if params[:non_employee_check_numbers].present?
