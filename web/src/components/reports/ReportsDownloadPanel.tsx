@@ -88,6 +88,10 @@ function TransmittalEditorModal({
   useEffect(() => {
     if (!open || initialized) return;
     setLoadingPreview(true);
+    setPreparerName('Cornerstone Tax Services');
+    setReportList([...DEFAULT_REPORT_LIST]);
+    setNewNote('');
+    setNewReport('');
     transmittalApi.preview(payPeriodId).then((data) => {
       setPreview(data);
       setCheckFirst(data.payroll_checks.first || '');
