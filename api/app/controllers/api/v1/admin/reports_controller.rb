@@ -429,6 +429,51 @@ module Api
             disposition: "attachment"
         end
 
+        # GET /api/v1/admin/reports/transmittal_preview
+        def transmittal_preview
+          pp = find_pay_period_for_report
+          return unless pp
+
+          items = pp.payroll_items.where(voided: false)
+          check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
+          ne_checks = pp.non_employee_checks.active.order(:id)
+
+          total_fit  = items.sum(:withholding_tax)
+          emp_ss     = items.sum(:social_security_tax)
+          er_ss      = items.sum(:employer_social_security_tax)
+          emp_med    = items.sum(:medicare_tax)
+          er_med     = items.sum(:employer_medicare_tax)
+          total_fica = emp_ss + er_ss + emp_med + er_med
+
+          render json: {
+            payroll_checks: {
+              count: check_numbers.size,
+              first: check_numbers.first,
+              last: check_numbers.last
+            },
+            non_employee_checks: ne_checks.map { |c|
+              {
+                id: c.id,
+                check_number: c.check_number,
+                payable_to: c.payable_to,
+                amount: c.amount.to_f,
+                check_type: c.check_type,
+                memo: c.memo,
+                description: c.description
+              }
+            },
+            tax_totals: {
+              fit: total_fit.to_f,
+              employee_ss: emp_ss.to_f,
+              employer_ss: er_ss.to_f,
+              employee_medicare: emp_med.to_f,
+              employer_medicare: er_med.to_f,
+              total_fica: total_fica.to_f,
+              total_drt_deposit: (total_fit + total_fica).to_f
+            }
+          }
+        end
+
         # GET /api/v1/admin/reports/transmittal_log_pdf
         def transmittal_log_pdf
           pp = find_pay_period_for_report
@@ -504,6 +549,11 @@ module Api
           opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
           opts[:notes] = Array(params[:notes]) if params[:notes].present?
           opts[:report_list] = Array(params[:report_list]) if params[:report_list].present?
+          opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
+          opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
+          if params[:non_employee_check_numbers].present?
+            opts[:non_employee_check_numbers] = params[:non_employee_check_numbers].to_unsafe_h.transform_keys(&:to_i)
+          end
           opts
         end
 

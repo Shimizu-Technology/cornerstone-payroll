@@ -1012,6 +1012,9 @@ export const reportsApi = {
       preparer_name: options?.preparerName,
       notes: options?.notes,
       report_list: options?.reportList,
+      check_number_first: options?.checkNumberFirst,
+      check_number_last: options?.checkNumberLast,
+      non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
     }),
   fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/full_print_package_pdf', {
@@ -1019,6 +1022,9 @@ export const reportsApi = {
       preparer_name: options?.preparerName,
       notes: options?.notes,
       report_list: options?.reportList,
+      check_number_first: options?.checkNumberFirst,
+      check_number_last: options?.checkNumberLast,
+      non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
     }),
 };
 
@@ -1026,7 +1032,41 @@ export interface TransmittalOptions {
   preparerName?: string;
   notes?: string[];
   reportList?: string[];
+  checkNumberFirst?: string;
+  checkNumberLast?: string;
+  nonEmployeeCheckNumbers?: Record<number, string>;
 }
+
+export interface TransmittalPreview {
+  payroll_checks: {
+    count: number;
+    first: string | null;
+    last: string | null;
+  };
+  non_employee_checks: {
+    id: number;
+    check_number: string | null;
+    payable_to: string;
+    amount: number;
+    check_type: string;
+    memo: string | null;
+    description: string | null;
+  }[];
+  tax_totals: {
+    fit: number;
+    employee_ss: number;
+    employer_ss: number;
+    employee_medicare: number;
+    employer_medicare: number;
+    total_fica: number;
+    total_drt_deposit: number;
+  };
+}
+
+export const transmittalApi = {
+  preview: (payPeriodId: number): Promise<TransmittalPreview> =>
+    api.get('/admin/reports/transmittal_preview', { pay_period_id: payPeriodId }),
+};
 
 // Pay Stubs (Admin API)
 export interface PayStubInfo {
@@ -1226,6 +1266,9 @@ export const payrollReportsApi = {
       preparer_name: options?.preparerName,
       notes: options?.notes,
       report_list: options?.reportList,
+      check_number_first: options?.checkNumberFirst,
+      check_number_last: options?.checkNumberLast,
+      non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
     }),
   fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/full_print_package_pdf', {
@@ -1233,6 +1276,9 @@ export const payrollReportsApi = {
       preparer_name: options?.preparerName,
       notes: options?.notes,
       report_list: options?.reportList,
+      check_number_first: options?.checkNumberFirst,
+      check_number_last: options?.checkNumberLast,
+      non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
     }),
 };
 
