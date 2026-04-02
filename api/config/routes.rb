@@ -102,6 +102,7 @@ Rails.application.routes.draw do
         get "reports/paycheck_history_pdf", to: "reports#paycheck_history_pdf"
         get "reports/retirement_plans_pdf", to: "reports#retirement_plans_pdf"
         get "reports/installment_loans_pdf", to: "reports#installment_loans_pdf"
+        get "reports/transmittal_preview", to: "reports#transmittal_preview"
         match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
         match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
 
