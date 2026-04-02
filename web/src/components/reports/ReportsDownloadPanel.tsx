@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { reportsApi } from '@/services/api';
-import type { BlobDownload, TransmittalOptions } from '@/services/api';
+import { reportsApi, transmittalApi } from '@/services/api';
+import type { BlobDownload, TransmittalOptions, TransmittalPreview } from '@/services/api';
+import { Loader2 } from 'lucide-react';
 
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
@@ -43,31 +44,72 @@ const DEFAULT_NOTES = [
   '401K upload to be submitted by client',
 ];
 
+function fmt(val: number) {
+  return `$${val.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}
+
 function TransmittalEditorModal({
   open,
   onClose,
   onGenerate,
   targetLabel,
+  payPeriodId,
 }: {
   open: boolean;
   onClose: () => void;
   onGenerate: (options: TransmittalOptions) => void;
   targetLabel: string;
+  payPeriodId: number;
 }) {
   const [preparerName, setPreparerName] = useState('Cornerstone Tax Services');
-  const [notes, setNotes] = useState<string[]>(DEFAULT_NOTES);
+  const [notes, setNotes] = useState<string[]>([]);
   const [reportList, setReportList] = useState<string[]>(DEFAULT_REPORT_LIST);
   const [newNote, setNewNote] = useState('');
   const [newReport, setNewReport] = useState('');
+  const [preview, setPreview] = useState<TransmittalPreview | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  const [checkFirst, setCheckFirst] = useState('');
+  const [checkLast, setCheckLast] = useState('');
+  const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setInitialized(false);
+      return;
+    }
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || initialized) return;
+    setLoadingPreview(true);
+    transmittalApi.preview(payPeriodId).then((data) => {
+      setPreview(data);
+      setCheckFirst(data.payroll_checks.first || '');
+      setCheckLast(data.payroll_checks.last || '');
+      const neNums: Record<number, string> = {};
+      data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
+      setNeCheckNumbers(neNums);
+      const autoNotes: string[] = [];
+      if (data.tax_totals.total_fica > 0) {
+        autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
+      }
+      if (data.tax_totals.fit > 0) {
+        autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+      }
+      autoNotes.push(...DEFAULT_NOTES);
+      setNotes(autoNotes);
+      setInitialized(true);
+    }).catch(() => {
+      setNotes([...DEFAULT_NOTES]);
+      setInitialized(true);
+    }).finally(() => setLoadingPreview(false));
+  }, [open, payPeriodId, initialized]);
 
   if (!open) return null;
 
@@ -96,18 +138,22 @@ function TransmittalEditorModal({
   };
 
   const handleGenerate = () => {
+    const hasNeOverrides = Object.values(neCheckNumbers).some(v => v.trim());
     onGenerate({
       preparerName: preparerName.trim() || undefined,
       notes: notes.length > 0 ? notes : undefined,
       reportList: reportList.length > 0 ? reportList : undefined,
+      checkNumberFirst: checkFirst.trim() || undefined,
+      checkNumberLast: checkLast.trim() || undefined,
+      nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
     });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-50 bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto mx-4">
-        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg">
+      <div className="relative z-50 bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto mx-4">
+        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
           <h3 className="text-lg font-semibold text-gray-900">Edit {targetLabel}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -116,121 +162,238 @@ function TransmittalEditorModal({
           </button>
         </div>
 
-        <div className="px-6 py-4 space-y-6">
-          {/* Preparer Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Preparer Name</label>
-            <input
-              type="text"
-              value={preparerName}
-              onChange={(e) => setPreparerName(e.target.value)}
-              placeholder="e.g. Cornerstone Tax Services"
-              className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+        {loadingPreview ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span className="ml-2 text-sm text-gray-500">Loading transmittal data...</span>
           </div>
+        ) : (
+          <div className="px-6 py-4 space-y-6">
+            {/* Preparer Name */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Preparer Name</label>
+              <input
+                type="text"
+                value={preparerName}
+                onChange={(e) => setPreparerName(e.target.value)}
+                placeholder="e.g. Cornerstone Tax Services"
+                className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
 
-          {/* Notes */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-            <p className="text-xs text-gray-500 mb-2">Instructions or reminders for the client</p>
-            <div className="space-y-2">
-              {notes.map((note, idx) => (
-                <div key={idx} className="flex items-center gap-2 group">
+            {/* Documents Provided Preview */}
+            {preview && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Documents Provided to Client</label>
+                <div className="bg-gray-50 border rounded-lg p-4 space-y-4 text-sm">
+                  {/* Payroll Checks */}
+                  {preview.payroll_checks.count > 0 && (
+                    <div>
+                      <p className="font-medium text-gray-900">1) Payroll Checks</p>
+                      <div className="ml-6 text-gray-600 space-y-1.5 mt-1">
+                        <p>Number of Checks: <span className="font-medium text-gray-900">{preview.payroll_checks.count}</span></p>
+                        <div className="flex items-center gap-2">
+                          <span>Checks #</span>
+                          <input
+                            type="text"
+                            value={checkFirst}
+                            onChange={(e) => setCheckFirst(e.target.value)}
+                            className="w-20 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
+                            placeholder="First"
+                          />
+                          <span>through</span>
+                          <input
+                            type="text"
+                            value={checkLast}
+                            onChange={(e) => setCheckLast(e.target.value)}
+                            className="w-20 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
+                            placeholder="Last"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Non-Employee Checks */}
+                  {preview.non_employee_checks.map((check, idx) => (
+                    <div key={check.id}>
+                      <p className="font-medium text-gray-900">
+                        {(preview.payroll_checks.count > 0 ? 2 : 1) + idx}) {check.payable_to} — {check.check_type}
+                      </p>
+                      <div className="ml-6 text-gray-600 space-y-1 mt-1">
+                        <div className="flex items-center gap-2">
+                          <span>Check #:</span>
+                          <input
+                            type="text"
+                            value={neCheckNumbers[check.id] || ''}
+                            onChange={(e) => setNeCheckNumbers(prev => ({ ...prev, [check.id]: e.target.value }))}
+                            className="w-24 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
+                            placeholder="____"
+                          />
+                        </div>
+                        <p>Amount: <span className="font-medium text-gray-900">{fmt(check.amount)}</span></p>
+                        <p>Payable to: <span className="font-medium text-gray-900">{check.payable_to}</span></p>
+                        {check.memo && <p>For: {check.check_type} — {check.memo}</p>}
+                        {check.description && <p>Description/Memo: {check.description}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Employer Tax Obligations */}
+            {preview && preview.tax_totals.total_drt_deposit > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Employer Tax Obligations</label>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+                  <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Federal / Guam Income Tax</p>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Employee FIT Withheld</span>
+                        <span className="font-medium">{fmt(preview.tax_totals.fit)}</span>
+                      </div>
+                      <div className="flex justify-between border-t mt-1 pt-1 font-semibold">
+                        <span>FIT Subtotal</span>
+                        <span>{fmt(preview.tax_totals.fit)}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Social Security & Medicare (FICA)</p>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Employee SS (6.2%)</span>
+                        <span>{fmt(preview.tax_totals.employee_ss)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Employer SS (6.2%)</span>
+                        <span>{fmt(preview.tax_totals.employer_ss)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Employee Medicare (1.45%)</span>
+                        <span>{fmt(preview.tax_totals.employee_medicare)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Employer Medicare (1.45%)</span>
+                        <span>{fmt(preview.tax_totals.employer_medicare)}</span>
+                      </div>
+                      <div className="flex justify-between border-t mt-1 pt-1 font-semibold">
+                        <span>FICA Subtotal</span>
+                        <span>{fmt(preview.tax_totals.total_fica)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-amber-300 flex justify-between text-base font-bold text-amber-800">
+                    <span>Total DRT Deposit (FIT + FICA)</span>
+                    <span>{fmt(preview.tax_totals.total_drt_deposit)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+              <p className="text-xs text-gray-500 mb-2">Instructions or reminders for the client — auto-populated with tax totals</p>
+              <div className="space-y-2">
+                {notes.map((note, idx) => (
+                  <div key={idx} className="flex items-center gap-2 group">
+                    <input
+                      type="text"
+                      value={note}
+                      onChange={(e) => {
+                        const updated = [...notes];
+                        updated[idx] = e.target.value;
+                        setNotes(updated);
+                      }}
+                      className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      onClick={() => handleRemoveNote(idx)}
+                      className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                      title="Remove"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    value={note}
-                    onChange={(e) => {
-                      const updated = [...notes];
-                      updated[idx] = e.target.value;
-                      setNotes(updated);
-                    }}
-                    className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
+                    placeholder="Add a note..."
+                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
                   />
                   <button
-                    onClick={() => handleRemoveNote(idx)}
-                    className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                    title="Remove"
+                    onClick={handleAddNote}
+                    disabled={!newNote.trim()}
+                    className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    + Add
                   </button>
                 </div>
-              ))}
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddNote(); }}
-                  placeholder="Add a note..."
-                  className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
-                />
-                <button
-                  onClick={handleAddNote}
-                  disabled={!newNote.trim()}
-                  className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
-                >
-                  + Add
-                </button>
+              </div>
+            </div>
+
+            {/* Report List */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Reports Included</label>
+              <p className="text-xs text-gray-500 mb-2">Listed on the transmittal as documents provided to client</p>
+              <div className="space-y-2">
+                {reportList.map((report, idx) => (
+                  <div key={idx} className="flex items-center gap-2 group">
+                    <span className="text-sm text-gray-500 w-6 text-right">{idx + 1}.</span>
+                    <input
+                      type="text"
+                      value={report}
+                      onChange={(e) => {
+                        const updated = [...reportList];
+                        updated[idx] = e.target.value;
+                        setReportList(updated);
+                      }}
+                      className="flex-1 border rounded-md px-3 py-1.5 text-sm"
+                    />
+                    <button
+                      onClick={() => handleRemoveReport(idx)}
+                      className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                      title="Remove"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-400 w-6 text-right">{reportList.length + 1}.</span>
+                  <input
+                    type="text"
+                    value={newReport}
+                    onChange={(e) => setNewReport(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddReport(); }}
+                    placeholder="Add a report..."
+                    className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
+                  />
+                  <button
+                    onClick={handleAddReport}
+                    disabled={!newReport.trim()}
+                    className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
+                  >
+                    + Add
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Report List */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Reports Included</label>
-            <p className="text-xs text-gray-500 mb-2">Listed on the transmittal as documents provided to client</p>
-            <div className="space-y-2">
-              {reportList.map((report, idx) => (
-                <div key={idx} className="flex items-center gap-2 group">
-                  <span className="text-sm text-gray-500 w-6 text-right">{idx + 1}.</span>
-                  <input
-                    type="text"
-                    value={report}
-                    onChange={(e) => {
-                      const updated = [...reportList];
-                      updated[idx] = e.target.value;
-                      setReportList(updated);
-                    }}
-                    className="flex-1 border rounded-md px-3 py-1.5 text-sm"
-                  />
-                  <button
-                    onClick={() => handleRemoveReport(idx)}
-                    className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
-                    title="Remove"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400 w-6 text-right">{reportList.length + 1}.</span>
-                <input
-                  type="text"
-                  value={newReport}
-                  onChange={(e) => setNewReport(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddReport(); }}
-                  placeholder="Add a report..."
-                  className="flex-1 border border-dashed rounded-md px-3 py-1.5 text-sm text-gray-500"
-                />
-                <button
-                  onClick={handleAddReport}
-                  disabled={!newReport.trim()}
-                  className="text-blue-600 hover:text-blue-800 disabled:text-gray-300 text-sm font-medium px-2"
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
 
         <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleGenerate}>Generate {targetLabel}</Button>
+          <Button onClick={handleGenerate} disabled={loadingPreview}>Generate {targetLabel}</Button>
         </div>
       </div>
     </div>
@@ -546,6 +709,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         onClose={() => setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' })}
         onGenerate={handleTransmittalGenerate}
         targetLabel={transmittalEditor.label}
+        payPeriodId={payPeriodId}
       />
     </>
   );
