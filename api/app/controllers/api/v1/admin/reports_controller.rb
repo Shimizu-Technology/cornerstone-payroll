@@ -438,11 +438,11 @@ module Api
           check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
-          total_fit = items.sum(:withholding_tax).to_f
-          emp_ss = items.sum(:social_security_tax).to_f
-          er_ss = items.sum(:employer_social_security_tax).to_f
-          emp_med = items.sum(:medicare_tax).to_f
-          er_med = items.sum(:employer_medicare_tax).to_f
+          total_fit  = items.sum(:withholding_tax)
+          emp_ss     = items.sum(:social_security_tax)
+          er_ss      = items.sum(:employer_social_security_tax)
+          emp_med    = items.sum(:medicare_tax)
+          er_med     = items.sum(:employer_medicare_tax)
           total_fica = emp_ss + er_ss + emp_med + er_med
 
           render json: {
@@ -463,13 +463,13 @@ module Api
               }
             },
             tax_totals: {
-              fit: total_fit,
-              employee_ss: emp_ss,
-              employer_ss: er_ss,
-              employee_medicare: emp_med,
-              employer_medicare: er_med,
-              total_fica: total_fica,
-              total_drt_deposit: total_fit + total_fica
+              fit: total_fit.to_f,
+              employee_ss: emp_ss.to_f,
+              employer_ss: er_ss.to_f,
+              employee_medicare: emp_med.to_f,
+              employer_medicare: er_med.to_f,
+              total_fica: total_fica.to_f,
+              total_drt_deposit: (total_fit + total_fica).to_f
             }
           }
         end

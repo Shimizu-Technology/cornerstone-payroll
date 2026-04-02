@@ -148,13 +148,13 @@ class TransmittalLogPdfGenerator
 
   def render_tax_obligations(pdf)
     items = pay_period.payroll_items.where(voided: false)
-    total_fit = items.sum(:withholding_tax).to_f
-    emp_ss = items.sum(:social_security_tax).to_f
-    er_ss = items.sum(:employer_social_security_tax).to_f
-    emp_med = items.sum(:medicare_tax).to_f
-    er_med = items.sum(:employer_medicare_tax).to_f
+    total_fit  = items.sum(:withholding_tax)
+    emp_ss     = items.sum(:social_security_tax)
+    er_ss      = items.sum(:employer_social_security_tax)
+    emp_med    = items.sum(:medicare_tax)
+    er_med     = items.sum(:employer_medicare_tax)
     total_fica = emp_ss + er_ss + emp_med + er_med
-    total_drt = total_fit + total_fica
+    total_drt  = total_fit + total_fica
 
     return unless total_drt > 0
 
@@ -198,9 +198,7 @@ class TransmittalLogPdfGenerator
     end
 
     pdf.move_down 10
-    pdf.font_size(11) do
-      pdf.text "Total DRT Deposit", style: :bold, display: :inline
-    end
+    pdf.font_size(11) { pdf.text "Total DRT Deposit", style: :bold }
     pdf.font_size(8) { pdf.text "FIT + Employee & Employer SS & Medicare", color: TEXT_MUTED }
     pdf.move_down 2
     pdf.font_size(14) { pdf.text fmt(total_drt), style: :bold, color: "B45309" }
