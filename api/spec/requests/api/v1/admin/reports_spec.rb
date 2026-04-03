@@ -1200,3 +1200,146 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 end
+
+RSpec.describe "Api::V1::Admin::Reports transmittal persistence", type: :request do
+  let!(:company) { create(:company) }
+  let!(:department) { create(:department, company: company) }
+  let!(:employee) { create(:employee, company: company, department: department) }
+  let!(:admin_user) do
+    User.create!(
+      company: company,
+      email: "admin-transmittal-#{company.id}@example.com",
+      name: "Transmittal Admin",
+      role: "admin",
+      active: true
+    )
+  end
+  let!(:pay_period) do
+    create(:pay_period, :committed,
+      company: company,
+      start_date: Date.new(2025, 4, 1),
+      end_date: Date.new(2025, 4, 14),
+      pay_date: Date.new(2025, 4, 18))
+  end
+
+  before do
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
+
+    create(:payroll_item, :with_check,
+      pay_period: pay_period,
+      employee: employee,
+      withholding_tax: 120.0,
+      social_security_tax: 74.4,
+      employer_social_security_tax: 74.4,
+      medicare_tax: 17.4,
+      employer_medicare_tax: 17.4)
+
+    NonEmployeeCheck.create!(
+      company: company,
+      pay_period: pay_period,
+      payable_to: "Treasurer of Guam",
+      amount: 120.0,
+      check_type: "tax_deposit",
+      memo: "FIT",
+      description: "Quarterly deposit",
+      check_number: "2201"
+    )
+  end
+
+  describe "GET /api/v1/admin/reports/transmittal_state" do
+    it "returns defaults when no persisted state exists" do
+      get "/api/v1/admin/reports/transmittal_state", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["transmittal_state"]).to be_nil
+      expect(response.parsed_body.dig("defaults", "report_list")).to include("Payroll Summary by Employee")
+      expect(response.parsed_body.dig("defaults", "check_number_first")).to be_present
+    end
+  end
+
+  describe "PATCH /api/v1/admin/reports/transmittal_state" do
+    it "persists current transmittal state for the pay period" do
+      patch "/api/v1/admin/reports/transmittal_state",
+        params: {
+          pay_period_id: pay_period.id,
+          preparer_name: "Dafne M Shimizu, CPA",
+          notes: ["Custom note"],
+          report_list: ["Payroll Summary by Employee", "Paycheck History"],
+          check_number_first: "3001",
+          check_number_last: "3004",
+          non_employee_check_numbers: { "1": "3301" }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      payload = response.parsed_body.fetch("transmittal_state")
+      expect(payload["preparer_name"]).to eq("Dafne M Shimizu, CPA")
+      expect(payload["notes"]).to eq(["Custom note"])
+      expect(payload["report_list"]).to eq(["Payroll Summary by Employee", "Paycheck History"])
+
+      state = PayPeriodTransmittal.find_by!(pay_period: pay_period)
+      expect(state.check_number_first).to eq("3001")
+      expect(state.check_number_last).to eq("3004")
+      expect(state.non_employee_check_numbers.values).to include("3301")
+    end
+  end
+
+  describe "POST /api/v1/admin/reports/transmittal_log_pdf" do
+    before do
+      allow_any_instance_of(TransmittalLogPdfGenerator).to receive(:generate).and_return("%PDF-test")
+      allow_any_instance_of(TransmittalLogPdfGenerator).to receive(:filename).and_return("transmittal_test.pdf")
+    end
+
+    it "persists the current state and creates a version snapshot" do
+      expect do
+        post "/api/v1/admin/reports/transmittal_log_pdf",
+          params: {
+            pay_period_id: pay_period.id,
+            preparer_name: "Snapshot Preparer",
+            notes: ["Generated note"],
+            report_list: ["Payroll Summary by Employee"],
+            check_number_first: "7001",
+            check_number_last: "7002",
+            non_employee_check_numbers: { "1": "8801" }
+          },
+          as: :json
+      end.to change(PayPeriodTransmittalVersion, :count).by(1)
+
+      expect(response).to have_http_status(:ok)
+      state = PayPeriodTransmittal.find_by!(pay_period: pay_period)
+      version = state.versions.first
+
+      expect(state.preparer_name).to eq("Snapshot Preparer")
+      expect(version.generated_from).to eq("transmittal_log")
+      expect(version.preparer_name).to eq("Snapshot Preparer")
+      expect(version.version_number).to eq(1)
+      expect(version.notes).to eq(["Generated note"])
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/transmittal_versions" do
+    it "returns generated version metadata in reverse chronological order" do
+      state = PayPeriodTransmittal.create!(
+        company: company,
+        pay_period: pay_period,
+        preparer_name: "Saved",
+        notes: ["n1"],
+        report_list: ["Payroll Summary by Employee"],
+        check_number_first: "1",
+        check_number_last: "2",
+        non_employee_check_numbers: {}
+      )
+      state.create_version_snapshot!(generated_by: admin_user, generated_from: "transmittal_log")
+      state.create_version_snapshot!(generated_by: admin_user, generated_from: "full_print_package")
+
+      get "/api/v1/admin/reports/transmittal_versions", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      versions = response.parsed_body.fetch("versions")
+      expect(versions.length).to eq(2)
+      expect(versions.first["generated_from"]).to eq("full_print_package")
+      expect(versions.first["version_number"]).to eq(2)
+    end
+  end
+end

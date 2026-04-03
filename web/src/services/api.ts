@@ -1063,9 +1063,60 @@ export interface TransmittalPreview {
   };
 }
 
+export interface PersistedTransmittalState {
+  id: number;
+  pay_period_id: number;
+  preparer_name?: string;
+  notes: string[];
+  report_list: string[];
+  check_number_first?: string;
+  check_number_last?: string;
+  non_employee_check_numbers: Record<string, string>;
+  updated_at: string;
+  last_generated_at?: string;
+}
+
+export interface TransmittalStateResponse {
+  transmittal_state: PersistedTransmittalState | null;
+  defaults: {
+    preparer_name?: string;
+    notes: string[];
+    report_list: string[];
+    check_number_first?: string;
+    check_number_last?: string;
+    non_employee_check_numbers: Record<string, string>;
+  };
+}
+
+export interface TransmittalVersionSummary {
+  id: number;
+  version_number: number;
+  generated_at: string;
+  generated_from: string;
+  generated_by_id?: number;
+  preparer_name?: string;
+  notes_count: number;
+  report_count: number;
+  updated_check_range?: string;
+}
+
 export const transmittalApi = {
   preview: (payPeriodId: number): Promise<TransmittalPreview> =>
     api.get('/admin/reports/transmittal_preview', { pay_period_id: payPeriodId }),
+  state: (payPeriodId: number): Promise<TransmittalStateResponse> =>
+    api.get('/admin/reports/transmittal_state', { pay_period_id: payPeriodId }),
+  saveState: (payPeriodId: number, options: TransmittalOptions): Promise<{ transmittal_state: PersistedTransmittalState }> =>
+    api.patch('/admin/reports/transmittal_state', {
+      pay_period_id: payPeriodId,
+      preparer_name: options.preparerName,
+      notes: options.notes ?? [],
+      report_list: options.reportList ?? [],
+      check_number_first: options.checkNumberFirst,
+      check_number_last: options.checkNumberLast,
+      non_employee_check_numbers: options.nonEmployeeCheckNumbers ?? {},
+    }),
+  versions: (payPeriodId: number): Promise<{ versions: TransmittalVersionSummary[] }> =>
+    api.get('/admin/reports/transmittal_versions', { pay_period_id: payPeriodId }),
 };
 
 // Pay Stubs (Admin API)
