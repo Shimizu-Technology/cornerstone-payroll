@@ -11,6 +11,14 @@ class PayPeriod < ApplicationRecord
   has_many :payroll_items, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
+  has_one :transmittal_state,
+          class_name: "PayPeriodTransmittal",
+          dependent: :destroy,
+          inverse_of: :pay_period
+  has_many :transmittal_versions,
+           -> { order(generated_at: :desc, id: :desc) },
+           through: :transmittal_state,
+           source: :versions
 
   # CPR-71: correction chain associations
   belongs_to :source_pay_period,

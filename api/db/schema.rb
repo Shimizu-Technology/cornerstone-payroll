@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_03_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -351,6 +351,45 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
     t.index ["resulting_pay_period_id"], name: "index_pay_period_correction_events_on_resulting_pay_period_id"
   end
 
+  create_table "pay_period_transmittal_versions", force: :cascade do |t|
+    t.string "check_number_first"
+    t.string "check_number_last"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "generated_at", null: false
+    t.bigint "generated_by_id"
+    t.string "generated_from", default: "transmittal_log", null: false
+    t.jsonb "non_employee_check_numbers", default: {}, null: false
+    t.jsonb "notes", default: [], null: false
+    t.bigint "pay_period_id", null: false
+    t.bigint "pay_period_transmittal_id", null: false
+    t.string "preparer_name"
+    t.jsonb "report_list", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.integer "version_number", null: false
+    t.index ["company_id"], name: "index_pay_period_transmittal_versions_on_company_id"
+    t.index ["generated_by_id"], name: "index_pay_period_transmittal_versions_on_generated_by_id"
+    t.index ["pay_period_id", "generated_at"], name: "idx_pp_transmittal_versions_on_generated_at"
+    t.index ["pay_period_id"], name: "index_pay_period_transmittal_versions_on_pay_period_id"
+    t.index ["pay_period_transmittal_id", "version_number"], name: "idx_pp_transmittal_versions_on_version", unique: true
+    t.index ["pay_period_transmittal_id"], name: "idx_on_pay_period_transmittal_id_f2c3d1f895"
+  end
+
+  create_table "pay_period_transmittals", force: :cascade do |t|
+    t.string "check_number_first"
+    t.string "check_number_last"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "non_employee_check_numbers", default: {}, null: false
+    t.jsonb "notes", default: [], null: false
+    t.bigint "pay_period_id", null: false
+    t.string "preparer_name"
+    t.jsonb "report_list", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_pay_period_transmittals_on_company_id"
+    t.index ["pay_period_id"], name: "index_pay_period_transmittals_on_pay_period_id", unique: true
+  end
+
   create_table "pay_periods", force: :cascade do |t|
     t.bigint "approved_by_id"
     t.datetime "committed_at"
@@ -681,6 +720,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
   add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "users", column: "actor_id", on_delete: :nullify
+  add_foreign_key "pay_period_transmittal_versions", "companies"
+  add_foreign_key "pay_period_transmittal_versions", "pay_period_transmittals"
+  add_foreign_key "pay_period_transmittal_versions", "pay_periods"
+  add_foreign_key "pay_period_transmittal_versions", "users", column: "generated_by_id"
+  add_foreign_key "pay_period_transmittals", "companies"
+  add_foreign_key "pay_period_transmittals", "pay_periods"
   add_foreign_key "pay_periods", "companies"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify

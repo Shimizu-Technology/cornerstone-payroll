@@ -1,8 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
-import type { BlobDownload, TransmittalOptions, TransmittalPreview } from '@/services/api';
+import type {
+  BlobDownload,
+  PersistedTransmittalState,
+  TransmittalOptions,
+  TransmittalPreview,
+  TransmittalVersionSummary,
+} from '@/services/api';
 import { Loader2 } from 'lucide-react';
 
 interface ReportsDownloadPanelProps {
@@ -48,6 +54,62 @@ function fmt(val: number) {
   return `$${val.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 }
 
+function buildDefaultNotes(preview: TransmittalPreview | null) {
+  if (!preview) return [...DEFAULT_NOTES];
+
+  const autoNotes: string[] = [];
+  if (preview.tax_totals.total_fica > 0) {
+    autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(preview.tax_totals.total_fica)} — to be deducted from bank account`);
+  }
+  if (preview.tax_totals.fit > 0) {
+    autoNotes.push(`FIT Deposit Total: ${fmt(preview.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+  }
+
+  return [...autoNotes, ...DEFAULT_NOTES];
+}
+
+function buildDraftFromSources(preview: TransmittalPreview | null, persisted?: PersistedTransmittalState | null) {
+  const defaultNeNumbers: Record<string, string> = {};
+  preview?.non_employee_checks.forEach((check) => {
+    defaultNeNumbers[String(check.id)] = check.check_number || '';
+  });
+
+  return {
+    preparerName: persisted?.preparer_name || 'Cornerstone Tax Services',
+    notes: persisted?.notes?.length ? [...persisted.notes] : buildDefaultNotes(preview),
+    reportList: persisted?.report_list?.length ? [...persisted.report_list] : [...DEFAULT_REPORT_LIST],
+    checkFirst: persisted?.check_number_first || preview?.payroll_checks.first || '',
+    checkLast: persisted?.check_number_last || preview?.payroll_checks.last || '',
+    nonEmployeeCheckNumbers: persisted?.non_employee_check_numbers
+      ? { ...defaultNeNumbers, ...persisted.non_employee_check_numbers }
+      : defaultNeNumbers,
+  };
+}
+
+function toTransmittalOptions(input: {
+  preparerName: string;
+  notes: string[];
+  reportList: string[];
+  checkFirst: string;
+  checkLast: string;
+  nonEmployeeCheckNumbers: Record<string, string>;
+}): TransmittalOptions {
+  const cleanedNeNumbers = Object.entries(input.nonEmployeeCheckNumbers).reduce<Record<number, string>>((memo, [key, value]) => {
+    const cleaned = value.trim();
+    if (cleaned) memo[Number(key)] = cleaned;
+    return memo;
+  }, {});
+
+  return {
+    preparerName: input.preparerName.trim() || undefined,
+    notes: input.notes,
+    reportList: input.reportList,
+    checkNumberFirst: input.checkFirst.trim() || undefined,
+    checkNumberLast: input.checkLast.trim() || undefined,
+    nonEmployeeCheckNumbers: Object.keys(cleanedNeNumbers).length > 0 ? cleanedNeNumbers : {},
+  };
+}
+
 function TransmittalEditorModal({
   open,
   onClose,
@@ -71,11 +133,22 @@ function TransmittalEditorModal({
   const [initialized, setInitialized] = useState(false);
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
-  const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
+  const [neCheckNumbers, setNeCheckNumbers] = useState<Record<string, string>>({});
+  const [versions, setVersions] = useState<TransmittalVersionSummary[]>([]);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const lastSavedRef = useRef<string>('');
+  const hydrateCompleteRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setInitialized(false);
+      setPreview(null);
+      setVersions([]);
+      setSaveStatus('idle');
+      setSaveError(null);
+      hydrateCompleteRef.current = false;
       return;
     }
     const handleEsc = (e: KeyboardEvent) => {
@@ -87,33 +160,76 @@ function TransmittalEditorModal({
 
   useEffect(() => {
     if (!open || initialized) return;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingPreview(true);
-    setPreparerName('Cornerstone Tax Services');
-    setReportList([...DEFAULT_REPORT_LIST]);
     setNewNote('');
     setNewReport('');
-    transmittalApi.preview(payPeriodId).then((data) => {
-      setPreview(data);
-      setCheckFirst(data.payroll_checks.first || '');
-      setCheckLast(data.payroll_checks.last || '');
-      const neNums: Record<number, string> = {};
-      data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
-      setNeCheckNumbers(neNums);
-      const autoNotes: string[] = [];
-      if (data.tax_totals.total_fica > 0) {
-        autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
-      }
-      if (data.tax_totals.fit > 0) {
-        autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
-      }
-      autoNotes.push(...DEFAULT_NOTES);
-      setNotes(autoNotes);
+
+    Promise.all([
+      transmittalApi.preview(payPeriodId),
+      transmittalApi.state(payPeriodId),
+      transmittalApi.versions(payPeriodId),
+    ]).then(([previewData, stateData, versionsData]) => {
+      setPreview(previewData);
+      setVersions(versionsData.versions);
+
+      const draft = buildDraftFromSources(previewData, stateData.transmittal_state);
+      setPreparerName(draft.preparerName);
+      setNotes(draft.notes);
+      setReportList(draft.reportList);
+      setCheckFirst(draft.checkFirst);
+      setCheckLast(draft.checkLast);
+      setNeCheckNumbers(draft.nonEmployeeCheckNumbers);
+      lastSavedRef.current = JSON.stringify(toTransmittalOptions(draft));
+      hydrateCompleteRef.current = true;
       setInitialized(true);
     }).catch(() => {
-      setNotes([...DEFAULT_NOTES]);
+      const draft = buildDraftFromSources(null, null);
+      setPreparerName(draft.preparerName);
+      setNotes(draft.notes);
+      setReportList(draft.reportList);
+      setCheckFirst(draft.checkFirst);
+      setCheckLast(draft.checkLast);
+      setNeCheckNumbers(draft.nonEmployeeCheckNumbers);
+      lastSavedRef.current = JSON.stringify(toTransmittalOptions(draft));
+      hydrateCompleteRef.current = true;
       setInitialized(true);
     }).finally(() => setLoadingPreview(false));
   }, [open, payPeriodId, initialized]);
+
+  useEffect(() => {
+    if (!open || !initialized || !hydrateCompleteRef.current) return;
+
+    const nextOptions = toTransmittalOptions({
+      preparerName,
+      notes,
+      reportList,
+      checkFirst,
+      checkLast,
+      nonEmployeeCheckNumbers: neCheckNumbers,
+    });
+    const serialized = JSON.stringify(nextOptions);
+    if (serialized === lastSavedRef.current) return;
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaveStatus('saving');
+    setSaveError(null);
+
+    const timer = window.setTimeout(() => {
+      transmittalApi.saveState(payPeriodId, nextOptions)
+        .then(() => {
+          lastSavedRef.current = serialized;
+          setSaveStatus('saved');
+        })
+        .catch((err) => {
+          setSaveStatus('error');
+          setSaveError(err instanceof Error ? err.message : 'Failed to save transmittal state');
+        });
+    }, 600);
+
+    return () => window.clearTimeout(timer);
+  }, [open, initialized, payPeriodId, preparerName, notes, reportList, checkFirst, checkLast, neCheckNumbers]);
 
   if (!open) return null;
 
@@ -142,15 +258,14 @@ function TransmittalEditorModal({
   };
 
   const handleGenerate = () => {
-    const hasNeOverrides = Object.values(neCheckNumbers).some(v => v.trim());
-    onGenerate({
-      preparerName: preparerName.trim() || undefined,
-      notes: notes.length > 0 ? notes : undefined,
-      reportList: reportList,
-      checkNumberFirst: checkFirst.trim() || undefined,
-      checkNumberLast: checkLast.trim() || undefined,
-      nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
-    });
+    onGenerate(toTransmittalOptions({
+      preparerName,
+      notes,
+      reportList,
+      checkFirst,
+      checkLast,
+      nonEmployeeCheckNumbers: neCheckNumbers,
+    }));
   };
 
   return (
@@ -392,12 +507,47 @@ function TransmittalEditorModal({
                 </div>
               </div>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Saved generation history</label>
+              <p className="text-xs text-gray-500 mb-2">A lightweight snapshot is created every time you generate a transmittal or full print package.</p>
+              {versions.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-3 text-sm text-gray-500">
+                  No generated snapshots yet.
+                </div>
+              ) : (
+                <div className="rounded-lg border divide-y bg-white">
+                  {versions.map((version) => (
+                    <div key={version.id} className="flex items-start justify-between gap-4 px-3 py-3 text-sm">
+                      <div>
+                        <p className="font-medium text-gray-900">Version {version.version_number}</p>
+                        <p className="text-gray-500">
+                          {new Date(version.generated_at).toLocaleString()} · {version.generated_from === 'full_print_package' ? 'Full Print Package' : 'Transmittal Log'}
+                        </p>
+                      </div>
+                      <div className="text-right text-xs text-gray-500">
+                        {version.preparer_name && <p>{version.preparer_name}</p>}
+                        {version.updated_check_range && <p>Checks {version.updated_check_range}</p>}
+                        <p>{version.report_count} reports · {version.notes_count} notes</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleGenerate} disabled={loadingPreview}>Generate {targetLabel}</Button>
+        <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex items-center justify-between gap-3 rounded-b-lg">
+          <div className="text-xs">
+            {saveStatus === 'saving' && <span className="text-blue-600">Saving current transmittal state…</span>}
+            {saveStatus === 'saved' && <span className="text-green-600">Current transmittal state saved.</span>}
+            {saveStatus === 'error' && <span className="text-red-600">{saveError || 'Failed to save current transmittal state.'}</span>}
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button onClick={handleGenerate} disabled={loadingPreview || saveStatus === 'saving'}>Generate {targetLabel}</Button>
+          </div>
         </div>
       </div>
     </div>

@@ -434,9 +434,119 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          items = pp.payroll_items.where(voided: false)
+          render json: transmittal_preview_payload(pp)
+        end
+
+        # GET /api/v1/admin/reports/transmittal_state
+        def transmittal_state
+          pp = find_pay_period_for_report
+          return unless pp
+
+          render json: {
+            transmittal_state: current_transmittal_state_for(pp)&.to_payload,
+            defaults: PayPeriodTransmittal.default_attributes_for(pp)
+          }
+        end
+
+        # PATCH /api/v1/admin/reports/transmittal_state
+        def update_transmittal_state
+          pp = find_pay_period_for_report
+          return unless pp
+
+          state = persist_transmittal_state!(pp, transmittal_options)
+          render json: { transmittal_state: state.to_payload }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/reports/transmittal_versions
+        def transmittal_versions
+          pp = find_pay_period_for_report
+          return unless pp
+
+          versions = pp.transmittal_versions.limit(25)
+          render json: { versions: versions.map(&:to_summary_payload) }
+        end
+
+        # GET /api/v1/admin/reports/transmittal_log_pdf
+        def transmittal_log_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          version = persist_and_snapshot_transmittal!(pp, generated_from: "transmittal_log")
+          generator = TransmittalLogPdfGenerator.new(pp, version.to_generator_options)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/reports/full_print_package_pdf
+        # Combines all reports for a pay period into a single PDF download
+        def full_print_package_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          version = persist_and_snapshot_transmittal!(pp, generated_from: "full_print_package")
+          pdf = CombinePDF.new
+          company = pp.company
+
+          generators = [
+            TransmittalLogPdfGenerator.new(pp, version.to_generator_options),
+            PayrollSummaryByEmployeePdfGenerator.new(pp),
+            DeductionsContributionsReportPdfGenerator.new(pp),
+            PaycheckHistoryPdfGenerator.new(pp),
+            RetirementPlansReportPdfGenerator.new(pp)
+          ]
+
+          # Add installment loans if company has any active loans
+          if company.employee_loans.active.any?
+            generators << InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
+          end
+
+          generators.each do |gen|
+            individual_pdf = CombinePDF.parse(gen.generate)
+            pdf << individual_pdf
+          end
+
+          send_data pdf.to_pdf,
+            filename: "print_package_#{pp.start_date}_to_#{pp.end_date}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
+        rescue StandardError => e
+          Rails.logger.error("[Reports] full_print_package_pdf failed for pay_period=#{pp&.id}: #{e.class}: #{e.message}")
+          render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/reports/ytd_summary
+        # Year-to-date summary for all employees
+        def ytd_summary
+          year = params[:year]&.to_i || Date.current.year
+
+          employees = Employee.where(company_id: current_company_id)
+                             .includes(:employee_ytd_totals)
+                             .order(:last_name, :first_name)
+
+          render json: {
+            report: {
+              type: "ytd_summary",
+              year: year,
+              employees: employees.map { |emp| employee_ytd_row(emp, year) },
+              company_totals: ytd_company_totals(year)
+            }
+          }
+        end
+
+        private
+
+        def transmittal_preview_payload(pay_period)
+          items = pay_period.payroll_items.where(voided: false)
           check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
-          ne_checks = pp.non_employee_checks.active.order(:id)
+          ne_checks = pay_period.non_employee_checks.active.order(:id)
 
           total_fit  = items.sum(:withholding_tax)
           emp_ss     = items.sum(:social_security_tax)
@@ -445,7 +555,7 @@ module Api
           er_med     = items.sum(:employer_medicare_tax)
           total_fica = emp_ss + er_ss + emp_med + er_med
 
-          render json: {
+          {
             payroll_checks: {
               count: check_numbers.size,
               first: check_numbers.first,
@@ -474,84 +584,55 @@ module Api
           }
         end
 
-        # GET /api/v1/admin/reports/transmittal_log_pdf
-        def transmittal_log_pdf
-          pp = find_pay_period_for_report
-          return unless pp
-
-          options = transmittal_options
-          generator = TransmittalLogPdfGenerator.new(pp, options)
-          send_data generator.generate,
-            filename: generator.filename,
-            type: "application/pdf",
-            disposition: "attachment"
+        def current_transmittal_state_for(pay_period)
+          pay_period.transmittal_state
         end
 
-        # GET /api/v1/admin/reports/full_print_package_pdf
-        # Combines all reports for a pay period into a single PDF download
-        def full_print_package_pdf
-          pp = find_pay_period_for_report
-          return unless pp
+        def persist_transmittal_state!(pay_period, attributes)
+          state = current_transmittal_state_for(pay_period) || pay_period.build_transmittal_state(company: pay_period.company)
+          state.assign_state(resolved_transmittal_state_attributes(pay_period, explicit_attributes: attributes))
+          state.save!
+          state
+        end
 
-          pdf = CombinePDF.new
-          company = pp.company
-
-          generators = [
-            TransmittalLogPdfGenerator.new(pp, transmittal_options),
-            PayrollSummaryByEmployeePdfGenerator.new(pp),
-            DeductionsContributionsReportPdfGenerator.new(pp),
-            PaycheckHistoryPdfGenerator.new(pp),
-            RetirementPlansReportPdfGenerator.new(pp)
-          ]
-
-          # Add installment loans if company has any active loans
-          if company.employee_loans.active.any?
-            generators << InstallmentLoanReportPdfGenerator.new(company, as_of_date: pp.pay_date)
+        def persist_and_snapshot_transmittal!(pay_period, generated_from:)
+          PayPeriodTransmittal.transaction do
+            state = persist_transmittal_state!(pay_period, transmittal_options)
+            state.create_version_snapshot!(generated_by: current_user, generated_from: generated_from)
           end
+        end
 
-          generators.each do |gen|
-            individual_pdf = CombinePDF.parse(gen.generate)
-            pdf << individual_pdf
+        def resolved_transmittal_state_attributes(pay_period, explicit_attributes:)
+          defaults = PayPeriodTransmittal.default_attributes_for(pay_period)
+          persisted = current_transmittal_state_for(pay_period)&.to_payload&.symbolize_keys || {}
+          explicit = normalize_transmittal_option_keys(explicit_attributes)
+
+          defaults.merge(persisted.slice(:preparer_name, :notes, :report_list, :check_number_first, :check_number_last, :non_employee_check_numbers))
+                  .merge(explicit)
+        end
+
+        def normalize_transmittal_option_keys(attributes)
+          attrs = (attributes || {}).deep_symbolize_keys
+          {}.tap do |normalized|
+            normalized[:preparer_name] = attrs[:preparer_name].to_s.presence if attrs.key?(:preparer_name)
+            normalized[:notes] = Array(attrs[:notes]) if attrs.key?(:notes)
+            normalized[:report_list] = Array(attrs[:report_list]) if attrs.key?(:report_list)
+            normalized[:check_number_first] = attrs[:check_number_first].to_s.presence if attrs.key?(:check_number_first)
+            normalized[:check_number_last] = attrs[:check_number_last].to_s.presence if attrs.key?(:check_number_last)
+            if attrs.key?(:non_employee_check_numbers)
+              normalized[:non_employee_check_numbers] = attrs[:non_employee_check_numbers].to_h.transform_keys(&:to_s)
+            end
           end
-
-          send_data pdf.to_pdf,
-            filename: "print_package_#{pp.start_date}_to_#{pp.end_date}.pdf",
-            type: "application/pdf",
-            disposition: "attachment"
-        rescue StandardError => e
-          Rails.logger.error("[Reports] full_print_package_pdf failed for pay_period=#{pp&.id}: #{e.class}: #{e.message}")
-          render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
         end
-
-        # GET /api/v1/admin/reports/ytd_summary
-        # Year-to-date summary for all employees
-        def ytd_summary
-          year = params[:year]&.to_i || Date.current.year
-
-          employees = Employee.where(company_id: current_company_id)
-                             .includes(:employee_ytd_totals)
-                             .order(:last_name, :first_name)
-
-          render json: {
-            report: {
-              type: "ytd_summary",
-              year: year,
-              employees: employees.map { |emp| employee_ytd_row(emp, year) },
-              company_totals: ytd_company_totals(year)
-            }
-          }
-        end
-
-        private
 
         def transmittal_options
           opts = {}
-          opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
-          opts[:notes] = Array(params[:notes]) if params[:notes].present?
+          opts[:preparer_name] = params[:preparer_name] if params.key?(:preparer_name)
+          opts[:notes] = Array(params[:notes]) if params.key?(:notes)
           opts[:report_list] = Array(params[:report_list]) if params.key?(:report_list)
-          opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
-          opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
-          if params[:non_employee_check_numbers].present?
+          opts[:check_number_first] = params[:check_number_first] if params.key?(:check_number_first)
+          opts[:check_number_last] = params[:check_number_last] if params.key?(:check_number_last)
+          if params.key?(:non_employee_check_numbers)
             opts[:non_employee_check_numbers] = params[:non_employee_check_numbers].to_unsafe_h.transform_keys(&:to_i)
           end
           opts
