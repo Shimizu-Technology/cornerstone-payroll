@@ -125,6 +125,7 @@ export function PayPeriodDetail() {
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
+  const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -269,9 +270,15 @@ export function PayPeriodDetail() {
         if (amount > 0) salary_overrides[empId] = amount;
       });
 
+      // Include any manually-added employees who were missing from the import
+      const employee_ids = additionalEmployeeIds.size > 0
+        ? [...new Set([...payrollItems.map(pi => pi.employee_id), ...additionalEmployeeIds])]
+        : undefined;
+
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
+        ...(employee_ids ? { employee_ids } : {}),
       });
       setPayPeriod(response.pay_period);
       setPayrollItems(response.pay_period.payroll_items || []);
@@ -284,6 +291,7 @@ export function PayPeriodDetail() {
         }
       });
       setSalaryOverrideMap(newOverrides);
+      setAdditionalEmployeeIds(new Set());
 
       if (response.results.errors.length > 0) {
         setError(
@@ -569,20 +577,38 @@ export function PayPeriodDetail() {
           if (missingEmployees.length === 0) return null;
           return (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-              <p className="font-medium text-amber-800">
-                {missingEmployees.length} active employee{missingEmployees.length !== 1 ? 's' : ''} not included in this payroll:
-              </p>
-              <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
-                {missingEmployees.map((emp) => (
-                  <li key={emp.id}>
-                    {emp.first_name} {emp.last_name}
-                    <span className="text-amber-500 ml-1">({emp.employment_type})</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="font-medium text-amber-800">
+                    {missingEmployees.length} active employee{missingEmployees.length !== 1 ? 's' : ''} not included in this payroll:
+                  </p>
+                  <ul className="mt-2 text-sm text-amber-700 space-y-1">
+                    {missingEmployees.map((emp) => (
+                      <li key={emp.id} className="flex items-center gap-2">
+                        <span>{emp.first_name} {emp.last_name}</span>
+                        <span className="text-amber-500 text-xs">({emp.employment_type})</span>
+                        {additionalEmployeeIds.has(emp.id) ? (
+                          <span className="text-xs text-green-600 font-medium">Will be included on recalculate</span>
+                        ) : (
+                          <button
+                            onClick={() => setAdditionalEmployeeIds(prev => { const next = new Set(prev); next.add(emp.id); return next; })}
+                            className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                          >
+                            Include in Payroll
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {additionalEmployeeIds.size > 0 && (
+                  <Button size="sm" variant="outline" onClick={handleRunPayroll} disabled={processing}>
+                    Recalculate with {additionalEmployeeIds.size} added
+                  </Button>
+                )}
+              </div>
               <p className="mt-2 text-xs text-amber-600">
-                These employees were not in the imported payroll data. If they should be paid this period,
-                add them manually or re-import with their data included.
+                These employees were not in the imported payroll data. Click &quot;Include in Payroll&quot; then Recalculate to add them.
               </p>
             </div>
           );
@@ -667,6 +693,27 @@ export function PayPeriodDetail() {
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
                             </p>
+                            {(() => {
+                              const pi = payrollItems.find(i => i.employee_id === emp.id);
+                              if (!pi) return null;
+                              const tips = toNumber(pi.reported_tips);
+                              const loan = toNumber(pi.loan_payment);
+                              if (tips === 0 && loan === 0) return null;
+                              return (
+                                <div className="flex gap-2 mt-0.5">
+                                  {tips > 0 && (
+                                    <span className="text-[10px] text-blue-600 bg-blue-50 rounded px-1 py-0.5">
+                                      Tips: {formatCurrency(tips)}{pi.tip_pool ? ` ${pi.tip_pool.toUpperCase()}` : ''}
+                                    </span>
+                                  )}
+                                  {loan > 0 && (
+                                    <span className="text-[10px] text-amber-600 bg-amber-50 rounded px-1 py-0.5">
+                                      Loan: {formatCurrency(loan)}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </TableCell>
                         <TableCell className="text-gray-700">
@@ -787,7 +834,12 @@ export function PayPeriodDetail() {
         )}
 
         {/* Payroll Results Table (Calculated/Approved/Committed) */}
-        {!isDraft && payrollItems.length > 0 && (
+        {!isDraft && payrollItems.length > 0 && (() => {
+          const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
+          const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
+          const extraColCount = (hasTips ? 1 : 0) + (hasLoans ? 1 : 0);
+          const totalCols = 10 + extraColCount + (isCalculated ? 1 : 0);
+          return (
           <Card>
             <div className="p-4 border-b">
               <h3 className="font-semibold text-gray-900">Employee Payroll</h3>
@@ -803,8 +855,8 @@ export function PayPeriodDetail() {
                     <TableHead className="text-right">Hours</TableHead>
                     <TableHead className="text-right">Rate</TableHead>
                     <TableHead className="text-right">Gross</TableHead>
-                    <TableHead className="text-right">Tips</TableHead>
-                    <TableHead className="text-right">Loan Ded.</TableHead>
+                    {hasTips && <TableHead className="text-right">Tips</TableHead>}
+                    {hasLoans && <TableHead className="text-right">Loan Ded.</TableHead>}
                     <TableHead className="text-right">FIT</TableHead>
                     <TableHead className="text-right">Addtl W/H</TableHead>
                     <TableHead className="text-right">SS (6.2%)</TableHead>
@@ -833,21 +885,21 @@ export function PayPeriodDetail() {
                       <Fragment key={item.id}>
                         {showSalaryDivider && (
                           <TableRow className="bg-indigo-50">
-                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
                               Salary Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showHourlyDivider && (
                           <TableRow className="bg-gray-100">
-                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                               Hourly Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showContractorDivider && (
                           <TableRow className="bg-emerald-50">
-                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
                               1099 Contractors
                             </TableCell>
                           </TableRow>
@@ -956,6 +1008,7 @@ export function PayPeriodDetail() {
                             })()}
                           </TableCell>
                           <TableCell className="text-right font-medium">{formatCurrency(toNumber(item.gross_pay))}</TableCell>
+                          {hasTips && (
                           <TableCell className="text-right">
                             {toNumber(item.reported_tips) > 0 ? (
                               <span>
@@ -970,6 +1023,8 @@ export function PayPeriodDetail() {
                               <span className="text-gray-300">—</span>
                             )}
                           </TableCell>
+                          )}
+                          {hasLoans && (
                           <TableCell className="text-right">
                             {toNumber(item.loan_payment) > 0 ? (
                               formatCurrency(toNumber(item.loan_payment))
@@ -977,6 +1032,7 @@ export function PayPeriodDetail() {
                               <span className="text-gray-300">—</span>
                             )}
                           </TableCell>
+                          )}
                           <TableCell className="text-right text-red-600">
                             {formatCurrency(toNumber(item.withholding_tax))}
                             {item.withholding_tax_override != null && (
@@ -1012,8 +1068,8 @@ export function PayPeriodDetail() {
                       <TableRow className="bg-gray-50 font-bold border-t-2">
                         <TableCell colSpan={3}>Totals ({payrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
-                        <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>
-                        <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>
+                        {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
+                        {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
                         <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
                         <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>
                         <TableCell className="text-right text-red-600">{formatCurrency(totalSS)}</TableCell>
@@ -1027,7 +1083,8 @@ export function PayPeriodDetail() {
               </Table>
             </div>
           </Card>
-        )}
+          );
+        })()}
 
         {/* Employer Tax Obligations (Calculated/Approved/Committed) */}
         {!isDraft && payrollItems.length > 0 && (
