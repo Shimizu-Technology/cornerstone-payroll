@@ -33,8 +33,34 @@ module Api
             .filter_map { |r| r[:raw]["department"]&.strip }
             .uniq
 
+          preview_id = SecureRandom.uuid
+          ssn_cache = {}
+
+          rows_json = result[:rows].map do |r|
+            row_data = serialize_preview_row(r)
+            raw_ssn = r[:raw]["ssn"]
+            if raw_ssn.present?
+              digits = raw_ssn.gsub(/\D/, "")
+              if digits.length == 9
+                token = SecureRandom.hex(16)
+                ssn_cache[token] = digits
+                row_data[:data][:_ssn_token] = token
+              end
+            end
+            row_data
+          end
+
+          if ssn_cache.any?
+            Rails.cache.write(
+              "bulk_import_ssn:#{preview_id}",
+              ssn_cache,
+              expires_in: 30.minutes
+            )
+          end
+
           render json: {
-            rows: result[:rows].map { |r| serialize_preview_row(r) },
+            preview_id: preview_id,
+            rows: rows_json,
             summary: {
               total: result[:rows].size,
               valid: result[:rows].count { |r| r[:valid] },
@@ -84,18 +110,28 @@ module Api
             return render json: { error: "No employee data provided" }, status: :unprocessable_entity
           end
 
+          ssn_cache = nil
+          if params[:preview_id].present?
+            ssn_cache = Rails.cache.read("bulk_import_ssn:#{params[:preview_id]}")
+          end
+
           company = Company.find(current_company_id)
           service = EmployeeBulkImport::ImportService.new(company)
 
           rows = employees_data.each_with_index.map do |emp, idx|
             {
               row_number: idx + 1,
-              attributes: sanitize_employee_attrs(emp),
+              attributes: sanitize_employee_attrs(emp, ssn_cache),
               raw: emp.to_unsafe_h
             }
           end
 
           create_result = service.create_employees!(rows)
+
+          # Clean up the SSN cache after use
+          if params[:preview_id].present?
+            Rails.cache.delete("bulk_import_ssn:#{params[:preview_id]}")
+          end
 
           render json: {
             created: create_result[:created],
@@ -118,7 +154,7 @@ module Api
           status
         ].freeze
 
-        def sanitize_employee_attrs(emp_params)
+        def sanitize_employee_attrs(emp_params, ssn_cache = nil)
           attrs = {}
           h = emp_params.respond_to?(:to_unsafe_h) ? emp_params.to_unsafe_h.symbolize_keys : emp_params.to_h.symbolize_keys
 
@@ -126,8 +162,13 @@ module Api
             attrs[key] = h[key] if h.key?(key)
           end
 
-          # Handle SSN: strip non-digits, only store if exactly 9 digits
-          if h[:ssn].present? && !h.key?(:ssn_encrypted)
+          # SSN resolution order:
+          # 1. _ssn_token -> look up raw digits from server-side cache (file-originated, not edited)
+          # 2. ssn -> user-provided raw digits (manually added or user-edited SSN field)
+          if h[:_ssn_token].present? && ssn_cache
+            digits = ssn_cache[h[:_ssn_token].to_s]
+            attrs[:ssn_encrypted] = digits if digits.present? && digits.length == 9
+          elsif h[:ssn].present? && !h.key?(:ssn_encrypted)
             digits = h[:ssn].to_s.gsub(/\D/, "")
             attrs[:ssn_encrypted] = digits if digits.length == 9
           end
@@ -151,7 +192,6 @@ module Api
               middle_name: raw["middle_name"],
               email: raw["email"],
               ssn: raw["ssn"].present? ? "***-**-#{raw['ssn'].gsub(/\D/, '').last(4)}" : nil,
-              _ssn_raw: raw["ssn"].present? ? raw["ssn"].gsub(/\D/, "") : nil,
               date_of_birth: raw["date_of_birth"],
               hire_date: raw["hire_date"],
               employment_type: raw["employment_type"],

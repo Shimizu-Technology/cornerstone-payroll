@@ -5,6 +5,7 @@ import {
   Search, 
   ChevronLeft, 
   ChevronRight,
+  ChevronDown,
   Users,
   Upload
 } from 'lucide-react';
@@ -54,6 +55,7 @@ export function EmployeeList() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') || '';
@@ -72,7 +74,7 @@ export function EmployeeList() {
         department_id: departmentId ? parseInt(departmentId, 10) : undefined,
         employment_type: employmentType || undefined,
         page,
-        per_page: 50,
+        per_page: 500,
         group_by: 'employment_type',
       });
       setEmployees(response.data);
@@ -113,6 +115,15 @@ export function EmployeeList() {
 
   const handleSearch = (value: string): void => {
     updateFilter('search', value);
+  };
+
+  const toggleGroup = (type: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
   };
 
   const grouped = useMemo(() => {
@@ -233,51 +244,58 @@ export function EmployeeList() {
         ) : (
           <>
             <div className="space-y-6">
-              {grouped.map(({ type, label, employees: groupEmployees }) => (
-                <div key={type}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-                      {label}
-                    </h3>
-                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${TYPE_COLORS[type] || 'bg-gray-50 text-gray-700 border-gray-200'}`}>
-                      {groupEmployees.length}
-                    </span>
+              {grouped.map(({ type, label, employees: groupEmployees }) => {
+                const isCollapsed = collapsedGroups.has(type);
+                return (
+                  <div key={type}>
+                    <button
+                      onClick={() => toggleGroup(type)}
+                      className="flex items-center gap-2 mb-3 group cursor-pointer"
+                    >
+                      <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                      <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider group-hover:text-gray-700">
+                        {label}
+                      </h3>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${TYPE_COLORS[type] || 'bg-gray-50 text-gray-700 border-gray-200'}`}>
+                        {groupEmployees.length}
+                      </span>
+                    </button>
+                    {!isCollapsed && (
+                      <Card>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Employee</TableHead>
+                              <TableHead>Department</TableHead>
+                              <TableHead>Pay Rate</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {groupEmployees.map((employee) => (
+                              <EmployeeTableRow
+                                key={employee.id}
+                                employee={employee}
+                                departments={departments}
+                                onEdit={() => navigate(`/employees/${employee.id}`)}
+                              />
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </Card>
+                    )}
                   </div>
-                  <Card>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Employee</TableHead>
-                          <TableHead>Department</TableHead>
-                          <TableHead>Pay Rate</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {groupEmployees.map((employee) => (
-                          <EmployeeTableRow
-                            key={employee.id}
-                            employee={employee}
-                            departments={departments}
-                            onEdit={() => navigate(`/employees/${employee.id}`)}
-                          />
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Card>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {meta && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-gray-500">
-                  Showing {((meta.current_page - 1) * meta.per_page) + 1} to{' '}
-                  {Math.min(meta.current_page * meta.per_page, meta.total_count)} of{' '}
-                  {meta.total_count} employees
+                  {meta.total_count} employee{meta.total_count !== 1 ? 's' : ''} total
                 </p>
-                {meta.total_pages > 1 ? (
+                {meta.total_pages > 1 && (
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -296,8 +314,6 @@ export function EmployeeList() {
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>
-                ) : (
-                  <span className="text-sm text-gray-400">1 page</span>
                 )}
               </div>
             )}

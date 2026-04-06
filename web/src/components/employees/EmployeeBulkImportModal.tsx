@@ -43,6 +43,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newDepartments, setNewDepartments] = useState<string[]>([]);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const [result, setResult] = useState<BulkImportApplyResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,6 +55,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
     setRows([]);
     setExpandedId(null);
     setNewDepartments([]);
+    setPreviewId(null);
     setResult(null);
     setError(null);
     setLoading(false);
@@ -100,6 +102,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
       }));
       setRows(editableRows);
       setNewDepartments(data.summary.new_departments || []);
+      setPreviewId(data.preview_id);
       setStep('preview');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse file');
@@ -116,7 +119,10 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
     setRows(prev => prev.map(r => {
       if (r.id !== id) return r;
       const newData = { ...r.data, [field]: value };
-      const errors = validateRowData(newData);
+      // When user edits the SSN field, clear the server-side token so
+      // handleApply sends the user's value instead of the original file value.
+      if (field === 'ssn') newData._ssn_token = undefined;
+      const errors = validateRowData(newData, r.isNew);
       return { ...r, data: newData, errors, included: errors.length === 0 ? r.included : false };
     }));
   }, []);
@@ -181,13 +187,14 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
           phone: d.phone || undefined,
         };
 
-        // For file-originated rows, use the raw SSN digits from the preview response.
-        // The displayed `ssn` field is masked (***-**-XXXX) and not usable.
-        // For manually-added rows, use whatever the user typed.
-        if (r.isNew) {
-          if (d.ssn) attrs.ssn = d.ssn;
-        } else if (d._ssn_raw) {
-          attrs.ssn = d._ssn_raw;
+        // SSN handling:
+        // - If _ssn_token exists: file-originated SSN, not user-edited -> send token
+        //   so backend resolves the real SSN from server-side cache.
+        // - If no token but user typed an SSN (new row or edited SSN field): send raw.
+        if (d._ssn_token) {
+          attrs._ssn_token = d._ssn_token;
+        } else if (d.ssn && !d.ssn.includes('*')) {
+          attrs.ssn = d.ssn;
         }
         if (d.date_of_birth) attrs.date_of_birth = d.date_of_birth;
         if (d.hire_date) attrs.hire_date = d.hire_date;
@@ -214,7 +221,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
         return attrs;
       });
 
-      const res = await employeeBulkImportApi.applyJson(employees);
+      const res = await employeeBulkImportApi.applyJson(employees, previewId || undefined);
       setResult(res);
       setStep('done');
     } catch (err) {
@@ -453,7 +460,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
 
 // --- Validation (client-side mirror of backend) ---
 
-function validateRowData(data: BulkImportEmployeeData): string[] {
+function validateRowData(data: BulkImportEmployeeData, isNew = true): string[] {
   const errors: string[] = [];
   if (!data.first_name?.trim()) errors.push('first_name is required');
   if (!data.last_name?.trim()) errors.push('last_name is required');
@@ -467,8 +474,13 @@ function validateRowData(data: BulkImportEmployeeData): string[] {
     errors.push('employment_type must be hourly, salary, or contractor');
   }
   if (data.ssn) {
-    const digits = data.ssn.replace(/\D/g, '');
-    if (digits.length !== 9 && digits.length !== 0) errors.push('ssn must be exactly 9 digits');
+    // Skip validation for file-originated rows where SSN is still the masked
+    // display value (***-**-XXXX) backed by a server-side token.
+    const isMasked = data.ssn.includes('*');
+    if (!isMasked) {
+      const digits = data.ssn.replace(/\D/g, '');
+      if (digits.length !== 9 && digits.length !== 0) errors.push('ssn must be exactly 9 digits');
+    }
   }
   if (data.allowances) {
     const val = Number(data.allowances);

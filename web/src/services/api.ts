@@ -345,7 +345,7 @@ export interface BulkImportEmployeeData {
   middle_name: string | null;
   email: string | null;
   ssn: string | null;
-  _ssn_raw?: string | null;
+  _ssn_token?: string | null;
   date_of_birth: string | null;
   hire_date: string | null;
   employment_type: string;
@@ -384,6 +384,7 @@ export interface BulkImportPreviewRow {
 }
 
 export interface BulkImportPreviewResult {
+  preview_id: string;
   rows: BulkImportPreviewRow[];
   summary: {
     total: number;
@@ -423,8 +424,8 @@ export const employeeBulkImportApi = {
     skipRows.forEach(r => formData.append('skip_rows[]', String(r)));
     return api.postForm<BulkImportApplyResult>('/admin/employee_bulk_imports/apply', formData);
   },
-  applyJson: (employees: Record<string, unknown>[]): Promise<BulkImportApplyResult> =>
-    api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees }),
+  applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
+    api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
 };
 
 export const employeeWageRatesApi = {
