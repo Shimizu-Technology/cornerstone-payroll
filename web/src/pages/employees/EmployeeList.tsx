@@ -5,7 +5,8 @@ import {
   Search, 
   ChevronLeft, 
   ChevronRight,
-  Users
+  Users,
+  Upload
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,7 @@ import {
 } from '@/lib/utils';
 import { employeesApi, departmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import type { Employee, Department, PaginationMeta } from '@/types';
 
 // Fallback company ID for development when auth is disabled
@@ -46,6 +48,7 @@ export function EmployeeList() {
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   // Filters from URL params
   const search = searchParams.get('search') || '';
@@ -112,10 +115,16 @@ export function EmployeeList() {
         title="Employees"
         description="Manage your company's employees"
         actions={
-          <Button onClick={() => navigate('/employees/new')}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Employee
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setShowBulkImport(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Bulk Import
+            </Button>
+            <Button onClick={() => navigate('/employees/new')}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Employee
+            </Button>
+          </div>
         }
       />
 
@@ -344,6 +353,12 @@ export function EmployeeList() {
           </>
         )}
       </div>
+
+      <EmployeeBulkImportModal
+        open={showBulkImport}
+        onClose={() => setShowBulkImport(false)}
+        onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}
+      />
     </div>
   );
 }
