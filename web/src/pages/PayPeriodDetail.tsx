@@ -127,6 +127,7 @@ export function PayPeriodDetail() {
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [hoursTableOpen, setHoursTableOpen] = useState(true);
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -414,7 +415,7 @@ export function PayPeriodDetail() {
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
 
   const draftHasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
-  const draftHasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
+  const draftHasLoans = payrollItems.some(i => toNumber(i.loan_deduction) > 0 || toNumber(i.loan_payment) > 0);
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
   const payrollItemLookup = new Map(payrollItems.map((pi) => [pi.employee_id, pi]));
@@ -628,32 +629,44 @@ export function PayPeriodDetail() {
         {/* Hours Input (Draft Mode) */}
         {(isDraft || isCalculated) && (
           <Card>
-            <div className="p-4 border-b">
+            <button
+              className="w-full p-4 border-b text-left hover:bg-gray-50/50 transition-colors"
+              onClick={() => setHoursTableOpen(prev => !prev)}
+            >
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-gray-900">
-                    {isCalculated ? 'Adjust Hours' : 'Enter Hours'}
-                  </h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {isCalculated
-                      ? 'Update hours and click Recalculate to refresh payroll amounts.'
-                      : 'Enter hours for each employee for this pay period. Single-rate hourly employees default to 80 hours; multi-rate rows start at 0.'}
-                  </p>
-                </div>
-                <div className="relative shrink-0">
-                  <input
-                    type="text"
-                    placeholder="Search employees..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                <div className="flex items-center gap-2">
+                  <svg
+                    className={`w-4 h-4 text-gray-500 transition-transform ${hoursTableOpen ? 'rotate-90' : ''}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">
+                      {isCalculated ? 'Adjust Hours' : 'Enter Hours'}
+                    </h3>
+                    {!hoursTableOpen && (
+                      <p className="text-xs text-gray-400 mt-0.5">Click to expand</p>
+                    )}
+                  </div>
                 </div>
+                {hoursTableOpen && (
+                  <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="text"
+                      placeholder="Search employees..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
+                )}
               </div>
-            </div>
+            </button>
+            {hoursTableOpen && (
             <div className="overflow-x-auto">
               <Table style={{ minWidth: 1380 + (draftHasTips ? 110 : 0) + (draftHasLoans ? 110 : 0) }}>
                 <TableHeader>
@@ -863,7 +876,7 @@ export function PayPeriodDetail() {
                         <TableCell className="text-right align-top">
                           {(() => {
                             const pi = payrollItemLookup.get(emp.id);
-                            const loan = pi ? toNumber(pi.loan_payment) : 0;
+                            const loan = pi ? (toNumber(pi.loan_deduction) || toNumber(pi.loan_payment)) : 0;
                             if (loan === 0) return <span className="text-gray-300">—</span>;
                             return <span className="text-sm">{formatCurrency(loan)}</span>;
                           })()}
@@ -880,6 +893,7 @@ export function PayPeriodDetail() {
                 </TableBody>
               </Table>
             </div>
+            )}
           </Card>
         )}
 

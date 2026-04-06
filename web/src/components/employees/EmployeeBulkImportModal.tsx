@@ -616,7 +616,7 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
               {row.data.employment_type === 'salary' && (
                 <SelectField
                   label="Salary Type"
-                  value={row.data.salary_type}
+                  value={row.data.salary_type ?? null}
                   onChange={v => onUpdateField('salary_type', v)}
                   options={[
                     { value: 'annual', label: 'Annual (fixed)' },
