@@ -590,7 +590,7 @@ module Api
             updated_by_id: current_user&.id
           )
           transmittal.save!
-        rescue ActiveRecord::RecordInvalid => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
           Rails.logger.warn("[Transmittal] Failed to save state for pay_period=#{pay_period.id}: #{e.message}")
         end
 

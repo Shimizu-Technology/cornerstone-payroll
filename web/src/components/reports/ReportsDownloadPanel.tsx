@@ -680,28 +680,29 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       : undefined,
   });
 
-  const handleReprint = (reportKey: ReportKey, label: string) => {
+  const handleReprint = async (reportKey: ReportKey, label: string) => {
     if (!savedTransmittal) return;
-    handlePreview(reportKey, label, savedToOptions(savedTransmittal));
+    await handlePreview(reportKey, label, savedToOptions(savedTransmittal));
+    refreshSavedState();
   };
 
-  const handleTransmittalGenerate = (options: TransmittalOptions) => {
+  const refreshSavedState = () => {
+    transmittalApi.preview(payPeriodId).then((data) => {
+      setSavedTransmittal(data.saved_transmittal);
+    }).catch(() => {});
+  };
+
+  const handleTransmittalGenerate = async (options: TransmittalOptions) => {
     const { key, mode } = transmittalEditor;
     setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' });
     if (!key) return;
 
-    // After generation, refresh saved state
-    setTimeout(() => {
-      transmittalApi.preview(payPeriodId).then((data) => {
-        setSavedTransmittal(data.saved_transmittal);
-      }).catch(() => {});
-    }, 1000);
-
     if (mode === 'preview') {
-      handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      await handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
     } else {
-      handleDownload(key, options);
+      await handleDownload(key, options);
     }
+    refreshSavedState();
   };
 
   const handlePreviewDownload = () => {
