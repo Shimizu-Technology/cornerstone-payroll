@@ -70,9 +70,11 @@ module EmployeeBulkImport
           if dept_name.present? && attrs[:department_id].blank?
             dept_key = dept_name.downcase.strip
             dept = dept_cache[dept_key] || begin
-              d = company.departments.create!(name: dept_name)
+              d = company.departments.find_or_create_by!(name: dept_name)
               dept_cache[dept_key] = d
               d
+            rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+              company.departments.find_by!(name: dept_name)
             end
             attrs[:department_id] = dept.id
           end
@@ -245,6 +247,11 @@ module EmployeeBulkImport
       if data["allowances"].present?
         val = Integer(data["allowances"]) rescue nil
         errors << "allowances must be a non-negative integer" if val.nil? || val.negative?
+      end
+
+      if data["ssn"].present?
+        digits = data["ssn"].gsub(/\D/, "")
+        errors << "ssn must be exactly 9 digits" unless digits.length == 9
       end
 
       if data["employment_type"] == "contractor"
