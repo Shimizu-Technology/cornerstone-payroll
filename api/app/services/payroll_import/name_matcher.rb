@@ -60,7 +60,7 @@ module PayrollImport
       "patrick" => %w[pat],
       "patricia" => %w[pat patty],
       "patty"   => %w[patricia],
-      "tony"    => %w[anthony],
+      "tony"    => %w[anthony antonio],
       "anthony" => %w[tony],
       "sam"     => %w[samuel samantha],
       "samuel"  => %w[sam],
@@ -118,7 +118,6 @@ module PayrollImport
       "walter"  => %w[wally],
       "lenny"   => %w[leonard],
       "leonard" => %w[lenny],
-      "tony"    => %w[antonio],
       "antonio" => %w[tony],
     }.freeze
 
