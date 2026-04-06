@@ -126,9 +126,10 @@ module Api
             attrs[key] = h[key] if h.key?(key)
           end
 
-          # Handle SSN: if raw ssn provided (not ssn_encrypted), strip non-digits
+          # Handle SSN: strip non-digits, only store if exactly 9 digits
           if h[:ssn].present? && !h.key?(:ssn_encrypted)
-            attrs[:ssn_encrypted] = h[:ssn].to_s.gsub(/\D/, "")
+            digits = h[:ssn].to_s.gsub(/\D/, "")
+            attrs[:ssn_encrypted] = digits if digits.length == 9
           end
 
           # Handle department by name if _department_name provided
