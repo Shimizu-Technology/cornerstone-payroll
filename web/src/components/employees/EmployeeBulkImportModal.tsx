@@ -181,7 +181,14 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
           phone: d.phone || undefined,
         };
 
-        if (d.ssn) attrs.ssn = d.ssn;
+        // For file-originated rows, use the raw SSN digits from the preview response.
+        // The displayed `ssn` field is masked (***-**-XXXX) and not usable.
+        // For manually-added rows, use whatever the user typed.
+        if (r.isNew) {
+          if (d.ssn) attrs.ssn = d.ssn;
+        } else if (d._ssn_raw) {
+          attrs.ssn = d._ssn_raw;
+        }
         if (d.date_of_birth) attrs.date_of_birth = d.date_of_birth;
         if (d.hire_date) attrs.hire_date = d.hire_date;
         if (d.department) attrs._department_name = d.department;
@@ -462,6 +469,10 @@ function validateRowData(data: BulkImportEmployeeData): string[] {
   if (data.ssn) {
     const digits = data.ssn.replace(/\D/g, '');
     if (digits.length !== 9 && digits.length !== 0) errors.push('ssn must be exactly 9 digits');
+  }
+  if (data.allowances) {
+    const val = Number(data.allowances);
+    if (!Number.isInteger(val) || val < 0) errors.push('allowances must be a non-negative integer');
   }
   return errors;
 }
