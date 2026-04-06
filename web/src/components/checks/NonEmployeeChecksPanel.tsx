@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { nonEmployeeChecksApi } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
+import { DRT } from '@/lib/constants';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
@@ -238,6 +239,28 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
         </div>
       )}
 
+      {/* Form 500 callout when tax deposit checks exist */}
+      {!loading && checks.some(c => c.check_type === 'tax_deposit' && !c.voided) && (
+        <div className="mx-4 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+          <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <div className="text-sm">
+            <p className="font-medium text-amber-800">DRT Form 500 Required</p>
+            <p className="text-amber-700 mt-0.5">
+              Tax deposit checks require a Guam DRT Form 500 (Depository Receipt for Income Tax Withheld).{' '}
+              <a href={DRT.FORM_500_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">
+                Open Form 500
+              </a>
+              {' · '}
+              <a href={DRT.FORMS_PAGE} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">
+                All DRT Forms
+              </a>
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="p-4">
         {loading ? (
           <p className="text-sm text-gray-500">Loading...</p>
@@ -260,6 +283,19 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
                     {check.check_number && <span>Check #{check.check_number}</span>}
                     {check.memo && <span>{check.memo}</span>}
                     {check.reference_number && <span>Ref: {check.reference_number}</span>}
+                    {check.check_type === 'tax_deposit' && (
+                      <a
+                        href={DRT.FORM_500_PDF}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                        Form 500
+                      </a>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1 shrink-0">
