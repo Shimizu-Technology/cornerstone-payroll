@@ -230,6 +230,19 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
                 )}
               </div>
 
+              {/* New departments notice */}
+              {previewData.summary.new_departments && previewData.summary.new_departments.length > 0 && (
+                <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2 text-sm">
+                  <svg className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-blue-800">
+                    <strong>New departments will be created:</strong>{' '}
+                    {previewData.summary.new_departments.join(', ')}
+                  </span>
+                </div>
+              )}
+
               {/* Preview table */}
               <div className="border rounded-lg overflow-hidden">
                 <div className="overflow-x-auto">

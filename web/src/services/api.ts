@@ -370,6 +370,7 @@ export interface BulkImportPreviewResult {
     valid: number;
     invalid: number;
     duplicates: number;
+    new_departments?: string[];
   };
 }
 

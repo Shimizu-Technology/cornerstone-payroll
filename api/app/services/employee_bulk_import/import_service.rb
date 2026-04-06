@@ -201,13 +201,16 @@ module EmployeeBulkImport
       full_name = "#{data['first_name']&.downcase&.strip} #{data['last_name']&.downcase&.strip}"
       duplicate = existing_employees.include?(full_name) || seen_in_file.include?(full_name)
 
+      new_dept = data["department"].present? && !departments.key?(data["department"].downcase.strip)
+
       {
         row_number: row_number,
         raw: data,
         attributes: attrs,
         errors: row_errors,
         valid: row_errors.empty?,
-        duplicate: duplicate
+        duplicate: duplicate,
+        new_department: new_dept
       }
     end
 
@@ -242,6 +245,15 @@ module EmployeeBulkImport
       if data["allowances"].present?
         val = Integer(data["allowances"]) rescue nil
         errors << "allowances must be a non-negative integer" if val.nil? || val.negative?
+      end
+
+      if data["employment_type"] == "contractor"
+        if data["contractor_type"].present? && !Employee::CONTRACTOR_TYPES.include?(data["contractor_type"])
+          errors << "contractor_type must be one of: #{Employee::CONTRACTOR_TYPES.join(', ')}"
+        end
+        if data["contractor_pay_type"].present? && !Employee::CONTRACTOR_PAY_TYPES.include?(data["contractor_pay_type"])
+          errors << "contractor_pay_type must be one of: #{Employee::CONTRACTOR_PAY_TYPES.join(', ')}"
+        end
       end
 
       %w[retirement_rate roth_retirement_rate].each do |col|

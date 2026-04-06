@@ -28,13 +28,19 @@ module Api
             return render json: { error: result[:errors].join("; ") }, status: :unprocessable_entity
           end
 
+          new_departments = result[:rows]
+            .select { |r| r[:new_department] }
+            .filter_map { |r| r[:raw]["department"]&.strip }
+            .uniq
+
           render json: {
             rows: result[:rows].map { |r| serialize_preview_row(r) },
             summary: {
               total: result[:rows].size,
               valid: result[:rows].count { |r| r[:valid] },
               invalid: result[:rows].count { |r| !r[:valid] },
-              duplicates: result[:rows].count { |r| r[:duplicate] }
+              duplicates: result[:rows].count { |r| r[:duplicate] },
+              new_departments: new_departments
             }
           }
         end
