@@ -37,6 +37,11 @@ Rails.application.routes.draw do
         resources :user_invitations, only: [ :create ]
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ]
+
+        # Employee Bulk Import
+        get  "employee_bulk_imports/template", to: "employee_bulk_imports#template"
+        post "employee_bulk_imports/preview",  to: "employee_bulk_imports#preview"
+        post "employee_bulk_imports/apply",    to: "employee_bulk_imports#apply"
         resources :departments, only: [ :index, :create, :update ]
 
         resources :pay_periods do

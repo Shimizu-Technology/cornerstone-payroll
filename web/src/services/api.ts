@@ -336,6 +336,74 @@ export const employeesApi = {
     api.delete<void>(`/admin/employees/${id}`),
 };
 
+// Employee Bulk Import
+export interface BulkImportPreviewRow {
+  row_number: number;
+  data: {
+    first_name: string;
+    last_name: string;
+    middle_name: string | null;
+    email: string | null;
+    ssn: string | null;
+    date_of_birth: string | null;
+    hire_date: string | null;
+    employment_type: string;
+    pay_rate: string;
+    pay_frequency: string | null;
+    filing_status: string | null;
+    department: string | null;
+    address_line1: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    phone: string | null;
+  };
+  valid: boolean;
+  duplicate: boolean;
+  errors: string[];
+}
+
+export interface BulkImportPreviewResult {
+  rows: BulkImportPreviewRow[];
+  summary: {
+    total: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+  };
+}
+
+export interface BulkImportApplyResult {
+  created: number;
+  failed: number;
+  errors: { row: number; messages: string[] }[];
+}
+
+export const employeeBulkImportApi = {
+  downloadTemplate: async (): Promise<void> => {
+    const data = await api.getBlobWithParams('/admin/employee_bulk_imports/template');
+    const url = URL.createObjectURL(data.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = data.filename || 'employee_import_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+  preview: (file: File): Promise<BulkImportPreviewResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.postForm<BulkImportPreviewResult>('/admin/employee_bulk_imports/preview', formData);
+  },
+  apply: (file: File, skipRows: number[] = []): Promise<BulkImportApplyResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    skipRows.forEach(r => formData.append('skip_rows[]', String(r)));
+    return api.postForm<BulkImportApplyResult>('/admin/employee_bulk_imports/apply', formData);
+  },
+};
+
 export const employeeWageRatesApi = {
   list: (employeeId: number) =>
     api.get<{ wage_rates: EmployeeWageRate[] }>('/admin/employee_wage_rates', { employee_id: employeeId }),
