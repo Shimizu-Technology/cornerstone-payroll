@@ -62,7 +62,7 @@ module Api
             return render json: { error: "No valid rows to import" }, status: :unprocessable_entity
           end
 
-          create_result = service.create_employees!(valid_rows, created_by: current_user)
+          create_result = service.create_employees!(valid_rows)
 
           render json: {
             created: create_result[:created],

@@ -2,6 +2,8 @@
 
 module EmployeeBulkImport
   class ImportService
+    MAX_FILE_SIZE = 10.megabytes
+
     REQUIRED_COLUMNS = %w[first_name last_name employment_type pay_rate].freeze
 
     VALID_COLUMNS = %w[
@@ -16,8 +18,9 @@ module EmployeeBulkImport
     ].freeze
 
     BOOLEAN_COLUMNS = %w[w4_step2_multiple_jobs w9_on_file].freeze
+    INTEGER_COLUMNS = %w[allowances].freeze
     NUMERIC_COLUMNS = %w[
-      pay_rate allowances additional_withholding
+      pay_rate additional_withholding
       w4_dependent_credit w4_step4a_other_income w4_step4b_deductions
       retirement_rate roth_retirement_rate
     ].freeze
@@ -40,19 +43,25 @@ module EmployeeBulkImport
 
       departments = company.departments.index_by { |d| d.name.downcase.strip }
       existing_employees = company.employees.pluck(:first_name, :last_name).map { |f, l| "#{f.downcase.strip} #{l.downcase.strip}" }.to_set
+      seen_in_file = Set.new
 
       parsed_rows = rows.drop(1).each_with_index.map do |row, idx|
-        parse_row(row, headers, idx + 2, departments, existing_employees)
+        result = parse_row(row, headers, idx + 2, departments, existing_employees, seen_in_file)
+        if result
+          name_key = "#{result[:raw]['first_name']&.downcase&.strip} #{result[:raw]['last_name']&.downcase&.strip}"
+          seen_in_file.add(name_key)
+        end
+        result
       end.compact
 
       { rows: parsed_rows, errors: @errors }
     end
 
-    def create_employees!(validated_rows, created_by: nil)
+    def create_employees!(validated_rows)
       results = { created: 0, failed: 0, errors: [] }
 
       ActiveRecord::Base.transaction do
-        validated_rows.each_with_index do |row_data, idx|
+        validated_rows.each do |row_data|
           employee = company.employees.new(row_data[:attributes])
           if employee.save
             results[:created] += 1
@@ -62,9 +71,14 @@ module EmployeeBulkImport
           end
         end
 
-        if results[:failed] > 0 && results[:created] == 0
+        if results[:failed] > 0
           raise ActiveRecord::Rollback
         end
+      end
+
+      # If rollback occurred, nothing was actually persisted
+      if results[:failed] > 0
+        results[:created] = 0
       end
 
       results
@@ -103,6 +117,12 @@ module EmployeeBulkImport
     private
 
     def read_file(file)
+      size = file.respond_to?(:size) ? file.size : File.size(file.path)
+      if size > MAX_FILE_SIZE
+        @errors << "File is too large (max #{MAX_FILE_SIZE / 1.megabyte} MB)"
+        return []
+      end
+
       filename = file.respond_to?(:original_filename) ? file.original_filename : file.path
       ext = File.extname(filename).downcase
 
@@ -152,7 +172,7 @@ module EmployeeBulkImport
       end
     end
 
-    def parse_row(row, headers, row_number, departments, existing_employees)
+    def parse_row(row, headers, row_number, departments, existing_employees, seen_in_file)
       return nil if row.nil? || row.all? { |c| c.to_s.strip.empty? }
 
       data = {}
@@ -161,11 +181,11 @@ module EmployeeBulkImport
         data[header] = row[idx].to_s.strip
       end
 
-      row_errors = validate_row_data(data, row_number)
+      row_errors = validate_row_data(data)
 
       attrs = build_attributes(data, departments)
       full_name = "#{data['first_name']&.downcase&.strip} #{data['last_name']&.downcase&.strip}"
-      duplicate = existing_employees.include?(full_name)
+      duplicate = existing_employees.include?(full_name) || seen_in_file.include?(full_name)
 
       {
         row_number: row_number,
@@ -177,7 +197,7 @@ module EmployeeBulkImport
       }
     end
 
-    def validate_row_data(data, row_number)
+    def validate_row_data(data)
       errors = []
 
       REQUIRED_COLUMNS.each do |col|
@@ -203,6 +223,11 @@ module EmployeeBulkImport
 
       if data["filing_status"].present? && !%w[single married married_separate head_of_household].include?(data["filing_status"])
         errors << "filing_status must be one of: single, married, married_separate, head_of_household"
+      end
+
+      if data["allowances"].present?
+        val = Integer(data["allowances"]) rescue nil
+        errors << "allowances must be a non-negative integer" if val.nil? || val.negative?
       end
 
       DATE_COLUMNS.each do |col|
@@ -244,6 +269,12 @@ module EmployeeBulkImport
       if attrs[:employment_type] == "contractor"
         attrs[:contractor_type] = data["contractor_type"].presence || "individual"
         attrs[:contractor_pay_type] = data["contractor_pay_type"].presence || "flat_fee"
+      end
+
+      # Integer fields (allowances)
+      INTEGER_COLUMNS.each do |col|
+        next if data[col].blank?
+        attrs[col.to_sym] = Integer(data[col]) rescue 0
       end
 
       # Numeric fields
