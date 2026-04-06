@@ -18,6 +18,7 @@ const initialFormData: EmployeeFormData = {
   date_of_birth: '',
   hire_date: '',
   employment_type: 'hourly',
+  salary_type: 'annual',
   pay_rate: 0,
   pay_frequency: 'biweekly',
   filing_status: 'single',
@@ -96,6 +97,7 @@ export function EmployeeForm() {
         date_of_birth: employee.date_of_birth || '',
         hire_date: employee.hire_date,
         employment_type: employee.employment_type,
+        salary_type: employee.salary_type || 'annual',
         pay_rate: employee.pay_rate,
         pay_frequency: employee.pay_frequency,
         filing_status: employee.filing_status,
@@ -258,7 +260,8 @@ export function EmployeeForm() {
     if (!form.last_name.trim()) {
       newErrors.last_name = ['Last name is required'];
     }
-    if (form.pay_rate <= 0) {
+    const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
+    if (!isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {
@@ -519,7 +522,7 @@ export function EmployeeForm() {
               </div>
             </div>
 
-            <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mt-4`}>
+            <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-4' : form.employment_type === 'salary' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mt-4`}>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Employment Type <span className="text-danger-600">*</span>
@@ -533,6 +536,20 @@ export function EmployeeForm() {
                   <option value="contractor">1099 Contractor</option>
                 </Select>
               </div>
+              {form.employment_type === 'salary' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Salary Type
+                  </label>
+                  <Select
+                    value={form.salary_type || 'annual'}
+                    onChange={(e) => handleChange('salary_type', e.target.value)}
+                  >
+                    <option value="annual">Fixed Annual Salary</option>
+                    <option value="variable">Variable (set each period)</option>
+                  </Select>
+                </div>
+              )}
               {form.employment_type === 'contractor' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -547,7 +564,7 @@ export function EmployeeForm() {
                   </Select>
                 </div>
               )}
-              {!supportsMultipleHourlyRates && (
+              {!supportsMultipleHourlyRates && !(form.employment_type === 'salary' && form.salary_type === 'variable') && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     {form.employment_type === 'contractor'
@@ -564,6 +581,13 @@ export function EmployeeForm() {
                   />
                   <p className="mt-1 text-xs text-gray-500">
                     {form.employment_type === 'salary' ? 'Annual salary' : form.contractor_pay_type === 'hourly' ? 'Per hour worked' : 'Amount paid each pay period'}
+                  </p>
+                </div>
+              )}
+              {form.employment_type === 'salary' && form.salary_type === 'variable' && (
+                <div className="flex items-center">
+                  <p className="text-sm text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
+                    Pay is set each pay period using the salary override field when running payroll.
                   </p>
                 </div>
               )}

@@ -122,7 +122,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
       // When user edits the SSN field, clear the server-side token so
       // handleApply sends the user's value instead of the original file value.
       if (field === 'ssn') newData._ssn_token = undefined;
-      const errors = validateRowData(newData, r.isNew);
+      const errors = validateRowData(newData);
       return { ...r, data: newData, errors, included: errors.length === 0 ? r.included : false };
     }));
   }, []);
@@ -460,7 +460,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
 
 // --- Validation (client-side mirror of backend) ---
 
-function validateRowData(data: BulkImportEmployeeData, isNew = true): string[] {
+function validateRowData(data: BulkImportEmployeeData): string[] {
   const errors: string[] = [];
   if (!data.first_name?.trim()) errors.push('first_name is required');
   if (!data.last_name?.trim()) errors.push('last_name is required');
@@ -485,6 +485,14 @@ function validateRowData(data: BulkImportEmployeeData, isNew = true): string[] {
   if (data.allowances) {
     const val = Number(data.allowances);
     if (!Number.isInteger(val) || val < 0) errors.push('allowances must be a non-negative integer');
+  }
+  if (data.retirement_rate) {
+    const val = parseFloat(data.retirement_rate);
+    if (isNaN(val) || val < 0 || val > 1) errors.push('retirement_rate must be between 0 and 1');
+  }
+  if (data.roth_retirement_rate) {
+    const val = parseFloat(data.roth_retirement_rate);
+    if (isNaN(val) || val < 0 || val > 1) errors.push('roth_retirement_rate must be between 0 and 1');
   }
   return errors;
 }

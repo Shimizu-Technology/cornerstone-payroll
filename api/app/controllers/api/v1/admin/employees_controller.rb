@@ -86,6 +86,7 @@ module Api
             :department_id,
             :job_title,
             :employment_type,
+            :salary_type,
             :pay_rate,
             :pay_frequency,
             :filing_status,
