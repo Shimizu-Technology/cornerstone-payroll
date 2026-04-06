@@ -130,7 +130,6 @@ module Api
           filing_status allowances additional_withholding
           w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
           retirement_rate roth_retirement_rate
-          department_id
           address_line1 address_line2 city state zip phone
           contractor_type contractor_pay_type business_name contractor_ein w9_on_file
           status
