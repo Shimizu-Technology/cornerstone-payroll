@@ -2,8 +2,9 @@ import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
-import type { BlobDownload, TransmittalOptions, TransmittalPreview } from '@/services/api';
+import type { BlobDownload, TransmittalOptions, TransmittalPreview, SavedTransmittal } from '@/services/api';
 import { Loader2 } from 'lucide-react';
+import { DRT } from '@/lib/constants';
 
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
@@ -72,6 +73,7 @@ function TransmittalEditorModal({
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
   const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
+  const [savedState, setSavedState] = useState<SavedTransmittal | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -88,28 +90,47 @@ function TransmittalEditorModal({
   useEffect(() => {
     if (!open || initialized) return;
     setLoadingPreview(true);
-    setPreparerName('Cornerstone Tax Services');
-    setReportList([...DEFAULT_REPORT_LIST]);
     setNewNote('');
     setNewReport('');
     transmittalApi.preview(payPeriodId).then((data) => {
       setPreview(data);
-      setCheckFirst(data.payroll_checks.first || '');
-      setCheckLast(data.payroll_checks.last || '');
-      const neNums: Record<number, string> = {};
-      data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
-      setNeCheckNumbers(neNums);
-      const autoNotes: string[] = [];
-      if (data.tax_totals.total_fica > 0) {
-        autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
+      setSavedState(data.saved_transmittal);
+
+      const saved = data.saved_transmittal;
+      if (saved) {
+        setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
+        setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
+        setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
+        setCheckFirst(saved.check_number_first || data.payroll_checks.first || '');
+        setCheckLast(saved.check_number_last || data.payroll_checks.last || '');
+        const neNums: Record<number, string> = {};
+        data.non_employee_checks.forEach(c => {
+          const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
+          neNums[c.id] = savedNum || c.check_number || '';
+        });
+        setNeCheckNumbers(neNums);
+      } else {
+        setPreparerName('Cornerstone Tax Services');
+        setReportList([...DEFAULT_REPORT_LIST]);
+        setCheckFirst(data.payroll_checks.first || '');
+        setCheckLast(data.payroll_checks.last || '');
+        const neNums: Record<number, string> = {};
+        data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
+        setNeCheckNumbers(neNums);
+        const autoNotes: string[] = [];
+        if (data.tax_totals.total_fica > 0) {
+          autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
+        }
+        if (data.tax_totals.fit > 0) {
+          autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+        }
+        autoNotes.push(...DEFAULT_NOTES);
+        setNotes(autoNotes);
       }
-      if (data.tax_totals.fit > 0) {
-        autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
-      }
-      autoNotes.push(...DEFAULT_NOTES);
-      setNotes(autoNotes);
       setInitialized(true);
     }).catch(() => {
+      setPreparerName('Cornerstone Tax Services');
+      setReportList([...DEFAULT_REPORT_LIST]);
       setNotes([...DEFAULT_NOTES]);
       setInitialized(true);
     }).finally(() => setLoadingPreview(false));
@@ -171,7 +192,20 @@ function TransmittalEditorModal({
             <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
             <span className="ml-2 text-sm text-gray-500">Loading transmittal data...</span>
           </div>
-        ) : (
+        ) : (<>
+          {savedState?.generated_at && (
+            <div className="mx-6 mt-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-sm">
+              <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-green-800">
+                Last generated: {new Date(savedState.generated_at).toLocaleDateString('en-US', {
+                  month: 'short', day: 'numeric', year: 'numeric',
+                  hour: 'numeric', minute: '2-digit'
+                })}
+              </span>
+            </div>
+          )}
           <div className="px-6 py-4 space-y-6">
             {/* Preparer Name */}
             <div>
@@ -295,6 +329,30 @@ function TransmittalEditorModal({
               </div>
             )}
 
+            {/* Guam DRT Resources */}
+            {preview && preview.tax_totals.fit > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Guam DRT Resources</label>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-3">
+                  <svg className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <div className="text-sm">
+                    <p className="font-medium text-blue-800">FIT deposit requires Form 500</p>
+                    <p className="text-blue-700 mt-0.5">
+                      <a href={DRT.FORM_500_PDF} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900 font-medium">
+                        Open Form 500 (Depository Receipt)
+                      </a>
+                      {' · '}
+                      <a href={DRT.FORMS_PAGE} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900">
+                        All DRT Forms
+                      </a>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Notes */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
@@ -393,11 +451,13 @@ function TransmittalEditorModal({
               </div>
             </div>
           </div>
-        )}
+        </>)}
 
         <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-lg">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleGenerate} disabled={loadingPreview}>Generate {targetLabel}</Button>
+          <Button onClick={handleGenerate} disabled={loadingPreview}>
+            {savedState?.generated_at ? 'Regenerate' : 'Generate'} {targetLabel}
+          </Button>
         </div>
       </div>
     </div>
@@ -548,8 +608,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     label: string;
     mode: 'preview' | 'download';
   }>({ open: false, key: null, label: '', mode: 'preview' });
+  const [savedTransmittal, setSavedTransmittal] = useState<SavedTransmittal | null>(null);
 
   const isReady = payPeriodStatus !== 'draft';
+
+  useEffect(() => {
+    if (!isReady) return;
+    transmittalApi.preview(payPeriodId).then((data) => {
+      setSavedTransmittal(data.saved_transmittal);
+    }).catch(() => { /* ignore */ });
+  }, [payPeriodId, isReady]);
 
   const needsTransmittalEditor = (key: ReportKey) => key === 'transmittalLog' || key === 'fullPrintPackage';
 
@@ -601,16 +669,40 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
-  const handleTransmittalGenerate = (options: TransmittalOptions) => {
+  const savedToOptions = (saved: SavedTransmittal): TransmittalOptions => ({
+    preparerName: saved.preparer_name || undefined,
+    notes: saved.notes?.length ? saved.notes : undefined,
+    reportList: saved.report_list || [],
+    checkNumberFirst: saved.check_number_first || undefined,
+    checkNumberLast: saved.check_number_last || undefined,
+    nonEmployeeCheckNumbers: saved.non_employee_check_numbers
+      ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
+      : undefined,
+  });
+
+  const handleReprint = async (reportKey: ReportKey, label: string) => {
+    if (!savedTransmittal) return;
+    await handlePreview(reportKey, label, savedToOptions(savedTransmittal));
+    refreshSavedState();
+  };
+
+  const refreshSavedState = () => {
+    transmittalApi.preview(payPeriodId).then((data) => {
+      setSavedTransmittal(data.saved_transmittal);
+    }).catch(() => {});
+  };
+
+  const handleTransmittalGenerate = async (options: TransmittalOptions) => {
     const { key, mode } = transmittalEditor;
     setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' });
     if (!key) return;
 
     if (mode === 'preview') {
-      handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
+      await handlePreview(key, REPORTS.find(r => r.key === key)?.label || '', options);
     } else {
-      handleDownload(key, options);
+      await handleDownload(key, options);
     }
+    refreshSavedState();
   };
 
   const handlePreviewDownload = () => {
@@ -648,53 +740,78 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {REPORTS.map(report => (
-              <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
-                <div className="mr-3 min-w-0">
-                  <p className="font-medium text-sm text-gray-900">{report.label}</p>
-                  <p className="text-xs text-gray-500 truncate">{report.description}</p>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePreview(report.key, report.label)}
-                    disabled={loading[report.key]}
-                    className="text-xs"
-                  >
-                    {loading[report.key] ? (
-                      <span className="flex items-center gap-1">
-                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        Loading...
-                      </span>
-                    ) : (
-                      <>
+            {REPORTS.map(report => {
+              const hasSaved = savedTransmittal && needsTransmittalEditor(report.key);
+              return (
+                <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
+                  <div className="mr-3 min-w-0">
+                    <p className="font-medium text-sm text-gray-900">{report.label}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {report.description}
+                      {hasSaved && savedTransmittal?.generated_at && (
+                        <span className="text-green-600 ml-1">
+                          · Last: {new Date(savedTransmittal.generated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {hasSaved && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePreview(report.key, report.label)}
+                        disabled={loading[report.key]}
+                        className="text-xs"
+                        title="Edit transmittal settings before generating"
+                      >
                         <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
-                        View
-                      </>
+                        Edit
+                      </Button>
                     )}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDownload(report.key)}
-                    disabled={loading[report.key]}
-                    className="text-xs"
-                    title="Download PDF"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                  </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => hasSaved ? handleReprint(report.key, report.label) : handlePreview(report.key, report.label)}
+                      disabled={loading[report.key]}
+                      className="text-xs"
+                    >
+                      {loading[report.key] ? (
+                        <span className="flex items-center gap-1">
+                          <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                          Loading...
+                        </span>
+                      ) : (
+                        <>
+                          <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                          View
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownload(report.key)}
+                      disabled={loading[report.key]}
+                      className="text-xs"
+                      title="Download PDF"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </Card>
