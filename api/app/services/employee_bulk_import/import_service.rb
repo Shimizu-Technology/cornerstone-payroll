@@ -8,7 +8,7 @@ module EmployeeBulkImport
 
     VALID_COLUMNS = %w[
       first_name middle_name last_name email ssn
-      date_of_birth hire_date employment_type pay_rate pay_frequency
+      date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
       filing_status allowances additional_withholding
       w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
       retirement_rate roth_retirement_rate
@@ -103,7 +103,7 @@ module EmployeeBulkImport
     def self.template_headers
       %w[
         first_name last_name middle_name email ssn
-        date_of_birth hire_date employment_type pay_rate pay_frequency
+        date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
         filing_status allowances additional_withholding
         w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
         retirement_rate roth_retirement_rate
@@ -119,7 +119,7 @@ module EmployeeBulkImport
         csv << template_headers
         csv << [
           "John", "Doe", "", "john@example.com", "123-45-6789",
-          "1990-01-15", "2024-03-01", "hourly", "15.00", "biweekly",
+          "1990-01-15", "2024-03-01", "hourly", "", "15.00", "biweekly",
           "single", "0", "0",
           "0", "false", "0", "0",
           "0", "0",
@@ -227,6 +227,10 @@ module EmployeeBulkImport
         errors << "employment_type must be one of: #{Employee::EMPLOYMENT_TYPES.join(', ')}"
       end
 
+      if data["salary_type"].present? && !Employee::SALARY_TYPES.include?(data["salary_type"])
+        errors << "salary_type must be one of: #{Employee::SALARY_TYPES.join(', ')}"
+      end
+
       if data["pay_rate"].present?
         begin
           rate = BigDecimal(data["pay_rate"])
@@ -312,6 +316,7 @@ module EmployeeBulkImport
 
       # Employment type with defaults
       attrs[:employment_type] = data["employment_type"].presence || "hourly"
+      attrs[:salary_type] = data["salary_type"].presence || "annual" if attrs[:employment_type] == "salary"
       attrs[:pay_frequency] = data["pay_frequency"].presence || company.pay_frequency
       attrs[:status] = "active"
 

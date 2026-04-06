@@ -124,7 +124,7 @@ module Api
             end
             if has_tokens
               return render json: {
-                error: "Your preview session has expired (30-minute limit). Please re-upload the file and try again."
+                error: "Your preview session has expired. Please re-upload the file and try again."
               }, status: :unprocessable_entity
             end
           end
@@ -209,6 +209,7 @@ module Api
               date_of_birth: raw["date_of_birth"],
               hire_date: raw["hire_date"],
               employment_type: raw["employment_type"],
+              salary_type: raw["salary_type"],
               pay_rate: raw["pay_rate"],
               pay_frequency: raw["pay_frequency"],
               filing_status: raw["filing_status"],
