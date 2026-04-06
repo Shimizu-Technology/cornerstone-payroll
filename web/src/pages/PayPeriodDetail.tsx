@@ -180,7 +180,7 @@ export function PayPeriodDetail() {
       (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
         const tipAmt = toNumber(item.reported_tips);
         if (tipAmt > 0) tips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
-        const loanAmt = toNumber(item.loan_deduction) || toNumber(item.loan_payment);
+        const loanAmt = toNumber(item.loan_deduction);
         if (loanAmt > 0) loans[String(item.employee_id)] = loanAmt;
       });
       setTipsMap(tips);
@@ -339,7 +339,7 @@ export function PayPeriodDetail() {
       (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
         const tipAmt = toNumber(item.reported_tips);
         if (tipAmt > 0) newTips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
-        const loanAmt = toNumber(item.loan_deduction) || toNumber(item.loan_payment);
+        const loanAmt = toNumber(item.loan_deduction);
         if (loanAmt > 0) newLoans[String(item.employee_id)] = loanAmt;
       });
       setTipsMap(newTips);
@@ -468,7 +468,6 @@ export function PayPeriodDetail() {
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
-  const payrollItemLookup = new Map(payrollItems.map((pi) => [pi.employee_id, pi]));
   const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
   const sortedPayrollItems = [...payrollItems].sort((a, b) => {
     const orderA = typeOrder[a.employment_type] ?? 1;
