@@ -263,6 +263,16 @@ module EmployeeBulkImport
         end
       end
 
+      %w[w4_dependent_credit w4_step4a_other_income w4_step4b_deductions additional_withholding].each do |col|
+        next if data[col].blank?
+        begin
+          val = BigDecimal(data[col])
+          errors << "#{col} must be >= 0" if val.negative?
+        rescue ArgumentError
+          errors << "#{col} must be a number"
+        end
+      end
+
       %w[retirement_rate roth_retirement_rate].each do |col|
         next if data[col].blank?
         begin
