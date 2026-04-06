@@ -241,6 +241,21 @@ module Api
                 payroll_item.salary_override = override_val > 0 ? override_val : nil
               end
 
+              # Apply tips from the Adjust Hours table
+              if params[:tips] && params[:tips][employee_id.to_s]
+                tip_data = params[:tips][employee_id.to_s]
+                tip_amount = (tip_data[:amount] || tip_data["amount"]).to_f
+                tip_pool = (tip_data[:pool] || tip_data["pool"]).to_s.presence
+                payroll_item.reported_tips = tip_amount > 0 ? tip_amount : 0
+                payroll_item.tip_pool = tip_pool
+              end
+
+              # Apply loan deductions from the Adjust Hours table
+              if params[:loan_deductions] && params[:loan_deductions][employee_id.to_s]
+                loan_val = params[:loan_deductions][employee_id.to_s].to_f
+                payroll_item.loan_deduction = loan_val > 0 ? loan_val : 0
+              end
+
               # Calculate payroll
               payroll_item.calculate!
               results[:success] << { employee_id: employee.id, name: employee.full_name }

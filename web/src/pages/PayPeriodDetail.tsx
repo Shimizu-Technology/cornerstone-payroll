@@ -128,6 +128,9 @@ export function PayPeriodDetail() {
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [hoursTableOpen, setHoursTableOpen] = useState(true);
+  const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
+  const [loansMap, setLoansMap] = useState<Record<string, number>>({});
+  const [showTipsLoans, setShowTipsLoans] = useState(false);
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -171,6 +174,18 @@ export function PayPeriodDetail() {
         }
       });
       setSalaryOverrideMap(overrides);
+      // Initialize tips/loans maps from existing payroll items
+      const tips: Record<string, { amount: number; pool: string }> = {};
+      const loans: Record<string, number> = {};
+      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+        const tipAmt = toNumber(item.reported_tips);
+        if (tipAmt > 0) tips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
+        const loanAmt = toNumber(item.loan_deduction) || toNumber(item.loan_payment);
+        if (loanAmt > 0) loans[String(item.employee_id)] = loanAmt;
+      });
+      setTipsMap(tips);
+      setLoansMap(loans);
+      if (Object.keys(tips).length > 0 || Object.keys(loans).length > 0) setShowTipsLoans(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
@@ -227,6 +242,17 @@ export function PayPeriodDetail() {
     setSalaryOverrideMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, value) }));
   };
 
+  const updateTip = (employeeId: number, amount: number, pool?: string) => {
+    setTipsMap((prev) => {
+      const existing = prev[String(employeeId)] || { amount: 0, pool: '' };
+      return { ...prev, [String(employeeId)]: { amount: Math.max(0, amount), pool: pool ?? existing.pool } };
+    });
+  };
+
+  const updateLoan = (employeeId: number, amount: number) => {
+    setLoansMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, amount) }));
+  };
+
   const handleRunPayroll = async () => {
     if (!payPeriod) return;
     try {
@@ -272,6 +298,18 @@ export function PayPeriodDetail() {
         if (amount > 0) salary_overrides[empId] = amount;
       });
 
+      // Build tips payload
+      const tips: Record<string, { amount: number; pool: string }> = {};
+      Object.entries(tipsMap).forEach(([empId, data]) => {
+        if (data.amount > 0) tips[empId] = data;
+      });
+
+      // Build loan deductions payload
+      const loan_deductions: Record<string, number> = {};
+      Object.entries(loansMap).forEach(([empId, amount]) => {
+        if (amount > 0) loan_deductions[empId] = amount;
+      });
+
       // Include any manually-added employees who were missing from the import
       const employee_ids = additionalEmployeeIds.size > 0
         ? [...new Set([...payrollItems.map(pi => pi.employee_id), ...additionalEmployeeIds])]
@@ -280,6 +318,8 @@ export function PayPeriodDetail() {
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
+        ...(Object.keys(tips).length > 0 ? { tips } : {}),
+        ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions } : {}),
         ...(employee_ids ? { employee_ids } : {}),
       });
       setPayPeriod(response.pay_period);
@@ -293,6 +333,17 @@ export function PayPeriodDetail() {
         }
       });
       setSalaryOverrideMap(newOverrides);
+      // Refresh tips/loans maps from results
+      const newTips: Record<string, { amount: number; pool: string }> = {};
+      const newLoans: Record<string, number> = {};
+      (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+        const tipAmt = toNumber(item.reported_tips);
+        if (tipAmt > 0) newTips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
+        const loanAmt = toNumber(item.loan_deduction) || toNumber(item.loan_payment);
+        if (loanAmt > 0) newLoans[String(item.employee_id)] = loanAmt;
+      });
+      setTipsMap(newTips);
+      setLoansMap(newLoans);
       setAdditionalEmployeeIds(new Set());
 
       if (response.results.errors.length > 0) {
@@ -414,8 +465,7 @@ export function PayPeriodDetail() {
   const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
 
-  const draftHasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
-  const draftHasLoans = payrollItems.some(i => toNumber(i.loan_deduction) > 0 || toNumber(i.loan_payment) > 0);
+  // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
   const payrollItemLookup = new Map(payrollItems.map((pi) => [pi.employee_id, pi]));
@@ -651,39 +701,51 @@ export function PayPeriodDetail() {
                   </div>
                 </div>
                 {hoursTableOpen && (
-                  <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="text"
-                      placeholder="Search employees..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
+                  <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setShowTipsLoans(prev => !prev)}
+                      className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                        showTipsLoans
+                          ? 'bg-blue-100 text-blue-700 border-blue-300'
+                          : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                      }`}
+                    >
+                      {showTipsLoans ? 'Tips & Loans ✓' : '+ Tips & Loans'}
+                    </button>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Search employees..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-48 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                      </svg>
+                    </div>
                   </div>
                 )}
               </div>
             </button>
             {hoursTableOpen && (
             <div className="overflow-x-auto">
-              <Table style={{ minWidth: 1380 + (draftHasTips ? 110 : 0) + (draftHasLoans ? 110 : 0) }}>
+              <Table style={{ minWidth: 1380 + (showTipsLoans ? 280 : 0) }}>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[220px]">Employee</TableHead>
                     <TableHead className="w-[300px]">Rate</TableHead>
                     <TableHead className="w-[300px] text-center">Regular Hours</TableHead>
                     <TableHead className="w-[300px] text-center">Overtime Hours</TableHead>
-                    {draftHasTips && <TableHead className="w-[110px] text-right">Tips</TableHead>}
-                    {draftHasLoans && <TableHead className="w-[110px] text-right">Loan Ded.</TableHead>}
+                    {showTipsLoans && <TableHead className="w-[140px] text-center">Tips</TableHead>}
+                    {showTipsLoans && <TableHead className="w-[110px] text-center">Loan Ded.</TableHead>}
                     <TableHead className="w-[160px] text-right">Est. Gross</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(() => {
                     const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-                    const draftDividerCols = 5 + (draftHasTips ? 1 : 0) + (draftHasLoans ? 1 : 0);
+                    const draftDividerCols = 5 + (showTipsLoans ? 2 : 0);
                     const filtered = isCalculated
                       ? employees.filter((emp) => payrollEmployeeIds.has(emp.id) || additionalEmployeeIds.has(emp.id))
                       : employees;
@@ -853,33 +915,45 @@ export function PayPeriodDetail() {
                           )}
                         </TableCell>
                         )}
-                        {draftHasTips && (
-                        <TableCell className="text-right align-top">
-                          {(() => {
-                            const pi = payrollItemLookup.get(emp.id);
-                            const tips = pi ? toNumber(pi.reported_tips) : 0;
-                            if (tips === 0) return <span className="text-gray-300">—</span>;
-                            return (
-                              <span className="text-sm">
-                                {formatCurrency(tips)}
-                                {pi?.tip_pool && (
-                                  <span className={`ml-1 text-[10px] font-medium uppercase ${pi.tip_pool === 'boh' ? 'text-amber-600' : 'text-blue-600'}`}>
-                                    {pi.tip_pool}
-                                  </span>
-                                )}
-                              </span>
-                            );
-                          })()}
+                        {showTipsLoans && (
+                        <TableCell className="text-center align-top">
+                          <div className="flex items-center gap-1 justify-center">
+                            <span className="text-xs text-gray-400">$</span>
+                            <input
+                              type="number"
+                              value={tipsMap[String(emp.id)]?.amount || ''}
+                              onChange={(e) => updateTip(emp.id, parseFloat(e.target.value) || 0)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              min={0}
+                              step={0.01}
+                            />
+                            <select
+                              value={tipsMap[String(emp.id)]?.pool || ''}
+                              onChange={(e) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, e.target.value)}
+                              className="border border-gray-300 rounded-md px-0.5 py-1.5 text-[10px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                            >
+                              <option value="">—</option>
+                              <option value="foh">FOH</option>
+                              <option value="boh">BOH</option>
+                            </select>
+                          </div>
                         </TableCell>
                         )}
-                        {draftHasLoans && (
-                        <TableCell className="text-right align-top">
-                          {(() => {
-                            const pi = payrollItemLookup.get(emp.id);
-                            const loan = pi ? (toNumber(pi.loan_deduction) || toNumber(pi.loan_payment)) : 0;
-                            if (loan === 0) return <span className="text-gray-300">—</span>;
-                            return <span className="text-sm">{formatCurrency(loan)}</span>;
-                          })()}
+                        {showTipsLoans && (
+                        <TableCell className="text-center align-top">
+                          <div className="flex items-center gap-1 justify-center">
+                            <span className="text-xs text-gray-400">$</span>
+                            <input
+                              type="number"
+                              value={loansMap[String(emp.id)] || ''}
+                              onChange={(e) => updateLoan(emp.id, parseFloat(e.target.value) || 0)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              min={0}
+                              step={0.01}
+                            />
+                          </div>
                         </TableCell>
                         )}
                         <TableCell className="text-right font-medium text-gray-700">
