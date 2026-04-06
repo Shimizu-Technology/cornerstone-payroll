@@ -54,7 +54,7 @@ module Api
             Rails.cache.write(
               "bulk_import_ssn:#{preview_id}",
               ssn_cache,
-              expires_in: 30.minutes
+              expires_in: 2.hours
             )
           end
 
@@ -113,6 +113,20 @@ module Api
           ssn_cache = nil
           if params[:preview_id].present?
             ssn_cache = Rails.cache.read("bulk_import_ssn:#{params[:preview_id]}")
+          end
+
+          # If any row references an SSN token but the cache has expired,
+          # reject the request so SSNs aren't silently dropped.
+          if ssn_cache.nil?
+            has_tokens = employees_data.any? do |emp|
+              h = emp.respond_to?(:to_unsafe_h) ? emp.to_unsafe_h : emp.to_h
+              h["_ssn_token"].present?
+            end
+            if has_tokens
+              return render json: {
+                error: "Your preview session has expired (30-minute limit). Please re-upload the file and try again."
+              }, status: :unprocessable_entity
+            end
           end
 
           company = Company.find(current_company_id)
