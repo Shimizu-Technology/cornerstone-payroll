@@ -445,6 +445,8 @@ module Api
           er_med     = items.sum(:employer_medicare_tax)
           total_fica = emp_ss + er_ss + emp_med + er_med
 
+          saved = pp.transmittal
+
           render json: {
             payroll_checks: {
               count: check_numbers.size,
@@ -470,7 +472,19 @@ module Api
               employer_medicare: er_med.to_f,
               total_fica: total_fica.to_f,
               total_drt_deposit: (total_fit + total_fica).to_f
-            }
+            },
+            saved_transmittal: saved ? {
+              preparer_name: saved.preparer_name,
+              notes: saved.notes,
+              report_list: saved.report_list,
+              check_number_first: saved.check_number_first,
+              check_number_last: saved.check_number_last,
+              non_employee_check_numbers: saved.non_employee_check_numbers,
+              generated_at: saved.generated_at&.iso8601,
+              updated_by_id: saved.updated_by_id,
+              created_at: saved.created_at.iso8601,
+              updated_at: saved.updated_at.iso8601
+            } : nil
           }
         end
 
@@ -480,6 +494,7 @@ module Api
           return unless pp
 
           options = transmittal_options
+          save_transmittal_state!(pp, options)
           generator = TransmittalLogPdfGenerator.new(pp, options)
           send_data generator.generate,
             filename: generator.filename,
@@ -495,9 +510,11 @@ module Api
 
           pdf = CombinePDF.new
           company = pp.company
+          t_options = transmittal_options
+          save_transmittal_state!(pp, t_options)
 
           generators = [
-            TransmittalLogPdfGenerator.new(pp, transmittal_options),
+            TransmittalLogPdfGenerator.new(pp, t_options),
             PayrollSummaryByEmployeePdfGenerator.new(pp),
             DeductionsContributionsReportPdfGenerator.new(pp),
             PaycheckHistoryPdfGenerator.new(pp),
@@ -555,6 +572,26 @@ module Api
             opts[:non_employee_check_numbers] = params[:non_employee_check_numbers].to_unsafe_h.transform_keys(&:to_i)
           end
           opts
+        end
+
+        def save_transmittal_state!(pay_period, options)
+          transmittal = pay_period.transmittal || pay_period.build_transmittal(
+            company_id: pay_period.company_id,
+            created_by_id: current_user&.id
+          )
+          transmittal.assign_attributes(
+            preparer_name: options[:preparer_name],
+            notes: options[:notes] || [],
+            report_list: options.key?(:report_list) ? options[:report_list] : [],
+            check_number_first: options[:check_number_first],
+            check_number_last: options[:check_number_last],
+            non_employee_check_numbers: options[:non_employee_check_numbers] || {},
+            generated_at: Time.current,
+            updated_by_id: current_user&.id
+          )
+          transmittal.save!
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          Rails.logger.warn("[Transmittal] Failed to save state for pay_period=#{pay_period.id}: #{e.message}")
         end
 
         def find_pay_period_for_report
