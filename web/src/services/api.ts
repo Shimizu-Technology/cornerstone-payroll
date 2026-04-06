@@ -1037,6 +1037,19 @@ export interface TransmittalOptions {
   nonEmployeeCheckNumbers?: Record<number, string>;
 }
 
+export interface SavedTransmittal {
+  preparer_name: string | null;
+  notes: string[];
+  report_list: string[];
+  check_number_first: string | null;
+  check_number_last: string | null;
+  non_employee_check_numbers: Record<string, string>;
+  generated_at: string | null;
+  updated_by_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface TransmittalPreview {
   payroll_checks: {
     count: number;
@@ -1061,6 +1074,7 @@ export interface TransmittalPreview {
     total_fica: number;
     total_drt_deposit: number;
   };
+  saved_transmittal: SavedTransmittal | null;
 }
 
 export const transmittalApi = {

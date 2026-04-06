@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_06_015526) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -578,6 +578,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
     t.index ["pay_period_id"], name: "index_timecards_on_pay_period_id"
   end
 
+  create_table "transmittals", force: :cascade do |t|
+    t.string "check_number_first"
+    t.string "check_number_last"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "generated_at"
+    t.jsonb "non_employee_check_numbers", default: {}
+    t.jsonb "notes", default: []
+    t.bigint "pay_period_id", null: false
+    t.string "preparer_name"
+    t.jsonb "report_list", default: []
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["company_id"], name: "index_transmittals_on_company_id"
+    t.index ["created_by_id"], name: "index_transmittals_on_created_by_id"
+    t.index ["pay_period_id"], name: "index_transmittals_on_pay_period_id", unique: true
+    t.index ["updated_by_id"], name: "index_transmittals_on_updated_by_id"
+  end
+
   create_table "user_invitations", force: :cascade do |t|
     t.datetime "accepted_at"
     t.bigint "company_id", null: false
@@ -698,6 +718,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_31_000548) do
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
   add_foreign_key "timecards", "companies"
   add_foreign_key "timecards", "pay_periods"
+  add_foreign_key "transmittals", "companies"
+  add_foreign_key "transmittals", "pay_periods"
+  add_foreign_key "transmittals", "users", column: "created_by_id"
+  add_foreign_key "transmittals", "users", column: "updated_by_id"
   add_foreign_key "user_invitations", "companies"
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_sessions", "users"
