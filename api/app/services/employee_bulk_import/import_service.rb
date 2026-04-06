@@ -166,7 +166,7 @@ module EmployeeBulkImport
     def read_excel(file)
       require "roo"
       path = file.respond_to?(:tempfile) ? file.tempfile.path : file.path
-      spreadsheet = Roo::Excelx.new(path)
+      spreadsheet = Roo::Spreadsheet.open(path)
       sheet = spreadsheet.sheet(0)
       (sheet.first_row..sheet.last_row).map { |i| sheet.row(i).map { |c| c.to_s.strip } }
     end
