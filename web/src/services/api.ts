@@ -337,29 +337,46 @@ export const employeesApi = {
 };
 
 // Employee Bulk Import
+export interface BulkImportEmployeeData {
+  first_name: string;
+  last_name: string;
+  middle_name: string | null;
+  email: string | null;
+  ssn: string | null;
+  date_of_birth: string | null;
+  hire_date: string | null;
+  employment_type: string;
+  pay_rate: string;
+  pay_frequency: string | null;
+  filing_status: string | null;
+  allowances: string | null;
+  additional_withholding: string | null;
+  w4_dependent_credit: string | null;
+  w4_step2_multiple_jobs: string | null;
+  w4_step4a_other_income: string | null;
+  w4_step4b_deductions: string | null;
+  retirement_rate: string | null;
+  roth_retirement_rate: string | null;
+  department: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  contractor_type: string | null;
+  contractor_pay_type: string | null;
+  business_name: string | null;
+  contractor_ein: string | null;
+  w9_on_file: string | null;
+}
+
 export interface BulkImportPreviewRow {
   row_number: number;
-  data: {
-    first_name: string;
-    last_name: string;
-    middle_name: string | null;
-    email: string | null;
-    ssn: string | null;
-    date_of_birth: string | null;
-    hire_date: string | null;
-    employment_type: string;
-    pay_rate: string;
-    pay_frequency: string | null;
-    filing_status: string | null;
-    department: string | null;
-    address_line1: string | null;
-    city: string | null;
-    state: string | null;
-    zip: string | null;
-    phone: string | null;
-  };
+  data: BulkImportEmployeeData;
   valid: boolean;
   duplicate: boolean;
+  new_department: boolean;
   errors: string[];
 }
 
@@ -403,6 +420,8 @@ export const employeeBulkImportApi = {
     skipRows.forEach(r => formData.append('skip_rows[]', String(r)));
     return api.postForm<BulkImportApplyResult>('/admin/employee_bulk_imports/apply', formData);
   },
+  applyJson: (employees: Record<string, unknown>[]): Promise<BulkImportApplyResult> =>
+    api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees }),
 };
 
 export const employeeWageRatesApi = {
