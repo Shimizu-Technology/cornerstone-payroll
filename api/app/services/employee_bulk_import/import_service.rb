@@ -61,8 +61,23 @@ module EmployeeBulkImport
       results = { created: 0, failed: 0, errors: [] }
 
       ActiveRecord::Base.transaction do
+        dept_cache = company.departments.index_by { |d| d.name.downcase.strip }
+
         validated_rows.each do |row_data|
-          employee = company.employees.new(row_data[:attributes])
+          attrs = row_data[:attributes].dup
+          dept_name = attrs.delete(:_department_name)
+
+          if dept_name.present? && attrs[:department_id].blank?
+            dept_key = dept_name.downcase.strip
+            dept = dept_cache[dept_key] || begin
+              d = company.departments.create!(name: dept_name)
+              dept_cache[dept_key] = d
+              d
+            end
+            attrs[:department_id] = dept.id
+          end
+
+          employee = company.employees.new(attrs)
           if employee.save
             results[:created] += 1
           else
@@ -76,7 +91,6 @@ module EmployeeBulkImport
         end
       end
 
-      # If rollback occurred, nothing was actually persisted
       if results[:failed] > 0
         results[:created] = 0
       end
@@ -309,8 +323,10 @@ module EmployeeBulkImport
 
       # Department lookup by name
       if data["department"].present?
-        dept = departments[data["department"].downcase.strip]
+        dept_key = data["department"].downcase.strip
+        dept = departments[dept_key]
         attrs[:department_id] = dept.id if dept
+        attrs[:_department_name] = data["department"].strip
       end
 
       attrs
