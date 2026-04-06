@@ -230,6 +230,18 @@ module EmployeeBulkImport
         errors << "allowances must be a non-negative integer" if val.nil? || val.negative?
       end
 
+      %w[retirement_rate roth_retirement_rate].each do |col|
+        next if data[col].blank?
+        begin
+          val = BigDecimal(data[col])
+          unless val >= 0 && val <= 1
+            errors << "#{col} must be between 0 and 1 (e.g. 0.05 for 5%)"
+          end
+        rescue ArgumentError
+          errors << "#{col} must be a number between 0 and 1"
+        end
+      end
+
       DATE_COLUMNS.each do |col|
         next if data[col].blank?
         begin
