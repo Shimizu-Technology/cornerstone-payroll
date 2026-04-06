@@ -613,6 +613,17 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
                   { value: 'contractor', label: 'Contractor' },
                 ]}
               />
+              {row.data.employment_type === 'salary' && (
+                <SelectField
+                  label="Salary Type"
+                  value={row.data.salary_type}
+                  onChange={v => onUpdateField('salary_type', v)}
+                  options={[
+                    { value: 'annual', label: 'Annual (fixed)' },
+                    { value: 'variable', label: 'Variable (per period)' },
+                  ]}
+                />
+              )}
               <Field label="Pay Rate *" value={row.data.pay_rate} onChange={v => onUpdateField('pay_rate', v)} prefix="$" />
               <SelectField
                 label="Pay Frequency"

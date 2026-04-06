@@ -71,38 +71,6 @@ module Api
           }
         end
 
-        # POST /api/v1/admin/employee_bulk_imports/apply
-        def apply
-          file = params[:file]
-          skip_rows = Array(params[:skip_rows]).map(&:to_i).to_set
-
-          unless file
-            return render json: { error: "No file uploaded" }, status: :unprocessable_entity
-          end
-
-          company = Company.find(current_company_id)
-          service = EmployeeBulkImport::ImportService.new(company)
-          result = service.parse(file)
-
-          if result[:errors].any?
-            return render json: { error: result[:errors].join("; ") }, status: :unprocessable_entity
-          end
-
-          valid_rows = result[:rows].select { |r| r[:valid] && !skip_rows.include?(r[:row_number]) }
-
-          if valid_rows.empty?
-            return render json: { error: "No valid rows to import" }, status: :unprocessable_entity
-          end
-
-          create_result = service.create_employees!(valid_rows)
-
-          render json: {
-            created: create_result[:created],
-            failed: create_result[:failed],
-            errors: create_result[:errors]
-          }
-        end
-
         # POST /api/v1/admin/employee_bulk_imports/apply_json
         def apply_json
           employees_data = params[:employees]
