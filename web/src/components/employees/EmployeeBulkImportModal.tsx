@@ -176,6 +176,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
           middle_name: d.middle_name || undefined,
           email: d.email || undefined,
           employment_type: d.employment_type || 'hourly',
+          salary_type: d.employment_type === 'salary' ? (d.salary_type || 'annual') : undefined,
           pay_rate: d.pay_rate,
           pay_frequency: d.pay_frequency || 'biweekly',
           status: 'active',

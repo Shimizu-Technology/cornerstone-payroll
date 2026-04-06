@@ -235,6 +235,12 @@ module Api
                 end
               end
 
+              # Apply salary override for variable-salary employees
+              if params[:salary_overrides] && params[:salary_overrides][employee_id.to_s]
+                override_val = params[:salary_overrides][employee_id.to_s].to_f
+                payroll_item.salary_override = override_val > 0 ? override_val : nil
+              end
+
               # Calculate payroll
               payroll_item.calculate!
               results[:success] << { employee_id: employee.id, name: employee.full_name }
@@ -628,6 +634,8 @@ module Api
             check_printed_at: item.check_printed_at,
             check_print_count: item.check_print_count,
             check_status: item.check_status,
+            loan_deduction: item.loan_deduction,
+            tip_pool: item.tip_pool,
             import_source: item.import_source,
             voided: item.voided,
             voided_at: item.voided_at,
