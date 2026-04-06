@@ -332,7 +332,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
                   <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
                   <span className="text-blue-800">
                     <strong>New departments will be created:</strong>{' '}
-                    {allDepartments.join(', ')}
+                    {newDepartments.join(', ')}
                   </span>
                 </div>
               )}
