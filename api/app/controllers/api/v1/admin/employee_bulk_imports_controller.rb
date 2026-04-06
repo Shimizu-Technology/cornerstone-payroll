@@ -151,6 +151,7 @@ module Api
               middle_name: raw["middle_name"],
               email: raw["email"],
               ssn: raw["ssn"].present? ? "***-**-#{raw['ssn'].gsub(/\D/, '').last(4)}" : nil,
+              _ssn_raw: raw["ssn"].present? ? raw["ssn"].gsub(/\D/, "") : nil,
               date_of_birth: raw["date_of_birth"],
               hire_date: raw["hire_date"],
               employment_type: raw["employment_type"],

@@ -321,9 +321,11 @@ export const employeesApi = {
     company_id?: number; 
     status?: string; 
     department_id?: number;
+    employment_type?: string;
     search?: string;
     page?: number; 
     per_page?: number;
+    group_by?: string;
   }) =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params),
   get: (id: number) =>
@@ -343,6 +345,7 @@ export interface BulkImportEmployeeData {
   middle_name: string | null;
   email: string | null;
   ssn: string | null;
+  _ssn_raw?: string | null;
   date_of_birth: string | null;
   hire_date: string | null;
   employment_type: string;
