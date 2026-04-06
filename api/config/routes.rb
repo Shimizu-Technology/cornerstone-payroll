@@ -42,6 +42,7 @@ Rails.application.routes.draw do
         get  "employee_bulk_imports/template", to: "employee_bulk_imports#template"
         post "employee_bulk_imports/preview",  to: "employee_bulk_imports#preview"
         post "employee_bulk_imports/apply",    to: "employee_bulk_imports#apply"
+        post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
         resources :departments, only: [ :index, :create, :update ]
 
         resources :pay_periods do
