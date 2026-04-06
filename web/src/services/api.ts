@@ -418,12 +418,6 @@ export const employeeBulkImportApi = {
     formData.append('file', file);
     return api.postForm<BulkImportPreviewResult>('/admin/employee_bulk_imports/preview', formData);
   },
-  apply: (file: File, skipRows: number[] = []): Promise<BulkImportApplyResult> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    skipRows.forEach(r => formData.append('skip_rows[]', String(r)));
-    return api.postForm<BulkImportApplyResult>('/admin/employee_bulk_imports/apply', formData);
-  },
   applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
     api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
 };

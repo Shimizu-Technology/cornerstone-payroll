@@ -384,7 +384,7 @@ function EmployeeTableRow({
             </div>
           ) : (
             <span className="font-medium text-gray-900">
-              {employee.employment_type === 'salary' && employee.pay_rate === 0
+              {employee.employment_type === 'salary' && (employee.salary_type === 'variable' || employee.pay_rate === 0)
                 ? 'Variable'
                 : employee.employment_type === 'hourly'
                 ? `${formatCurrency(employee.pay_rate)}/hr`
