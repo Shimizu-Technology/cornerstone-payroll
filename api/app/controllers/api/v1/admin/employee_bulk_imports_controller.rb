@@ -157,7 +157,7 @@ module Api
         private
 
         PERMITTED_ATTRS = %i[
-          first_name middle_name last_name email ssn_encrypted
+          first_name middle_name last_name email
           date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
           filing_status allowances additional_withholding
           w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions

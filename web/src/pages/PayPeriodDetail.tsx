@@ -118,6 +118,7 @@ export function PayPeriodDetail() {
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [hoursMap, setHoursMap] = useState<Record<string, HoursEntry>>({});
+  const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -159,6 +160,14 @@ export function PayPeriodDetail() {
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
+      // Initialize salary override map from existing payroll items
+      const overrides: Record<string, number> = {};
+      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+        if (item.salary_override && toNumber(item.salary_override) > 0) {
+          overrides[String(item.employee_id)] = toNumber(item.salary_override);
+        }
+      });
+      setSalaryOverrideMap(overrides);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
@@ -211,6 +220,10 @@ export function PayPeriodDetail() {
     });
   };
 
+  const updateSalaryOverride = (employeeId: number, value: number) => {
+    setSalaryOverrideMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, value) }));
+  };
+
   const handleRunPayroll = async () => {
     if (!payPeriod) return;
     try {
@@ -250,12 +263,27 @@ export function PayPeriodDetail() {
           : { regular: entry.regular, overtime: entry.overtime };
       });
 
+      // Build salary overrides payload for variable salary employees
+      const salary_overrides: Record<string, number> = {};
+      Object.entries(salaryOverrideMap).forEach(([empId, amount]) => {
+        if (amount > 0) salary_overrides[empId] = amount;
+      });
+
       const response = await payPeriodsApi.runPayroll(payPeriod.id, {
         hours,
+        ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
       });
       setPayPeriod(response.pay_period);
       setPayrollItems(response.pay_period.payroll_items || []);
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
+      // Refresh salary override map from results
+      const newOverrides: Record<string, number> = {};
+      (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
+        if (item.salary_override && toNumber(item.salary_override) > 0) {
+          newOverrides[String(item.employee_id)] = toNumber(item.salary_override);
+        }
+      });
+      setSalaryOverrideMap(newOverrides);
 
       if (response.results.errors.length > 0) {
         setError(
@@ -534,6 +562,32 @@ export function PayPeriodDetail() {
           </div>
         )}
 
+        {/* Missing Employees Warning */}
+        {isCalculated && (() => {
+          const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
+          const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id));
+          if (missingEmployees.length === 0) return null;
+          return (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <p className="font-medium text-amber-800">
+                {missingEmployees.length} active employee{missingEmployees.length !== 1 ? 's' : ''} not included in this payroll:
+              </p>
+              <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
+                {missingEmployees.map((emp) => (
+                  <li key={emp.id}>
+                    {emp.first_name} {emp.last_name}
+                    <span className="text-amber-500 ml-1">({emp.employment_type})</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-amber-600">
+                These employees were not in the imported payroll data. If they should be paid this period,
+                add them manually or re-import with their data included.
+              </p>
+            </div>
+          );
+        })()}
+
         {/* Hours Input (Draft Mode) */}
         {(isDraft || isCalculated) && (
           <Card>
@@ -580,8 +634,12 @@ export function PayPeriodDetail() {
                     const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
                     const activeWageRates = (hours.wage_rates || []).filter((rate) => rate.active !== false);
                     const hasMultiRate = (emp.employment_type === 'hourly' || isContractorHourly) && activeWageRates.length > 1;
+                    const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
                     const noHoursType = emp.employment_type === 'salary' || isContractorFlat;
-                    const estGross = emp.employment_type === 'salary'
+                    const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
+                    const estGross = isVariableSalary
+                      ? salaryOverride
+                      : emp.employment_type === 'salary'
                       ? payRate / 26
                       : isContractorFlat
                       ? payRate
@@ -612,7 +670,9 @@ export function PayPeriodDetail() {
                           </div>
                         </TableCell>
                         <TableCell className="text-gray-700">
-                          {emp.employment_type === 'salary' ? (
+                          {isVariableSalary ? (
+                            <span className="text-indigo-600 font-medium">Variable</span>
+                          ) : emp.employment_type === 'salary' ? (
                             `$${(payRate / 26).toFixed(2)}/period`
                           ) : isContractorFlat ? (
                             `$${payRate.toFixed(2)}/period`
@@ -629,8 +689,21 @@ export function PayPeriodDetail() {
                             `$${payRate.toFixed(2)}/hr`
                           )}
                         </TableCell>
-                        <TableCell className="text-center align-top">
-                          {hasMultiRate ? (
+                        <TableCell className="text-center align-top" colSpan={isVariableSalary ? 2 : 1}>
+                          {isVariableSalary ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <span className="text-xs text-gray-500">Pay this period: $</span>
+                              <input
+                                type="number"
+                                value={salaryOverride || ''}
+                                onChange={(e) => updateSalaryOverride(emp.id, parseFloat(e.target.value) || 0)}
+                                placeholder="0.00"
+                                className="w-28 text-center border border-indigo-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-indigo-50/50"
+                                min={0}
+                                step={0.01}
+                              />
+                            </div>
+                          ) : hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map((rate, index) => (
                                 <div key={`${emp.id}-${rate.label}-regular`} className="grid grid-cols-[12rem_5rem] items-center gap-3">
@@ -663,6 +736,7 @@ export function PayPeriodDetail() {
                             />
                           )}
                         </TableCell>
+                        {!isVariableSalary && (
                         <TableCell className="text-center align-top">
                           {hasMultiRate ? (
                             <div className="space-y-2">
@@ -697,6 +771,7 @@ export function PayPeriodDetail() {
                             />
                           )}
                         </TableCell>
+                        )}
                         <TableCell className="text-right font-medium text-gray-700">
                           {formatCurrency(estGross)}
                         </TableCell>
@@ -728,6 +803,8 @@ export function PayPeriodDetail() {
                     <TableHead className="text-right">Hours</TableHead>
                     <TableHead className="text-right">Rate</TableHead>
                     <TableHead className="text-right">Gross</TableHead>
+                    <TableHead className="text-right">Tips</TableHead>
+                    <TableHead className="text-right">Loan Ded.</TableHead>
                     <TableHead className="text-right">FIT</TableHead>
                     <TableHead className="text-right">Addtl W/H</TableHead>
                     <TableHead className="text-right">SS (6.2%)</TableHead>
@@ -756,21 +833,21 @@ export function PayPeriodDetail() {
                       <Fragment key={item.id}>
                         {showSalaryDivider && (
                           <TableRow className="bg-indigo-50">
-                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
                               Salary Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showHourlyDivider && (
                           <TableRow className="bg-gray-100">
-                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                               Hourly Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showContractorDivider && (
                           <TableRow className="bg-emerald-50">
-                            <TableCell colSpan={isCalculated ? 11 : 10} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                            <TableCell colSpan={isCalculated ? 14 : 13} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
                               1099 Contractors
                             </TableCell>
                           </TableRow>
@@ -879,6 +956,27 @@ export function PayPeriodDetail() {
                             })()}
                           </TableCell>
                           <TableCell className="text-right font-medium">{formatCurrency(toNumber(item.gross_pay))}</TableCell>
+                          <TableCell className="text-right">
+                            {toNumber(item.reported_tips) > 0 ? (
+                              <span>
+                                {formatCurrency(toNumber(item.reported_tips))}
+                                {item.tip_pool && (
+                                  <span className={`ml-1 text-[10px] font-medium uppercase ${item.tip_pool === 'boh' ? 'text-amber-600' : 'text-blue-600'}`}>
+                                    {item.tip_pool}
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {toNumber(item.loan_payment) > 0 ? (
+                              formatCurrency(toNumber(item.loan_payment))
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right text-red-600">
                             {formatCurrency(toNumber(item.withholding_tax))}
                             {item.withholding_tax_override != null && (
@@ -907,16 +1005,24 @@ export function PayPeriodDetail() {
                     );
                   })}
                   {/* Totals */}
-                  <TableRow className="bg-gray-50 font-bold border-t-2">
-                    <TableCell colSpan={3}>Totals ({payrollItems.length} employees)</TableCell>
-                    <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
-                    <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
-                    <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>
-                    <TableCell className="text-right text-red-600">{formatCurrency(totalSS)}</TableCell>
-                    <TableCell className="text-right text-red-600">{formatCurrency(totalMedicare)}</TableCell>
-                    <TableCell className="text-right text-red-600">{formatCurrency(totalDeductions)}</TableCell>
-                    <TableCell className="text-right text-green-600">{formatCurrency(totalNet)}</TableCell>
-                  </TableRow>
+                  {(() => {
+                    const totalTips = payrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
+                    const totalLoans = payrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
+                    return (
+                      <TableRow className="bg-gray-50 font-bold border-t-2">
+                        <TableCell colSpan={3}>Totals ({payrollItems.length} employees)</TableCell>
+                        <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
+                        <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>
+                        <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>
+                        <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
+                        <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>
+                        <TableCell className="text-right text-red-600">{formatCurrency(totalSS)}</TableCell>
+                        <TableCell className="text-right text-red-600">{formatCurrency(totalMedicare)}</TableCell>
+                        <TableCell className="text-right text-red-600">{formatCurrency(totalDeductions)}</TableCell>
+                        <TableCell className="text-right text-green-600">{formatCurrency(totalNet)}</TableCell>
+                      </TableRow>
+                    );
+                  })()}
                 </TableBody>
               </Table>
             </div>
