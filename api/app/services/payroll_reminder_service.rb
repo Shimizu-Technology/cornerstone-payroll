@@ -143,7 +143,6 @@ class PayrollReminderService
     rescue ActiveRecord::RecordNotUnique
       Rails.logger.info("[PayrollReminder] Duplicate #{reminder_type} skipped for company=#{company.id} pay_period=#{pay_period.id}")
     rescue StandardError => e
-      log&.destroy
       Rails.logger.error("[PayrollReminder] Failed #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}: #{e.class} #{e.message}")
     end
 
@@ -167,7 +166,6 @@ class PayrollReminderService
     rescue ActiveRecord::RecordNotUnique
       Rails.logger.info("[PayrollReminder] Duplicate create_payroll skipped for company=#{company.id} expected_pay_date=#{expected[:pay_date]}")
     rescue StandardError => e
-      log&.destroy
       Rails.logger.error("[PayrollReminder] Failed create_payroll for company=#{company.id}: #{e.class} #{e.message}")
     end
 
