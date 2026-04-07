@@ -243,6 +243,14 @@ RSpec.describe PayrollReminderService do
       expect(result[:pay_date]).to eq(Date.new(2026, 5, 5))
     end
 
+    it "calculates semimonthly correctly (second half → next month first half)" do
+      last = build(:pay_period, start_date: Date.new(2026, 4, 16), end_date: Date.new(2026, 4, 30), pay_date: Date.new(2026, 5, 5))
+      result = described_class.send(:calculate_next_period, "semimonthly", last)
+      expect(result[:start_date]).to eq(Date.new(2026, 5, 1))
+      expect(result[:end_date]).to eq(Date.new(2026, 5, 15))
+      expect(result[:pay_date]).to eq(Date.new(2026, 5, 20))
+    end
+
     it "calculates monthly correctly" do
       last = build(:pay_period, start_date: Date.new(2026, 3, 1), end_date: Date.new(2026, 3, 31), pay_date: Date.new(2026, 4, 5))
       result = described_class.send(:calculate_next_period, "monthly", last)

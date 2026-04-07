@@ -5,13 +5,6 @@ require "cgi"
 class PayrollReminderService
   BRAND_NAME = "Cornerstone Payroll"
 
-  FREQUENCY_DAYS = {
-    "weekly" => 7,
-    "biweekly" => 14,
-    "semimonthly" => nil,
-    "monthly" => nil
-  }.freeze
-
   class << self
     # Main entry point: called daily by SendPayrollRemindersJob.
     def run_all!
@@ -331,7 +324,7 @@ class PayrollReminderService
 
     def upcoming_html(company:, pay_period:, days_before:)
       days_until = (pay_period.pay_date - Date.current).to_i
-      urgency_label = days_until <= 1 ? "Tomorrow" : "in #{days_until} day#{'s' if days_until != 1}"
+      urgency_label = days_until <= 0 ? "Today" : days_until == 1 ? "Tomorrow" : "in #{days_until} days"
       pay_periods_link = "#{frontend_url}/pay-periods/#{pay_period.id}"
 
       email_wrapper do
