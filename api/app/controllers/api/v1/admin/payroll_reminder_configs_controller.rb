@@ -37,6 +37,7 @@ module Api
             return render json: { error: "From email not configured" }, status: :unprocessable_entity
           end
 
+          failures = []
           config.recipients.each do |email|
             Resend::Emails.send({
               from: from_email,
@@ -44,11 +45,17 @@ module Api
               subject: "Test: Payroll Reminder for #{current_company.name}",
               html: test_email_html
             })
+          rescue StandardError => e
+            failures << { email: email, error: e.message }
           end
 
-          render json: { message: "Test email sent to #{config.recipients.size} recipient(s)" }
-        rescue StandardError => e
-          render json: { error: "Failed to send test email: #{e.message}" }, status: :unprocessable_entity
+          if failures.size == config.recipients.size
+            render json: { error: "Failed to send test email: #{failures.first[:error]}" }, status: :unprocessable_entity
+          elsif failures.any?
+            render json: { message: "Test email sent to #{config.recipients.size - failures.size} of #{config.recipients.size} recipient(s). #{failures.size} failed." }
+          else
+            render json: { message: "Test email sent to #{config.recipients.size} recipient(s)" }
+          end
         end
 
         # GET /api/v1/admin/payroll_reminder_config/logs

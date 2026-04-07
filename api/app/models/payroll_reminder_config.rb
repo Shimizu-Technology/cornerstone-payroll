@@ -2,7 +2,6 @@
 
 class PayrollReminderConfig < ApplicationRecord
   belongs_to :company
-  has_many :payroll_reminder_logs, through: :company
 
   validates :days_before_due, numericality: { only_integer: true, greater_than: 0, less_than_or_equal_to: 14 }
   validates :recipients, presence: true, if: :enabled?
