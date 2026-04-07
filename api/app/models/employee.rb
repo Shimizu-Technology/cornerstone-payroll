@@ -2,6 +2,7 @@
 
 class Employee < ApplicationRecord
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
+  SALARY_TYPES = %w[annual variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
 
@@ -25,6 +26,7 @@ class Employee < ApplicationRecord
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }
+  validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
   validates :contractor_pay_type, inclusion: { in: CONTRACTOR_PAY_TYPES }, if: :contractor?
 
@@ -84,6 +86,10 @@ class Employee < ApplicationRecord
 
   def salary?
     employment_type == "salary"
+  end
+
+  def variable_salary?
+    salary? && salary_type == "variable"
   end
 
   def contractor?
