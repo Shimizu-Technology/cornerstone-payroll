@@ -122,8 +122,18 @@ class PayrollReminderService
     # Sending helpers
     # -----------------------------------------------------------------------
 
+    # Insert the log FIRST as a distributed lock, then deliver email.
+    # If email delivery fails, delete the log so the next run can retry.
     def send_period_reminder(config, pay_period, reminder_type)
       company = config.company
+
+      log = PayrollReminderLog.create!(
+        company_id: company.id,
+        pay_period_id: pay_period.id,
+        reminder_type: reminder_type,
+        recipients_snapshot: config.recipients,
+        sent_at: Time.current
+      )
 
       case reminder_type
       when "overdue"
@@ -136,29 +146,16 @@ class PayrollReminderService
 
       deliver_to_recipients(config, subject, html)
 
-      PayrollReminderLog.create!(
-        company_id: company.id,
-        pay_period_id: pay_period.id,
-        reminder_type: reminder_type,
-        recipients_snapshot: config.recipients,
-        sent_at: Time.current
-      )
-
       Rails.logger.info("[PayrollReminder] Sent #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}")
     rescue ActiveRecord::RecordNotUnique
       Rails.logger.info("[PayrollReminder] Duplicate #{reminder_type} skipped for company=#{company.id} pay_period=#{pay_period.id}")
     rescue StandardError => e
+      log&.destroy
       Rails.logger.error("[PayrollReminder] Failed #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}: #{e.class} #{e.message}")
     end
 
     def send_create_reminder(config, company, expected)
-      html = create_payroll_html(company: company, expected: expected)
-      freq_label = company.pay_frequency.gsub("semimonthly", "semi-monthly").capitalize
-      subject = "📅 Time to create #{freq_label} payroll for #{company.name}"
-
-      deliver_to_recipients(config, subject, html)
-
-      PayrollReminderLog.create!(
+      log = PayrollReminderLog.create!(
         company_id: company.id,
         pay_period_id: nil,
         reminder_type: "create_payroll",
@@ -167,10 +164,17 @@ class PayrollReminderService
         sent_at: Time.current
       )
 
+      html = create_payroll_html(company: company, expected: expected)
+      freq_label = company.pay_frequency.gsub("semimonthly", "semi-monthly").capitalize
+      subject = "📅 Time to create #{freq_label} payroll for #{company.name}"
+
+      deliver_to_recipients(config, subject, html)
+
       Rails.logger.info("[PayrollReminder] Sent create_payroll for company=#{company.id} expected_pay_date=#{expected[:pay_date]}")
     rescue ActiveRecord::RecordNotUnique
       Rails.logger.info("[PayrollReminder] Duplicate create_payroll skipped for company=#{company.id} expected_pay_date=#{expected[:pay_date]}")
     rescue StandardError => e
+      log&.destroy
       Rails.logger.error("[PayrollReminder] Failed create_payroll for company=#{company.id}: #{e.class} #{e.message}")
     end
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bell, Plus, X, Send, Trash2, History, Mail, Clock, AlertTriangle } from 'lucide-react';
+import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -393,9 +393,9 @@ export default function PayrollReminders() {
                           log.reminder_type === 'create_payroll' ? 'Create Payroll' :
                           'Upcoming';
                         const typeVariant =
-                          log.reminder_type === 'overdue' ? 'destructive' as const :
-                          log.reminder_type === 'create_payroll' ? 'default' as const :
-                          'secondary' as const;
+                          log.reminder_type === 'overdue' ? 'danger' as const :
+                          log.reminder_type === 'create_payroll' ? 'info' as const :
+                          'warning' as const;
 
                         return (
                           <TableRow key={log.id}>
