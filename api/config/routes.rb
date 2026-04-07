@@ -111,6 +111,12 @@ Rails.application.routes.draw do
         match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
         match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
 
+        # Payroll Reminder Config (per-company, singleton)
+        get   "payroll_reminder_config",      to: "payroll_reminder_configs#show"
+        put   "payroll_reminder_config",      to: "payroll_reminder_configs#update"
+        post  "payroll_reminder_config/test", to: "payroll_reminder_configs#test"
+        get   "payroll_reminder_config/logs", to: "payroll_reminder_configs#logs"
+
         # Employee Loans
         resources :employee_loans do
           member do

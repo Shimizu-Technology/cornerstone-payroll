@@ -19,6 +19,7 @@ import { CheckSettingsPage } from '@/pages/CheckSettings';
 import EmployeeLoans from '@/pages/EmployeeLoans';
 import { Clients } from '@/pages/Clients';
 import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
+import PayrollReminders from '@/pages/PayrollReminders';
 import { Login } from '@/pages/Login';
 import { Invite } from '@/pages/Invite';
 
@@ -136,6 +137,7 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
         <Route path="check-settings" element={<CheckSettingsPage />} />
+        <Route path="payroll-reminders" element={<PayrollReminders />} />
         <Route path="settings/clients" element={<AdminOnlyRoute><Clients /></AdminOnlyRoute>} />
       </Route>
 
