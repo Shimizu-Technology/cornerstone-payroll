@@ -49,7 +49,7 @@ class PayrollReminderService
       overdue_periods = company.pay_periods
                                .where(status: %w[draft calculated])
                                .where(correction_status: [nil, "correction"])
-                               .where("pay_date < ?", today)
+                               .where(pay_date: (today - 90.days)...today)
 
       overdue_periods.find_each do |pp|
         send_period_reminder(config, pp, "overdue") unless already_sent_for_period?(company.id, pp.id, "overdue")
