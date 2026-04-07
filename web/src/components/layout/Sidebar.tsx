@@ -8,7 +8,6 @@ import {
   Users,
   Building,
   CalendarDays,
-  Calculator,
   FileBarChart2,
   HandCoins,
   SlidersHorizontal,
@@ -41,7 +40,6 @@ const clientNavigation: NavItem[] = [
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Run Payroll', href: '/payroll/run', icon: <Calculator className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee Loans', href: '/employee-loans', icon: <HandCoins className="h-[18px] w-[18px] shrink-0" /> },
 ];

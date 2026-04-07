@@ -60,7 +60,7 @@ module PayrollImport
       "patrick" => %w[pat],
       "patricia" => %w[pat patty],
       "patty"   => %w[patricia],
-      "tony"    => %w[anthony],
+      "tony"    => %w[anthony antonio],
       "anthony" => %w[tony],
       "sam"     => %w[samuel samantha],
       "samuel"  => %w[sam],
@@ -118,7 +118,6 @@ module PayrollImport
       "walter"  => %w[wally],
       "lenny"   => %w[leonard],
       "leonard" => %w[lenny],
-      "tony"    => %w[antonio],
       "antonio" => %w[tony],
     }.freeze
 
@@ -239,11 +238,11 @@ module PayrollImport
 
       # Fuzzy match on first tokens (handles typos like "Elaine" vs "Elain")
       if input_first.present? && emp_first.present?
-        dist = ld(input_first, emp_first)
+        dist = dld(input_first, emp_first)
         max_len = [input_first.length, emp_first.length].max
         if max_len > 0
           token_score = 1.0 - (dist.to_f / max_len)
-          return token_score if token_score >= 0.75
+          return token_score if token_score >= 0.7
         end
       end
 
@@ -296,6 +295,26 @@ module PayrollImport
         end
       end
       d[m]
+    end
+
+    # Damerau-Levenshtein distance (transpositions count as 1 edit)
+    def dld(s, t)
+      m = s.length
+      n = t.length
+      d = Array.new(m + 1) { Array.new(n + 1, 0) }
+      (0..m).each { |i| d[i][0] = i }
+      (0..n).each { |j| d[0][j] = j }
+
+      (1..m).each do |i|
+        (1..n).each do |j|
+          cost = s[i - 1] == t[j - 1] ? 0 : 1
+          d[i][j] = [d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost].min
+          if i > 1 && j > 1 && s[i - 1] == t[j - 2] && s[i - 2] == t[j - 1]
+            d[i][j] = [d[i][j], d[i - 2][j - 2] + 1].min
+          end
+        end
+      end
+      d[m][n]
     end
   end
 end

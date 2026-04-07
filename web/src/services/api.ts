@@ -321,9 +321,11 @@ export const employeesApi = {
     company_id?: number; 
     status?: string; 
     department_id?: number;
+    employment_type?: string;
     search?: string;
     page?: number; 
     per_page?: number;
+    group_by?: string;
   }) =>
     api.get<{ data: Employee[]; meta: PaginationMeta }>('/admin/employees', params),
   get: (id: number) =>
@@ -334,6 +336,91 @@ export const employeesApi = {
     api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/employees/${id}`),
+};
+
+// Employee Bulk Import
+export interface BulkImportEmployeeData {
+  first_name: string;
+  last_name: string;
+  middle_name: string | null;
+  email: string | null;
+  ssn: string | null;
+  _ssn_token?: string | null;
+  date_of_birth: string | null;
+  hire_date: string | null;
+  employment_type: string;
+  salary_type?: string | null;
+  pay_rate: string;
+  pay_frequency: string | null;
+  filing_status: string | null;
+  allowances: string | null;
+  additional_withholding: string | null;
+  w4_dependent_credit: string | null;
+  w4_step2_multiple_jobs: string | null;
+  w4_step4a_other_income: string | null;
+  w4_step4b_deductions: string | null;
+  retirement_rate: string | null;
+  roth_retirement_rate: string | null;
+  department: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+  contractor_type: string | null;
+  contractor_pay_type: string | null;
+  business_name: string | null;
+  contractor_ein: string | null;
+  w9_on_file: string | null;
+}
+
+export interface BulkImportPreviewRow {
+  row_number: number;
+  data: BulkImportEmployeeData;
+  valid: boolean;
+  duplicate: boolean;
+  new_department: boolean;
+  errors: string[];
+}
+
+export interface BulkImportPreviewResult {
+  preview_id: string;
+  rows: BulkImportPreviewRow[];
+  summary: {
+    total: number;
+    valid: number;
+    invalid: number;
+    duplicates: number;
+    new_departments?: string[];
+  };
+}
+
+export interface BulkImportApplyResult {
+  created: number;
+  failed: number;
+  errors: { row: number; messages: string[] }[];
+}
+
+export const employeeBulkImportApi = {
+  downloadTemplate: async (): Promise<void> => {
+    const data = await api.getBlobWithParams('/admin/employee_bulk_imports/template');
+    const url = URL.createObjectURL(data.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = data.filename || 'employee_import_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+  preview: (file: File): Promise<BulkImportPreviewResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.postForm<BulkImportPreviewResult>('/admin/employee_bulk_imports/preview', formData);
+  },
+  applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
+    api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
 };
 
 export const employeeWageRatesApi = {
@@ -538,7 +625,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; loan_deductions?: Record<string, number> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),

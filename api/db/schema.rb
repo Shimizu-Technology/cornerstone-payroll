@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_06_015526) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_06_115725) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -258,6 +258,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_06_015526) do
     t.string "phone"
     t.decimal "retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "roth_retirement_rate", precision: 5, scale: 4, default: "0.0"
+    t.string "salary_type", default: "annual", null: false
     t.string "ssn_encrypted"
     t.string "state"
     t.string "status", default: "active"

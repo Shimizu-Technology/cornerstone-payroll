@@ -11,7 +11,12 @@ module Api
         def index
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
-          employees = employees.includes(:department, :employee_wage_rates).order(:last_name, :first_name)
+          employees = employees.includes(:department, :employee_wage_rates)
+          if params[:group_by] == "employment_type"
+            employees = employees.order(:employment_type, :last_name, :first_name)
+          else
+            employees = employees.order(:last_name, :first_name)
+          end
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -81,6 +86,7 @@ module Api
             :department_id,
             :job_title,
             :employment_type,
+            :salary_type,
             :pay_rate,
             :pay_frequency,
             :filing_status,

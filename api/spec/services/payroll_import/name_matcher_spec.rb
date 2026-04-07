@@ -92,6 +92,15 @@ RSpec.describe PayrollImport::NameMatcher do
       expect([nil, Hash]).to include(result.class)
     end
 
+    it "matches transposed first name 'Arthur, Juile R.' → Julie Arthur" do
+      julie_employees = [StubEmployee.new(10, "Julie", "Arthur", "Julie Arthur")]
+      transposition_matcher = described_class.new(julie_employees)
+      result = transposition_matcher.match_pdf_name("Arthur, Juile R.")
+      expect(result).not_to be_nil
+      expect(result[:employee_id]).to eq(10)
+      expect(result[:confidence]).to be >= 0.7
+    end
+
     it "returns nil for name with confidence below threshold" do
       # Very different name should not be matched
       result = matcher.match_pdf_name("Xyzzy, Flobberworm")
@@ -149,7 +158,7 @@ RSpec.describe PayrollImport::NameMatcher do
     end
   end
 
-  # ── Levenshtein distance helper ────────────────────────────────────────────
+  # ── Distance helper methods ────────────────────────────────────────────────
 
   describe "#ld (private)" do
     it "returns 0 for identical strings" do
@@ -163,6 +172,20 @@ RSpec.describe PayrollImport::NameMatcher do
     it "returns correct distance for typical name typo" do
       d = matcher.send(:ld, "belleza", "beleeza")
       expect(d).to be <= 2
+    end
+  end
+
+  describe "#dld (private)" do
+    it "returns 0 for identical strings" do
+      expect(matcher.send(:dld, "hello", "hello")).to eq(0)
+    end
+
+    it "counts a transposition as 1 edit" do
+      expect(matcher.send(:dld, "juile", "julie")).to eq(1)
+    end
+
+    it "returns 1 for single substitution" do
+      expect(matcher.send(:dld, "hello", "heLlo")).to eq(1)
     end
   end
 
