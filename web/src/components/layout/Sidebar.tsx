@@ -12,6 +12,7 @@ import {
   HandCoins,
   SlidersHorizontal,
   Printer,
+  Bell,
   Settings,
   Wrench,
   ScanLine,
@@ -50,6 +51,7 @@ const toolsNavigation: NavItem[] = [
 
 const clientSettingsNavigation: NavItem[] = [
   { name: 'Check Settings', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const adminNavigation: NavItem[] = [

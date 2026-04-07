@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_06_115725) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_07_032333) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -492,6 +492,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_06_115725) do
     t.index ["voided"], name: "index_payroll_items_on_voided"
   end
 
+  create_table "payroll_reminder_configs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "days_before_due", default: 3, null: false
+    t.boolean "enabled", default: false, null: false
+    t.jsonb "recipients", default: [], null: false
+    t.boolean "send_overdue_alerts", default: true, null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_payroll_reminder_configs_on_company_id", unique: true
+  end
+
+  create_table "payroll_reminder_logs", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.date "expected_pay_date"
+    t.bigint "pay_period_id"
+    t.jsonb "recipients_snapshot", default: [], null: false
+    t.string "reminder_type", null: false
+    t.datetime "sent_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "pay_period_id", "reminder_type"], name: "idx_reminder_logs_period_unique", unique: true, where: "(pay_period_id IS NOT NULL)"
+    t.index ["company_id", "reminder_type", "expected_pay_date"], name: "idx_reminder_logs_create_unique", unique: true, where: "((pay_period_id IS NULL) AND (expected_pay_date IS NOT NULL))"
+    t.index ["company_id"], name: "index_payroll_reminder_logs_on_company_id"
+    t.index ["pay_period_id"], name: "index_payroll_reminder_logs_on_pay_period_id"
+  end
+
   create_table "punch_entries", force: :cascade do |t|
     t.integer "card_day"
     t.time "clock_in"
@@ -714,6 +740,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_06_115725) do
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
+  add_foreign_key "payroll_reminder_configs", "companies"
+  add_foreign_key "payroll_reminder_logs", "companies"
+  add_foreign_key "payroll_reminder_logs", "pay_periods"
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
