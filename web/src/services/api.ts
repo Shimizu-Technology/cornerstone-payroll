@@ -1436,6 +1436,45 @@ export const nonEmployeeChecksApi = {
     api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`),
 };
 
+// ============================================================
+// Payroll Reminder Config API
+// ============================================================
+export interface PayrollReminderConfig {
+  id: number | null;
+  enabled: boolean;
+  recipients: string[];
+  days_before_due: number;
+  send_overdue_alerts: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PayrollReminderLog {
+  id: number;
+  reminder_type: string;
+  sent_at: string;
+  recipients_snapshot: string[];
+  expected_pay_date: string | null;
+  pay_period?: {
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: string;
+  };
+}
+
+export const payrollReminderApi = {
+  getConfig: () =>
+    api.get<{ payroll_reminder_config: PayrollReminderConfig }>('/admin/payroll_reminder_config'),
+  updateConfig: (config: Partial<PayrollReminderConfig>) =>
+    api.put<{ payroll_reminder_config: PayrollReminderConfig }>('/admin/payroll_reminder_config', { payroll_reminder_config: config }),
+  sendTest: () =>
+    api.post<{ message: string }>('/admin/payroll_reminder_config/test'),
+  getLogs: () =>
+    api.get<{ logs: PayrollReminderLog[] }>('/admin/payroll_reminder_config/logs'),
+};
+
 // Legacy dashboard (for migration)
 export const dashboardApi = {
   stats: (companyId: number) => api.get<DashboardStats>(`/companies/${companyId}/dashboard`),

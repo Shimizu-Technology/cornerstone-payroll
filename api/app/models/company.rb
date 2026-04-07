@@ -11,6 +11,8 @@ class Company < ApplicationRecord
   has_many :user_invitations, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
+  has_one :payroll_reminder_config, dependent: :destroy
+  has_many :payroll_reminder_logs, dependent: :destroy
 
   before_validation :normalize_blanks
 
