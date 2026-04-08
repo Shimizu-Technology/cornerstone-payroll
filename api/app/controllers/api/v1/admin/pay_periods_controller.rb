@@ -495,7 +495,8 @@ module Api
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
             check_type: "tax_deposit",
-            payable_to: "EFTPS - Federal Income Tax"
+            payable_to: "EFTPS - Federal Income Tax",
+            voided: false
           }
 
           existing = NonEmployeeCheck.find_by(fit_query)
@@ -533,7 +534,8 @@ module Api
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
             check_type: "tax_deposit",
-            payable_to: "EFTPS - Federal Income Tax"
+            payable_to: "EFTPS - Federal Income Tax",
+            voided: false
           )
 
           w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
