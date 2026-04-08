@@ -336,6 +336,8 @@ export const employeesApi = {
     api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/employees/${id}`),
+  reactivate: (id: number) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/reactivate`),
 };
 
 // Employee Bulk Import

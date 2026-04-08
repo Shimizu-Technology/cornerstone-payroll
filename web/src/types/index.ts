@@ -88,7 +88,7 @@ export interface Employee {
   hire_date: string;
   termination_date?: string;
   employment_type: EmploymentType;
-  salary_type?: 'annual' | 'variable';
+  salary_type?: 'annual' | 'per_period' | 'variable';
   pay_rate: number;
   pay_frequency: PayFrequency;
   filing_status: FilingStatus;
@@ -128,7 +128,7 @@ export interface EmployeeFormData {
   date_of_birth?: string;
   hire_date: string;
   employment_type: EmploymentType;
-  salary_type?: 'annual' | 'variable';
+  salary_type?: 'annual' | 'per_period' | 'variable';
   pay_rate: number;
   pay_frequency: PayFrequency;
   filing_status: FilingStatus;

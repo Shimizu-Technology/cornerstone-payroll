@@ -3,10 +3,11 @@
 # Calculator for salary employees
 #
 # Gross pay = base_salary + tips + bonus
-# base_salary = salary_override (per-period) OR (annual pay_rate / periods per year)
 #
-# For variable-pay owners: set salary_override on the PayrollItem to the
-# per-period amount. This avoids needing to convert to an annual equivalent.
+# base_salary is determined by salary_type:
+#   annual     → pay_rate / periods_per_year
+#   per_period → pay_rate used directly (no division)
+#   variable   → salary_override entered each pay period
 #
 # Non-taxable pass-through payments (allotments, reimbursements) go in
 # non_taxable_pay — they're added to the check but not subject to any taxes.
@@ -44,6 +45,8 @@ class SalaryPayrollCalculator < PayrollCalculator
   def calculate_gross_pay
     if payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
+    elsif employee.salary_type == "per_period"
+      @base_pay = payroll_item.pay_rate.to_f
     else
       periods = PERIODS_PER_YEAR[employee.pay_frequency] || 26
       @base_pay = payroll_item.pay_rate / periods.to_f
