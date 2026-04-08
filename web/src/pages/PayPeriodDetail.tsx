@@ -86,7 +86,6 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
 
   employees.forEach((emp) => {
     if (!hours[String(emp.id)]) {
-      const noHours = emp.employment_type === 'salary' || (emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly');
       const wageRates = emp.employment_type === 'hourly' || (emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly')
         ? templateWageRates(emp)
         : [];
