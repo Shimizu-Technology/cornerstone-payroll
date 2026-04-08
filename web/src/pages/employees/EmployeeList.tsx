@@ -58,7 +58,7 @@ export function EmployeeList() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const search = searchParams.get('search') || '';
-  const status = searchParams.get('status') || '';
+  const status = searchParams.get('status') ?? 'active';
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
   const page = parseInt(searchParams.get('page') || '1', 10);
@@ -70,7 +70,7 @@ export function EmployeeList() {
       const response = await employeesApi.list({
         company_id: companyId,
         search: search || undefined,
-        status: status || undefined,
+        status: status === 'all' ? undefined : (status || undefined),
         department_id: departmentId ? parseInt(departmentId, 10) : undefined,
         employment_type: employmentType || undefined,
         page,
@@ -138,7 +138,7 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [employees]);
 
-  const hasActiveFilters = !!(search || status || departmentId || employmentType);
+  const hasActiveFilters = !!(search || (status && status !== 'active') || departmentId || employmentType);
 
   return (
     <div>
@@ -179,8 +179,8 @@ export function EmployeeList() {
               onChange={(e) => updateFilter('status', e.target.value)}
               className="w-36"
             >
-              <option value="">All Status</option>
               <option value="active">Active</option>
+              <option value="all">All Status</option>
               <option value="inactive">Inactive</option>
               <option value="terminated">Terminated</option>
             </Select>
@@ -392,6 +392,8 @@ function EmployeeTableRow({
                 ? employee.contractor_pay_type === 'hourly'
                   ? `${formatCurrency(employee.pay_rate)}/hr`
                   : `${formatCurrency(employee.pay_rate)}/period`
+                : employee.salary_type === 'per_period'
+                ? `${formatCurrency(employee.pay_rate)}/period`
                 : `${formatCurrency(employee.pay_rate)}/yr`}
             </span>
           )}

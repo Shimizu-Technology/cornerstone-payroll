@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -72,11 +72,14 @@ export function EmployeeForm() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
   const [ssnLastFour, setSsnLastFour] = useState<string | null>(null);
+  const [employeeStatus, setEmployeeStatus] = useState<string>('active');
+  const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -138,6 +141,9 @@ export function EmployeeForm() {
         );
       }
       
+      setEmployeeStatus(employee.status || 'active');
+      setTerminationDate(employee.termination_date || null);
+
       if (employee.ssn_last_four) {
         setSsnLastFour(employee.ssn_last_four);
       }
@@ -389,6 +395,24 @@ export function EmployeeForm() {
     }
   };
 
+  const handleReactivate = async (): Promise<void> => {
+    if (!id || !confirm(`Are you sure you want to reactivate this ${form.employment_type === 'contractor' ? 'contractor' : 'employee'}? They will be marked as active again.`)) {
+      return;
+    }
+
+    setIsReactivating(true);
+    try {
+      const response = await employeesApi.reactivate(parseInt(id, 10));
+      setEmployeeStatus(response.data.status || 'active');
+      setTerminationDate(null);
+      setGeneralError(null);
+    } catch (err) {
+      setGeneralError(err instanceof Error ? err.message : 'Failed to reactivate employee');
+    } finally {
+      setIsReactivating(false);
+    }
+  };
+
   const getFieldError = (field: string): string | undefined => {
     return errors[field]?.[0];
   };
@@ -413,6 +437,34 @@ export function EmployeeForm() {
           </Button>
         }
       />
+
+      {isEditing && employeeStatus === 'terminated' && (
+        <div className="mx-6 lg:mx-8 mt-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <p className="text-red-800 font-medium">
+                This {form.employment_type === 'contractor' ? 'contractor' : 'employee'} is terminated
+              </p>
+              {terminationDate && (
+                <p className="text-red-600 text-sm">
+                  Terminated on {new Date(terminationDate + 'T00:00:00').toLocaleDateString()}
+                </p>
+              )}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleReactivate}
+            disabled={isReactivating}
+            className="border-red-300 text-red-700 hover:bg-red-100"
+          >
+            <RotateCcw className="w-4 h-4 mr-2" />
+            {isReactivating ? 'Reactivating...' : 'Reactivate'}
+          </Button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="p-6 lg:p-8 max-w-4xl">
         {generalError && (
@@ -546,6 +598,7 @@ export function EmployeeForm() {
                     onChange={(e) => handleChange('salary_type', e.target.value)}
                   >
                     <option value="annual">Fixed Annual Salary</option>
+                    <option value="per_period">Fixed Per Pay Period</option>
                     <option value="variable">Variable (set each period)</option>
                   </Select>
                 </div>
@@ -580,7 +633,9 @@ export function EmployeeForm() {
                     error={getFieldError('pay_rate')}
                   />
                   <p className="mt-1 text-xs text-gray-500">
-                    {form.employment_type === 'salary' ? 'Annual salary' : form.contractor_pay_type === 'hourly' ? 'Per hour worked' : 'Amount paid each pay period'}
+                    {form.employment_type === 'salary'
+                      ? form.salary_type === 'per_period' ? 'Amount paid each pay period' : 'Annual salary'
+                      : form.contractor_pay_type === 'hourly' ? 'Per hour worked' : 'Amount paid each pay period'}
                   </p>
                 </div>
               )}
@@ -975,7 +1030,7 @@ export function EmployeeForm() {
         {/* Actions */}
         <div className="flex items-center justify-between">
           <div>
-            {isEditing && (
+            {isEditing && employeeStatus !== 'terminated' && (
               <Button
                 type="button"
                 variant="danger"
