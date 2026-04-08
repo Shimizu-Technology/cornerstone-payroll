@@ -138,7 +138,7 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [employees]);
 
-  const hasActiveFilters = !!(search || (status && status !== 'active') || departmentId || employmentType);
+  const hasActiveFilters = !!(search || departmentId || employmentType || status !== 'active');
 
   return (
     <div>
