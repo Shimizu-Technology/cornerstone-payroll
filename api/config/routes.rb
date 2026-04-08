@@ -36,7 +36,11 @@ Rails.application.routes.draw do
         resources :audit_logs, only: [ :index ]
         resources :user_invitations, only: [ :create ]
 
-        resources :employees, only: [ :index, :show, :create, :update, :destroy ]
+        resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
+          member do
+            post :reactivate
+          end
+        end
 
         # Employee Bulk Import
         get  "employee_bulk_imports/template", to: "employee_bulk_imports#template"

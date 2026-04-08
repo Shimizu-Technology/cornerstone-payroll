@@ -2,7 +2,7 @@
 
 class Employee < ApplicationRecord
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
-  SALARY_TYPES = %w[annual variable].freeze
+  SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
 

@@ -620,7 +620,8 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
                   onChange={v => onUpdateField('salary_type', v)}
                   options={[
                     { value: 'annual', label: 'Annual (fixed)' },
-                    { value: 'variable', label: 'Variable (per period)' },
+                    { value: 'per_period', label: 'Fixed Per Pay Period' },
+                    { value: 'variable', label: 'Variable (set each period)' },
                   ]}
                 />
               )}
