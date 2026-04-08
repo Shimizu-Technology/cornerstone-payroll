@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_07_032333) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -328,6 +328,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_07_032333) do
     t.index ["company_id", "check_number"], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
+    t.index ["pay_period_id", "company_id", "check_type", "payable_to"], name: "idx_unique_non_voided_ne_check_per_period", unique: true, where: "(voided = false)"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
   end
 
