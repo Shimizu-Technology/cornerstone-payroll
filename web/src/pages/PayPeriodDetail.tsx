@@ -1351,6 +1351,7 @@ export function PayPeriodDetail() {
           <NonEmployeeChecksPanel
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
+            payPeriodStatus={payPeriod.status}
           />
         )}
 
