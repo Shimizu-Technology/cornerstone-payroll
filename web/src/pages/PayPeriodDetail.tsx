@@ -52,7 +52,7 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
   }
 
   const configuredRates = employee.wage_rates || [];
-  const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 80);
+  const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
 
   return configuredRates.map((rate) => ({
     employee_wage_rate_id: rate.id,
@@ -78,7 +78,7 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
       ? templateWageRates(employee, item)
       : [];
     hours[String(item.employee_id)] = {
-      regular: noHours ? 0 : (item.hours_worked || 80),
+      regular: noHours ? 0 : (item.hours_worked || 0),
       overtime: noHours ? 0 : (item.overtime_hours || 0),
       wage_rates: wageRates.length > 0 ? wageRates : undefined,
     };
@@ -86,13 +86,12 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
 
   employees.forEach((emp) => {
     if (!hours[String(emp.id)]) {
-      const noHours = emp.employment_type === 'salary' || (emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly');
       const wageRates = emp.employment_type === 'hourly' || (emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly')
         ? templateWageRates(emp)
         : [];
       const regularDefault = wageRates.length > 1
         ? wageRates.reduce((sum, rate) => sum + toNumber(rate.regular_hours), 0)
-        : (noHours ? 0 : 80);
+        : 0;
       hours[String(emp.id)] = {
         regular: regularDefault,
         overtime: 0,
@@ -765,7 +764,7 @@ export function PayPeriodDetail() {
                     return displayEmployees.map((emp) => {
                     const showDivider = emp.employment_type !== prevType;
                     prevType = emp.employment_type;
-                    const hours = hoursMap[String(emp.id)] || { regular: 80, overtime: 0 };
+                    const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                     const payRate = toNumber(emp.pay_rate);
                     const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
                     const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
