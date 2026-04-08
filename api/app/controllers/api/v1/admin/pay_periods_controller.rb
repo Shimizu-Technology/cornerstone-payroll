@@ -8,7 +8,7 @@ module Api
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
-          :void, :create_correction_run, :correction_history
+          :void, :create_correction_run, :correction_history, :generate_fit_check
         ]
 
         # GET /api/v1/admin/pay_periods
@@ -483,6 +483,29 @@ module Api
             pay_period:        pay_period_correction_summary_json(@pay_period),
             correction_events: events.map { |e| correction_event_json(e) }
           }
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/generate_fit_check
+        def generate_fit_check
+          unless @pay_period.status == "committed"
+            return render json: { error: "FIT check can only be generated for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          committed_items = @pay_period.payroll_items.where(voided: false).to_a
+          create_fit_tax_deposit_check!(committed_items)
+
+          fit_check = NonEmployeeCheck.find_by(
+            pay_period: @pay_period,
+            company_id: @pay_period.company_id,
+            check_type: "tax_deposit",
+            payable_to: "EFTPS - Federal Income Tax"
+          )
+
+          if fit_check
+            render json: { message: "FIT tax deposit check created", check_id: fit_check.id }
+          else
+            render json: { error: "No FIT withholding to create a check for (total is $0)" }, status: :unprocessable_entity
+          end
         end
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
