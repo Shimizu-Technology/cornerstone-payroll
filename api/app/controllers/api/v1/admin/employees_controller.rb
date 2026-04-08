@@ -5,7 +5,8 @@ module Api
     module Admin
       class EmployeesController < BaseController
         include Auditable
-        before_action :set_employee, only: [ :show, :update, :destroy ]
+        audit_actions :reactivate
+        before_action :set_employee, only: [ :show, :update, :destroy, :reactivate ]
 
         # GET /api/v1/admin/employees
         def index
@@ -62,6 +63,16 @@ module Api
         def destroy
           @employee.update!(status: "terminated", termination_date: Date.current)
           head :no_content
+        end
+
+        # POST /api/v1/admin/employees/:id/reactivate
+        def reactivate
+          unless @employee.status == "terminated"
+            return render json: { error: "Only terminated employees can be reactivated" }, status: :unprocessable_entity
+          end
+
+          @employee.update!(status: "active", termination_date: nil)
+          render json: { data: serialize_employee(@employee) }
         end
 
         private

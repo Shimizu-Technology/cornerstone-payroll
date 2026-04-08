@@ -772,12 +772,16 @@ export function PayPeriodDetail() {
                     const activeWageRates = (hours.wage_rates || []).filter((rate) => rate.active !== false);
                     const hasMultiRate = (emp.employment_type === 'hourly' || isContractorHourly) && activeWageRates.length > 1;
                     const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
+                    const isPerPeriodSalary = emp.employment_type === 'salary' && emp.salary_type === 'per_period';
                     const noHoursType = emp.employment_type === 'salary' || isContractorFlat;
                     const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
+                    const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                     const estGross = isVariableSalary
                       ? salaryOverride
+                      : isPerPeriodSalary
+                      ? payRate
                       : emp.employment_type === 'salary'
-                      ? payRate / 26
+                      ? payRate / periodsPerYear
                       : isContractorFlat
                       ? payRate
                       : hasMultiRate
@@ -814,8 +818,10 @@ export function PayPeriodDetail() {
                         <TableCell className="text-gray-700">
                           {isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
+                          ) : isPerPeriodSalary ? (
+                            `$${payRate.toFixed(2)}/period`
                           ) : emp.employment_type === 'salary' ? (
-                            `$${(payRate / 26).toFixed(2)}/period`
+                            `$${(payRate / periodsPerYear).toFixed(2)}/period`
                           ) : isContractorFlat ? (
                             `$${payRate.toFixed(2)}/period`
                           ) : hasMultiRate ? (
