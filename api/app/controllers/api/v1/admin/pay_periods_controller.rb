@@ -5,10 +5,10 @@ module Api
     module Admin
       class PayPeriodsController < BaseController
         include Auditable
-        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run
+        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run, :generate_fit_check
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
-          :void, :create_correction_run, :correction_history
+          :void, :create_correction_run, :correction_history, :generate_fit_check
         ]
 
         # GET /api/v1/admin/pay_periods
@@ -485,6 +485,36 @@ module Api
           }
         end
 
+        # POST /api/v1/admin/pay_periods/:id/generate_fit_check
+        def generate_fit_check
+          unless @pay_period.status == "committed"
+            return render json: { error: "FIT check can only be generated for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          fit_query = {
+            pay_period: @pay_period,
+            company_id: @pay_period.company_id,
+            check_type: "tax_deposit",
+            payable_to: "EFTPS - Federal Income Tax",
+            voided: false
+          }
+
+          existing = NonEmployeeCheck.find_by(fit_query)
+          if existing
+            return render json: { message: "FIT tax deposit check already exists", check_id: existing.id, created: false }
+          end
+
+          committed_items = @pay_period.payroll_items.where(voided: false).to_a
+          create_fit_tax_deposit_check!(committed_items)
+
+          fit_check = NonEmployeeCheck.find_by(fit_query)
+          if fit_check
+            render json: { message: "FIT tax deposit check created", check_id: fit_check.id, created: true }
+          else
+            render json: { error: "No FIT withholding to create a check for (total is $0)" }, status: :unprocessable_entity
+          end
+        end
+
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
         def retry_tax_sync
           unless @pay_period.can_retry_sync?
@@ -504,7 +534,8 @@ module Api
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
             check_type: "tax_deposit",
-            payable_to: "EFTPS - Federal Income Tax"
+            payable_to: "EFTPS - Federal Income Tax",
+            voided: false
           )
 
           w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
@@ -521,6 +552,8 @@ module Api
             description: "Auto-generated FIT tax deposit for payroll commit",
             created_by: current_user
           )
+        rescue ActiveRecord::RecordNotUnique
+          # Concurrent request already created the check — safe to ignore
         end
 
         def pay_period_aggregates(pay_period)

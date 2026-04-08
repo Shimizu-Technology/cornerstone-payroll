@@ -637,6 +637,8 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
   retryTaxSync: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
+  generateFitCheck: (id: number) =>
+    api.post<{ message: string; check_id: number }>(`/admin/pay_periods/${id}/generate_fit_check`),
   previewImport: async (id: number, pdfFile: File, excelFile?: File) => {
     const formData = new FormData();
     formData.append('pdf_file', pdfFile);

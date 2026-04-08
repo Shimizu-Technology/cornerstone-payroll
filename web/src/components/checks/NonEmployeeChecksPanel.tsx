@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { nonEmployeeChecksApi } from '@/services/api';
+import { nonEmployeeChecksApi, payPeriodsApi } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
+  payPeriodStatus?: string;
 }
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
@@ -29,7 +30,7 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, payPeriodStatus }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -52,6 +53,8 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
   const [markingPrintedId, setMarkingPrintedId] = useState<number | null>(null);
+  const [generatingFit, setGeneratingFit] = useState(false);
+  const [fitError, setFitError] = useState<string | null>(null);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -196,6 +199,22 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
     }
   };
 
+  const hasFitCheck = checks.some(c => c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax' && !c.voided);
+  const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
+
+  const handleGenerateFitCheck = async () => {
+    setGeneratingFit(true);
+    setFitError(null);
+    try {
+      await payPeriodsApi.generateFitCheck(payPeriodId);
+      loadChecks();
+    } catch (err) {
+      setFitError(err instanceof Error ? err.message : 'Failed to generate FIT check');
+    } finally {
+      setGeneratingFit(false);
+    }
+  };
+
   const fmt = (v: number | string) => `$${Number(v).toFixed(2)}`;
 
   return (
@@ -208,9 +227,22 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
               Tax deposits, garnishments, vendor payments, etc.
             </p>
           </div>
-          <Button size="sm" onClick={() => setShowForm(!showForm)}>
-            {showForm ? 'Cancel' : '+ Add Check'}
-          </Button>
+          <div className="flex gap-2">
+            {showGenerateFit && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleGenerateFitCheck}
+                disabled={generatingFit}
+                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+              >
+                {generatingFit ? 'Generating...' : 'Generate FIT Check'}
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancel' : '+ Add Check'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -236,6 +268,12 @@ export function NonEmployeeChecksPanel({ payPeriodId }: NonEmployeeChecksPanelPr
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
           </div>
+        </div>
+      )}
+
+      {fitError && (
+        <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {fitError}
         </div>
       )}
 
