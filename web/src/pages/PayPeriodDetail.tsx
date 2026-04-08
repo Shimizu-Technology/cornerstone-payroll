@@ -92,7 +92,7 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
         : [];
       const regularDefault = wageRates.length > 1
         ? wageRates.reduce((sum, rate) => sum + toNumber(rate.regular_hours), 0)
-        : (noHours ? 0 : 80);
+        : 0;
       hours[String(emp.id)] = {
         regular: regularDefault,
         overtime: 0,
