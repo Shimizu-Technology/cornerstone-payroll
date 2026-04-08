@@ -212,11 +212,7 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.employment_type = employee.employment_type
                 payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
-                payroll_item.hours_worked = if employee.salary? || employee.contractor_flat_fee?
-                                             0
-                                           else
-                                             80
-                                           end
+                payroll_item.hours_worked = 0
               end
 
               # Use hours from params if provided
