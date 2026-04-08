@@ -328,7 +328,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
     t.index ["company_id", "check_number"], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
-    t.index ["pay_period_id", "company_id", "check_type", "payable_to"], name: "idx_unique_non_voided_ne_check_per_period", unique: true, where: "(voided = false)"
+    t.index ["pay_period_id", "company_id"], name: "idx_unique_non_voided_fit_check_per_period", unique: true, where: "(((check_type)::text = 'tax_deposit'::text) AND ((payable_to)::text = 'EFTPS - Federal Income Tax'::text) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
   end
 
