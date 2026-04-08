@@ -5,6 +5,7 @@ module Api
     module Admin
       class EmployeesController < BaseController
         include Auditable
+        audit_actions :reactivate
         before_action :set_employee, only: [ :show, :update, :destroy, :reactivate ]
 
         # GET /api/v1/admin/employees
