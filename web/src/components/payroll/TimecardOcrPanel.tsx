@@ -381,7 +381,6 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [reprocessing, setReprocessing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [savingName, setSavingName] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
   const [error, setError] = useState('');
   const [imageCollapsed, setImageCollapsed] = useState(false);
@@ -494,13 +493,10 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   };
 
   const handleSaveName = async (name: string) => {
-    setSavingName(true);
     try {
       const updated = await timecardsApi.update(tc.id, { employee_name: name });
       setTc(updated);
-    } catch { /* ignore */ } finally {
-      setSavingName(false);
-    }
+    } catch { /* ignore */ }
   };
 
   const imageSrc = tc.preprocessed_image_url || tc.image_url;
