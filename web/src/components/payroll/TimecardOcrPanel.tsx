@@ -209,6 +209,138 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
   );
 }
 
+// ──── Zoomable Image Viewer ─────────────────────────────
+function ZoomableImage({ src, alt }: { src: string; alt: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
+
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 5));
+  const handleZoomOut = () => { setZoom((z) => { const next = Math.max(z - 0.5, 1); if (next === 1) setPan({ x: 0, y: 0 }); return next; }); };
+  const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.25 : 0.25;
+    setZoom((z) => { const next = Math.max(1, Math.min(z + delta, 5)); if (next === 1) setPan({ x: 0, y: 0 }); return next; });
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    setDragging(true);
+    dragStart.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!dragging) return;
+    setPan({
+      x: dragStart.current.panX + (e.clientX - dragStart.current.x),
+      y: dragStart.current.panY + (e.clientY - dragStart.current.y),
+    });
+  };
+
+  const handleMouseUp = () => setDragging(false);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1">
+        <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={zoom <= 1} className="px-2 py-1 text-xs">−</Button>
+        <span className="text-xs text-gray-500 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
+        <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= 5} className="px-2 py-1 text-xs">+</Button>
+        {zoom > 1 && (
+          <Button size="sm" variant="outline" onClick={handleReset} className="px-2 py-1 text-xs ml-1">Reset</Button>
+        )}
+      </div>
+      <div
+        ref={containerRef}
+        className="overflow-hidden rounded border bg-gray-900 select-none"
+        style={{ cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in', maxHeight: '600px' }}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onClick={() => { if (zoom === 1) handleZoomIn(); }}
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="w-full transition-transform duration-150"
+          style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center' }}
+          draggable={false}
+        />
+      </div>
+      {zoom === 1 && <p className="text-[10px] text-gray-400 text-center">Click image or scroll to zoom, then drag to pan</p>}
+    </div>
+  );
+}
+
+// ──── Employee Selector ─────────────────────────────────
+function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName, saving }: {
+  currentName: string;
+  employees: Employee[];
+  selectedEmployeeId: number | '';
+  onSelectEmployee: (id: number | '') => void;
+  onSaveName: (name: string) => Promise<void>;
+  saving: boolean;
+}) {
+  const [mode, setMode] = useState<'dropdown' | 'custom'>(employees.length > 0 ? 'dropdown' : 'custom');
+  const [customName, setCustomName] = useState(currentName);
+  const [savingCustom, setSavingCustom] = useState(false);
+
+  const handleSaveCustom = async () => {
+    setSavingCustom(true);
+    await onSaveName(customName);
+    setSavingCustom(false);
+    setMode('dropdown');
+  };
+
+  if (mode === 'custom') {
+    return (
+      <div className="flex items-center gap-2">
+        <input
+          className="border rounded px-2 py-1.5 text-sm w-64 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+          value={customName}
+          onChange={(e) => setCustomName(e.target.value)}
+          placeholder="Enter employee name..."
+        />
+        <Button size="sm" onClick={handleSaveCustom} disabled={savingCustom || !customName.trim()}>
+          {savingCustom ? <><Spinner size="sm" /> Saving...</> : 'Save'}
+        </Button>
+        {employees.length > 0 && (
+          <Button size="sm" variant="outline" onClick={() => setMode('dropdown')}>Use Dropdown</Button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className="border rounded px-2 py-1.5 text-sm max-w-xs focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+        value={selectedEmployeeId}
+        onChange={(e) => onSelectEmployee(e.target.value ? Number(e.target.value) : '')}
+      >
+        <option value="">Auto-match by name ({currentName || 'Unknown'})</option>
+        {employees.map((emp) => (
+          <option key={emp.id} value={emp.id}>
+            {emp.first_name} {emp.last_name}
+          </option>
+        ))}
+      </select>
+      <button
+        className="text-xs text-indigo-600 hover:text-indigo-800 underline"
+        onClick={() => setMode('custom')}
+      >
+        Edit name
+      </button>
+    </div>
+  );
+}
+
 // ──── Timecard Detail / Review Screen ──────────────────
 type EditableEntry = {
   id: number;
@@ -250,11 +382,10 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [reprocessing, setReprocessing] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [editingName, setEditingName] = useState(false);
   const [savingName, setSavingName] = useState(false);
-  const [nameValue, setNameValue] = useState(tc.employee_name || '');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
   const [error, setError] = useState('');
+  const [imageCollapsed, setImageCollapsed] = useState(false);
 
   const reload = useCallback(async () => {
     const fresh = await timecardsApi.show(tc.id);
@@ -363,37 +494,24 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     }
   };
 
-  const handleSaveName = async () => {
+  const handleSaveName = async (name: string) => {
     setSavingName(true);
     try {
-      const updated = await timecardsApi.update(tc.id, { employee_name: nameValue });
+      const updated = await timecardsApi.update(tc.id, { employee_name: name });
       setTc(updated);
-      setEditingName(false);
     } catch { /* ignore */ } finally {
       setSavingName(false);
     }
   };
 
+  const imageSrc = tc.preprocessed_image_url || tc.image_url;
+
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
+      {/* Header with back, status, and confidence */}
+      <div className="flex items-center gap-3 flex-wrap">
         <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
-        <h3 className="font-semibold text-lg flex-1">
-          {editingName ? (
-            <span className="flex items-center gap-2">
-              <input className="border rounded px-2 py-1 text-sm" value={nameValue} onChange={(e) => setNameValue(e.target.value)} />
-              <Button size="sm" onClick={handleSaveName} disabled={savingName}>
-                {savingName ? <><Spinner size="sm" /> Saving...</> : 'Save'}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setEditingName(false)} disabled={savingName}>Cancel</Button>
-            </span>
-          ) : (
-            <span className="cursor-pointer hover:underline" onClick={() => setEditingName(true)}>
-              {tc.employee_name || 'Unknown Employee'} ✏️
-            </span>
-          )}
-        </h3>
+        <div className="flex-1" />
         {statusBadge(tc.ocr_status)}
         {tc.overall_confidence !== null && (
           <Badge className={confidenceColor(tc.overall_confidence)}>
@@ -402,22 +520,48 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         )}
       </div>
 
+      {/* Employee assignment section */}
+      <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border">
+        <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Employee:</span>
+        {payPeriodId ? (
+          <EmployeeSelector
+            currentName={tc.employee_name || ''}
+            employees={employees}
+            selectedEmployeeId={selectedEmployeeId}
+            onSelectEmployee={setSelectedEmployeeId}
+            onSaveName={handleSaveName}
+            saving={savingName}
+          />
+        ) : (
+          <span className="text-sm font-semibold">{tc.employee_name || 'Unknown Employee'}</span>
+        )}
+        <span className="text-xs text-gray-400 ml-auto">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</span>
+      </div>
+
       {error && <div className="bg-red-50 text-red-700 px-3 py-2 rounded text-sm">{error}</div>}
 
+      {/* Image + Table side by side */}
       <div className="flex gap-4">
-        {/* Image preview */}
-        <div className="w-72 shrink-0">
-          {tc.preprocessed_image_url ? (
-            <img src={tc.preprocessed_image_url} alt="Processed timecard" className="w-full rounded border" />
-          ) : tc.image_url ? (
-            <img src={tc.image_url} alt="Original timecard" className="w-full rounded border" />
-          ) : (
+        {/* Image panel — collapsible */}
+        <div className={`shrink-0 transition-all duration-200 ${imageCollapsed ? 'w-0 overflow-hidden' : 'w-80'}`}>
+          {imageSrc && !imageCollapsed && (
+            <ZoomableImage src={imageSrc} alt="Timecard" />
+          )}
+          {!imageSrc && !imageCollapsed && (
             <div className="bg-gray-100 rounded border h-96 flex items-center justify-center text-gray-400">No image</div>
           )}
-          <p className="text-xs text-gray-500 mt-1">Period: {tc.period_start || '?'} – {tc.period_end || '?'}</p>
         </div>
 
-        {/* Punch table — always editable */}
+        {/* Collapse/expand toggle */}
+        <button
+          className="self-start px-1 py-2 text-gray-400 hover:text-gray-700 transition-colors"
+          onClick={() => setImageCollapsed(!imageCollapsed)}
+          title={imageCollapsed ? 'Show image' : 'Hide image'}
+        >
+          {imageCollapsed ? '▶' : '◀'}
+        </button>
+
+        {/* Punch table */}
         <div className="flex-1 overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -531,22 +675,14 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
 
         {tc.ocr_status === 'reviewed' && payPeriodId && (
           <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
-            <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Assign to employee:</span>
-            <select
-              className="border rounded px-2 py-1.5 text-sm flex-1 max-w-xs"
-              value={selectedEmployeeId}
-              onChange={(e) => setSelectedEmployeeId(e.target.value ? Number(e.target.value) : '')}
-            >
-              <option value="">Auto-match by name</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.first_name} {emp.last_name}
-                </option>
-              ))}
-            </select>
             <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying}>
               {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply Hours to Payroll'}
             </Button>
+            <span className="text-xs text-gray-500">
+              {selectedEmployeeId
+                ? `Assigning to: ${employees.find(e => e.id === selectedEmployeeId)?.first_name} ${employees.find(e => e.id === selectedEmployeeId)?.last_name}`
+                : `Will auto-match by name: "${tc.employee_name}"`}
+            </span>
           </div>
         )}
         {tc.ocr_status === 'reviewed' && !payPeriodId && (
