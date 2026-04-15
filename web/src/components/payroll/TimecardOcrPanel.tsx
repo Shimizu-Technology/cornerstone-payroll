@@ -217,15 +217,23 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
-  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, 5));
+  const MAX_ZOOM = 8;
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, MAX_ZOOM));
   const handleZoomOut = () => { setZoom((z) => { const next = Math.max(z - 0.5, 1); if (next === 1) setPan({ x: 0, y: 0 }); return next; }); };
   const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.25 : 0.25;
-    setZoom((z) => { const next = Math.max(1, Math.min(z + delta, 5)); if (next === 1) setPan({ x: 0, y: 0 }); return next; });
-  };
+  // Native wheel listener so we can preventDefault without passive violation
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.25 : 0.25;
+      setZoom((z) => { const next = Math.max(1, Math.min(z + delta, MAX_ZOOM)); if (next === 1) setPan({ x: 0, y: 0 }); return next; });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (zoom <= 1) return;
@@ -249,7 +257,7 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
       <div className="flex items-center gap-1">
         <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={zoom <= 1} className="px-2 py-1 text-xs">−</Button>
         <span className="text-xs text-gray-500 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
-        <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= 5} className="px-2 py-1 text-xs">+</Button>
+        <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM} className="px-2 py-1 text-xs">+</Button>
         {zoom > 1 && (
           <Button size="sm" variant="outline" onClick={handleReset} className="px-2 py-1 text-xs ml-1">Reset</Button>
         )}
@@ -257,8 +265,7 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
       <div
         ref={containerRef}
         className="overflow-hidden rounded border bg-gray-900 select-none"
-        style={{ cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in', maxHeight: '600px' }}
-        onWheel={handleWheel}
+        style={{ cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in', maxHeight: '70vh' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -268,9 +275,11 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
         <img
           src={src}
           alt={alt}
-          className="w-full transition-transform duration-150"
-          style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center' }}
           draggable={false}
+          style={{
+            width: `${zoom * 100}%`,
+            transform: `translate(${pan.x}px, ${pan.y}px)`,
+          }}
         />
       </div>
       {zoom === 1 && <p className="text-[10px] text-gray-400 text-center">Click image or scroll to zoom, then drag to pan</p>}
@@ -340,9 +349,40 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
   );
 }
 
+// ──── Date helpers ──────────────────────────────────────
+function parseDateStr(d: string): Date | null {
+  const parts = d.split('-');
+  if (parts.length !== 3) return null;
+  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+}
+
+function formatDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function dayOfWeek(d: Date): string {
+  return d.toLocaleDateString('en-US', { weekday: 'short' });
+}
+
+function generateDateRange(start: string, end: string): { date: string; dayOfMonth: number; dow: string }[] {
+  const s = parseDateStr(start);
+  const e = parseDateStr(end);
+  if (!s || !e || s > e) return [];
+  const result: { date: string; dayOfMonth: number; dow: string }[] = [];
+  const cur = new Date(s);
+  while (cur <= e) {
+    result.push({ date: formatDateStr(cur), dayOfMonth: cur.getDate(), dow: dayOfWeek(cur) });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return result;
+}
+
 // ──── Timecard Detail / Review Screen ──────────────────
 type EditableEntry = {
-  id: number;
+  id: number | null; // null = placeholder row (no punch entry exists yet)
   card_day: number | null;
   date: string;
   clock_in: string;
@@ -351,20 +391,91 @@ type EditableEntry = {
   clock_out: string;
   in3: string;
   out3: string;
+  _isPlaceholder?: boolean;
+  _dow?: string;
 };
 
-function buildEditable(entries: PunchEntryData[]): EditableEntry[] {
-  return entries.map((pe) => ({
-    id: pe.id,
-    card_day: pe.card_day,
-    date: pe.date || '',
-    clock_in: to12h(pe.clock_in),
-    lunch_out: to12h(pe.lunch_out),
-    lunch_in: to12h(pe.lunch_in),
-    clock_out: to12h(pe.clock_out),
-    in3: to12h(pe.in3),
-    out3: to12h(pe.out3),
-  }));
+function buildEditableWithAllDates(
+  entries: PunchEntryData[],
+  periodStart: string | null,
+  periodEnd: string | null,
+): EditableEntry[] {
+  if (!periodStart || !periodEnd) {
+    return entries.map((pe) => ({
+      id: pe.id,
+      card_day: pe.card_day,
+      date: pe.date || '',
+      clock_in: to12h(pe.clock_in),
+      lunch_out: to12h(pe.lunch_out),
+      lunch_in: to12h(pe.lunch_in),
+      clock_out: to12h(pe.clock_out),
+      in3: to12h(pe.in3),
+      out3: to12h(pe.out3),
+    }));
+  }
+
+  const dateRange = generateDateRange(periodStart, periodEnd);
+  const entryByDate = new Map<string, PunchEntryData>();
+  const entryByDay = new Map<number, PunchEntryData>();
+  for (const pe of entries) {
+    if (pe.date) entryByDate.set(pe.date, pe);
+    if (pe.card_day != null) entryByDay.set(pe.card_day, pe);
+  }
+
+  const usedIds = new Set<number>();
+  const result: EditableEntry[] = [];
+
+  for (const { date, dayOfMonth, dow } of dateRange) {
+    const pe = entryByDate.get(date) || entryByDay.get(dayOfMonth);
+    if (pe && !usedIds.has(pe.id)) {
+      usedIds.add(pe.id);
+      result.push({
+        id: pe.id,
+        card_day: pe.card_day ?? dayOfMonth,
+        date: pe.date || date,
+        clock_in: to12h(pe.clock_in),
+        lunch_out: to12h(pe.lunch_out),
+        lunch_in: to12h(pe.lunch_in),
+        clock_out: to12h(pe.clock_out),
+        in3: to12h(pe.in3),
+        out3: to12h(pe.out3),
+        _dow: dow,
+      });
+    } else {
+      result.push({
+        id: null,
+        card_day: dayOfMonth,
+        date,
+        clock_in: '',
+        lunch_out: '',
+        lunch_in: '',
+        clock_out: '',
+        in3: '',
+        out3: '',
+        _isPlaceholder: true,
+        _dow: dow,
+      });
+    }
+  }
+
+  // Include any entries not matched to the date range (edge cases)
+  for (const pe of entries) {
+    if (!usedIds.has(pe.id)) {
+      result.push({
+        id: pe.id,
+        card_day: pe.card_day,
+        date: pe.date || '',
+        clock_in: to12h(pe.clock_in),
+        lunch_out: to12h(pe.lunch_out),
+        lunch_in: to12h(pe.lunch_in),
+        clock_out: to12h(pe.clock_out),
+        in3: to12h(pe.in3),
+        out3: to12h(pe.out3),
+      });
+    }
+  }
+
+  return result;
 }
 
 function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, onApplied }: {
@@ -375,7 +486,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   onApplied?: () => void;
 }) {
   const [tc, setTc] = useState(initialTc);
-  const [editable, setEditable] = useState<EditableEntry[]>(() => buildEditable(initialTc.punch_entries));
+  const [editable, setEditable] = useState<EditableEntry[]>(() =>
+    buildEditableWithAllDates(initialTc.punch_entries, initialTc.period_start, initialTc.period_end)
+  );
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reprocessing, setReprocessing] = useState(false);
@@ -388,16 +501,17 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const reload = useCallback(async () => {
     const fresh = await timecardsApi.show(tc.id);
     setTc(fresh);
-    setEditable(buildEditable(fresh.punch_entries));
+    setEditable(buildEditableWithAllDates(fresh.punch_entries, fresh.period_start, fresh.period_end));
     setDirty(false);
   }, [tc.id]);
 
-  const sortedEntries = [...tc.punch_entries].sort((a, b) => (a.card_day ?? 99) - (b.card_day ?? 99));
-  const sortedEditable = [...editable].sort((a, b) => (a.card_day ?? 99) - (b.card_day ?? 99));
-  const punchesWithData = sortedEntries.filter((pe) => !pe.blank_day);
+  const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
 
-  const updateField = (id: number, field: keyof EditableEntry, value: string) => {
-    setEditable((prev) => prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)));
+  const updateField = (rowKey: string, field: keyof EditableEntry, value: string) => {
+    setEditable((prev) => prev.map((e) => {
+      const key = e.id != null ? `entry-${e.id}` : `placeholder-${e.date}`;
+      return key === rowKey ? { ...e, [field]: value } : e;
+    }));
     setDirty(true);
   };
 
@@ -405,25 +519,41 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     setSaving(true);
     setError('');
     try {
+      const timeFields = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
+
       for (const entry of editable) {
-        const original = tc.punch_entries.find((pe) => pe.id === entry.id);
-        if (!original) continue;
+        if (entry._isPlaceholder || entry.id == null) {
+          // Placeholder row — create a new entry only if user typed data
+          const hasAnyTime = timeFields.some((f) => entry[f].trim() !== '');
+          if (!hasAnyTime) continue;
 
-        const changes: Record<string, string | null> = {};
-        const fieldsToCheck = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
-
-        for (const f of fieldsToCheck) {
-          const converted = to24h(entry[f]);
-          if (converted !== original[f]) {
-            changes[f] = converted;
+          const createData: Record<string, string | number | null> = {
+            card_day: entry.card_day,
+            date: entry.date || null,
+          };
+          for (const f of timeFields) {
+            createData[f] = to24h(entry[f]);
           }
-        }
-        if (entry.date !== (original.date || '')) {
-          changes['date'] = entry.date || null;
-        }
+          await punchEntriesApi.create(tc.id, createData as Partial<PunchEntryData>);
+        } else {
+          // Existing entry — update if changed
+          const original = tc.punch_entries.find((pe) => pe.id === entry.id);
+          if (!original) continue;
 
-        if (Object.keys(changes).length > 0) {
-          await punchEntriesApi.update(entry.id, changes as Partial<PunchEntryData>);
+          const changes: Record<string, string | null> = {};
+          for (const f of timeFields) {
+            const converted = to24h(entry[f]);
+            if (converted !== original[f]) {
+              changes[f] = converted;
+            }
+          }
+          if (entry.date !== (original.date || '')) {
+            changes['date'] = entry.date || null;
+          }
+
+          if (Object.keys(changes).length > 0) {
+            await punchEntriesApi.update(entry.id, changes as Partial<PunchEntryData>);
+          }
         }
       }
       await reload();
@@ -455,7 +585,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     try {
       const updated = await timecardsApi.reprocess(tc.id);
       setTc(updated);
-      setEditable(buildEditable(updated.punch_entries));
+      setEditable(buildEditableWithAllDates(updated.punch_entries, updated.period_start, updated.period_end));
       setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reprocess failed');
@@ -575,45 +705,51 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               </tr>
             </thead>
             <tbody>
-              {sortedEditable.map((entry) => {
-                const original = sortedEntries.find((pe) => pe.id === entry.id);
-                if (!original || original.blank_day) return null;
-                const hasData = original.clock_in || original.lunch_out || original.lunch_in || original.clock_out || original.in3 || original.out3;
-                if (!hasData) return null;
+              {editable.map((entry) => {
+                const rowKey = entry.id != null ? `entry-${entry.id}` : `placeholder-${entry.date}`;
+                const original = entry.id != null ? tc.punch_entries.find((pe) => pe.id === entry.id) : null;
+                const isBlank = !entry.clock_in && !entry.lunch_out && !entry.lunch_in && !entry.clock_out && !entry.in3 && !entry.out3;
+                const dow = entry._dow || original?.day_of_week || '';
 
-                const rowBg = original.needs_attention
+                const rowBg = original?.needs_attention
                   ? original.review_state === 'approved' ? 'bg-blue-50' : 'bg-orange-50'
-                  : '';
+                  : isBlank ? 'bg-gray-50/50' : '';
 
                 return (
-                  <tr key={entry.id} className={`text-sm ${rowBg}`}>
+                  <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-gray-400' : ''}`}>
                     <td className="px-1 py-1 font-mono text-xs text-gray-500">{entry.card_day}</td>
                     <td className="px-1 py-1">
                       <input
                         type="date"
                         className="text-xs border border-gray-200 rounded px-1 py-0.5 w-[7rem] focus:border-indigo-400 outline-none"
                         value={entry.date}
-                        onChange={(e) => updateField(entry.id, 'date', e.target.value)}
+                        onChange={(e) => updateField(rowKey, 'date', e.target.value)}
                       />
                     </td>
-                    <td className="px-1 py-1 text-xs text-gray-500">{original.day_of_week || ''}</td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_in} onChange={(v) => updateField(entry.id, 'clock_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_out} onChange={(v) => updateField(entry.id, 'lunch_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.lunch_in} onChange={(v) => updateField(entry.id, 'lunch_in', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.clock_out} onChange={(v) => updateField(entry.id, 'clock_out', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.in3} onChange={(v) => updateField(entry.id, 'in3', v)} /></td>
-                    <td className="px-1 py-1"><TimeInput value={entry.out3} onChange={(v) => updateField(entry.id, 'out3', v)} /></td>
-                    <td className="px-1 py-1 text-xs text-right font-mono">{original.hours_worked?.toFixed(2) ?? '-'}</td>
-                    <td className="px-1 py-1">
-                      <Badge className={`text-[10px] ${confidenceColor(original.confidence)}`}>
-                        {original.confidence !== null ? `${(original.confidence * 100).toFixed(0)}%` : '-'}
-                      </Badge>
+                    <td className="px-1 py-1 text-xs text-gray-500">{dow}</td>
+                    <td className="px-1 py-1"><TimeInput value={entry.clock_in} onChange={(v) => updateField(rowKey, 'clock_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput value={entry.lunch_out} onChange={(v) => updateField(rowKey, 'lunch_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput value={entry.lunch_in} onChange={(v) => updateField(rowKey, 'lunch_in', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput value={entry.clock_out} onChange={(v) => updateField(rowKey, 'clock_out', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
+                    <td className="px-1 py-1"><TimeInput value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
+                    <td className="px-1 py-1 text-xs text-right font-mono">
+                      {original?.hours_worked != null ? original.hours_worked.toFixed(2) : isBlank ? '—' : '-'}
                     </td>
-                    <td className="px-1 py-1 text-[10px] text-gray-500 max-w-28 truncate" title={original.notes || ''}>
-                      {original.needs_attention && original.review_state === 'unresolved' && (
+                    <td className="px-1 py-1">
+                      {original ? (
+                        <Badge className={`text-[10px] ${confidenceColor(original.confidence)}`}>
+                          {original.confidence !== null ? `${(original.confidence * 100).toFixed(0)}%` : '-'}
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-1 py-1 text-[10px] text-gray-500 max-w-28 truncate" title={original?.notes || ''}>
+                      {original?.needs_attention && original.review_state === 'unresolved' && (
                         <span className="text-orange-600 font-medium">⚠ </span>
                       )}
-                      {original.notes || ''}
+                      {original?.notes || ''}
                     </td>
                   </tr>
                 );

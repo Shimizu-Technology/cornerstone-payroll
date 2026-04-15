@@ -4,7 +4,21 @@ module Api
   module V1
     module Admin
       class PunchEntriesController < BaseController
-        before_action :set_punch_entry
+        before_action :set_punch_entry, only: [:update]
+
+        # POST /api/v1/admin/punch_entries
+        def create
+          timecard = Timecard.find(params[:timecard_id])
+          unless timecard.company_id == current_company_id
+            return render json: { error: "Not found" }, status: :not_found
+          end
+
+          attrs = punch_entry_params.to_h
+          attrs[:manually_edited] = true if punch_field_changed?(attrs)
+
+          @punch_entry = timecard.punch_entries.create!(attrs)
+          render json: punch_entry_json(@punch_entry), status: :created
+        end
 
         # PATCH /api/v1/admin/punch_entries/:id
         def update
@@ -27,7 +41,7 @@ module Api
 
         def punch_entry_params
           params.require(:punch_entry).permit(
-            :date, :clock_in, :lunch_out, :lunch_in, :clock_out, :in3, :out3,
+            :card_day, :date, :clock_in, :lunch_out, :lunch_in, :clock_out, :in3, :out3,
             :notes, :confidence, :review_state, :reviewed_by_name
           )
         end
