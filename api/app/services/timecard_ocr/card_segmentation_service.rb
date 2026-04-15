@@ -1,7 +1,7 @@
 module TimecardOcr
   class CardSegmentationService
     TARGET_CARD_RATIO = 0.43
-    MULTI_CARD_RATIO_THRESHOLD = 0.75
+    MULTI_CARD_RATIO_THRESHOLD = 1.0
     MAX_CARD_COUNT = 4
     HORIZONTAL_TRIM_RATIO = 0.02
     PDF_RENDER_DPI = 400
@@ -90,7 +90,7 @@ module TimecardOcr
 
     def estimated_card_count(width, height)
       ratio = width.to_f / height.to_f
-      return 1 if ratio < MULTI_CARD_RATIO_THRESHOLD
+      return 1 if ratio <= MULTI_CARD_RATIO_THRESHOLD
 
       [(ratio / TARGET_CARD_RATIO).round, 1].max.clamp(1, MAX_CARD_COUNT)
     end
