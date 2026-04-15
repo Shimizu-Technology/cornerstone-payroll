@@ -210,26 +210,46 @@ function TimeInput({ value, onChange }: { value: string; onChange: (v: string) =
 }
 
 // ──── Zoomable Image Viewer ─────────────────────────────
-function ZoomableImage({ src, alt }: { src: string; alt: string }) {
+function ZoomableImage({
+  originalSrc,
+  enhancedSrc,
+  alt,
+}: {
+  originalSrc: string | null;
+  enhancedSrc: string | null;
+  alt: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(true);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
   const MAX_ZOOM = 8;
-  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.5, MAX_ZOOM));
-  const handleZoomOut = () => { setZoom((z) => { const next = Math.max(z - 0.5, 1); if (next === 1) setPan({ x: 0, y: 0 }); return next; }); };
+  const ZOOM_STEP = 0.5;
+  const handleZoomIn = () => setZoom((z) => Math.min(z + ZOOM_STEP, MAX_ZOOM));
+  const handleZoomOut = () => { setZoom((z) => { const next = Math.max(z - ZOOM_STEP, 1); if (next === 1) setPan({ x: 0, y: 0 }); return next; }); };
   const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
 
-  // Native wheel listener so we can preventDefault without passive violation
+  const src = showOriginal ? (originalSrc || enhancedSrc) : (enhancedSrc || originalSrc);
+  const hasBothImages = !!(originalSrc && enhancedSrc);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.25 : 0.25;
-      setZoom((z) => { const next = Math.max(1, Math.min(z + delta, MAX_ZOOM)); if (next === 1) setPan({ x: 0, y: 0 }); return next; });
+      // Scale delta to trackpad sensitivity — small pinch gestures
+      // produce deltaY ~1-4, mouse wheels produce ~100+
+      const absDelta = Math.abs(e.deltaY);
+      const step = absDelta > 50 ? 0.25 : Math.min(absDelta * 0.03, 0.15);
+      const direction = e.deltaY > 0 ? -1 : 1;
+      setZoom((z) => {
+        const next = Math.max(1, Math.min(z + direction * step, MAX_ZOOM));
+        if (next === 1) setPan({ x: 0, y: 0 });
+        return Math.round(next * 100) / 100;
+      });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -252,9 +272,11 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
 
   const handleMouseUp = () => setDragging(false);
 
+  if (!src) return <div className="bg-gray-100 rounded border h-96 flex items-center justify-center text-gray-400">No image</div>;
+
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-wrap">
         <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={zoom <= 1} className="px-2 py-1 text-xs">−</Button>
         <span className="text-xs text-gray-500 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
         <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM} className="px-2 py-1 text-xs">+</Button>
@@ -262,6 +284,22 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
           <Button size="sm" variant="outline" onClick={handleReset} className="px-2 py-1 text-xs ml-1">Reset</Button>
         )}
       </div>
+      {hasBothImages && (
+        <div className="flex gap-1">
+          <button
+            className={`text-xs px-2 py-1 rounded border transition-colors ${showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            onClick={() => setShowOriginal(true)}
+          >
+            Original
+          </button>
+          <button
+            className={`text-xs px-2 py-1 rounded border transition-colors ${!showOriginal ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-medium' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+            onClick={() => setShowOriginal(false)}
+          >
+            Enhanced (B&W)
+          </button>
+        </div>
+      )}
       <div
         ref={containerRef}
         className="overflow-hidden rounded border bg-gray-900 select-none"
@@ -637,8 +675,6 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     } catch { /* ignore */ }
   };
 
-  const imageSrc = tc.preprocessed_image_url || tc.image_url;
-
   return (
     <div className="space-y-4">
       {/* Header with back, status, and confidence */}
@@ -676,11 +712,12 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       <div className="flex gap-4">
         {/* Image panel — collapsible */}
         <div className={`shrink-0 transition-all duration-200 ${imageCollapsed ? 'w-0 overflow-hidden' : 'w-80'}`}>
-          {imageSrc && !imageCollapsed && (
-            <ZoomableImage src={imageSrc} alt="Timecard" />
-          )}
-          {!imageSrc && !imageCollapsed && (
-            <div className="bg-gray-100 rounded border h-96 flex items-center justify-center text-gray-400">No image</div>
+          {!imageCollapsed && (
+            <ZoomableImage
+              originalSrc={tc.image_url}
+              enhancedSrc={tc.preprocessed_image_url}
+              alt="Timecard"
+            />
           )}
         </div>
 
