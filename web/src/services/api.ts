@@ -819,6 +819,8 @@ export const timecardsApi = {
 };
 
 export const punchEntriesApi = {
+  create: (timecardId: number, data: Partial<PunchEntryData>) =>
+    api.post<PunchEntryData>(`/admin/punch_entries`, { timecard_id: timecardId, punch_entry: data }),
   update: (id: number, data: Partial<PunchEntryData>) =>
     api.patch<PunchEntryData>(`/admin/punch_entries/${id}`, { punch_entry: data }),
 };
