@@ -1128,7 +1128,21 @@ export const reportsApi = {
   payrollRegisterPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   employeePayHistory: (employeeId: number, limit?: number) =>
-    api.get<{ report: { employee: Employee; history: PayrollItem[]; ytd: Record<string, number> } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
+    api.get<{ report: {
+      employee: { id: number; name: string; employment_type: string; pay_rate: number };
+      history: {
+        pay_period_id: number;
+        pay_date: string;
+        period_description: string;
+        hours_worked: number | null;
+        overtime_hours: number | null;
+        gross_pay: number;
+        total_deductions: number;
+        net_pay: number;
+        check_number: string | null;
+      }[];
+      ytd: Record<string, number>;
+    } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
   taxSummary: (year?: number, quarter?: number) =>
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
   // CPR-70: Tax Summary exports
