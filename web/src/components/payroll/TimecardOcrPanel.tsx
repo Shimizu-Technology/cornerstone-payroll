@@ -189,11 +189,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting }: {
         {tc.ocr_status === 'failed' && (
           <Button size="sm" variant="outline" onClick={onReprocess}>Retry OCR</Button>
         )}
-        {!isProcessing && (
-          <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete} disabled={isDeleting}>
-            {isDeleting ? <><Spinner size="sm" /> Deleting...</> : 'Delete'}
-          </Button>
-        )}
+        <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete} disabled={isDeleting}>
+          {isDeleting ? <><Spinner size="sm" /> Deleting...</> : 'Delete'}
+        </Button>
       </div>
     </div>
   );
