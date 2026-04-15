@@ -415,9 +415,10 @@ function buildEditableWithAllDates(
   }
 
   const dateRange = generateDateRange(periodStart, periodEnd);
+  const realEntries = entries.filter((pe) => !pe.blank_day);
   const entryByDate = new Map<string, PunchEntryData>();
   const entryByDay = new Map<number, PunchEntryData>();
-  for (const pe of entries) {
+  for (const pe of realEntries) {
     if (pe.date) entryByDate.set(pe.date, pe);
     if (pe.card_day != null) entryByDay.set(pe.card_day, pe);
   }
@@ -458,8 +459,8 @@ function buildEditableWithAllDates(
     }
   }
 
-  // Include any entries not matched to the date range (edge cases)
-  for (const pe of entries) {
+  // Include any non-blank entries not matched to the date range (edge cases)
+  for (const pe of realEntries) {
     if (!usedIds.has(pe.id)) {
       result.push({
         id: pe.id,
@@ -559,6 +560,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
+      // Reload even on error so successfully-created entries are reflected
+      // and placeholder rows don't get re-created on retry
+      try { await reload(); } catch { /* ignore reload failure */ }
     } finally {
       setSaving(false);
     }
