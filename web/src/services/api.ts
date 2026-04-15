@@ -1035,7 +1035,7 @@ export interface YtdSummaryReport {
       retirement: number;
       net_pay: number;
     }[];
-    company_totals: {
+    company_totals: null | {
       year: number;
       gross_pay: number;
       withholding_tax: number;
