@@ -4,7 +4,26 @@ module Api
   module V1
     module Admin
       class PunchEntriesController < BaseController
-        before_action :set_punch_entry
+        before_action :set_punch_entry, only: [:update]
+
+        # POST /api/v1/admin/punch_entries
+        def create
+          timecard = Timecard.find_by(id: params[:timecard_id])
+          return render json: { error: "Not found" }, status: :not_found unless timecard
+          unless timecard.company_id == current_company_id
+            return render json: { error: "Not found" }, status: :not_found
+          end
+
+          attrs = punch_entry_params.to_h
+          attrs[:manually_edited] = true if punch_field_changed?(attrs)
+
+          @punch_entry = timecard.punch_entries.build(attrs)
+          if @punch_entry.save
+            render json: punch_entry_json(@punch_entry), status: :created
+          else
+            render json: { error: 'Validation failed', details: @punch_entry.errors }, status: :unprocessable_entity
+          end
+        end
 
         # PATCH /api/v1/admin/punch_entries/:id
         def update
@@ -27,7 +46,7 @@ module Api
 
         def punch_entry_params
           params.require(:punch_entry).permit(
-            :date, :clock_in, :lunch_out, :lunch_in, :clock_out, :in3, :out3,
+            :card_day, :date, :clock_in, :lunch_out, :lunch_in, :clock_out, :in3, :out3,
             :notes, :confidence, :review_state, :reviewed_by_name
           )
         end

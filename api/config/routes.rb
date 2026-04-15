@@ -147,7 +147,7 @@ Rails.application.routes.draw do
             post :apply_to_payroll
           end
         end
-        resources :punch_entries, only: [:update]
+        resources :punch_entries, only: [:create, :update]
 
         # Employee Wage Rates
         resources :employee_wage_rates, only: [:index, :create, :update, :destroy]
