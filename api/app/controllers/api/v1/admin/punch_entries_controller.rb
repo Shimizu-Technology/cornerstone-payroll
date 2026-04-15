@@ -16,8 +16,12 @@ module Api
           attrs = punch_entry_params.to_h
           attrs[:manually_edited] = true if punch_field_changed?(attrs)
 
-          @punch_entry = timecard.punch_entries.create!(attrs)
-          render json: punch_entry_json(@punch_entry), status: :created
+          @punch_entry = timecard.punch_entries.build(attrs)
+          if @punch_entry.save
+            render json: punch_entry_json(@punch_entry), status: :created
+          else
+            render json: { error: 'Validation failed', details: @punch_entry.errors }, status: :unprocessable_entity
+          end
         end
 
         # PATCH /api/v1/admin/punch_entries/:id
