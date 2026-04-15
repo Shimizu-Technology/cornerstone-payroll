@@ -1035,7 +1035,7 @@ export interface YtdSummaryReport {
       retirement: number;
       net_pay: number;
     }[];
-    company_totals: {
+    company_totals: null | {
       year: number;
       gross_pay: number;
       withholding_tax: number;
@@ -1046,6 +1046,75 @@ export interface YtdSummaryReport {
       payroll_count: number;
     };
   };
+}
+
+export interface Form941GuReport {
+  meta: {
+    report_type: string;
+    company_name: string;
+    ein: string;
+    year: number;
+    quarter: number;
+    quarter_label: string;
+    quarter_start: string;
+    quarter_end: string;
+    generated_at: string;
+    pay_periods_included: number;
+    caveats: string[];
+  };
+  employer_info: {
+    name: string;
+    ein: string;
+    address: string;
+  };
+  lines: {
+    line1_employee_count: number;
+    line2_wages_tips_other: number;
+    line3_fit_withheld: number;
+    line5a_ss_wages: number;
+    line5a_ss_combined_tax: number;
+    line5b_ss_tips: number;
+    line5b_ss_tips_combined_tax: number;
+    line5c_medicare_wages: number;
+    line5c_medicare_combined_tax: number;
+    line5d_add_medicare_wages: number;
+    line5d_add_medicare_tax: number;
+    line5e_total_ss_medicare: number;
+    line6_total_taxes_before_adj: number;
+    line7_adj_fractions_cents: number | null;
+    line8_adj_sick_pay: number | null;
+    line9_adj_tips_group_life: number | null;
+    line10_total_taxes_after_adj: number;
+    line11_nonrefundable_credits: number | null;
+    line12_total_after_credits: number;
+    line13_total_deposits: number | null;
+    line14_balance_due_or_overpayment: number | null;
+  };
+  tax_detail: {
+    gross_wages: number;
+    reported_tips: number;
+    fit_withheld: number;
+    ss_employee: number;
+    ss_employer: number;
+    ss_wages_combined: number;
+    ss_tips_combined: number;
+    ss_combined: number;
+    medicare_employee: number;
+    medicare_employer: number;
+    medicare_combined: number;
+    additional_medicare_employee: number;
+    total_employee_taxes: number;
+    total_employer_taxes: number;
+  };
+  monthly_liability: {
+    month: number;
+    month_name: string;
+    fit_withheld: number;
+    ss_combined: number;
+    medicare_combined: number;
+    additional_medicare: number;
+    total_liability: number;
+  }[];
 }
 
 export const reportsApi = {
@@ -1059,7 +1128,21 @@ export const reportsApi = {
   payrollRegisterPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   employeePayHistory: (employeeId: number, limit?: number) =>
-    api.get<{ report: { employee: Employee; history: PayrollItem[]; ytd: Record<string, number> } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
+    api.get<{ report: {
+      employee: { id: number; name: string; employment_type: string; pay_rate: number };
+      history: {
+        pay_period_id: number;
+        pay_date: string;
+        period_description: string;
+        hours_worked: number | null;
+        overtime_hours: number | null;
+        gross_pay: number;
+        total_deductions: number;
+        net_pay: number;
+        check_number: string | null;
+      }[];
+      ytd: Record<string, number>;
+    } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
   taxSummary: (year?: number, quarter?: number) =>
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
   // CPR-70: Tax Summary exports
@@ -1083,6 +1166,9 @@ export const reportsApi = {
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
   w2GuMarkReady: (year: number, notes?: string) =>
     api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
+  // Form 941-GU Quarterly Report
+  form941Gu: (year: number, quarter: number) =>
+    api.get<{ report: Form941GuReport }>('/admin/reports/form_941_gu', { year, quarter }),
   // 1099-NEC Annual Report
   form1099Nec: (year: number) =>
     api.get('/admin/reports/form_1099_nec', { year }),
