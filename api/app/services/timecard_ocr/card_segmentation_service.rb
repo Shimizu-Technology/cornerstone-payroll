@@ -31,7 +31,10 @@ module TimecardOcr
     def segment_image(path_or_file)
       path = path_or_file.respond_to?(:path) ? path_or_file.path : path_or_file
       image = MiniMagick::Image.open(path)
+      image.auto_orient
+      ratio = image.width.to_f / image.height.to_f
       count = estimated_card_count(image.width, image.height)
+      Rails.logger.info("CardSegmentation: #{image.width}x#{image.height} ratio=#{ratio.round(2)} → #{count} card(s)")
       return [copy_as_jpeg(image)] if count == 1
 
       split_into_columns(image, count)
