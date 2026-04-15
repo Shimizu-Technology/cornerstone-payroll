@@ -401,7 +401,7 @@ function buildEditableWithAllDates(
   periodEnd: string | null,
 ): EditableEntry[] {
   if (!periodStart || !periodEnd) {
-    return entries.map((pe) => ({
+    return entries.filter((pe) => !pe.blank_day).map((pe) => ({
       id: pe.id,
       card_day: pe.card_day,
       date: pe.date || '',
@@ -524,7 +524,6 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
 
       for (const entry of editable) {
         if (entry._isPlaceholder || entry.id == null) {
-          // Placeholder row — create a new entry only if user typed data
           const hasAnyTime = timeFields.some((f) => entry[f].trim() !== '');
           if (!hasAnyTime) continue;
 
@@ -535,9 +534,15 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           for (const f of timeFields) {
             createData[f] = to24h(entry[f]);
           }
-          await punchEntriesApi.create(tc.id, createData as Partial<PunchEntryData>);
+          const created = await punchEntriesApi.create(tc.id, createData as Partial<PunchEntryData>);
+          // Immediately mark this row as persisted so it won't be
+          // re-created if a later request fails and reload also fails
+          setEditable((prev) => prev.map((e) =>
+            (e._isPlaceholder && e.date === entry.date)
+              ? { ...e, id: created.id, _isPlaceholder: false }
+              : e
+          ));
         } else {
-          // Existing entry — update if changed
           const original = tc.punch_entries.find((pe) => pe.id === entry.id);
           if (!original) continue;
 
@@ -560,9 +565,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
       await reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Save failed');
-      // Reload even on error so successfully-created entries are reflected
-      // and placeholder rows don't get re-created on retry
-      try { await reload(); } catch { /* ignore reload failure */ }
+      try { await reload(); } catch { /* best-effort refresh */ }
     } finally {
       setSaving(false);
     }
