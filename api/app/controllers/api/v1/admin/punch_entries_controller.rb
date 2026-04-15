@@ -8,7 +8,8 @@ module Api
 
         # POST /api/v1/admin/punch_entries
         def create
-          timecard = Timecard.find(params[:timecard_id])
+          timecard = Timecard.find_by(id: params[:timecard_id])
+          return render json: { error: "Not found" }, status: :not_found unless timecard
           unless timecard.company_id == current_company_id
             return render json: { error: "Not found" }, status: :not_found
           end
