@@ -279,13 +279,12 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
 }
 
 // ──── Employee Selector ─────────────────────────────────
-function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName, saving }: {
+function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelectEmployee, onSaveName }: {
   currentName: string;
   employees: Employee[];
   selectedEmployeeId: number | '';
   onSelectEmployee: (id: number | '') => void;
   onSaveName: (name: string) => Promise<void>;
-  saving: boolean;
 }) {
   const [mode, setMode] = useState<'dropdown' | 'custom'>(employees.length > 0 ? 'dropdown' : 'custom');
   const [customName, setCustomName] = useState(currentName);
@@ -530,7 +529,6 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
             selectedEmployeeId={selectedEmployeeId}
             onSelectEmployee={setSelectedEmployeeId}
             onSaveName={handleSaveName}
-            saving={savingName}
           />
         ) : (
           <span className="text-sm font-semibold">{tc.employee_name || 'Unknown Employee'}</span>
