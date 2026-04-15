@@ -895,15 +895,28 @@ function EmployeePayHistoryPanel() {
   } | null>(null);
 
   useEffect(() => {
-    employeesApi.list({ status: 'active', per_page: 500 })
-      .then((res) => {
-        const list = res.data ?? [];
-        list.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || ''));
-        setEmployees(list);
-        if (list.length > 0) setSelectedEmployeeId(list[0].id);
-      })
-      .catch(() => setError('Failed to load employees'))
-      .finally(() => setLoadingEmployees(false));
+    async function loadAllEmployees() {
+      try {
+        const all: Employee[] = [];
+        let page = 1;
+        let hasMore = true;
+        while (hasMore) {
+          const res = await employeesApi.list({ status: 'active', per_page: 100, page });
+          const batch = res.data ?? [];
+          all.push(...batch);
+          hasMore = batch.length === 100;
+          page++;
+        }
+        all.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || ''));
+        setEmployees(all);
+        if (all.length > 0) setSelectedEmployeeId(all[0].id);
+      } catch {
+        setError('Failed to load employees');
+      } finally {
+        setLoadingEmployees(false);
+      }
+    }
+    loadAllEmployees();
   }, []);
 
   async function loadReport() {
