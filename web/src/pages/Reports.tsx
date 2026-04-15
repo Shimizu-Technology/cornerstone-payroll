@@ -11,10 +11,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { reportsApi, payPeriodsApi, ApiError } from '@/services/api';
-import type { PayrollRegisterReport, TaxSummaryReport } from '@/services/api';
+import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport } from '@/services/api';
 import type {
   PayPeriod,
+  Employee,
   W2GuReport,
   W2GuEmployeeRow,
   W2GuPreflightResult,
@@ -869,6 +870,749 @@ function W2GuPanel() {
   );
 }
 
+// ─── Employee Pay History Panel ────────────────────────────────────────────
+
+function EmployeePayHistoryPanel() {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<{
+    employee: { id: number; name: string; employment_type: string; pay_rate: number };
+    history: {
+      pay_period_id: number;
+      pay_date: string;
+      period_description: string;
+      hours_worked: number | null;
+      overtime_hours: number | null;
+      gross_pay: number;
+      total_deductions: number;
+      net_pay: number;
+      check_number: string | null;
+    }[];
+    ytd: Record<string, number>;
+  } | null>(null);
+
+  useEffect(() => {
+    employeesApi.list({ status: 'active', per_page: 500 })
+      .then((res) => {
+        const list = res.data ?? [];
+        list.sort((a, b) => (a.last_name || '').localeCompare(b.last_name || ''));
+        setEmployees(list);
+        if (list.length > 0) setSelectedEmployeeId(list[0].id);
+      })
+      .catch(() => setError('Failed to load employees'))
+      .finally(() => setLoadingEmployees(false));
+  }, []);
+
+  async function loadReport() {
+    if (!selectedEmployeeId) return;
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.employeePayHistory(selectedEmployeeId);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Employee Pay History</CardTitle>
+          <CardDescription>
+            Individual employee pay records across recent committed pay periods.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="eph-employee" className="text-sm font-medium text-gray-700">
+                Employee
+              </label>
+              {loadingEmployees ? (
+                <span className="text-sm text-gray-400">Loading…</span>
+              ) : (
+                <select
+                  id="eph-employee"
+                  value={selectedEmployeeId ?? ''}
+                  onChange={(e) => {
+                    setSelectedEmployeeId(Number(e.target.value));
+                    setReport(null);
+                    setError(null);
+                  }}
+                  disabled={loading}
+                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                >
+                  {employees.length === 0 && <option value="">No active employees</option>}
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.last_name}, {emp.first_name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>{report.employee.name}</CardTitle>
+              <CardDescription>
+                {report.employee.employment_type} &bull; Rate: {fmt(report.employee.pay_rate)}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+                <TotalBox label="YTD Gross Pay" value={report.ytd.gross_pay ?? 0} />
+                <TotalBox label="YTD Withholding" value={report.ytd.withholding_tax ?? 0} />
+                <TotalBox label="YTD SS Tax" value={report.ytd.social_security_tax ?? 0} />
+                <TotalBox label="YTD Medicare" value={report.ytd.medicare_tax ?? 0} />
+                <TotalBox label="YTD Retirement" value={report.ytd.retirement ?? 0} />
+                <TotalBox label="YTD Net Pay" value={report.ytd.net_pay ?? 0} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Pay Period History</CardTitle>
+              <CardDescription>{report.history.length} period{report.history.length !== 1 ? 's' : ''}</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500">
+                    <th className="pb-2 pr-4 font-medium">Pay Date</th>
+                    <th className="pb-2 pr-4 font-medium">Period</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
+                    <th className="pb-2 font-medium">Check #</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.history.map((h) => (
+                    <tr key={h.pay_period_id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="py-2 pr-4">{h.pay_date}</td>
+                      <td className="py-2 pr-4 text-gray-500">{h.period_description}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
+                      <td className="py-2 font-mono text-gray-500">{h.check_number ?? '—'}</td>
+                    </tr>
+                  ))}
+                  {report.history.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-6 text-center text-gray-400">
+                        No pay history found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── YTD Summary Panel ────────────────────────────────────────────────────────
+
+function YtdSummaryPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
+  const [year, setYear] = useState(currentYear);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.ytdSummary(year);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Year-to-Date Summary</CardTitle>
+          <CardDescription>
+            YTD payroll totals for all employees — gross, taxes, retirement, and net pay.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="ytd-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="ytd-year"
+                value={year}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>YTD Summary — {report.year}</CardTitle>
+              <CardDescription>
+                {report.employees.length} employee{report.employees.length !== 1 ? 's' : ''}
+                {report.company_totals?.payroll_count != null && (
+                  <> &bull; {report.company_totals.payroll_count} payroll{report.company_totals.payroll_count !== 1 ? 's' : ''}</>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {report.company_totals && (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+                  <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
+                  <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
+                  <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
+                  <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
+                  <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
+                  <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Employee Detail</CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-gray-500">
+                    <th className="pb-2 pr-4 font-medium">Employee</th>
+                    <th className="pb-2 pr-4 font-medium">Type</th>
+                    <th className="pb-2 pr-4 font-medium">Status</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
+                    <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
+                    <th className="pb-2 font-medium text-right">Net Pay</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.employees.map((emp) => (
+                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-gray-50">
+                      <td className="py-2 pr-4 font-medium">{emp.name}</td>
+                      <td className="py-2 pr-4 capitalize text-gray-500">{emp.employment_type}</td>
+                      <td className="py-2 pr-4">
+                        <Badge variant={emp.status === 'active' ? 'success' : 'default'}>
+                          {emp.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
+                      <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
+                    </tr>
+                  ))}
+                  {report.employees.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="py-6 text-center text-gray-400">
+                        No employee data found for {report.year}.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Employer Tax Liability Panel ─────────────────────────────────────────────
+
+function EmployerLiabilityPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState<number | undefined>(undefined);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.taxSummary(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const periodLabel = quarter ? `Q${quarter} ${year}` : `${year} Full Year`;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Employer Tax Liability</CardTitle>
+          <CardDescription>
+            Employer-side payroll tax obligations — Social Security match (6.2%) and Medicare match (1.45%).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="el-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="el-year"
+                value={year}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="el-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <select
+                id="el-quarter"
+                value={quarter ?? ''}
+                onChange={(e) => { setQuarter(e.target.value ? Number(e.target.value) : undefined); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="">Full Year</option>
+                <option value="1">Q1 (Jan–Mar)</option>
+                <option value="2">Q2 (Apr–Jun)</option>
+                <option value="3">Q3 (Jul–Sep)</option>
+                <option value="4">Q4 (Oct–Dec)</option>
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Employer Tax Liability — {periodLabel}</CardTitle>
+            <CardDescription>
+              {report.pay_periods_included} pay period{report.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
+              {report.employee_count} employee{report.employee_count !== 1 ? 's' : ''}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              <TotalBox label="Gross Wages" value={report.totals.gross_wages} />
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+                <p className="text-xs text-blue-700">Employer SS (6.2%)</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{fmt(report.totals.social_security_employer)}</p>
+              </div>
+              <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+                <p className="text-xs text-blue-700">Employer Medicare (1.45%)</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">{fmt(report.totals.medicare_employer)}</p>
+              </div>
+            </div>
+            <div className="rounded-md border border-blue-300 bg-blue-100 p-4">
+              <div className="flex justify-between items-center">
+                <p className="text-sm font-medium text-blue-900">Total Employer Tax Liability</p>
+                <p className="text-xl font-bold tabular-nums text-blue-900">
+                  {fmt(report.totals.social_security_employer + report.totals.medicare_employer)}
+                </p>
+              </div>
+              <p className="text-xs text-blue-700 mt-1">
+                Employer SS ({fmt(report.totals.social_security_employer)}) + Employer Medicare ({fmt(report.totals.medicare_employer)})
+              </p>
+            </div>
+
+            <div className="mt-6 rounded-md bg-gray-50 border p-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Full Tax Breakdown</h4>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Employee Withholding (FIT)</span>
+                  <span className="tabular-nums">{fmt(report.totals.withholding_tax)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Employee SS</span>
+                  <span className="tabular-nums">{fmt(report.totals.social_security_employee)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Employer SS</span>
+                  <span className="tabular-nums font-medium">{fmt(report.totals.social_security_employer)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Employee Medicare</span>
+                  <span className="tabular-nums">{fmt(report.totals.medicare_employee)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Employer Medicare</span>
+                  <span className="tabular-nums font-medium">{fmt(report.totals.medicare_employer)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-2 col-span-2">
+                  <span className="text-gray-700 font-medium">Total Employment Taxes</span>
+                  <span className="tabular-nums font-semibold">{fmt(report.totals.total_employment_taxes)}</span>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Form 941-GU Panel ────────────────────────────────────────────────────────
+
+function Form941GuPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
+  const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState(currentQuarter);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<Form941GuReport | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.form941Gu(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const fmtOrPlaceholder = (v: number | null) => v != null ? fmt(v) : '—';
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Form 941-GU Quarterly Report</CardTitle>
+          <CardDescription>
+            Guam Employer's Quarterly Federal Tax Return — mirrors federal Form 941 for DRT filing.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="f941-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="f941-year"
+                value={year}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="f941-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <select
+                id="f941-quarter"
+                value={quarter}
+                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="1">Q1 (Jan–Mar)</option>
+                <option value="2">Q2 (Apr–Jun)</option>
+                <option value="3">Q3 (Jul–Sep)</option>
+                <option value="4">Q4 (Oct–Dec)</option>
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Form 941-GU — {report.meta.quarter_label}</CardTitle>
+              <CardDescription>
+                {report.employer_info.name} &bull; EIN: {report.employer_info.ein || '—'} &bull;{' '}
+                {report.meta.pay_periods_included} pay period{report.meta.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
+                {report.meta.quarter_start} to {report.meta.quarter_end}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="rounded-md border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b">
+                        <th className="text-left px-4 py-2 font-medium text-gray-600">Line</th>
+                        <th className="text-left px-4 py-2 font-medium text-gray-600">Description</th>
+                        <th className="text-right px-4 py-2 font-medium text-gray-600">Taxable Amount</th>
+                        <th className="text-right px-4 py-2 font-medium text-gray-600">Tax</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">1</td>
+                        <td className="px-4 py-2">Number of employees</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{report.lines.line1_employee_count}</td>
+                        <td className="px-4 py-2 text-right"></td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">2</td>
+                        <td className="px-4 py-2">Wages, tips, and other compensation</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line2_wages_tips_other)}</td>
+                        <td className="px-4 py-2 text-right"></td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">3</td>
+                        <td className="px-4 py-2">Federal income tax withheld</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line3_fit_withheld)}</td>
+                      </tr>
+                      <tr className="border-b bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">5a</td>
+                        <td className="px-4 py-2">Taxable Social Security wages</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5a_ss_wages)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5a_ss_combined_tax)}</td>
+                      </tr>
+                      <tr className="border-b bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">5b</td>
+                        <td className="px-4 py-2">Taxable Social Security tips</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5b_ss_tips)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5b_ss_tips_combined_tax)}</td>
+                      </tr>
+                      <tr className="border-b bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">5c</td>
+                        <td className="px-4 py-2">Taxable Medicare wages & tips</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5c_medicare_wages)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5c_medicare_combined_tax)}</td>
+                      </tr>
+                      <tr className="border-b bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">5d</td>
+                        <td className="px-4 py-2">Taxable wages & tips subject to Additional Medicare Tax</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5d_add_medicare_wages)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5d_add_medicare_tax)}</td>
+                      </tr>
+                      <tr className="border-b font-medium">
+                        <td className="px-4 py-2 font-mono text-gray-500">5e</td>
+                        <td className="px-4 py-2">Total Social Security and Medicare taxes</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line5e_total_ss_medicare)}</td>
+                      </tr>
+                      <tr className="border-b font-medium bg-blue-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">6</td>
+                        <td className="px-4 py-2">Total taxes before adjustments (line 3 + 5e)</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line6_total_taxes_before_adj)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">7</td>
+                        <td className="px-4 py-2">Adjustment: fractions of cents</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line7_adj_fractions_cents)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">8</td>
+                        <td className="px-4 py-2">Adjustment: sick pay</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line8_adj_sick_pay)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">9</td>
+                        <td className="px-4 py-2">Adjustment: tips and group-term life</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line9_adj_tips_group_life)}</td>
+                      </tr>
+                      <tr className="border-b font-medium bg-blue-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">10</td>
+                        <td className="px-4 py-2">Total taxes after adjustments</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line10_total_taxes_after_adj)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">11</td>
+                        <td className="px-4 py-2">Nonrefundable portion of credit</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line11_nonrefundable_credits)}</td>
+                      </tr>
+                      <tr className="border-b font-medium">
+                        <td className="px-4 py-2 font-mono text-gray-500">12</td>
+                        <td className="px-4 py-2">Total taxes after adjustments and credits</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line12_total_after_credits)}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="px-4 py-2 font-mono text-gray-500">13</td>
+                        <td className="px-4 py-2">Total deposits for this quarter</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line13_total_deposits)}</td>
+                      </tr>
+                      <tr className="bg-amber-50">
+                        <td className="px-4 py-2 font-mono text-gray-500">14</td>
+                        <td className="px-4 py-2 font-medium">Balance due / overpayment</td>
+                        <td className="px-4 py-2 text-right"></td>
+                        <td className="px-4 py-2 text-right tabular-nums text-gray-400">{fmtOrPlaceholder(report.lines.line14_balance_due_or_overpayment)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Monthly Liability Breakdown */}
+                {report.monthly_liability && report.monthly_liability.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Monthly Tax Liability (Schedule B)</h4>
+                    <div className="rounded-md border overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 border-b">
+                            <th className="text-left px-4 py-2 font-medium text-gray-600">Month</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">FIT Withheld</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">SS Combined</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">Medicare Combined</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">Addtl Medicare</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">Total Liability</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {report.monthly_liability.map((m) => (
+                            <tr key={m.month} className="border-b last:border-0">
+                              <td className="px-4 py-2">{m.month_name}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.fit_withheld)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.ss_combined)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.medicare_combined)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.additional_medicare)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums font-semibold">{fmt(m.total_liability)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tax Detail Breakdown */}
+                <div className="mt-4 rounded-md bg-gray-50 border p-4">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3">Employee/Employer Tax Split</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employee SS Tax</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.ss_employee)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employer SS Tax</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.ss_employer)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employee Medicare</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.medicare_employee)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Employer Medicare</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.medicare_employer)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Additional Medicare (Employee)</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.additional_medicare_employee)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Reported Tips</span>
+                      <span className="tabular-nums">{fmt(report.tax_detail.reported_tips)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="text-gray-700 font-medium">Total Employee Taxes</span>
+                      <span className="tabular-nums font-semibold">{fmt(report.tax_detail.total_employee_taxes)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="text-gray-700 font-medium">Total Employer Taxes</span>
+                      <span className="tabular-nums font-semibold">{fmt(report.tax_detail.total_employer_taxes)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Caveats */}
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-3 space-y-1">
+                  <p className="text-sm font-medium text-amber-800">Notes & Caveats</p>
+                  {report.meta.caveats.map((c, i) => (
+                    <p key={i} className="text-xs text-amber-700">• {c}</p>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TotalBox({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-md border p-3">
@@ -1088,9 +1832,9 @@ function Form1099NecPanel() {
 
 // ─── Report Tiles ─────────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec';
+type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'tax-withholding-summary', 'w2-gu', '1099-nec'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'employee-pay-history', 'tax-withholding-summary', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
@@ -1163,6 +1907,16 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
       </svg>
     ),
   },
+  {
+    id: '941-gu',
+    title: 'Form 941-GU Quarterly',
+    description: 'Quarterly federal tax return for Guam employers (DRT filing)',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+      </svg>
+    ),
+  },
 ];
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -1219,9 +1973,13 @@ export function Reports() {
 
         {/* Active report panel */}
         {activeReport === 'payroll-register' && <PayrollRegisterPanel />}
+        {activeReport === 'employee-pay-history' && <EmployeePayHistoryPanel />}
         {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
+        {activeReport === 'ytd-summary' && <YtdSummaryPanel />}
+        {activeReport === 'employer-liability' && <EmployerLiabilityPanel />}
         {activeReport === 'w2-gu' && <W2GuPanel />}
         {activeReport === '1099-nec' && <Form1099NecPanel />}
+        {activeReport === '941-gu' && <Form941GuPanel />}
 
         {/* Placeholder for other reports not yet wired */}
         {activeReport && !PANELS_WITH_UI.includes(activeReport) && (
@@ -1233,7 +1991,7 @@ export function Reports() {
           </Card>
         )}
 
-        {/* Coming Soon — Form 941-GU and General Ledger */}
+        {/* Coming Soon */}
         <Card>
           <CardHeader>
             <CardTitle>Coming Soon</CardTitle>
@@ -1241,10 +1999,6 @@ export function Reports() {
           </CardHeader>
           <CardContent>
             <ul className="space-y-2 text-sm text-gray-600">
-              <li className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-gray-300 rounded-full" />
-                Form 941-GU Quarterly Report
-              </li>
               <li className="flex items-center gap-2">
                 <span className="w-2 h-2 bg-gray-300 rounded-full" />
                 General Ledger Export
