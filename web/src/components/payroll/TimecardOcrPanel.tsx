@@ -278,6 +278,7 @@ function ZoomableImage({ src, alt }: { src: string; alt: string }) {
           draggable={false}
           style={{
             width: `${zoom * 100}%`,
+            maxWidth: 'none',
             transform: `translate(${pan.x}px, ${pan.y}px)`,
           }}
         />
