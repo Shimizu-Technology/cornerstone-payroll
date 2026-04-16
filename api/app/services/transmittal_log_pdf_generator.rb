@@ -133,11 +133,12 @@ class TransmittalLogPdfGenerator
     # Custom manual entries (e.g., hand-written checks, other documents)
     custom_entries = options[:custom_entries] || []
     custom_entries.each do |entry|
-      next unless entry["title"].present? || entry[:title].present?
+      entry = entry.stringify_keys if entry.respond_to?(:stringify_keys)
+      next unless entry["title"].present?
 
       item_num += 1
-      title = entry["title"] || entry[:title]
-      details = entry["details"] || entry[:details] || []
+      title = entry["title"]
+      details = Array(entry["details"])
 
       pdf.font_size(10) do
         pdf.text "#{item_num})  #{title}", style: :bold

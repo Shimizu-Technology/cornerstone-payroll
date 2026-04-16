@@ -45,21 +45,24 @@ module Api
         # POST /api/v1/admin/printer_profiles/:id/apply
         # Applies this profile's settings to the company's active check settings
         def apply
-          current_company.update!(
+          if current_company.update(
             check_stock_type: @profile.check_stock_type,
             check_offset_x: @profile.check_offset_x,
             check_offset_y: @profile.check_offset_y,
             check_layout_config: @profile.check_layout_config
           )
-          render json: {
-            printer_profile: profile_json(@profile),
-            check_settings: {
-              check_stock_type: current_company.check_stock_type,
-              check_offset_x: current_company.check_offset_x,
-              check_offset_y: current_company.check_offset_y,
-              check_layout_config: current_company.check_layout_config
+            render json: {
+              printer_profile: profile_json(@profile),
+              check_settings: {
+                check_stock_type: current_company.check_stock_type,
+                check_offset_x: current_company.check_offset_x,
+                check_offset_y: current_company.check_offset_y,
+                check_layout_config: current_company.check_layout_config
+              }
             }
-          }
+          else
+            render json: { errors: current_company.errors.full_messages }, status: :unprocessable_entity
+          end
         end
 
         private
