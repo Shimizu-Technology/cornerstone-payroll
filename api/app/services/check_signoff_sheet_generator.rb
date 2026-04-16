@@ -116,9 +116,13 @@ class CheckSignoffSheetGenerator
 
   def format_period_description
     if pay_period.period_start && pay_period.period_end
-      start_str = pay_period.period_start.strftime("%B %-d")
-      end_str = pay_period.period_end.strftime("%-d, %Y")
-      "#{start_str}-#{end_str}"
+      s = pay_period.period_start
+      e = pay_period.period_end
+      if s.month == e.month && s.year == e.year
+        "#{s.strftime('%B')} #{s.day}-#{e.day}, #{e.year}"
+      else
+        "#{s.strftime('%B')} #{s.day} - #{e.strftime('%B')} #{e.day}, #{e.year}"
+      end
     else
       pay_period.name.presence || "N/A"
     end
