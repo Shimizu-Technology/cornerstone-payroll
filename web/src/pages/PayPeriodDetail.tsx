@@ -19,6 +19,7 @@ import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
+import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
@@ -1144,7 +1145,10 @@ export function PayPeriodDetail() {
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
                                 if (override > 0) return <span className="text-indigo-600" title="Salary Override">{formatCurrency(override)}/period</span>;
                                 const payRate = toNumber(item.pay_rate);
-                                return `${formatCurrency(payRate / 26)}/period`;
+                                const isPerPeriod = empRecord?.salary_type === 'per_period';
+                                if (isPerPeriod) return `${formatCurrency(payRate)}/period`;
+                                const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[empRecord?.pay_frequency || ''] || 26;
+                                return `${formatCurrency(payRate / periodsPerYear)}/period`;
                               }
                               if (isContractorFlat) {
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
@@ -1361,6 +1365,11 @@ export function PayPeriodDetail() {
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
           />
+        )}
+
+        {/* Timecard History — read-only view for processed pay periods */}
+        {!isDraft && (
+          <TimecardHistoryPanel payPeriodId={payPeriod.id} />
         )}
 
         {/* CPR-71: Correction Panel — committed and voided periods */}

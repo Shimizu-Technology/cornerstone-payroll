@@ -13,6 +13,7 @@ class Company < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
+  has_many :printer_profiles, dependent: :destroy
 
   before_validation :normalize_blanks
 
