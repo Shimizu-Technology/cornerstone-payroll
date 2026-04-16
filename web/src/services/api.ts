@@ -1194,6 +1194,7 @@ export const reportsApi = {
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
+      custom_entries: options?.customEntries,
     }),
   fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/full_print_package_pdf', {
@@ -1204,8 +1205,19 @@ export const reportsApi = {
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
+      custom_entries: options?.customEntries,
+    }),
+  checkSignoffSheet: (payPeriodId: number, notes?: string[]) =>
+    api.postBlob('/admin/reports/check_signoff_sheet', {
+      pay_period_id: payPeriodId,
+      ...(notes && notes.length > 0 ? { notes } : {}),
     }),
 };
+
+export interface TransmittalCustomEntry {
+  title: string;
+  details: string[];
+}
 
 export interface TransmittalOptions {
   preparerName?: string;
@@ -1214,6 +1226,7 @@ export interface TransmittalOptions {
   checkNumberFirst?: string;
   checkNumberLast?: string;
   nonEmployeeCheckNumbers?: Record<number, string>;
+  customEntries?: TransmittalCustomEntry[];
 }
 
 export interface SavedTransmittal {
@@ -1223,6 +1236,7 @@ export interface SavedTransmittal {
   check_number_first: string | null;
   check_number_last: string | null;
   non_employee_check_numbers: Record<string, string>;
+  custom_entries: TransmittalCustomEntry[];
   generated_at: string | null;
   updated_by_id: number | null;
   created_at: string;
@@ -1331,6 +1345,38 @@ export const checksApi = {
   // Download alignment test PDF through authenticated API client
   alignmentTestPdf: () =>
     api.getBlob('/admin/companies/alignment_test_pdf'),
+};
+
+// ============================================================
+// Printer Profiles API
+// ============================================================
+export interface PrinterProfile {
+  id: number;
+  name: string;
+  description: string | null;
+  notes: string | null;
+  check_stock_type: 'bottom_check' | 'top_check';
+  check_offset_x: number;
+  check_offset_y: number;
+  check_layout_config: Record<string, unknown>;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const printerProfilesApi = {
+  list: () =>
+    api.get<{ printer_profiles: PrinterProfile[] }>('/admin/printer_profiles'),
+  get: (id: number) =>
+    api.get<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`),
+  create: (data: Partial<PrinterProfile>) =>
+    api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
+  update: (id: number, data: Partial<PrinterProfile>) =>
+    api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
+  delete: (id: number) =>
+    api.delete<void>(`/admin/printer_profiles/${id}`),
+  apply: (id: number) =>
+    api.post<{ printer_profile: PrinterProfile; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config'> }>(`/admin/printer_profiles/${id}/apply`),
 };
 
 // ============================================================
@@ -1462,6 +1508,7 @@ export const payrollReportsApi = {
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
+      custom_entries: options?.customEntries,
     }),
   fullPrintPackagePdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/full_print_package_pdf', {
@@ -1472,6 +1519,7 @@ export const payrollReportsApi = {
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
+      custom_entries: options?.customEntries,
     }),
 };
 

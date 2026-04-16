@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { nonEmployeeChecksApi, payPeriodsApi } from '@/services/api';
+import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
+import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
 
@@ -30,9 +31,10 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, payPeriodStatus }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
+  const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
     payable_to: '',
@@ -69,6 +71,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, payPeriodStatus }: NonEmpl
   }, [payPeriodId]);
 
   useEffect(() => { loadChecks(); }, [loadChecks]);
+
+  useEffect(() => {
+    if (companyId) {
+      companiesApi.get(companyId).then(data => setCompany(data.company)).catch(() => {});
+    }
+  }, [companyId]);
 
   const handleCreate = async () => {
     setFormError(null);
@@ -283,7 +291,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, payPeriodStatus }: NonEmpl
           <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
-          <div className="text-sm">
+          <div className="text-sm flex-1">
             <p className="font-medium text-amber-800">DRT Form 500 Required</p>
             <p className="text-amber-700 mt-0.5">
               Tax deposit checks require a Guam DRT Form 500 (Depository Receipt for Income Tax Withheld).{' '}
@@ -295,6 +303,31 @@ export function NonEmployeeChecksPanel({ payPeriodId, payPeriodStatus }: NonEmpl
                 All DRT Forms
               </a>
             </p>
+            {company && (company.ein || company.address_line1) && (
+              <div className="mt-2 pt-2 border-t border-amber-200 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-amber-800">
+                {company.ein && (
+                  <div>
+                    <span className="font-medium">EIN:</span>{' '}
+                    <span className="font-mono">{company.ein}</span>
+                  </div>
+                )}
+                {company.name && (
+                  <div>
+                    <span className="font-medium">Company:</span> {company.name}
+                  </div>
+                )}
+                {company.address_line1 && (
+                  <div className="sm:col-span-2">
+                    <span className="font-medium">Address:</span>{' '}
+                    {company.address_line1}
+                    {company.address_line2 ? `, ${company.address_line2}` : ''}
+                    {company.city || company.state || company.zip
+                      ? `, ${[company.city, company.state, company.zip].filter(Boolean).join(', ')}`
+                      : ''}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -433,12 +433,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
   create_table "payroll_items", force: :cascade do |t|
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
+    t.date "check_date"
+    t.string "check_memo"
     t.string "check_number"
     t.integer "check_print_count", default: 0, null: false
     t.datetime "check_printed_at"
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
+    t.jsonb "custom_earnings", default: []
     t.bigint "employee_id", null: false
     t.decimal "employer_medicare_tax", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "employer_retirement_match", precision: 10, scale: 2, default: "0.0"
@@ -517,6 +520,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
     t.index ["company_id", "reminder_type", "expected_pay_date"], name: "idx_reminder_logs_create_unique", unique: true, where: "((pay_period_id IS NULL) AND (expected_pay_date IS NOT NULL))"
     t.index ["company_id"], name: "index_payroll_reminder_logs_on_company_id"
     t.index ["pay_period_id"], name: "index_payroll_reminder_logs_on_pay_period_id"
+  end
+
+  create_table "printer_profiles", force: :cascade do |t|
+    t.jsonb "check_layout_config", default: {}, null: false
+    t.decimal "check_offset_x", precision: 5, scale: 3, default: "0.0", null: false
+    t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
+    t.string "check_stock_type", default: "top_check", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.boolean "is_default", default: false, null: false
+    t.string "name", null: false
+    t.text "notes"
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_printer_profiles_on_company_id_and_name", unique: true
+    t.index ["company_id"], name: "index_printer_profiles_on_company_id"
+    t.index ["company_id"], name: "index_printer_profiles_one_default_per_company", unique: true, where: "(is_default = true)"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -612,6 +632,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
+    t.jsonb "custom_entries", default: []
     t.datetime "generated_at"
     t.jsonb "non_employee_check_numbers", default: {}
     t.jsonb "notes", default: []
@@ -744,6 +765,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_08_092809) do
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"
+  add_foreign_key "printer_profiles", "companies"
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"

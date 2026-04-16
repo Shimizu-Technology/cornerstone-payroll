@@ -20,6 +20,13 @@ Rails.application.routes.draw do
         patch "companies/next_check_number",  to: "checks#update_next_check_number"
         get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
 
+        # Printer Profiles (saved check alignment presets per printer)
+        resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
+          member do
+            post :apply
+          end
+        end
+
         resources :companies, only: [:index, :show, :create, :update]
         resources :company_assignments, only: [:index, :create, :destroy] do
           collection do
@@ -115,6 +122,7 @@ Rails.application.routes.draw do
         get "reports/transmittal_preview", to: "reports#transmittal_preview"
         match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
         match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
+        match "reports/check_signoff_sheet", to: "reports#check_signoff_sheet", via: [:get, :post]
 
         # Payroll Reminder Config (per-company, singleton)
         get   "payroll_reminder_config",      to: "payroll_reminder_configs#show"
