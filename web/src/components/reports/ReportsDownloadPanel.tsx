@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
-import type { BlobDownload, TransmittalOptions, TransmittalPreview, SavedTransmittal } from '@/services/api';
+import type { BlobDownload, TransmittalOptions, TransmittalPreview, SavedTransmittal, TransmittalCustomEntry } from '@/services/api';
 import { Loader2 } from 'lucide-react';
 import { DRT } from '@/lib/constants';
 
@@ -73,6 +73,7 @@ function TransmittalEditorModal({
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
   const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
+  const [customEntries, setCustomEntries] = useState<TransmittalCustomEntry[]>([]);
   const [savedState, setSavedState] = useState<SavedTransmittal | null>(null);
 
   useEffect(() => {
@@ -109,6 +110,7 @@ function TransmittalEditorModal({
           neNums[c.id] = savedNum || c.check_number || '';
         });
         setNeCheckNumbers(neNums);
+        setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
       } else {
         setPreparerName('Cornerstone Tax Services');
         setReportList([...DEFAULT_REPORT_LIST]);
@@ -117,6 +119,7 @@ function TransmittalEditorModal({
         const neNums: Record<number, string> = {};
         data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
         setNeCheckNumbers(neNums);
+        setCustomEntries([]);
         const autoNotes: string[] = [];
         if (data.tax_totals.total_fica > 0) {
           autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
@@ -164,6 +167,7 @@ function TransmittalEditorModal({
 
   const handleGenerate = () => {
     const hasNeOverrides = Object.values(neCheckNumbers).some(v => v.trim());
+    const validEntries = customEntries.filter(e => e.title.trim());
     onGenerate({
       preparerName: preparerName.trim() || undefined,
       notes: notes.length > 0 ? notes : undefined,
@@ -171,6 +175,7 @@ function TransmittalEditorModal({
       checkNumberFirst: checkFirst.trim() || undefined,
       checkNumberLast: checkLast.trim() || undefined,
       nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
+      customEntries: validEntries.length > 0 ? validEntries : undefined,
     });
   };
 
@@ -279,6 +284,88 @@ function TransmittalEditorModal({
                 </div>
               </div>
             )}
+
+            {/* Custom / Manual Entries */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Additional Documents / Manual Entries</label>
+              <p className="text-xs text-gray-500 mb-2">Add manually written checks, extra documents, or other items to the transmittal</p>
+              <div className="space-y-3">
+                {customEntries.map((entry, idx) => (
+                  <div key={idx} className="border rounded-lg p-3 bg-gray-50 space-y-2 group relative">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={entry.title}
+                        onChange={(e) => {
+                          const updated = [...customEntries];
+                          updated[idx] = { ...updated[idx], title: e.target.value };
+                          setCustomEntries(updated);
+                        }}
+                        placeholder="e.g. Manual Check for John Doe"
+                        className="flex-1 border rounded-md px-3 py-1.5 text-sm font-medium"
+                      />
+                      <button
+                        onClick={() => setCustomEntries(customEntries.filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-600 p-1"
+                        title="Remove entry"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    {entry.details.map((detail, dIdx) => (
+                      <div key={dIdx} className="flex items-center gap-2 ml-4">
+                        <input
+                          type="text"
+                          value={detail}
+                          onChange={(e) => {
+                            const updated = [...customEntries];
+                            const details = [...updated[idx].details];
+                            details[dIdx] = e.target.value;
+                            updated[idx] = { ...updated[idx], details };
+                            setCustomEntries(updated);
+                          }}
+                          placeholder="Detail line..."
+                          className="flex-1 border rounded-md px-3 py-1 text-sm"
+                        />
+                        <button
+                          onClick={() => {
+                            const updated = [...customEntries];
+                            updated[idx] = { ...updated[idx], details: updated[idx].details.filter((_, i) => i !== dIdx) };
+                            setCustomEntries(updated);
+                          }}
+                          className="text-red-300 hover:text-red-500 p-0.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => {
+                        const updated = [...customEntries];
+                        updated[idx] = { ...updated[idx], details: [...updated[idx].details, ''] };
+                        setCustomEntries(updated);
+                      }}
+                      className="text-blue-600 hover:text-blue-800 text-xs font-medium ml-4"
+                    >
+                      + Add detail line
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => setCustomEntries([...customEntries, { title: '', details: [] }])}
+                  className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Custom Entry
+                </button>
+              </div>
+            </div>
 
             {/* Employer Tax Obligations */}
             {preview && preview.tax_totals.total_drt_deposit > 0 && (
@@ -609,6 +696,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     mode: 'preview' | 'download';
   }>({ open: false, key: null, label: '', mode: 'preview' });
   const [savedTransmittal, setSavedTransmittal] = useState<SavedTransmittal | null>(null);
+  const [signoffNotes, setSignoffNotes] = useState<string[]>([]);
+  const [signoffNewNote, setSignoffNewNote] = useState('');
+  const [signoffLoading, setSignoffLoading] = useState(false);
+  const [showSignoffConfig, setShowSignoffConfig] = useState(false);
 
   const isReady = payPeriodStatus !== 'draft';
 
@@ -722,6 +813,22 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
+  const handleDownloadSignoff = async () => {
+    setSignoffLoading(true);
+    setError(null);
+    try {
+      const blobData = await reportsApi.checkSignoffSheet(
+        payPeriodId,
+        signoffNotes.length > 0 ? signoffNotes : undefined
+      );
+      downloadBlob(blobData, 'check_signoff_sheet.xlsx');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate sign-off sheet');
+    } finally {
+      setSignoffLoading(false);
+    }
+  };
+
   if (!isReady) return null;
 
   return (
@@ -814,6 +921,101 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
             })}
           </div>
         </div>
+      </Card>
+
+      {/* Check Sign-Off Sheet */}
+      <Card className="mt-4">
+        <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900">Check Sign-Off Sheet</h3>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Excel spreadsheet for employees to sign when picking up checks
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowSignoffConfig(!showSignoffConfig)}
+              className="text-xs"
+            >
+              {showSignoffConfig ? 'Hide Options' : 'Notes'}
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleDownloadSignoff}
+              disabled={signoffLoading}
+              className="text-xs"
+            >
+              {signoffLoading ? (
+                <span className="flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Generating...
+                </span>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download Excel
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+        {showSignoffConfig && (
+          <div className="p-4 space-y-3 border-b">
+            <label className="block text-sm font-medium text-gray-700">Notes (printed at bottom of sheet)</label>
+            {signoffNotes.map((note, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <textarea
+                  value={note}
+                  onChange={e => {
+                    const updated = [...signoffNotes];
+                    updated[i] = e.target.value;
+                    setSignoffNotes(updated);
+                  }}
+                  rows={2}
+                  className="flex-1 text-sm border rounded px-2 py-1 resize-none"
+                />
+                <button
+                  onClick={() => setSignoffNotes(signoffNotes.filter((_, idx) => idx !== i))}
+                  className="text-red-500 hover:text-red-700 text-xs mt-1"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Add a note..."
+                value={signoffNewNote}
+                onChange={e => setSignoffNewNote(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && signoffNewNote.trim()) {
+                    setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
+                    setSignoffNewNote('');
+                  }
+                }}
+                className="flex-1 text-sm border rounded px-2 py-1"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (signoffNewNote.trim()) {
+                    setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
+                    setSignoffNewNote('');
+                  }
+                }}
+                className="text-xs"
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
 
       <PdfPreviewModal

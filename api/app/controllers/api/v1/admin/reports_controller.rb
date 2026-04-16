@@ -480,6 +480,7 @@ module Api
               check_number_first: saved.check_number_first,
               check_number_last: saved.check_number_last,
               non_employee_check_numbers: saved.non_employee_check_numbers,
+              custom_entries: saved.custom_entries || [],
               generated_at: saved.generated_at&.iso8601,
               updated_by_id: saved.updated_by_id,
               created_at: saved.created_at.iso8601,
@@ -540,6 +541,19 @@ module Api
           render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
         end
 
+        # GET /api/v1/admin/reports/check_signoff_sheet
+        def check_signoff_sheet
+          pp = find_pay_period_for_report
+          return unless pp
+
+          notes = params[:notes].present? ? Array(params[:notes]) : []
+          generator = CheckSignoffSheetGenerator.new(pp, notes: notes, default_notes: params[:default_notes])
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            disposition: "attachment"
+        end
+
         # GET /api/v1/admin/reports/ytd_summary
         # Year-to-date summary for all employees
         def ytd_summary
@@ -571,6 +585,9 @@ module Api
           if params[:non_employee_check_numbers].present?
             opts[:non_employee_check_numbers] = params[:non_employee_check_numbers].to_unsafe_h.transform_keys(&:to_i)
           end
+          if params[:custom_entries].present?
+            opts[:custom_entries] = Array(params[:custom_entries]).map { |e| e.permit(:title, details: []).to_h }
+          end
           opts
         end
 
@@ -586,6 +603,7 @@ module Api
             check_number_first: options[:check_number_first],
             check_number_last: options[:check_number_last],
             non_employee_check_numbers: options[:non_employee_check_numbers] || {},
+            custom_entries: options[:custom_entries] || [],
             generated_at: Time.current,
             updated_by_id: current_user&.id
           )
