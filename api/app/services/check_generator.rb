@@ -178,9 +178,10 @@ class CheckGenerator
     words_cfg = layout_field(:check_face, :amount_words)
     memo_cfg = layout_field(:check_face, :memo)
 
-    # ---- Date (top-right) ----
+    # ---- Date (top-right) — use per-item override if set ----
+    effective_check_date = payroll_item.check_date || pay_period.pay_date
     pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
-      pdf.font_size(date_cfg["font_size"].to_f) { pdf.text format_date(pay_period.pay_date), align: :right }
+      pdf.font_size(date_cfg["font_size"].to_f) { pdf.text format_date(effective_check_date), align: :right }
     end
 
     # ---- Payee name (left) + amount (right) ----
@@ -289,7 +290,7 @@ class CheckGenerator
         pdf.text "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}"
         pdf.move_down 3
         pdf.text "Pay Date", style: :bold
-        pdf.text format_date(pay_period.pay_date)
+        pdf.text format_date(payroll_item.check_date || pay_period.pay_date)
       end
     end
 
@@ -369,7 +370,8 @@ class CheckGenerator
           end
         end
       else
-        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f), fn(ytd[:gross])]
+        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - ce_total), fn(ytd[:gross])]
       end
     elsif payroll_item.hourly?
       hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
@@ -395,12 +397,18 @@ class CheckGenerator
     else
       sal_label = "Salary"
       sal_label = "Salary - #{employee.first_name&.first} #{employee.last_name}" if employee.first_name.present?
-      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f
+      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total
       rows << [sal_label, "-", "-", fn(sal_cur), fn(ytd[:gross])]
     end
 
     rows << ["Bonus", "-", "-", fn(payroll_item.bonus), fn(payroll_item.bonus)] if payroll_item.bonus.to_f > 0
     rows << ["Paycheck Tips", "-", "-", fn(payroll_item.reported_tips), fn(payroll_item.reported_tips)] if payroll_item.reported_tips.to_f > 0
+
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      rows << [truncate_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
+    end
 
     rows << [
       { content: "TOTAL", font_style: :bold }, "", "",
@@ -609,6 +617,8 @@ class CheckGenerator
   end
 
   def resolve_memo_text
+    return payroll_item.check_memo if payroll_item.check_memo.present?
+
     template = company&.check_memo_template.presence
     return "Payroll #{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" unless template
 

@@ -36,8 +36,9 @@ class HourlyPayrollCalculator < PayrollCalculator
 
     @tips_amount = BigDecimal(payroll_item.reported_tips.to_s)
     @bonus_amount = BigDecimal(payroll_item.bonus.to_s)
+    @custom_earnings_amount = BigDecimal(custom_earnings_total.to_s)
 
-    total = @regular_pay + @overtime_pay + @holiday_pay + @pto_pay + @tips_amount + @bonus_amount
+    total = @regular_pay + @overtime_pay + @holiday_pay + @pto_pay + @tips_amount + @bonus_amount + @custom_earnings_amount
     payroll_item.gross_pay = total.round(2)
   end
 
@@ -65,6 +66,11 @@ class HourlyPayrollCalculator < PayrollCalculator
 
     build_earning("tips", "Tips", nil, nil, @tips_amount) if @tips_amount > 0
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
+
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      build_earning("other", ce["label"].presence || "Other Earning", nil, nil, amt) if amt > 0
+    end
 
     nontax = payroll_item.non_taxable_pay.to_f
     build_earning("non_taxable", "Non-Taxable Pay", nil, nil, nontax) if nontax > 0
