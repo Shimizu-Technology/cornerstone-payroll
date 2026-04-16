@@ -54,8 +54,9 @@ class SalaryPayrollCalculator < PayrollCalculator
 
     @tips_amount = payroll_item.reported_tips.to_f
     @bonus_amount = payroll_item.bonus.to_f
+    @custom_earnings_amount = custom_earnings_total
 
-    payroll_item.gross_pay = (@base_pay + @tips_amount + @bonus_amount).round(2)
+    payroll_item.gross_pay = (@base_pay + @tips_amount + @bonus_amount + @custom_earnings_amount).round(2)
   end
 
   def record_earnings_breakdown
@@ -64,6 +65,11 @@ class SalaryPayrollCalculator < PayrollCalculator
     build_earning("salary", "Salary", nil, nil, @base_pay) if @base_pay > 0
     build_earning("tips", "Tips", nil, nil, @tips_amount) if @tips_amount > 0
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
+
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      build_earning("other", ce["label"].presence || "Other Earning", nil, nil, amt) if amt > 0
+    end
 
     nontax = payroll_item.non_taxable_pay.to_f
     if nontax > 0

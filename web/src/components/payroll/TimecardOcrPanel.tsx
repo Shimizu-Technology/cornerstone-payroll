@@ -180,13 +180,20 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
   const isReviewed = tc.ocr_status === 'reviewed';
   const hasAttention = tc.review_summary.attention_count > 0;
 
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>(() =>
-    findBestEmployeeMatch(tc.employee_name, employees)
-  );
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
   const [reviewing, setReviewing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
+
+  // Re-run auto-match when employees finish loading (race condition fix)
+  useEffect(() => {
+    if (selectedEmployeeId === '' && employees.length > 0) {
+      const match = findBestEmployeeMatch(tc.employee_name, employees);
+      if (match !== '') setSelectedEmployeeId(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees]);
 
   const handleApproveAll = async () => {
     setApproving(true);
@@ -197,11 +204,11 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
           await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' } as Partial<PunchEntryData>);
         }
       }
-      onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approve failed');
     } finally {
       setApproving(false);
+      onRefresh();
     }
   };
 
@@ -266,9 +273,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
       {/* Main summary row — always visible */}
       <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50/50 rounded-t-lg" onClick={onSelect}>
         {tc.image_url ? (
-          <img src={tc.image_url} alt="Timecard" className="w-10 h-14 object-cover rounded border shrink-0" />
+          <img src={tc.image_url} alt="Timecard" className="w-20 h-28 object-cover rounded border shrink-0" />
         ) : (
-          <div className="w-10 h-14 rounded border bg-gray-100 shrink-0" />
+          <div className="w-20 h-28 rounded border bg-gray-100 shrink-0" />
         )}
 
         <div className="flex-1 min-w-0">

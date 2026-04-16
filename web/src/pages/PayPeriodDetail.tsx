@@ -1411,6 +1411,10 @@ export function PayPeriodDetail() {
         payPeriodId={payPeriod.id}
         item={editingItem}
         onSaved={handlePayrollItemSaved}
+        onRemoved={(id) => {
+          setPayrollItems((prev) => prev.filter((item) => item.id !== id));
+          setEditingItem(null);
+        }}
         contractorPayType={editingItem ? employeeLookup.get(editingItem.employee_id)?.contractor_pay_type as 'hourly' | 'flat_fee' | undefined : undefined}
         wageRates={editingItem ? (employeeLookup.get(editingItem.employee_id)?.wage_rates || []) : []}
       />
