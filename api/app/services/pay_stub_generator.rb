@@ -99,7 +99,7 @@ class PayStubGenerator
     pdf.font_size(10) do
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
-        [ "Pay Date:", format_date(pay_period.pay_date) ],
+        [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
         [ "Check #:", payroll_item.check_number || "Direct Deposit" ]
       ]
 
@@ -164,12 +164,13 @@ class PayStubGenerator
         ]
       end
     else
-      # Salary
+      # Salary — subtract bonus, tips, and custom earnings so they appear as separate lines
+      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
       earnings_data << [
         "Salary",
         "—",
         "#{format_currency(payroll_item.pay_rate)}/yr",
-        format_currency(payroll_item.gross_pay - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f),
+        format_currency(payroll_item.gross_pay - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total),
         "—"
       ]
     end
@@ -182,6 +183,14 @@ class PayStubGenerator
     # Tips
     if payroll_item.reported_tips.to_f > 0
       earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
+    end
+
+    # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      if amt > 0
+        earnings_data << [ ce["label"].presence || "Other Earning", "—", "—", format_currency(amt), "—" ]
+      end
     end
 
     # Gross total

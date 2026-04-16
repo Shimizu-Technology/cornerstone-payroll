@@ -13,12 +13,18 @@ import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours } from '@/types';
 
+interface CustomEarningField {
+  label: string;
+  amount: string;
+}
+
 interface PayrollItemEditModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
   item: PayrollItem | null;
   onSaved: (updated: PayrollItem) => void;
+  onRemoved?: (id: number) => void;
   contractorPayType?: 'hourly' | 'flat_fee';
   wageRates?: EmployeeWageRate[];
 }
@@ -35,6 +41,9 @@ interface EditableFields {
   additional_withholding: number;
   withholding_tax_override: string;
   wage_rate_hours: PayrollItemWageRateHours[];
+  check_date: string;
+  check_memo: string;
+  custom_earnings: CustomEarningField[];
 }
 
 export function PayrollItemEditModal({
@@ -43,6 +52,7 @@ export function PayrollItemEditModal({
   payPeriodId,
   item,
   onSaved,
+  onRemoved,
   contractorPayType,
   wageRates = [],
 }: PayrollItemEditModalProps) {
@@ -58,8 +68,13 @@ export function PayrollItemEditModal({
     additional_withholding: 0,
     withholding_tax_override: '',
     wage_rate_hours: [],
+    check_date: '',
+    check_memo: '',
+    custom_earnings: [],
   });
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -90,8 +105,14 @@ export function PayrollItemEditModal({
         additional_withholding: item.additional_withholding || 0,
         withholding_tax_override: item.withholding_tax_override != null ? String(item.withholding_tax_override) : '',
         wage_rate_hours: initialWageRateHours,
+        check_date: item.check_date || '',
+        check_memo: item.check_memo || '',
+        custom_earnings: (item.custom_earnings && item.custom_earnings.length > 0)
+          ? item.custom_earnings.map(ce => ({ label: ce.label, amount: String(ce.amount) }))
+          : [],
       });
       setError(null);
+      setConfirmRemove(false);
     }
   }, [item, wageRates]);
 
@@ -134,6 +155,28 @@ export function PayrollItemEditModal({
     });
   };
 
+  const handleCustomEarningChange = (index: number, field: 'label' | 'amount', value: string) => {
+    setFields((prev) => {
+      const updated = [...prev.custom_earnings];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, custom_earnings: updated };
+    });
+  };
+
+  const addCustomEarning = () => {
+    setFields((prev) => ({
+      ...prev,
+      custom_earnings: [...prev.custom_earnings, { label: '', amount: '0' }],
+    }));
+  };
+
+  const removeCustomEarning = (index: number) => {
+    setFields((prev) => ({
+      ...prev,
+      custom_earnings: prev.custom_earnings.filter((_, i) => i !== index),
+    }));
+  };
+
   const handleSaveAndRecalculate = async () => {
     setSaving(true);
     setError(null);
@@ -148,6 +191,11 @@ export function PayrollItemEditModal({
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding: parseFloat(String(fields.additional_withholding)) || 0,
         withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
+        check_date: fields.check_date || null,
+        check_memo: fields.check_memo || null,
+        custom_earnings: fields.custom_earnings
+          .filter(ce => ce.label.trim() && parseFloat(ce.amount) > 0)
+          .map(ce => ({ label: ce.label.trim(), amount: parseFloat(ce.amount) || 0 })),
       };
 
       if (hasMultiRate) {
@@ -171,9 +219,28 @@ export function PayrollItemEditModal({
     }
   };
 
+  const handleRemoveFromPayroll = async () => {
+    if (!confirmRemove) {
+      setConfirmRemove(true);
+      return;
+    }
+    setRemoving(true);
+    setError(null);
+    try {
+      await payrollItemsApi.delete(payPeriodId, item.id);
+      onRemoved?.(item.id);
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove');
+    } finally {
+      setRemoving(false);
+      setConfirmRemove(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
           <DialogDescription>
@@ -221,7 +288,7 @@ export function PayrollItemEditModal({
                     value={fields.salary_override}
                     onChange={(e) => handleChange('salary_override', e.target.value)}
                   />
-                  <p className="text-xs text-gray-400 mt-1">Leave blank to use default rate</p>
+                  <p className="text-xs text-gray-400 mt-1">Leave blank to use default rate. Set to 0 to skip payment this period.</p>
                 </div>
               </div>
               <p className="text-xs text-amber-600 mt-2">
@@ -409,6 +476,53 @@ export function PayrollItemEditModal({
             </div>
           </div>
 
+          {/* Custom Earnings (Stipends, etc.) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-medium text-gray-700">Custom Earnings</h4>
+              <button
+                type="button"
+                onClick={addCustomEarning}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                + Add Custom Earning
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-2">
+              Named taxable earnings (e.g. Chief Stipend, Asst Chief Stipend). Shows on check/stub by name.
+            </p>
+            {fields.custom_earnings.length === 0 && (
+              <p className="text-xs text-gray-400 italic">No custom earnings added.</p>
+            )}
+            {fields.custom_earnings.map((ce, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <Input
+                  placeholder="Label (e.g. Chief Stipend)"
+                  value={ce.label}
+                  onChange={(e) => handleCustomEarningChange(idx, 'label', e.target.value)}
+                  className="flex-1"
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Amount"
+                  value={ce.amount}
+                  onChange={(e) => handleCustomEarningChange(idx, 'amount', e.target.value)}
+                  className="w-28"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeCustomEarning(idx)}
+                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
           {/* Tax Adjustments — not applicable to contractors */}
           {!isContractor && (
             <div>
@@ -448,15 +562,73 @@ export function PayrollItemEditModal({
               </div>
             </div>
           )}
+
+          {/* Check Overrides */}
+          <div>
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Check Overrides</h4>
+            <p className="text-xs text-gray-400 mb-2">
+              Override the date or memo printed on this person's check. Leave blank to use defaults.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Check Date</label>
+                <Input
+                  type="date"
+                  value={fields.check_date}
+                  onChange={(e) => handleChange('check_date', e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Overrides the pay date shown on this check
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Check Memo</label>
+                <Input
+                  type="text"
+                  placeholder="Default memo"
+                  value={fields.check_memo}
+                  onChange={(e) => handleChange('check_memo', e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Overrides the memo line on this check
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={handleSaveAndRecalculate} disabled={saving}>
-            {saving ? 'Saving...' : 'Save & Recalculate'}
-          </Button>
+        <DialogFooter className="flex items-center justify-between sm:justify-between">
+          <div>
+            {confirmRemove ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-red-600">Remove this employee from payroll?</span>
+                <Button variant="destructive" size="sm" onClick={handleRemoveFromPayroll} disabled={removing}>
+                  {removing ? 'Removing...' : 'Yes, Remove'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setConfirmRemove(false)} disabled={removing}>
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleRemoveFromPayroll}
+                disabled={saving}
+              >
+                Remove from Payroll
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveAndRecalculate} disabled={saving}>
+              {saving ? 'Saving...' : 'Save & Recalculate'}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
