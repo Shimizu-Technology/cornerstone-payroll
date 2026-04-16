@@ -16,8 +16,10 @@ class PrinterProfile < ApplicationRecord
   private
 
   def clear_other_defaults
-    PrinterProfile.where(company_id: company_id, is_default: true)
-                  .where.not(id: id)
-                  .update_all(is_default: false)
+    self.class.transaction do
+      PrinterProfile.where(company_id: company_id, is_default: true)
+                    .where.not(id: id)
+                    .update_all(is_default: false)
+    end
   end
 end

@@ -130,6 +130,28 @@ class TransmittalLogPdfGenerator
       pdf.move_down 6
     end
 
+    # Custom manual entries (e.g., hand-written checks, other documents)
+    custom_entries = options[:custom_entries] || []
+    custom_entries.each do |entry|
+      next unless entry["title"].present? || entry[:title].present?
+
+      item_num += 1
+      title = entry["title"] || entry[:title]
+      details = entry["details"] || entry[:details] || []
+
+      pdf.font_size(10) do
+        pdf.text "#{item_num})  #{title}", style: :bold
+        if details.any?
+          pdf.indent(30) do
+            details.each do |detail|
+              pdf.text detail.to_s if detail.present?
+            end
+          end
+        end
+      end
+      pdf.move_down 6
+    end
+
     # Reports section
     reports = options.key?(:report_list) ? options[:report_list] : default_report_list
     if reports.any?
