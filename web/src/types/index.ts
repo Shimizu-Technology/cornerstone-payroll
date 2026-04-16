@@ -279,9 +279,13 @@ export interface PayrollItem {
   ytd_social_security_tax?: number;
   ytd_medicare_tax?: number;
   ytd_retirement?: number;
+  // Custom earnings (e.g., Chief Stipend, Asst Chief Stipend)
+  custom_earnings?: { label: string; amount: number }[];
   // Check info
   // CPR-66: Check printing lifecycle
   check_number?: string;
+  check_date?: string | null;
+  check_memo?: string | null;
   check_printed_at?: string | null;
   check_print_count?: number;
   check_status?: 'unprinted' | 'printed' | 'voided' | null;

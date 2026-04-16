@@ -195,10 +195,15 @@ class PayrollCalculator
     end
   end
 
+  def custom_earnings_total
+    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+  end
+
   def calculate_totals
     payroll_item.total_additions = (
       payroll_item.reported_tips.to_f +
       payroll_item.bonus.to_f +
+      custom_earnings_total +
       payroll_item.non_taxable_pay.to_f
     ).round(2)
 

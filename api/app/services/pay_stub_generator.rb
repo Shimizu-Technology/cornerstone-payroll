@@ -99,7 +99,7 @@ class PayStubGenerator
     pdf.font_size(10) do
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
-        [ "Pay Date:", format_date(pay_period.pay_date) ],
+        [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
         [ "Check #:", payroll_item.check_number || "Direct Deposit" ]
       ]
 

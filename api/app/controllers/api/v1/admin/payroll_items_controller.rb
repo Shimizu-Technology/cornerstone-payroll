@@ -121,14 +121,17 @@ module Api
             :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
             :bonus, :additional_withholding, :withholding_tax_override, :check_number,
             :salary_override, :non_taxable_pay, :reported_tips,
+            :check_date, :check_memo,
             wage_rate_hours: [
               :employee_wage_rate_id, :label, :rate, :regular_hours,
               :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
-            ]
+            ],
+            custom_earnings: [ :label, :amount ]
           )
 
-          attrs = permitted.except(:wage_rate_hours).to_h.symbolize_keys
+          attrs = permitted.except(:wage_rate_hours, :custom_earnings).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
+          attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs
         end
 
@@ -166,6 +169,9 @@ module Api
             insurance_payment: item.insurance_payment,
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
+            check_date: item.check_date,
+            check_memo: item.check_memo,
+            custom_earnings: item.custom_earnings || [],
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours

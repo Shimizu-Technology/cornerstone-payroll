@@ -49,8 +49,9 @@ class ContractorPayrollCalculator < PayrollCalculator
     @holiday_pay ||= 0.0
     @pto_pay ||= 0.0
     @bonus_amount = payroll_item.bonus.to_f
+    @custom_earnings_amount = custom_earnings_total
 
-    payroll_item.gross_pay = (@base_pay + @overtime_pay + @holiday_pay + @pto_pay + @bonus_amount).round(2)
+    payroll_item.gross_pay = (@base_pay + @overtime_pay + @holiday_pay + @pto_pay + @bonus_amount + @custom_earnings_amount).round(2)
   end
 
   def record_earnings_breakdown
@@ -78,6 +79,11 @@ class ContractorPayrollCalculator < PayrollCalculator
     end
 
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
+
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      build_earning("other", ce["label"].presence || "Other Earning", nil, nil, amt) if amt > 0
+    end
 
     nontax = payroll_item.non_taxable_pay.to_f
     build_earning("non_taxable", "Non-Taxable Pay", nil, nil, nontax) if nontax > 0
