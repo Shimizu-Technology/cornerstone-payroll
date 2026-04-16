@@ -168,6 +168,14 @@ export function CheckSettingsPage() {
     if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
     setProfileSaving(true);
     setError(null);
+    let layoutConfig: Record<string, unknown>;
+    try {
+      layoutConfig = JSON.parse(layoutOverridesJson || '{}');
+    } catch {
+      setError('Invalid JSON in advanced layout overrides. Please fix it before saving.');
+      setProfileSaving(false);
+      return;
+    }
     try {
       await printerProfilesApi.create({
         name: newProfileName.trim(),
@@ -176,7 +184,7 @@ export function CheckSettingsPage() {
         check_stock_type: stockType,
         check_offset_x: parseFloat(offsetX),
         check_offset_y: parseFloat(offsetY),
-        check_layout_config: JSON.parse(layoutOverridesJson || '{}'),
+        check_layout_config: layoutConfig,
       });
       setNewProfileName('');
       setNewProfileDescription('');
@@ -240,12 +248,19 @@ export function CheckSettingsPage() {
   const handleOverwriteProfile = async (profile: PrinterProfile) => {
     if (!window.confirm(`Overwrite "${profile.name}" with current settings?`)) return;
     setError(null);
+    let layoutConfig: Record<string, unknown>;
+    try {
+      layoutConfig = JSON.parse(layoutOverridesJson || '{}');
+    } catch {
+      setError('Invalid JSON in advanced layout overrides. Please fix it before overwriting.');
+      return;
+    }
     try {
       await printerProfilesApi.update(profile.id, {
         check_stock_type: stockType,
         check_offset_x: parseFloat(offsetX),
         check_offset_y: parseFloat(offsetY),
-        check_layout_config: JSON.parse(layoutOverridesJson || '{}'),
+        check_layout_config: layoutConfig,
       });
       setSuccess(`Profile "${profile.name}" updated with current settings.`);
       loadProfiles();
