@@ -370,7 +370,8 @@ class CheckGenerator
           end
         end
       else
-        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f), fn(ytd[:gross])]
+        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+        rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - ce_total), fn(ytd[:gross])]
       end
     elsif payroll_item.hourly?
       hourly_earnings = earnings.select { |earning| %w[regular overtime holiday pto].include?(earning.category) }
@@ -396,12 +397,18 @@ class CheckGenerator
     else
       sal_label = "Salary"
       sal_label = "Salary - #{employee.first_name&.first} #{employee.last_name}" if employee.first_name.present?
-      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f
+      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+      sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total
       rows << [sal_label, "-", "-", fn(sal_cur), fn(ytd[:gross])]
     end
 
     rows << ["Bonus", "-", "-", fn(payroll_item.bonus), fn(payroll_item.bonus)] if payroll_item.bonus.to_f > 0
     rows << ["Paycheck Tips", "-", "-", fn(payroll_item.reported_tips), fn(payroll_item.reported_tips)] if payroll_item.reported_tips.to_f > 0
+
+    Array(payroll_item.custom_earnings).each do |ce|
+      amt = ce["amount"].to_f
+      rows << [truncate_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
+    end
 
     rows << [
       { content: "TOTAL", font_style: :bold }, "", "",
