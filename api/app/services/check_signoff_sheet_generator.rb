@@ -27,8 +27,8 @@ class CheckSignoffSheetGenerator
   end
 
   def filename
-    period = pay_period.period_start&.strftime("%m-%d") || "unknown"
-    period_end = pay_period.period_end&.strftime("%m-%d-%Y") || "unknown"
+    period = pay_period.start_date&.strftime("%m-%d") || "unknown"
+    period_end = pay_period.end_date&.strftime("%m-%d-%Y") || "unknown"
     company_short = company.name.gsub(/[^a-zA-Z0-9]/, "")[0..15]
     "#{company_short}_CheckSignoff_PP_#{period}_#{period_end}.xlsx"
   end
@@ -115,9 +115,9 @@ class CheckSignoffSheetGenerator
   end
 
   def format_period_description
-    if pay_period.period_start && pay_period.period_end
-      s = pay_period.period_start
-      e = pay_period.period_end
+    if pay_period.start_date && pay_period.end_date
+      s = pay_period.start_date
+      e = pay_period.end_date
       if s.month == e.month && s.year == e.year
         "#{s.strftime('%B')} #{s.day}-#{e.day}, #{e.year}"
       else
