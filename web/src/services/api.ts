@@ -1207,11 +1207,19 @@ export const reportsApi = {
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
-  checkSignoffSheet: (payPeriodId: number, notes?: string[]) =>
+  checkSignoffSheet: (payPeriodId: number, notes?: string[], entries?: { name: string; check_number: string }[]) =>
     api.postBlob('/admin/reports/check_signoff_sheet', {
       pay_period_id: payPeriodId,
       ...(notes && notes.length > 0 ? { notes } : {}),
+      ...(entries && entries.length > 0 ? { entries } : {}),
     }),
+  checkSignoffPreview: (payPeriodId: number) =>
+    api.get<{
+      company_name: string;
+      period_start: string;
+      period_end: string;
+      entries: { id: number; employee_id: number; name: string; check_number: string }[];
+    }>(`/admin/reports/check_signoff_preview?pay_period_id=${payPeriodId}`),
 };
 
 export interface TransmittalCustomEntry {

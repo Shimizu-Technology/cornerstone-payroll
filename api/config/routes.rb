@@ -123,6 +123,7 @@ Rails.application.routes.draw do
         match "reports/transmittal_log_pdf", to: "reports#transmittal_log_pdf", via: [:get, :post]
         match "reports/full_print_package_pdf", to: "reports#full_print_package_pdf", via: [:get, :post]
         match "reports/check_signoff_sheet", to: "reports#check_signoff_sheet", via: [:get, :post]
+        get "reports/check_signoff_preview", to: "reports#check_signoff_preview"
 
         # Payroll Reminder Config (per-company, singleton)
         get   "payroll_reminder_config",      to: "payroll_reminder_configs#show"

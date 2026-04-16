@@ -541,17 +541,56 @@ module Api
           render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
         end
 
-        # GET /api/v1/admin/reports/check_signoff_sheet
+        # POST /api/v1/admin/reports/check_signoff_sheet
         def check_signoff_sheet
           pp = find_pay_period_for_report
           return unless pp
 
           notes = params[:notes].present? ? Array(params[:notes]) : []
-          generator = CheckSignoffSheetGenerator.new(pp, notes: notes, default_notes: params[:default_notes])
+
+          custom_entries = nil
+          if params[:entries].present?
+            custom_entries = Array(params[:entries]).map { |e|
+              e.permit(:name, :check_number).to_h
+            }
+          end
+
+          generator = CheckSignoffSheetGenerator.new(
+            pp,
+            notes: notes,
+            default_notes: params[:default_notes],
+            custom_entries: custom_entries
+          )
           send_data generator.generate,
             filename: generator.filename,
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             disposition: "attachment"
+        end
+
+        # GET /api/v1/admin/reports/check_signoff_preview
+        def check_signoff_preview
+          pp = find_pay_period_for_report
+          return unless pp
+
+          items = pp.payroll_items
+            .where(voided: false)
+            .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")
+            .select("payroll_items.id, payroll_items.employee_id, payroll_items.check_number, employees.first_name, employees.last_name")
+            .order("employees.last_name ASC, employees.first_name ASC")
+
+          render json: {
+            company_name: pp.company.name,
+            period_start: pp.start_date,
+            period_end: pp.end_date,
+            entries: items.map { |item|
+              {
+                id: item.id,
+                employee_id: item.employee_id,
+                name: "#{item.last_name}, #{item.first_name}",
+                check_number: item.check_number.presence || ""
+              }
+            }
+          }
         end
 
         # GET /api/v1/admin/reports/ytd_summary

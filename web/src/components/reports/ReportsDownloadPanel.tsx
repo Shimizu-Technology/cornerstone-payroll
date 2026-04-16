@@ -699,7 +699,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
   const [signoffNotes, setSignoffNotes] = useState<string[]>([]);
   const [signoffNewNote, setSignoffNewNote] = useState('');
   const [signoffLoading, setSignoffLoading] = useState(false);
-  const [showSignoffConfig, setShowSignoffConfig] = useState(false);
+  const [showSignoffEditor, setShowSignoffEditor] = useState(false);
+  const [signoffEntries, setSignoffEntries] = useState<{ name: string; check_number: string }[]>([]);
+  const [signoffPreviewLoaded, setSignoffPreviewLoaded] = useState(false);
+  const [signoffPreviewLoading, setSignoffPreviewLoading] = useState(false);
+  const [signoffCompanyName, setSignoffCompanyName] = useState('');
+  const [signoffPeriodDesc, setSignoffPeriodDesc] = useState('');
 
   const isReady = payPeriodStatus !== 'draft';
 
@@ -813,13 +818,40 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
+  const loadSignoffPreview = useCallback(async (force = false) => {
+    if (signoffPreviewLoaded && !force) return;
+    setSignoffPreviewLoading(true);
+    try {
+      const data = await reportsApi.checkSignoffPreview(payPeriodId);
+      setSignoffEntries(data.entries.map(e => ({ name: e.name, check_number: e.check_number })));
+      setSignoffCompanyName(data.company_name);
+      if (data.period_start && data.period_end) {
+        const [sY, sM, sD] = data.period_start.split('-').map(Number);
+        const [eY, eM, eD] = data.period_end.split('-').map(Number);
+        const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+        if (sM === eM && sY === eY) {
+          setSignoffPeriodDesc(`${months[sM]} ${sD}-${eD}, ${eY}`);
+        } else {
+          setSignoffPeriodDesc(`${months[sM]} ${sD} - ${months[eM]} ${eD}, ${eY}`);
+        }
+      }
+      setSignoffPreviewLoaded(true);
+    } catch {
+      setError('Failed to load sign-off sheet data');
+    } finally {
+      setSignoffPreviewLoading(false);
+    }
+  }, [payPeriodId, signoffPreviewLoaded]);
+
   const handleDownloadSignoff = async () => {
     setSignoffLoading(true);
     setError(null);
     try {
+      const entries = signoffPreviewLoaded && signoffEntries.length > 0 ? signoffEntries : undefined;
       const blobData = await reportsApi.checkSignoffSheet(
         payPeriodId,
-        signoffNotes.length > 0 ? signoffNotes : undefined
+        signoffNotes.length > 0 ? signoffNotes : undefined,
+        entries
       );
       downloadBlob(blobData, 'check_signoff_sheet.xlsx');
     } catch (err) {
@@ -936,10 +968,16 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setShowSignoffConfig(!showSignoffConfig)}
+              onClick={() => {
+                if (!showSignoffEditor) loadSignoffPreview();
+                setShowSignoffEditor(!showSignoffEditor);
+              }}
               className="text-xs"
             >
-              {showSignoffConfig ? 'Hide Options' : 'Notes'}
+              <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              {showSignoffEditor ? 'Collapse' : 'Edit'}
             </Button>
             <Button
               size="sm"
@@ -963,57 +1001,185 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
             </Button>
           </div>
         </div>
-        {showSignoffConfig && (
-          <div className="p-4 space-y-3 border-b">
-            <label className="block text-sm font-medium text-gray-700">Notes (printed at bottom of sheet)</label>
-            {signoffNotes.map((note, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <textarea
-                  value={note}
-                  onChange={e => {
-                    const updated = [...signoffNotes];
-                    updated[i] = e.target.value;
-                    setSignoffNotes(updated);
-                  }}
-                  rows={2}
-                  className="flex-1 text-sm border rounded px-2 py-1 resize-none"
-                />
-                <button
-                  onClick={() => setSignoffNotes(signoffNotes.filter((_, idx) => idx !== i))}
-                  className="text-red-500 hover:text-red-700 text-xs mt-1"
-                >
-                  Remove
-                </button>
+        {showSignoffEditor && (
+          <div className="divide-y">
+            {signoffPreviewLoading ? (
+              <div className="p-6 flex items-center justify-center text-sm text-gray-500">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading sign-off data...
               </div>
-            ))}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Add a note..."
-                value={signoffNewNote}
-                onChange={e => setSignoffNewNote(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && signoffNewNote.trim()) {
-                    setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
-                    setSignoffNewNote('');
-                  }
-                }}
-                className="flex-1 text-sm border rounded px-2 py-1"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (signoffNewNote.trim()) {
-                    setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
-                    setSignoffNewNote('');
-                  }
-                }}
-                className="text-xs"
-              >
-                Add
-              </Button>
-            </div>
+            ) : (
+              <>
+                {/* Header preview */}
+                {signoffCompanyName && (
+                  <div className="px-4 py-3 bg-white">
+                    <p className="font-semibold text-sm text-gray-900">{signoffCompanyName}</p>
+                    {signoffPeriodDesc && (
+                      <p className="text-xs text-gray-500 mt-0.5">Pay Period: {signoffPeriodDesc}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Employee / check table */}
+                <div className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-medium text-gray-700">
+                      Employees ({signoffEntries.length})
+                    </label>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSignoffEntries([...signoffEntries, { name: '', check_number: '' }])}
+                      className="text-xs"
+                    >
+                      <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add Row
+                    </Button>
+                  </div>
+
+                  <div className="border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 border-b">
+                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-8">#</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Employee Name</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-32">Check No.</th>
+                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-20">Print</th>
+                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-28">Sign</th>
+                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-24">Date</th>
+                          <th className="px-3 py-2 w-10"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signoffEntries.map((entry, i) => (
+                          <tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">
+                            <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
+                            <td className="px-3 py-1.5">
+                              <input
+                                type="text"
+                                value={entry.name}
+                                onChange={e => {
+                                  const updated = [...signoffEntries];
+                                  updated[i] = { ...updated[i], name: e.target.value };
+                                  setSignoffEntries(updated);
+                                }}
+                                className="w-full text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="Last, First"
+                              />
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <input
+                                type="text"
+                                value={entry.check_number}
+                                onChange={e => {
+                                  const updated = [...signoffEntries];
+                                  updated[i] = { ...updated[i], check_number: e.target.value };
+                                  setSignoffEntries(updated);
+                                }}
+                                className="w-full text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                placeholder="—"
+                              />
+                            </td>
+                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">______</td>
+                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">__________</td>
+                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">________</td>
+                            <td className="px-3 py-1.5">
+                              <button
+                                onClick={() => setSignoffEntries(signoffEntries.filter((_, idx) => idx !== i))}
+                                className="text-red-400 hover:text-red-600 p-0.5"
+                                title="Remove row"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {signoffEntries.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-3 py-4 text-center text-sm text-gray-400 italic">
+                              No entries. Click "Add Row" to add employees.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {signoffEntries.length > 0 && (
+                    <div className="flex gap-2 mt-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => loadSignoffPreview(true)}
+                        className="text-xs"
+                      >
+                        <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Reset to Payroll Data
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes section */}
+                <div className="p-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes <span className="font-normal text-gray-400">(printed at bottom of sheet)</span>
+                  </label>
+                  {signoffNotes.map((note, i) => (
+                    <div key={i} className="flex items-start gap-2 mb-2">
+                      <textarea
+                        value={note}
+                        onChange={e => {
+                          const updated = [...signoffNotes];
+                          updated[i] = e.target.value;
+                          setSignoffNotes(updated);
+                        }}
+                        rows={2}
+                        className="flex-1 text-sm border rounded px-2 py-1 resize-none"
+                      />
+                      <button
+                        onClick={() => setSignoffNotes(signoffNotes.filter((_, idx) => idx !== i))}
+                        className="text-red-500 hover:text-red-700 text-xs mt-1"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Add a note..."
+                      value={signoffNewNote}
+                      onChange={e => setSignoffNewNote(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && signoffNewNote.trim()) {
+                          setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
+                          setSignoffNewNote('');
+                        }
+                      }}
+                      className="flex-1 text-sm border rounded px-2 py-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (signoffNewNote.trim()) {
+                          setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
+                          setSignoffNewNote('');
+                        }
+                      }}
+                      className="text-xs"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </Card>
