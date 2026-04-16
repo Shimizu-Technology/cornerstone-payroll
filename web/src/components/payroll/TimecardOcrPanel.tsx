@@ -129,70 +129,256 @@ function UploadSection({ payPeriodId, onUploaded }: { payPeriodId?: number; onUp
   );
 }
 
-// ──── Timecard List Item ────────────────────────────────
-function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting }: {
+// ──── Fuzzy name matching ────────────────────────────────
+function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/[^a-z]/g, '');
+}
+
+function findBestEmployeeMatch(ocrName: string | null, employees: Employee[]): number | '' {
+  if (!ocrName || employees.length === 0) return '';
+  const norm = normalizeForMatch(ocrName);
+  if (!norm) return '';
+
+  // Try exact normalized match first
+  for (const emp of employees) {
+    const full = normalizeForMatch(`${emp.first_name} ${emp.last_name}`);
+    const reversed = normalizeForMatch(`${emp.last_name} ${emp.first_name}`);
+    if (full === norm || reversed === norm) return emp.id;
+  }
+
+  // Try substring match (OCR name contains employee name or vice versa)
+  for (const emp of employees) {
+    const full = normalizeForMatch(`${emp.first_name} ${emp.last_name}`);
+    if (norm.includes(full) || full.includes(norm)) return emp.id;
+
+    const lastOnly = normalizeForMatch(emp.last_name);
+    const firstOnly = normalizeForMatch(emp.first_name);
+    if (lastOnly.length > 2 && norm.includes(lastOnly) && firstOnly.length > 1 && norm.includes(firstOnly)) {
+      return emp.id;
+    }
+  }
+
+  return '';
+}
+
+// ──── Timecard List Item (Inline Review) ──────────────────
+function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, employees, payPeriodId, onRefresh, onPayrollUpdated }: {
   tc: TimecardData;
   onSelect: () => void;
   onReprocess: () => void;
   onDelete: () => void;
   isDeleting: boolean;
+  employees: Employee[];
+  payPeriodId?: number;
+  onRefresh: () => void;
+  onPayrollUpdated?: () => void;
 }) {
   const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
+  const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
+  const totalHours = punchesWithData.reduce((sum, pe) => sum + (pe.hours_worked || 0), 0);
+  const isComplete = tc.ocr_status === 'complete';
+  const isReviewed = tc.ocr_status === 'reviewed';
+  const hasAttention = tc.review_summary.attention_count > 0;
 
-  return (
-    <div
-      className={`flex items-center justify-between p-3 border rounded-lg cursor-pointer transition-all ${
-        isDeleting ? 'opacity-50 pointer-events-none scale-[0.98]' :
-        isProcessing ? 'bg-indigo-50/50 border-indigo-200' : 'hover:bg-gray-50'
-      }`}
-      onClick={isProcessing || isDeleting ? undefined : onSelect}
-    >
-      <div className="flex items-center gap-3 flex-1">
-        {isProcessing ? (
-          <div className="w-12 h-16 flex items-center justify-center rounded border border-indigo-200 bg-indigo-50">
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>(() =>
+    findBestEmployeeMatch(tc.employee_name, employees)
+  );
+  const [reviewing, setReviewing] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleApproveAll = async () => {
+    setApproving(true);
+    setError('');
+    try {
+      for (const pe of tc.punch_entries) {
+        if (pe.needs_attention && pe.review_state === 'unresolved') {
+          await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' } as Partial<PunchEntryData>);
+        }
+      }
+      onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Approve failed');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleReview = async () => {
+    setReviewing(true);
+    setError('');
+    try {
+      await timecardsApi.review(tc.id, 'Admin');
+      onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Review failed');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const handleApply = async () => {
+    if (!payPeriodId) return;
+    setApplying(true);
+    setError('');
+    try {
+      const empId = selectedEmployeeId || undefined;
+      await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
+      onRefresh();
+      onPayrollUpdated?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Apply failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const busy = reviewing || approving || applying;
+
+  // Processing state — compact row
+  if (isProcessing) {
+    return (
+      <div className={`p-3 border rounded-lg bg-indigo-50/50 border-indigo-200 ${isDeleting ? 'opacity-50' : ''}`}>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-14 flex items-center justify-center rounded border border-indigo-200 bg-indigo-50 shrink-0">
             <Spinner size="sm" />
           </div>
-        ) : tc.image_url ? (
-          <img src={tc.image_url} alt="Timecard" className="w-12 h-16 object-cover rounded border" />
-        ) : null}
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">
-              {isProcessing ? 'Processing with GPT...' : (tc.employee_name || 'Unknown Employee')}
+          <div className="flex-1">
+            <span className="font-medium text-sm">Processing with GPT...</span>
+            <p className="text-xs text-gray-500 mt-0.5">OCR is running in the background. This takes 60-90 seconds per card.</p>
+          </div>
+          <Button size="sm" variant="outline" className="text-red-600 shrink-0" onClick={onDelete} disabled={isDeleting}>
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`border rounded-lg transition-all ${isDeleting ? 'opacity-50 pointer-events-none scale-[0.98]' : ''} ${
+      isReviewed ? 'border-green-200 bg-green-50/30' :
+      isComplete && hasAttention ? 'border-orange-200 bg-orange-50/30' :
+      isComplete ? 'border-blue-200 bg-blue-50/20' :
+      tc.ocr_status === 'failed' ? 'border-red-200 bg-red-50/30' : ''
+    }`}>
+      {/* Main summary row — always visible */}
+      <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-gray-50/50 rounded-t-lg" onClick={onSelect}>
+        {tc.image_url ? (
+          <img src={tc.image_url} alt="Timecard" className="w-10 h-14 object-cover rounded border shrink-0" />
+        ) : (
+          <div className="w-10 h-14 rounded border bg-gray-100 shrink-0" />
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium text-sm truncate">
+              {tc.employee_name || 'Unknown Employee'}
             </span>
             {statusBadge(tc.ocr_status)}
-            {!isProcessing && tc.overall_confidence !== null && (
+            {tc.overall_confidence !== null && (
               <Badge className={confidenceColor(tc.overall_confidence)}>
                 {(tc.overall_confidence * 100).toFixed(0)}%
               </Badge>
             )}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5">
-            {isDeleting ? (
-              'Deleting...'
-            ) : isProcessing ? (
-              'OCR is running in the background. This takes 60-90 seconds per card.'
-            ) : tc.period_start && tc.period_end ? (
-              <>
-                {tc.period_start} – {tc.period_end}
-                {tc.review_summary.attention_count > 0 && (
-                  <span className="text-orange-600 ml-2">
-                    {tc.review_summary.attention_count} items need attention
-                  </span>
-                )}
-              </>
-            ) : 'Period not detected'}
-          </p>
+          <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
+            {tc.period_start && tc.period_end ? (
+              <span>{tc.period_start} – {tc.period_end}</span>
+            ) : (
+              <span>Period not detected</span>
+            )}
+            {hasAttention && (
+              <span className="text-orange-600 font-medium">
+                {tc.review_summary.attention_count} need attention
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Total hours — prominent */}
+        <div className="text-right shrink-0 mr-2">
+          <p className="text-lg font-bold tabular-nums">{totalHours.toFixed(2)}</p>
+          <p className="text-[10px] text-gray-500 uppercase tracking-wide">hours</p>
+        </div>
+
+        <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {tc.ocr_status === 'failed' && (
+            <Button size="sm" variant="outline" onClick={onReprocess}>Retry OCR</Button>
+          )}
+          <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete} disabled={isDeleting}>
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
         </div>
       </div>
-      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-        {tc.ocr_status === 'failed' && (
-          <Button size="sm" variant="outline" onClick={onReprocess}>Retry OCR</Button>
-        )}
-        <Button size="sm" variant="outline" className="text-red-600" onClick={onDelete} disabled={isDeleting}>
-          {isDeleting ? <><Spinner size="sm" /> Deleting...</> : 'Delete'}
-        </Button>
-      </div>
+
+      {/* Inline action row — for complete/reviewed cards with a pay period */}
+      {(isComplete || isReviewed) && payPeriodId && (
+        <div className="px-3 pb-3 pt-1 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+          {error && <p className="text-xs text-red-600 mb-2">{error}</p>}
+
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Employee assignment dropdown */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-gray-600">Assign to:</span>
+              <select
+                className="border rounded px-2 py-1 text-sm max-w-[200px] focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+                value={selectedEmployeeId}
+                onChange={(e) => setSelectedEmployeeId(e.target.value ? Number(e.target.value) : '')}
+                disabled={busy}
+              >
+                <option value="">Auto-match ({tc.employee_name || '?'})</option>
+                {employees.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.first_name} {emp.last_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1" />
+
+            {/* Action buttons based on status */}
+            {isComplete && hasAttention && (
+              <Button size="sm" variant="outline" onClick={handleApproveAll} disabled={busy}>
+                {approving ? <><Spinner size="sm" /> Approving...</> : `Approve ${tc.review_summary.attention_count} Flagged`}
+              </Button>
+            )}
+
+            {isComplete && !hasAttention && (
+              <Button size="sm" onClick={handleReview} disabled={busy}>
+                {reviewing ? <><Spinner size="sm" /> Marking...</> : 'Mark Reviewed'}
+              </Button>
+            )}
+
+            {isReviewed && (
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApply} disabled={busy}>
+                {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply to Payroll'}
+              </Button>
+            )}
+
+            <Button size="sm" variant="outline" onClick={onSelect}>
+              View Details
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* For standalone (no pay period) or failed, just show a view details link */}
+      {(isComplete || isReviewed) && !payPeriodId && (
+        <div className="px-3 pb-3 pt-1 border-t border-gray-100">
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500">
+              {isReviewed ? 'Reviewed' : 'Ready for review'} — {punchesWithData.length} entries, {totalHours.toFixed(2)} total hours
+            </span>
+            <div className="flex-1" />
+            <Button size="sm" variant="outline" onClick={onSelect}>
+              View Details
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1124,6 +1310,10 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
                 onReprocess={() => handleReprocess(tc.id)}
                 onDelete={() => handleDelete(tc.id)}
                 isDeleting={deletingId === tc.id}
+                employees={employees}
+                payPeriodId={payPeriodId}
+                onRefresh={loadTimecards}
+                onPayrollUpdated={onPayrollUpdated}
               />
             ))}
             {isStandalone && (
