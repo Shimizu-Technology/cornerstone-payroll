@@ -1213,6 +1213,12 @@ export const reportsApi = {
       ...(notes && notes.length > 0 ? { notes } : {}),
       ...(entries && entries.length > 0 ? { entries } : {}),
     }),
+  checkSignoffPdf: (payPeriodId: number, notes?: string[], entries?: { name: string; check_number: string }[]) =>
+    api.postBlob('/admin/reports/check_signoff_pdf', {
+      pay_period_id: payPeriodId,
+      ...(notes && notes.length > 0 ? { notes } : {}),
+      ...(entries && entries.length > 0 ? { entries } : {}),
+    }),
   checkSignoffPreview: (payPeriodId: number) =>
     api.get<{
       company_name: string;
