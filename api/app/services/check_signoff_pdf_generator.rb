@@ -20,7 +20,7 @@ class CheckSignoffPdfGenerator
   def generate
     pdf = Prawn::Document.new(
       page_size: "LETTER",
-      page_layout: :portrait,
+      page_layout: :landscape,
       margin: [36, 40, 36, 40]
     )
     render_document(pdf)
@@ -120,7 +120,8 @@ class CheckSignoffPdfGenerator
 
   def compute_column_widths(pdf)
     total = pdf.bounds.width
-    [30, total - 330, 60, 70, 90, 80]
+    name_width = total - 430
+    [35, name_width, 75, 90, 120, 110]
   end
 
   def employee_check_rows
