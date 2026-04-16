@@ -1334,6 +1334,38 @@ export const checksApi = {
 };
 
 // ============================================================
+// Printer Profiles API
+// ============================================================
+export interface PrinterProfile {
+  id: number;
+  name: string;
+  description: string | null;
+  notes: string | null;
+  check_stock_type: 'bottom_check' | 'top_check';
+  check_offset_x: number;
+  check_offset_y: number;
+  check_layout_config: Record<string, unknown>;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const printerProfilesApi = {
+  list: () =>
+    api.get<{ printer_profiles: PrinterProfile[] }>('/admin/printer_profiles'),
+  get: (id: number) =>
+    api.get<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`),
+  create: (data: Partial<PrinterProfile>) =>
+    api.post<{ printer_profile: PrinterProfile }>('/admin/printer_profiles', { printer_profile: data }),
+  update: (id: number, data: Partial<PrinterProfile>) =>
+    api.patch<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`, { printer_profile: data }),
+  delete: (id: number) =>
+    api.delete<void>(`/admin/printer_profiles/${id}`),
+  apply: (id: number) =>
+    api.post<{ printer_profile: PrinterProfile; check_settings: CheckSettings }>(`/admin/printer_profiles/${id}/apply`),
+};
+
+// ============================================================
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {

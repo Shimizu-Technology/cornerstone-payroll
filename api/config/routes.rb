@@ -20,6 +20,13 @@ Rails.application.routes.draw do
         patch "companies/next_check_number",  to: "checks#update_next_check_number"
         get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
 
+        # Printer Profiles (saved check alignment presets per printer)
+        resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
+          member do
+            post :apply
+          end
+        end
+
         resources :companies, only: [:index, :show, :create, :update]
         resources :company_assignments, only: [:index, :create, :destroy] do
           collection do
