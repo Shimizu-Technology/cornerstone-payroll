@@ -569,6 +569,34 @@ module Api
             disposition: "attachment"
         end
 
+        # POST /api/v1/admin/reports/check_signoff_pdf
+        def check_signoff_pdf
+          pp = find_pay_period_for_report
+          return unless pp
+
+          notes = params[:notes].present? ? Array(params[:notes]) : []
+
+          custom_entries = nil
+          if params[:entries].present?
+            custom_entries = Array(params[:entries]).map { |e|
+              e.permit(:name, :check_number).to_h
+            }
+          end
+
+          save_signoff_state!(pp, custom_entries, notes)
+
+          generator = CheckSignoffPdfGenerator.new(
+            pp,
+            notes: notes,
+            default_notes: params[:default_notes],
+            custom_entries: custom_entries
+          )
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "inline"
+        end
+
         # GET /api/v1/admin/reports/check_signoff_preview
         def check_signoff_preview
           pp = find_pay_period_for_report

@@ -705,6 +705,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
   const [signoffPreviewLoading, setSignoffPreviewLoading] = useState(false);
   const [signoffCompanyName, setSignoffCompanyName] = useState('');
   const [signoffPeriodDesc, setSignoffPeriodDesc] = useState('');
+  const [signoffPdfPreview, setSignoffPdfPreview] = useState<{
+    open: boolean;
+    pdfUrl: string | null;
+    blobData: BlobDownload | null;
+  }>({ open: false, pdfUrl: null, blobData: null });
+  const [signoffPdfLoading, setSignoffPdfLoading] = useState(false);
 
   const isReady = payPeriodStatus !== 'draft';
 
@@ -872,6 +878,34 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
+  const handlePreviewSignoffPdf = async () => {
+    setSignoffPdfLoading(true);
+    setError(null);
+    setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
+    try {
+      const entries = signoffPreviewLoaded && signoffEntries.length > 0 ? signoffEntries : undefined;
+      const blobData = await reportsApi.checkSignoffPdf(
+        payPeriodId,
+        signoffNotes.length > 0 ? signoffNotes : undefined,
+        entries
+      );
+      const url = URL.createObjectURL(blobData.blob);
+      setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
+    } catch (err) {
+      setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
+      setError(err instanceof Error ? err.message : 'Failed to generate sign-off PDF');
+    } finally {
+      setSignoffPdfLoading(false);
+    }
+  };
+
+  const cleanupSignoffPreview = useCallback(() => {
+    if (signoffPdfPreview.pdfUrl) {
+      URL.revokeObjectURL(signoffPdfPreview.pdfUrl);
+    }
+    setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
+  }, [signoffPdfPreview.pdfUrl]);
+
   if (!isReady) return null;
 
   return (
@@ -994,6 +1028,23 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
               {showSignoffEditor ? 'Collapse' : 'Edit'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePreviewSignoffPdf}
+              disabled={signoffPdfLoading}
+              className="text-xs"
+            >
+              {signoffPdfLoading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+              )}
+              View
             </Button>
             <Button
               size="sm"
@@ -1219,6 +1270,28 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         onGenerate={handleTransmittalGenerate}
         targetLabel={transmittalEditor.label}
         payPeriodId={payPeriodId}
+      />
+
+      <PdfPreviewModal
+        open={signoffPdfPreview.open}
+        onClose={cleanupSignoffPreview}
+        pdfUrl={signoffPdfPreview.pdfUrl}
+        title="Check Sign-Off Sheet"
+        onDownload={() => {
+          if (signoffPdfPreview.blobData) {
+            downloadBlob(signoffPdfPreview.blobData, 'check_signoff_sheet.pdf');
+          }
+        }}
+        onPrint={() => {
+          if (signoffPdfPreview.pdfUrl) {
+            const printWindow = window.open(signoffPdfPreview.pdfUrl, '_blank');
+            if (printWindow) {
+              printWindow.addEventListener('load', () => {
+                printWindow.print();
+              });
+            }
+          }
+        }}
       />
     </>
   );
