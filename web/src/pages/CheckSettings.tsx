@@ -2,7 +2,7 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Download } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
-import { checksApi } from '@/services/api';
+import { checksApi, printerProfilesApi } from '@/services/api';
+import type { PrinterProfile } from '@/services/api';
 import type { CheckSettings as CheckSettingsType } from '@/types';
 
 export function CheckSettingsPage() {
@@ -33,6 +34,27 @@ export function CheckSettingsPage() {
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
+
+  // Printer profiles
+  const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
+  const [showAddProfile, setShowAddProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState('');
+  const [newProfileDescription, setNewProfileDescription] = useState('');
+  const [newProfileNotes, setNewProfileNotes] = useState('');
+  const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
+  const [editProfileName, setEditProfileName] = useState('');
+  const [editProfileDescription, setEditProfileDescription] = useState('');
+  const [editProfileNotes, setEditProfileNotes] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+
+  const loadProfiles = useCallback(async () => {
+    try {
+      const data = await printerProfilesApi.list();
+      setProfiles(data.printer_profiles);
+    } catch {
+      // Non-critical — profiles section just stays empty
+    }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -60,8 +82,9 @@ export function CheckSettingsPage() {
       } finally {
         setLoading(false);
       }
+      loadProfiles();
     })();
-  }, []);
+  }, [loadProfiles]);
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -141,6 +164,96 @@ export function CheckSettingsPage() {
     }
   };
 
+  const handleSaveCurrentAsProfile = async () => {
+    if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
+    setProfileSaving(true);
+    setError(null);
+    try {
+      await printerProfilesApi.create({
+        name: newProfileName.trim(),
+        description: newProfileDescription.trim() || null,
+        notes: newProfileNotes.trim() || null,
+        check_stock_type: stockType,
+        check_offset_x: parseFloat(offsetX),
+        check_offset_y: parseFloat(offsetY),
+        check_layout_config: JSON.parse(layoutOverridesJson || '{}'),
+      });
+      setNewProfileName('');
+      setNewProfileDescription('');
+      setNewProfileNotes('');
+      setShowAddProfile(false);
+      setSuccess('Printer profile saved.');
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleApplyProfile = async (profile: PrinterProfile) => {
+    setError(null);
+    try {
+      const data = await printerProfilesApi.apply(profile.id);
+      const s = data.check_settings;
+      setStockType(s.check_stock_type as 'bottom_check' | 'top_check');
+      setOffsetX(Number(s.check_offset_x || 0).toFixed(3));
+      setOffsetY(Number(s.check_offset_y || 0).toFixed(3));
+      setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
+      setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply profile');
+    }
+  };
+
+  const handleUpdateProfile = async (id: number) => {
+    if (!editProfileName.trim()) { setError('Profile name is required.'); return; }
+    setProfileSaving(true);
+    setError(null);
+    try {
+      await printerProfilesApi.update(id, {
+        name: editProfileName.trim(),
+        description: editProfileDescription.trim() || null,
+        notes: editProfileNotes.trim() || null,
+      });
+      setEditingProfileId(null);
+      setSuccess('Profile updated.');
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleDeleteProfile = async (id: number, name: string) => {
+    if (!window.confirm(`Delete printer profile "${name}"?`)) return;
+    try {
+      await printerProfilesApi.delete(id);
+      setSuccess('Profile deleted.');
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete profile');
+    }
+  };
+
+  const handleOverwriteProfile = async (profile: PrinterProfile) => {
+    if (!window.confirm(`Overwrite "${profile.name}" with current settings?`)) return;
+    setError(null);
+    try {
+      await printerProfilesApi.update(profile.id, {
+        check_stock_type: stockType,
+        check_offset_x: parseFloat(offsetX),
+        check_offset_y: parseFloat(offsetY),
+        check_layout_config: JSON.parse(layoutOverridesJson || '{}'),
+      });
+      setSuccess(`Profile "${profile.name}" updated with current settings.`);
+      loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update profile');
+    }
+  };
+
   const handleResetAdvancedOverrides = () => {
     setLayoutOverridesJson('{}');
     setSuccess(null);
@@ -169,6 +282,145 @@ export function CheckSettingsPage() {
         {success && (
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{success}</div>
         )}
+
+        {/* Printer Profiles */}
+        <Card>
+          <div className="p-4 border-b flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-900">Printer Profiles</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Save and switch between alignment settings for different printers.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
+              {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
+            </Button>
+          </div>
+          <CardContent className="p-4 space-y-3">
+            {showAddProfile && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
+                <p className="text-sm font-medium text-blue-900">Save current settings as a new printer profile</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-xs">Profile Name *</Label>
+                    <Input
+                      value={newProfileName}
+                      onChange={(e) => setNewProfileName(e.target.value)}
+                      placeholder="e.g., Office HP LaserJet"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Description</Label>
+                    <Input
+                      value={newProfileDescription}
+                      onChange={(e) => setNewProfileDescription(e.target.value)}
+                      placeholder="e.g., Main office printer"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs">Notes / Print Instructions</Label>
+                  <Textarea
+                    value={newProfileNotes}
+                    onChange={(e) => setNewProfileNotes(e.target.value)}
+                    placeholder="e.g., Set browser print to 'Fit to page', use tray 2 for check stock"
+                    className="min-h-[60px] text-sm"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <Button size="sm" onClick={handleSaveCurrentAsProfile} disabled={profileSaving}>
+                    {profileSaving ? 'Saving...' : 'Save Profile'}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {profiles.length === 0 && !showAddProfile && (
+              <p className="text-sm text-gray-400 italic">No printer profiles saved yet. Save your current settings as a profile to get started.</p>
+            )}
+
+            {profiles.map((profile) => (
+              <div key={profile.id} className="rounded-lg border p-3 hover:bg-gray-50 transition-colors">
+                {editingProfileId === profile.id ? (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Name</Label>
+                        <Input value={editProfileName} onChange={(e) => setEditProfileName(e.target.value)} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Description</Label>
+                        <Input value={editProfileDescription} onChange={(e) => setEditProfileDescription(e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Notes</Label>
+                      <Textarea value={editProfileNotes} onChange={(e) => setEditProfileNotes(e.target.value)} className="min-h-[60px] text-sm" />
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="outline" size="sm" onClick={() => setEditingProfileId(null)}>Cancel</Button>
+                      <Button size="sm" onClick={() => handleUpdateProfile(profile.id)} disabled={profileSaving}>Save</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{profile.name}</span>
+                        {profile.is_default && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Default</span>
+                        )}
+                      </div>
+                      {profile.description && (
+                        <p className="text-sm text-gray-500 mt-0.5">{profile.description}</p>
+                      )}
+                      <p className="text-xs text-gray-400 mt-1 font-mono">
+                        X: {Number(profile.check_offset_x).toFixed(3)} &nbsp; Y: {Number(profile.check_offset_y).toFixed(3)} &nbsp; Stock: {profile.check_stock_type === 'top_check' ? 'Top' : 'Bottom'}
+                      </p>
+                      {profile.notes && (
+                        <div className="mt-2 rounded bg-amber-50 border border-amber-200 px-2 py-1.5">
+                          <p className="text-xs font-medium text-amber-800">Print Notes:</p>
+                          <p className="text-xs text-amber-700 whitespace-pre-wrap">{profile.notes}</p>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <Button size="sm" onClick={() => handleApplyProfile(profile)}>
+                        Use This Printer
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
+                        Overwrite with Current
+                      </Button>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs"
+                          onClick={() => {
+                            setEditingProfileId(profile.id);
+                            setEditProfileName(profile.name);
+                            setEditProfileDescription(profile.description || '');
+                            setEditProfileNotes(profile.notes || '');
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-red-600 hover:text-red-700"
+                          onClick={() => handleDeleteProfile(profile.id, profile.name)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
 
         {/* Check Stock Settings */}
         <Card>

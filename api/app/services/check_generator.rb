@@ -110,10 +110,14 @@ class CheckGenerator
   def ytd
     @ytd ||= begin
       year = pay_period.pay_date&.year || Date.current.year
+      reportable_ids = PayPeriod.reportable_committed
+        .where(company_id: company.id)
+        .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", year)
+        .select(:id)
+
       items = PayrollItem.joins(:pay_period)
         .where(employee_id: employee.id)
-        .where(pay_periods: { status: "committed", company_id: company.id })
-        .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", year)
+        .where(pay_periods: { id: reportable_ids })
 
       gross   = items.sum(:gross_pay).to_f
       fit     = items.sum(:withholding_tax).to_f
