@@ -1219,6 +1219,12 @@ export const reportsApi = {
       period_start: string;
       period_end: string;
       entries: { id: number; employee_id: number; name: string; check_number: string }[];
+      saved_signoff: {
+        entries: { name: string; check_number: string }[];
+        notes: string[];
+        generated_at: string;
+        updated_at: string;
+      } | null;
     }>(`/admin/reports/check_signoff_preview?pay_period_id=${payPeriodId}`),
 };
 

@@ -555,6 +555,8 @@ module Api
             }
           end
 
+          save_signoff_state!(pp, custom_entries, notes)
+
           generator = CheckSignoffSheetGenerator.new(
             pp,
             notes: notes,
@@ -572,24 +574,34 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
+          saved = CheckSignoffSheet.find_by(pay_period_id: pp.id)
+
           items = pp.payroll_items
             .where(voided: false)
             .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")
             .select("payroll_items.id, payroll_items.employee_id, payroll_items.check_number, employees.first_name, employees.last_name")
             .order("employees.last_name ASC, employees.first_name ASC")
 
+          payroll_entries = items.map { |item|
+            {
+              id: item.id,
+              employee_id: item.employee_id,
+              name: "#{item.last_name}, #{item.first_name}",
+              check_number: item.check_number.presence || ""
+            }
+          }
+
           render json: {
             company_name: pp.company.name,
             period_start: pp.start_date,
             period_end: pp.end_date,
-            entries: items.map { |item|
-              {
-                id: item.id,
-                employee_id: item.employee_id,
-                name: "#{item.last_name}, #{item.first_name}",
-                check_number: item.check_number.presence || ""
-              }
-            }
+            entries: payroll_entries,
+            saved_signoff: saved ? {
+              entries: saved.entries,
+              notes: saved.notes,
+              generated_at: saved.generated_at,
+              updated_at: saved.updated_at
+            } : nil
           }
         end
 
@@ -649,6 +661,20 @@ module Api
           transmittal.save!
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
           Rails.logger.warn("[Transmittal] Failed to save state for pay_period=#{pay_period.id}: #{e.message}")
+        end
+
+        def save_signoff_state!(pay_period, entries, notes)
+          sheet = CheckSignoffSheet.find_or_initialize_by(pay_period_id: pay_period.id)
+          sheet.assign_attributes(
+            company_id: pay_period.company_id,
+            entries: entries || [],
+            notes: notes || [],
+            generated_at: Time.current,
+            updated_by_id: current_user&.id
+          )
+          sheet.save!
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          Rails.logger.warn("[CheckSignoffSheet] Failed to save state for pay_period=#{pay_period.id}: #{e.message}")
         end
 
         def find_pay_period_for_report
