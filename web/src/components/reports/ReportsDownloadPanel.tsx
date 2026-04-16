@@ -49,6 +49,294 @@ function fmt(val: number) {
   return `$${val.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 }
 
+function SignoffEditorModal({
+  open,
+  onClose,
+  onGenerate,
+  payPeriodId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onGenerate: (entries: { name: string; check_number: string }[], notes: string[]) => void;
+  payPeriodId: number;
+}) {
+  const [entries, setEntries] = useState<{ name: string; check_number: string; included: boolean }[]>([]);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [newNote, setNewNote] = useState('');
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  const [savedState, setSavedState] = useState<{ generated_at?: string } | null>(null);
+  const [companyName, setCompanyName] = useState('');
+  const [periodDesc, setPeriodDesc] = useState('');
+
+  useEffect(() => {
+    if (!open) { setInitialized(false); return; }
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open || initialized) return;
+    setLoadingPreview(true);
+    setNewNote('');
+    reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
+      setCompanyName(data.company_name);
+      if (data.period_start && data.period_end) {
+        const [sY, sM, sD] = data.period_start.split('-').map(Number);
+        const [eY, eM, eD] = data.period_end.split('-').map(Number);
+        const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+        setPeriodDesc(sM === eM && sY === eY
+          ? `${months[sM]} ${sD}-${eD}, ${eY}`
+          : `${months[sM]} ${sD} - ${months[eM]} ${eD}, ${eY}`);
+      }
+
+      const saved = data.saved_signoff;
+      if (saved) {
+        setSavedState({ generated_at: saved.generated_at });
+        const savedNames = new Set(saved.entries.map((e: { name: string }) => e.name));
+        const mergedEntries = saved.entries.map((e: { name: string; check_number: string }) => ({
+          name: e.name, check_number: e.check_number, included: true
+        }));
+        data.entries.forEach(e => {
+          if (!savedNames.has(e.name)) {
+            mergedEntries.push({ name: e.name, check_number: e.check_number, included: false });
+          }
+        });
+        setEntries(mergedEntries);
+        setNotes(saved.notes?.length ? [...saved.notes] : []);
+      } else {
+        setSavedState(null);
+        setEntries(data.entries.map(e => ({
+          name: e.name, check_number: e.check_number, included: true
+        })));
+        setNotes([]);
+      }
+      setInitialized(true);
+    }).catch(() => { setInitialized(true); }).finally(() => setLoadingPreview(false));
+  }, [open, payPeriodId, initialized]);
+
+  if (!open) return null;
+
+  const includedCount = entries.filter(e => e.included).length;
+
+  const handleGenerate = () => {
+    const included = entries.filter(e => e.included).map(e => ({ name: e.name, check_number: e.check_number }));
+    onGenerate(included, notes);
+  };
+
+  const handleResetToPayroll = () => {
+    setInitialized(false);
+    setSavedState(null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-50 bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto mx-4">
+        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between rounded-t-lg z-10">
+          <h3 className="text-lg font-semibold text-gray-900">Edit Check Sign-Off Sheet</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {loadingPreview ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            <span className="ml-2 text-sm text-gray-500">Loading sign-off data...</span>
+          </div>
+        ) : (<>
+          {savedState?.generated_at && (
+            <div className="mx-6 mt-4 px-3 py-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2 text-sm">
+              <svg className="w-4 h-4 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-green-800">
+                Last generated: {new Date(savedState.generated_at).toLocaleDateString('en-US', {
+                  month: 'short', day: 'numeric', year: 'numeric',
+                  hour: 'numeric', minute: '2-digit'
+                })}
+              </span>
+            </div>
+          )}
+
+          <div className="px-6 py-4 space-y-6">
+            {/* Company / period header */}
+            {companyName && (
+              <div className="bg-gray-50 border rounded-lg p-3">
+                <p className="font-semibold text-sm text-gray-900">{companyName}</p>
+                {periodDesc && <p className="text-xs text-gray-500 mt-0.5">Pay Period: {periodDesc}</p>}
+              </div>
+            )}
+
+            {/* Employee Selection */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium text-gray-700">
+                  Employees ({includedCount} of {entries.length} selected)
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setEntries(entries.map(e => ({ ...e, included: true })))}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >Select All</button>
+                  <span className="text-gray-300">|</span>
+                  <button
+                    onClick={() => setEntries(entries.map(e => ({ ...e, included: false })))}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >Deselect All</button>
+                  <span className="text-gray-300">|</span>
+                  <button
+                    onClick={handleResetToPayroll}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >Reset</button>
+                </div>
+              </div>
+
+              <div className="border rounded-lg overflow-hidden max-h-[400px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0">
+                    <tr className="bg-gray-50 border-b">
+                      <th className="px-3 py-2 w-10"></th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600 w-8">#</th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600">Employee Name</th>
+                      <th className="text-left px-3 py-2 font-medium text-gray-600 w-36">Check No.</th>
+                      <th className="px-3 py-2 w-10"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {entries.map((entry, i) => (
+                      <tr key={i} className={`border-b last:border-b-0 ${entry.included ? 'bg-white' : 'bg-gray-50 opacity-60'}`}>
+                        <td className="px-3 py-1.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={entry.included}
+                            onChange={() => {
+                              const updated = [...entries];
+                              updated[i] = { ...updated[i], included: !updated[i].included };
+                              setEntries(updated);
+                            }}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="text"
+                            value={entry.name}
+                            onChange={e => {
+                              const updated = [...entries];
+                              updated[i] = { ...updated[i], name: e.target.value };
+                              setEntries(updated);
+                            }}
+                            className="w-full text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="Last, First"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="text"
+                            value={entry.check_number}
+                            onChange={e => {
+                              const updated = [...entries];
+                              updated[i] = { ...updated[i], check_number: e.target.value };
+                              setEntries(updated);
+                            }}
+                            className="w-full text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            placeholder="—"
+                          />
+                        </td>
+                        <td className="px-3 py-1.5 text-center">
+                          <button
+                            onClick={() => setEntries(entries.filter((_, idx) => idx !== i))}
+                            className="text-red-400 hover:text-red-600 p-0.5"
+                            title="Remove"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                onClick={() => setEntries([...entries, { name: '', check_number: '', included: true }])}
+                className="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Add Row
+              </button>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Notes <span className="font-normal text-gray-400">(printed at bottom of sheet)</span>
+              </label>
+              {notes.map((note, i) => (
+                <div key={i} className="flex items-start gap-2 mb-2">
+                  <textarea
+                    value={note}
+                    onChange={e => {
+                      const updated = [...notes];
+                      updated[i] = e.target.value;
+                      setNotes(updated);
+                    }}
+                    rows={2}
+                    className="flex-1 text-sm border rounded px-2 py-1 resize-none"
+                  />
+                  <button
+                    onClick={() => setNotes(notes.filter((_, idx) => idx !== i))}
+                    className="text-red-500 hover:text-red-700 text-xs mt-1"
+                  >Remove</button>
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a note..."
+                  value={newNote}
+                  onChange={e => setNewNote(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newNote.trim()) {
+                      setNotes([...notes, newNote.trim()]);
+                      setNewNote('');
+                    }
+                  }}
+                  className="flex-1 text-sm border rounded px-2 py-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { if (newNote.trim()) { setNotes([...notes, newNote.trim()]); setNewNote(''); } }}
+                  className="text-xs"
+                >Add</Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="sticky bottom-0 bg-white border-t px-6 py-4 flex items-center justify-end gap-3 rounded-b-lg">
+            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button size="sm" onClick={handleGenerate} disabled={includedCount === 0}>
+              Generate Sign-Off Sheet
+            </Button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 function TransmittalEditorModal({
   open,
   onClose,
@@ -696,21 +984,17 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     mode: 'preview' | 'download';
   }>({ open: false, key: null, label: '', mode: 'preview' });
   const [savedTransmittal, setSavedTransmittal] = useState<SavedTransmittal | null>(null);
-  const [signoffNotes, setSignoffNotes] = useState<string[]>([]);
-  const [signoffNewNote, setSignoffNewNote] = useState('');
-  const [signoffLoading, setSignoffLoading] = useState(false);
-  const [showSignoffEditor, setShowSignoffEditor] = useState(false);
-  const [signoffEntries, setSignoffEntries] = useState<{ name: string; check_number: string }[]>([]);
-  const [signoffPreviewLoaded, setSignoffPreviewLoaded] = useState(false);
-  const [signoffPreviewLoading, setSignoffPreviewLoading] = useState(false);
-  const [signoffCompanyName, setSignoffCompanyName] = useState('');
-  const [signoffPeriodDesc, setSignoffPeriodDesc] = useState('');
+  const [signoffEditor, setSignoffEditor] = useState<{
+    open: boolean;
+    mode: 'view' | 'download';
+  }>({ open: false, mode: 'view' });
+  const [signoffSavedAt, setSignoffSavedAt] = useState<string | null>(null);
   const [signoffPdfPreview, setSignoffPdfPreview] = useState<{
     open: boolean;
     pdfUrl: string | null;
     blobData: BlobDownload | null;
   }>({ open: false, pdfUrl: null, blobData: null });
-  const [signoffPdfLoading, setSignoffPdfLoading] = useState(false);
+  const [signoffLoading, setSignoffLoading] = useState(false);
 
   const isReady = payPeriodStatus !== 'draft';
 
@@ -824,78 +1108,75 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
-  const [signoffSavedAt, setSignoffSavedAt] = useState<string | null>(null);
-
-  const loadSignoffPreview = useCallback(async (force = false) => {
-    if (signoffPreviewLoaded && !force) return;
-    setSignoffPreviewLoading(true);
-    try {
-      const data = await reportsApi.checkSignoffPreview(payPeriodId);
-
-      if (data.saved_signoff && !force) {
-        setSignoffEntries(data.saved_signoff.entries.map(e => ({ name: e.name, check_number: e.check_number })));
-        setSignoffNotes(data.saved_signoff.notes || []);
+  useEffect(() => {
+    if (!isReady) return;
+    reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
+      if (data.saved_signoff?.generated_at) {
         setSignoffSavedAt(data.saved_signoff.generated_at);
-      } else {
-        setSignoffEntries(data.entries.map(e => ({ name: e.name, check_number: e.check_number })));
-        setSignoffSavedAt(null);
       }
+    }).catch(() => {});
+  }, [payPeriodId, isReady]);
 
-      setSignoffCompanyName(data.company_name);
-      if (data.period_start && data.period_end) {
-        const [sY, sM, sD] = data.period_start.split('-').map(Number);
-        const [eY, eM, eD] = data.period_end.split('-').map(Number);
-        const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
-        if (sM === eM && sY === eY) {
-          setSignoffPeriodDesc(`${months[sM]} ${sD}-${eD}, ${eY}`);
-        } else {
-          setSignoffPeriodDesc(`${months[sM]} ${sD} - ${months[eM]} ${eD}, ${eY}`);
-        }
-      }
-      setSignoffPreviewLoaded(true);
-    } catch {
-      setError('Failed to load sign-off sheet data');
-    } finally {
-      setSignoffPreviewLoading(false);
-    }
-  }, [payPeriodId, signoffPreviewLoaded]);
+  const handleSignoffGenerate = async (entries: { name: string; check_number: string }[], notes: string[]) => {
+    const { mode } = signoffEditor;
+    setSignoffEditor({ open: false, mode: 'view' });
 
-  const handleDownloadSignoff = async () => {
     setSignoffLoading(true);
     setError(null);
+
     try {
-      const entries = signoffPreviewLoaded && signoffEntries.length > 0 ? signoffEntries : undefined;
-      const blobData = await reportsApi.checkSignoffSheet(
-        payPeriodId,
-        signoffNotes.length > 0 ? signoffNotes : undefined,
-        entries
-      );
-      downloadBlob(blobData, 'check_signoff_sheet.xlsx');
+      if (mode === 'view') {
+        setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
+        const blobData = await reportsApi.checkSignoffPdf(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        const url = URL.createObjectURL(blobData.blob);
+        setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
+      } else {
+        const blobData = await reportsApi.checkSignoffSheet(payPeriodId, notes.length > 0 ? notes : undefined, entries);
+        downloadBlob(blobData, 'check_signoff_sheet.xlsx');
+      }
+      setSignoffSavedAt(new Date().toISOString());
     } catch (err) {
+      setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off sheet');
     } finally {
       setSignoffLoading(false);
     }
   };
 
-  const handlePreviewSignoffPdf = async () => {
-    setSignoffPdfLoading(true);
+  const handleSignoffView = async () => {
+    if (!signoffSavedAt) {
+      setSignoffEditor({ open: true, mode: 'view' });
+      return;
+    }
+    setSignoffLoading(true);
     setError(null);
     setSignoffPdfPreview({ open: true, pdfUrl: null, blobData: null });
     try {
-      const entries = signoffPreviewLoaded && signoffEntries.length > 0 ? signoffEntries : undefined;
-      const blobData = await reportsApi.checkSignoffPdf(
-        payPeriodId,
-        signoffNotes.length > 0 ? signoffNotes : undefined,
-        entries
-      );
+      const blobData = await reportsApi.checkSignoffPdf(payPeriodId);
       const url = URL.createObjectURL(blobData.blob);
       setSignoffPdfPreview({ open: true, pdfUrl: url, blobData });
     } catch (err) {
       setSignoffPdfPreview({ open: false, pdfUrl: null, blobData: null });
       setError(err instanceof Error ? err.message : 'Failed to generate sign-off PDF');
     } finally {
-      setSignoffPdfLoading(false);
+      setSignoffLoading(false);
+    }
+  };
+
+  const handleSignoffDownload = async () => {
+    if (!signoffSavedAt) {
+      setSignoffEditor({ open: true, mode: 'download' });
+      return;
+    }
+    setSignoffLoading(true);
+    setError(null);
+    try {
+      const blobData = await reportsApi.checkSignoffSheet(payPeriodId);
+      downloadBlob(blobData, 'check_signoff_sheet.xlsx');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download sign-off sheet');
+    } finally {
+      setSignoffLoading(false);
     }
   };
 
@@ -1002,11 +1283,11 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
 
       {/* Check Sign-Off Sheet */}
       <Card className="mt-4">
-        <div className="p-4 border-b bg-gray-50 flex items-center justify-between">
-          <div>
+        <div className="p-4 bg-gray-50 flex items-center justify-between">
+          <div className="mr-3 min-w-0">
             <h3 className="font-semibold text-gray-900">Check Sign-Off Sheet</h3>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Excel spreadsheet for employees to sign when picking up checks
+            <p className="text-sm text-gray-500 mt-0.5 truncate">
+              Employee sign-off sheet for check pickup
               {signoffSavedAt && (
                 <span className="text-green-600 ml-1">
                   · Last: {new Date(signoffSavedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -1014,30 +1295,29 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {signoffSavedAt && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSignoffEditor({ open: true, mode: 'view' })}
+                className="text-xs"
+              >
+                <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (!showSignoffEditor) loadSignoffPreview();
-                setShowSignoffEditor(!showSignoffEditor);
-              }}
+              onClick={handleSignoffView}
+              disabled={signoffLoading}
               className="text-xs"
             >
-              <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              {showSignoffEditor ? 'Collapse' : 'Edit'}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePreviewSignoffPdf}
-              disabled={signoffPdfLoading}
-              className="text-xs"
-            >
-              {signoffPdfLoading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
+              {signoffLoading && signoffPdfPreview.open ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
               ) : (
                 <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -1047,212 +1327,23 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
               View
             </Button>
             <Button
+              variant="outline"
               size="sm"
-              onClick={handleDownloadSignoff}
+              onClick={handleSignoffDownload}
               disabled={signoffLoading}
               className="text-xs"
             >
-              {signoffLoading ? (
-                <span className="flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Generating...
-                </span>
+              {signoffLoading && !signoffPdfPreview.open ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
               ) : (
-                <>
-                  <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  Download Excel
-                </>
+                <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
               )}
+              Download
             </Button>
           </div>
         </div>
-        {showSignoffEditor && (
-          <div className="divide-y">
-            {signoffPreviewLoading ? (
-              <div className="p-6 flex items-center justify-center text-sm text-gray-500">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading sign-off data...
-              </div>
-            ) : (
-              <>
-                {/* Header preview */}
-                {signoffCompanyName && (
-                  <div className="px-4 py-3 bg-white">
-                    <p className="font-semibold text-sm text-gray-900">{signoffCompanyName}</p>
-                    {signoffPeriodDesc && (
-                      <p className="text-xs text-gray-500 mt-0.5">Pay Period: {signoffPeriodDesc}</p>
-                    )}
-                  </div>
-                )}
-
-                {/* Employee / check table */}
-                <div className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-gray-700">
-                      Employees ({signoffEntries.length})
-                    </label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSignoffEntries([...signoffEntries, { name: '', check_number: '' }])}
-                      className="text-xs"
-                    >
-                      <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                      </svg>
-                      Add Row
-                    </Button>
-                  </div>
-
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b">
-                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-8">#</th>
-                          <th className="text-left px-3 py-2 font-medium text-gray-600">Employee Name</th>
-                          <th className="text-left px-3 py-2 font-medium text-gray-600 w-32">Check No.</th>
-                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-20">Print</th>
-                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-28">Sign</th>
-                          <th className="text-center px-3 py-2 font-medium text-gray-600 w-24">Date</th>
-                          <th className="px-3 py-2 w-10"></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {signoffEntries.map((entry, i) => (
-                          <tr key={i} className="border-b last:border-b-0 hover:bg-gray-50">
-                            <td className="px-3 py-1.5 text-gray-400 text-xs">{i + 1}</td>
-                            <td className="px-3 py-1.5">
-                              <input
-                                type="text"
-                                value={entry.name}
-                                onChange={e => {
-                                  const updated = [...signoffEntries];
-                                  updated[i] = { ...updated[i], name: e.target.value };
-                                  setSignoffEntries(updated);
-                                }}
-                                className="w-full text-sm border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                placeholder="Last, First"
-                              />
-                            </td>
-                            <td className="px-3 py-1.5">
-                              <input
-                                type="text"
-                                value={entry.check_number}
-                                onChange={e => {
-                                  const updated = [...signoffEntries];
-                                  updated[i] = { ...updated[i], check_number: e.target.value };
-                                  setSignoffEntries(updated);
-                                }}
-                                className="w-full text-sm border rounded px-2 py-1 text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                placeholder="—"
-                              />
-                            </td>
-                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">______</td>
-                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">__________</td>
-                            <td className="px-3 py-1.5 text-center text-gray-300 text-xs">________</td>
-                            <td className="px-3 py-1.5">
-                              <button
-                                onClick={() => setSignoffEntries(signoffEntries.filter((_, idx) => idx !== i))}
-                                className="text-red-400 hover:text-red-600 p-0.5"
-                                title="Remove row"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {signoffEntries.length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="px-3 py-4 text-center text-sm text-gray-400 italic">
-                              No entries. Click "Add Row" to add employees.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                  {signoffEntries.length > 0 && (
-                    <div className="flex gap-2 mt-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSignoffNotes([]);
-                          setSignoffSavedAt(null);
-                          loadSignoffPreview(true);
-                        }}
-                        className="text-xs"
-                      >
-                        <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        Reset to Payroll Data
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Notes section */}
-                <div className="p-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Notes <span className="font-normal text-gray-400">(printed at bottom of sheet)</span>
-                  </label>
-                  {signoffNotes.map((note, i) => (
-                    <div key={i} className="flex items-start gap-2 mb-2">
-                      <textarea
-                        value={note}
-                        onChange={e => {
-                          const updated = [...signoffNotes];
-                          updated[i] = e.target.value;
-                          setSignoffNotes(updated);
-                        }}
-                        rows={2}
-                        className="flex-1 text-sm border rounded px-2 py-1 resize-none"
-                      />
-                      <button
-                        onClick={() => setSignoffNotes(signoffNotes.filter((_, idx) => idx !== i))}
-                        className="text-red-500 hover:text-red-700 text-xs mt-1"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Add a note..."
-                      value={signoffNewNote}
-                      onChange={e => setSignoffNewNote(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && signoffNewNote.trim()) {
-                          setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
-                          setSignoffNewNote('');
-                        }
-                      }}
-                      className="flex-1 text-sm border rounded px-2 py-1"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        if (signoffNewNote.trim()) {
-                          setSignoffNotes([...signoffNotes, signoffNewNote.trim()]);
-                          setSignoffNewNote('');
-                        }
-                      }}
-                      className="text-xs"
-                    >
-                      Add
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </Card>
 
       <PdfPreviewModal
@@ -1269,6 +1360,13 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         onClose={() => setTransmittalEditor({ open: false, key: null, label: '', mode: 'preview' })}
         onGenerate={handleTransmittalGenerate}
         targetLabel={transmittalEditor.label}
+        payPeriodId={payPeriodId}
+      />
+
+      <SignoffEditorModal
+        open={signoffEditor.open}
+        onClose={() => setSignoffEditor({ open: false, mode: 'view' })}
+        onGenerate={handleSignoffGenerate}
         payPeriodId={payPeriodId}
       />
 

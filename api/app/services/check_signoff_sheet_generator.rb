@@ -16,6 +16,7 @@ class CheckSignoffSheetGenerator
     workbook = package.workbook
 
     workbook.add_worksheet(name: "Check Sign-Off") do |sheet|
+      sheet.page_setup.set(orientation: :landscape, paper_size: 1)
       add_styles(workbook)
       build_header(sheet)
       build_table(sheet)
@@ -96,7 +97,7 @@ class CheckSignoffSheetGenerator
   end
 
   def set_column_widths(sheet)
-    sheet.column_widths 30, 14, 14, 18, 14
+    sheet.column_widths 40, 16, 18, 24, 18
   end
 
   def employee_check_rows

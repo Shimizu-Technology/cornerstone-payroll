@@ -546,23 +546,10 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          notes = params[:notes].present? ? Array(params[:notes]) : []
+          custom_entries, notes = resolve_signoff_params(pp)
+          save_signoff_state!(pp, custom_entries, notes) if params[:entries].present?
 
-          custom_entries = nil
-          if params[:entries].present?
-            custom_entries = Array(params[:entries]).map { |e|
-              e.permit(:name, :check_number).to_h
-            }
-          end
-
-          save_signoff_state!(pp, custom_entries, notes)
-
-          generator = CheckSignoffSheetGenerator.new(
-            pp,
-            notes: notes,
-            default_notes: params[:default_notes],
-            custom_entries: custom_entries
-          )
+          generator = CheckSignoffSheetGenerator.new(pp, notes: notes, custom_entries: custom_entries)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -574,23 +561,10 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          notes = params[:notes].present? ? Array(params[:notes]) : []
+          custom_entries, notes = resolve_signoff_params(pp)
+          save_signoff_state!(pp, custom_entries, notes) if params[:entries].present?
 
-          custom_entries = nil
-          if params[:entries].present?
-            custom_entries = Array(params[:entries]).map { |e|
-              e.permit(:name, :check_number).to_h
-            }
-          end
-
-          save_signoff_state!(pp, custom_entries, notes)
-
-          generator = CheckSignoffPdfGenerator.new(
-            pp,
-            notes: notes,
-            default_notes: params[:default_notes],
-            custom_entries: custom_entries
-          )
+          generator = CheckSignoffPdfGenerator.new(pp, notes: notes, custom_entries: custom_entries)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -689,6 +663,23 @@ module Api
           transmittal.save!
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
           Rails.logger.warn("[Transmittal] Failed to save state for pay_period=#{pay_period.id}: #{e.message}")
+        end
+
+        def resolve_signoff_params(pay_period)
+          if params[:entries].present?
+            entries = Array(params[:entries]).map { |e| e.permit(:name, :check_number).to_h }
+            notes = params[:notes].present? ? Array(params[:notes]) : []
+          else
+            saved = CheckSignoffSheet.find_by(pay_period_id: pay_period.id)
+            if saved
+              entries = saved.entries.map { |e| e.stringify_keys }
+              notes = saved.notes || []
+            else
+              entries = nil
+              notes = []
+            end
+          end
+          [entries, notes]
         end
 
         def save_signoff_state!(pay_period, entries, notes)
