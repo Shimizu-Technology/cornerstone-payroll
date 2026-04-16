@@ -100,6 +100,12 @@ class CheckSignoffSheetGenerator
   end
 
   def employee_check_rows
+    if options[:custom_entries].present?
+      return options[:custom_entries].map { |e|
+        { name: e["name"].to_s, check_number: e["check_number"].to_s }
+      }
+    end
+
     items = pay_period.payroll_items
       .where(voided: false)
       .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")

@@ -12,6 +12,46 @@ interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
+  payPeriodEndDate?: string;
+}
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-medium">{label}:</span>{' '}
+      <span className="font-mono">{value}</span>
+      <button
+        onClick={handleCopy}
+        className="inline-flex items-center text-amber-600 hover:text-amber-800 p-0.5 rounded"
+        title={`Copy ${label}`}
+      >
+        {copied ? (
+          <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function getTaxQuarter(dateStr?: string): { year: number; quarter: number } | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const month = d.getMonth();
+  return { year: d.getFullYear(), quarter: Math.floor(month / 3) + 1 };
 }
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
@@ -31,7 +71,7 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -303,31 +343,48 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 All DRT Forms
               </a>
             </p>
-            {company && (company.ein || company.address_line1) && (
-              <div className="mt-2 pt-2 border-t border-amber-200 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-amber-800">
-                {company.ein && (
-                  <div>
-                    <span className="font-medium">EIN:</span>{' '}
-                    <span className="font-mono">{company.ein}</span>
+            {(() => {
+              const taxDeposit = checks.find(c => c.check_type === 'tax_deposit' && !c.voided);
+              const taxQ = getTaxQuarter(payPeriodEndDate);
+              const fullAddress = company?.address_line1
+                ? [
+                    company.address_line1,
+                    company.address_line2,
+                    [company.city, company.state, company.zip].filter(Boolean).join(', ')
+                  ].filter(Boolean).join(', ')
+                : null;
+
+              return (company || taxDeposit || taxQ) ? (
+                <div className="mt-2 pt-2 border-t border-amber-200 text-amber-800">
+                  <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1.5">Form 500 Quick-Fill</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+                    {taxDeposit && (
+                      <CopyField label="Total Taxes" value={`$${Number(taxDeposit.amount).toFixed(2)}`} />
+                    )}
+                    {company?.ein && (
+                      <CopyField label="EIN" value={company.ein} />
+                    )}
+                    {taxQ && (
+                      <CopyField label="Tax Year" value={String(taxQ.year)} />
+                    )}
+                    {taxQ && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium">Quarter:</span>{' '}
+                        <span>Q{taxQ.quarter} ({['Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec'][taxQ.quarter - 1]})</span>
+                      </div>
+                    )}
+                    {company?.name && (
+                      <CopyField label="Company" value={company.name} />
+                    )}
+                    {fullAddress && (
+                      <div className="sm:col-span-2">
+                        <CopyField label="Address" value={fullAddress} />
+                      </div>
+                    )}
                   </div>
-                )}
-                {company.name && (
-                  <div>
-                    <span className="font-medium">Company:</span> {company.name}
-                  </div>
-                )}
-                {company.address_line1 && (
-                  <div className="sm:col-span-2">
-                    <span className="font-medium">Address:</span>{' '}
-                    {company.address_line1}
-                    {company.address_line2 ? `, ${company.address_line2}` : ''}
-                    {company.city || company.state || company.zip
-                      ? `, ${[company.city, company.state, company.zip].filter(Boolean).join(', ')}`
-                      : ''}
-                  </div>
-                )}
-              </div>
-            )}
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
       )}

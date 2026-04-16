@@ -1356,6 +1356,7 @@ export function PayPeriodDetail() {
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
+            payPeriodEndDate={payPeriod.end_date}
           />
         )}
 
