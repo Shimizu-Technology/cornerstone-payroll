@@ -19,6 +19,7 @@ import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
+import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
@@ -1364,6 +1365,11 @@ export function PayPeriodDetail() {
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
           />
+        )}
+
+        {/* Timecard History — read-only view for processed pay periods */}
+        {!isDraft && (
+          <TimecardHistoryPanel payPeriodId={payPeriod.id} />
         )}
 
         {/* CPR-71: Correction Panel — committed and voided periods */}

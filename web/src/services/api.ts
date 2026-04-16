@@ -1208,7 +1208,7 @@ export const reportsApi = {
       custom_entries: options?.customEntries,
     }),
   checkSignoffSheet: (payPeriodId: number, notes?: string[]) =>
-    api.getBlobWithParams('/admin/reports/check_signoff_sheet', {
+    api.postBlob('/admin/reports/check_signoff_sheet', {
       pay_period_id: payPeriodId,
       ...(notes && notes.length > 0 ? { notes } : {}),
     }),
