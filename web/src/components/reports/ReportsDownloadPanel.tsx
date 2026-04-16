@@ -818,12 +818,23 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
+  const [signoffSavedAt, setSignoffSavedAt] = useState<string | null>(null);
+
   const loadSignoffPreview = useCallback(async (force = false) => {
     if (signoffPreviewLoaded && !force) return;
     setSignoffPreviewLoading(true);
     try {
       const data = await reportsApi.checkSignoffPreview(payPeriodId);
-      setSignoffEntries(data.entries.map(e => ({ name: e.name, check_number: e.check_number })));
+
+      if (data.saved_signoff && !force) {
+        setSignoffEntries(data.saved_signoff.entries.map(e => ({ name: e.name, check_number: e.check_number })));
+        setSignoffNotes(data.saved_signoff.notes || []);
+        setSignoffSavedAt(data.saved_signoff.generated_at);
+      } else {
+        setSignoffEntries(data.entries.map(e => ({ name: e.name, check_number: e.check_number })));
+        setSignoffSavedAt(null);
+      }
+
       setSignoffCompanyName(data.company_name);
       if (data.period_start && data.period_end) {
         const [sY, sM, sD] = data.period_start.split('-').map(Number);
@@ -962,6 +973,11 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
             <h3 className="font-semibold text-gray-900">Check Sign-Off Sheet</h3>
             <p className="text-sm text-gray-500 mt-0.5">
               Excel spreadsheet for employees to sign when picking up checks
+              {signoffSavedAt && (
+                <span className="text-green-600 ml-1">
+                  · Last: {new Date(signoffSavedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1112,7 +1128,11 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => loadSignoffPreview(true)}
+                        onClick={() => {
+                          setSignoffNotes([]);
+                          setSignoffSavedAt(null);
+                          loadSignoffPreview(true);
+                        }}
                         className="text-xs"
                       >
                         <svg className="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

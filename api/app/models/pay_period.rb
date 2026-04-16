@@ -12,6 +12,7 @@ class PayPeriod < ApplicationRecord
   has_many :non_employee_checks, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
   has_one :transmittal, dependent: :destroy
+  has_one :check_signoff_sheet, dependent: :destroy
 
   # CPR-71: correction chain associations
   belongs_to :source_pay_period,
