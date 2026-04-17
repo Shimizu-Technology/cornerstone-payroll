@@ -333,18 +333,23 @@ module Api
             return render json: { error: "Replace flow is only available for committed pay periods" }, status: :unprocessable_entity
           end
 
-          user = User.find(current_user_id)
+          # `current_user` on ApplicationController already memoizes the
+          # User object — calling `User.find(current_user_id)` would
+          # re-issue a SELECT for the same row we already loaded for
+          # auth. Use `current_user` directly.
+          unless current_user
+            return render json: { error: "User not found" }, status: :unprocessable_entity
+          end
+
           updated_item = ReplaceCheckService.replace!(
             payroll_item:    @payroll_item,
             corrected_inputs: params[:corrected_inputs]&.to_unsafe_h || {},
             reason:          params[:reason].to_s.strip,
-            actor:           user,
+            actor:           current_user,
             ip_address:      request.remote_ip
           )
 
           render json: { payroll_item: check_item_json(updated_item) }, status: :ok
-        rescue ActiveRecord::RecordNotFound
-          render json: { error: "User not found" }, status: :unprocessable_entity
         rescue ReplaceCheckService::InvalidStateError, ReplaceCheckService::UnsupportedEmployeeError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ReplaceCheckService::InvalidInputError => e
