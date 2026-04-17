@@ -72,23 +72,35 @@ module Api
           before_snapshot = audit_snapshot(@check)
           reason = params[:reason].presence
 
+          # Track success inside the transaction rather than `return`-ing out of
+          # the block — non-local return inside ActiveRecord::Base.transaction
+          # works but obscures the rollback semantics and trips up readers
+          # (and static analysis). We do all the writes atomically and then
+          # render based on the outcome once we're back at the controller scope.
+          updated = false
           ActiveRecord::Base.transaction do
-            unless @check.update(attrs)
-              return render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
-            end
+            if @check.update(attrs)
+              after_snapshot = audit_snapshot(@check)
+              changed = changed_fields(before_snapshot, after_snapshot)
 
-            after_snapshot = audit_snapshot(@check)
-            changed = changed_fields(before_snapshot, after_snapshot)
+              if changed.any?
+                @check.edits.create!(
+                  edited_by: current_user,
+                  before: before_snapshot.slice(*changed),
+                  after: after_snapshot.slice(*changed),
+                  changed_fields: changed,
+                  reason: reason
+                )
+              end
 
-            if changed.any?
-              @check.edits.create!(
-                edited_by: current_user,
-                before: before_snapshot.slice(*changed),
-                after: after_snapshot.slice(*changed),
-                changed_fields: changed,
-                reason: reason
-              )
+              updated = true
+            else
+              raise ActiveRecord::Rollback
             end
+          end
+
+          unless updated
+            return render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
           end
 
           # Reset the edits association so the freshly-created edit (or no-op)
