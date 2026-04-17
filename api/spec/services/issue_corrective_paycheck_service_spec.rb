@@ -248,5 +248,68 @@ RSpec.describe IssueCorrectivePaycheckService do
 
       expect(original_period.reload.supplemental_pay_periods.size).to eq(2)
     end
+
+    # Regression for the stale-memoization race flagged by Greptile (P1).
+    # `validate_for_issue!` (called outside the transaction) memoizes
+    # `@original_item` and reads its `voided?` state. If a concurrent void
+    # commits in the window between validation and the `FOR UPDATE` lock
+    # acquisition, the in-transaction `assert_correctable!` was previously
+    # checking the *stale* cached snapshot, so the guard silently passed
+    # and a corrective paycheck was issued against a voided original —
+    # corrupting the employee's YTD against a base the void had removed.
+    it "re-reads the payroll item under lock so a concurrent void is caught" do
+      service = described_class.new(
+        original_pay_period: original_period,
+        employee:            employee,
+        corrected_inputs:    { hours_worked: 80 },
+        pay_date:            Date.new(2024, 2, 1),
+        reason:              "Concurrent-void race regression",
+        actor:               actor
+      )
+
+      # Force memoization of `@original_item` (snapshot says voided=false).
+      service.send(:original_item)
+      expect(service.send(:original_item).voided?).to eq(false)
+
+      # Simulate a concurrent void that commits *after* validation but
+      # *before* (or as) the transaction lock is acquired. `update_columns`
+      # mutates the DB row directly without touching our cached instance.
+      original_item.update_columns(
+        voided:    true,
+        voided_at: Time.current,
+        void_reason: "Concurrent void test"
+      )
+
+      expect {
+        service.issue!
+      }.to raise_error(IssueCorrectivePaycheckService::InvalidStateError, /voided/)
+
+      # Critical: no supplemental period should have been persisted, since
+      # the lock-time re-read should have raised before any writes.
+      expect(original_period.reload.supplemental_pay_periods.count).to eq(0)
+    end
+
+    it "raises cleanly when the original payroll item is deleted between validate and lock" do
+      service = described_class.new(
+        original_pay_period: original_period,
+        employee:            employee,
+        corrected_inputs:    { hours_worked: 80 },
+        pay_date:            Date.new(2024, 2, 1),
+        reason:              "Concurrent-delete race regression",
+        actor:               actor
+      )
+
+      # Memoize, then destroy out of band before issue! re-reads.
+      # `destroy` (rather than `delete`) handles dependent associations
+      # like `payroll_item_earnings`.
+      service.send(:original_item)
+      original_item.destroy!
+
+      expect {
+        service.issue!
+      }.to raise_error(IssueCorrectivePaycheckService::InvalidStateError,
+                       /no longer exists/)
+      expect(original_period.reload.supplemental_pay_periods.count).to eq(0)
+    end
   end
 end
