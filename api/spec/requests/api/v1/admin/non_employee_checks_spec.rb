@@ -199,6 +199,61 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       }.not_to change(NonEmployeeCheckEdit, :count)
     end
 
+    # Regression for the nil → "" spurious-audit issue (Greptile P2 / data
+    # quality). The Edit modal sends the full payload, so unset optional
+    # text fields arrive as "". Without coercion, the DB column flips
+    # nil → "" on a no-op edit and the diff records a phantom change like
+    # `{description: null → ""}`. Both `check_params` (controller) and
+    # `changed_fields` (audit comparator) now treat blank and nil as
+    # equivalent for these fields.
+    it "treats nil and blank optional-text fields as equivalent (no spurious audit entry)" do
+      # `check` was created with description=nil/reference_number=nil,
+      # but the modal will send "" for both on every save. Touch only
+      # one real field so we can confirm the audit log lists *only*
+      # that one and not the phantom blanks.
+      expect {
+        patch "/api/v1/admin/non_employee_checks/#{check.id}",
+          params: {
+            non_employee_check: {
+              payable_to:        check.payable_to,
+              amount:            check.amount.to_s,
+              check_type:        check.check_type,
+              memo:              check.memo,                # unchanged
+              description:       "",                        # was nil — should NOT diff
+              reference_number:  "",                        # was nil — should NOT diff
+              check_number:      "",                        # was nil — should NOT diff
+              edit_reason:       "Touching payable_to only"
+            }
+          },
+          as: :json
+      }.not_to change(NonEmployeeCheckEdit, :count)
+
+      # And the DB stays nil (not coerced to "") so future audit diffs
+      # don't degrade either.
+      check.reload
+      expect(check.description).to be_nil
+      expect(check.reference_number).to be_nil
+      expect(check.check_number).to be_nil
+    end
+
+    it "logs only real changes when blanks-vs-nils coexist with a genuine edit" do
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: {
+            payable_to:       "Updated Vendor Name",
+            description:      "",
+            reference_number: "",
+            check_number:     "",
+            edit_reason:      "Renamed vendor"
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      edit = check.edits.order(created_at: :desc).first
+      expect(edit.changed_fields).to eq([ "payable_to" ])
+    end
+
     it "rejects updates to a voided check" do
       check.update!(voided: true, voided_at: Time.current, void_reason: "test")
 
