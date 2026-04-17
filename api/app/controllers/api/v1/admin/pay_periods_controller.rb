@@ -658,7 +658,14 @@ module Api
         end
 
         def set_pay_period
-          @pay_period = PayPeriod.includes(:payroll_items, :voided_by, :source_pay_period, :correction_events).find(params[:id])
+          # `:supplemental_pay_periods` is eager-loaded so that
+          # `pay_period_json` can call `pay_period.supplemental_pay_periods.size`
+          # for the `supplemental_pay_periods_count` field without firing an
+          # extra `SELECT COUNT(*)` query on every show/update/etc. request.
+          @pay_period = PayPeriod
+            .includes(:payroll_items, :voided_by, :source_pay_period,
+                      :correction_events, :supplemental_pay_periods)
+            .find(params[:id])
 
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
