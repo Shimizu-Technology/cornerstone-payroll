@@ -316,6 +316,8 @@ import type {
   CorrectivePaycheckInputs,
   CorrectivePaycheckPreview,
   SupplementalPayPeriodSummary,
+  ReplaceCheckPreview,
+  ReplaceCheckResult,
 } from '@/types';
 
 // Employees (Admin API)
@@ -1384,6 +1386,30 @@ export const checksApi = {
   // Reprint a check (in-place reassignment)
   reprint: (payrollItemId: number, reason?: string) =>
     api.post<{ original_check_number: string; reprint: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reprint`, { reason }),
+
+  // Replace check (uncashed) — preview the corrected snapshot + delta.
+  // Used when the original physical check has not been distributed or has
+  // been returned uncashed AND the financial values need to change.
+  replaceCheckPreview: (
+    payrollItemId: number,
+    data: { corrected_inputs: Record<string, unknown> }
+  ) =>
+    api.post<ReplaceCheckPreview>(
+      `/admin/payroll_items/${payrollItemId}/replace_check_preview`,
+      data
+    ),
+
+  // Replace check (uncashed) — commit the change. For unprinted items the
+  // check # is reused (in_place); for printed items the old # is voided
+  // and a new one assigned (void_and_reissue).
+  replaceCheck: (
+    payrollItemId: number,
+    data: { corrected_inputs: Record<string, unknown>; reason: string }
+  ) =>
+    api.post<ReplaceCheckResult>(
+      `/admin/payroll_items/${payrollItemId}/replace_check`,
+      data
+    ),
 
   // Company check settings
   getSettings: () =>

@@ -19,6 +19,7 @@ import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
 import { CorrectivePaycheckModal } from '@/components/payroll/CorrectivePaycheckModal';
+import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
@@ -131,6 +132,7 @@ export function PayPeriodDetail() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
+  const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
   const [supplementals, setSupplementals] = useState<SupplementalPayPeriodSummary[]>([]);
   const [supplementalsLoading, setSupplementalsLoading] = useState(false);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
@@ -1274,18 +1276,44 @@ export function PayPeriodDetail() {
                               </button>
                             </TableCell>
                           )}
-                          {isCommitted && payPeriod?.can_issue_corrective_paycheck && !isContractor && (
-                            <TableCell className="text-center">
-                              <button
-                                onClick={() => setCorrectingItem(item)}
-                                className="text-xs text-amber-700 hover:text-amber-900 hover:underline font-medium"
-                                title="Issue a corrective paycheck for this employee against this pay period"
-                              >
-                                Correct
-                              </button>
-                            </TableCell>
-                          )}
-                          {isCommitted && (!payPeriod?.can_issue_corrective_paycheck || isContractor) && (
+                          {isCommitted && !isContractor && (() => {
+                            const canCorrect = !!payPeriod?.can_issue_corrective_paycheck;
+                            // Replace (uncashed) is offered when we can cleanly
+                            // void+reissue or in-place edit a single check on
+                            // this period: must be a regular (non-supplemental)
+                            // committed period and the item must still own a
+                            // non-voided check number.
+                            const canReplace =
+                              payPeriod?.cycle !== 'supplemental' &&
+                              !item.voided &&
+                              !!item.check_number;
+                            if (!canCorrect && !canReplace) return <TableCell />;
+                            return (
+                              <TableCell className="text-center">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  {canCorrect && (
+                                    <button
+                                      onClick={() => setCorrectingItem(item)}
+                                      className="text-xs text-amber-700 hover:text-amber-900 hover:underline font-medium"
+                                      title="Issue a separate supplemental check for the difference (use when the original was cashed)"
+                                    >
+                                      Correct
+                                    </button>
+                                  )}
+                                  {canReplace && (
+                                    <button
+                                      onClick={() => setReplacingItem(item)}
+                                      className="text-xs text-orange-700 hover:text-orange-900 hover:underline font-medium"
+                                      title="Void & reissue this check (use when the original is uncashed or never distributed)"
+                                    >
+                                      Replace
+                                    </button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            );
+                          })()}
+                          {isCommitted && isContractor && (
                             <TableCell />
                           )}
                         </TableRow>
@@ -1601,6 +1629,23 @@ export function PayPeriodDetail() {
             // (so totals/badges that depend on YTD or supplemental count
             // pick up the freshly committed corrective).
             loadSupplementals(payPeriod.id);
+            loadPayPeriod(payPeriod.id, true);
+          }}
+        />
+      )}
+
+      {/* Replace Check (uncashed) Modal — used when the original check is
+          in our possession (never distributed or returned uncashed) and
+          the financial values need to change. Different from Correct
+          (which leaves the original alone and adds a supplemental delta). */}
+      {replacingItem && payPeriod && payPeriod.cycle !== 'supplemental' && (
+        <ReplaceCheckModal
+          open={replacingItem !== null}
+          onOpenChange={(isOpen) => { if (!isOpen) setReplacingItem(null); }}
+          payPeriod={payPeriod}
+          payrollItem={replacingItem}
+          onReplaced={() => {
+            setReplacingItem(null);
             loadPayPeriod(payPeriod.id, true);
           }}
         />

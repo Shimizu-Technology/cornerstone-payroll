@@ -368,6 +368,58 @@ export interface CorrectivePaycheckPreview {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Replace check (uncashed) — single-check void+reissue or in-place edit when
+// the original physical check has not been distributed or has been returned.
+// Distinct from CorrectivePaycheck (which cuts a separate supplemental check
+// for the delta when the original is already cashed).
+// ---------------------------------------------------------------------------
+export interface ReplaceCheckSnapshot {
+  hours_worked: number;
+  overtime_hours: number;
+  pay_rate: number;
+  bonus: number;
+  gross_pay: number;
+  withholding_tax: number;
+  social_security_tax: number;
+  medicare_tax: number;
+  net_pay: number;
+}
+
+export type ReplaceCheckMode = 'in_place' | 'void_and_reissue';
+
+export interface ReplaceCheckPreview {
+  original: ReplaceCheckSnapshot;
+  corrected: ReplaceCheckSnapshot;
+  mode: ReplaceCheckMode;
+  meta: {
+    payroll_item_id: number;
+    employee_id: number;
+    employee_name: string;
+    will_assign_new_check_number: boolean;
+    original_check_number: string | null;
+    is_zero_change: boolean;
+  };
+}
+
+export interface ReplaceCheckResult {
+  payroll_item: {
+    id: number;
+    check_number: string | null;
+    replaced_check_number: string | null;
+    voided: boolean;
+    gross_pay: number;
+    net_pay: number;
+    events: Array<{
+      id: number;
+      event_type: string;
+      check_number: string;
+      reason: string | null;
+      created_at: string;
+    }>;
+  };
+}
+
 export interface SupplementalPayPeriodSummary {
   id: number;
   pay_date: string;
