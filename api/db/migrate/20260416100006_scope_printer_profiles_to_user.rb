@@ -40,6 +40,16 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     end
     remove_column :printer_profiles, :company_id
 
+    # Dedupe before adding the user-scoped unique indexes. `backfill_user_ids!`
+    # assigns the same admin user to every profile in their company, so any
+    # company that already had multiple printer profiles (a real scenario:
+    # one operator owning several physical printers) will end up with
+    # multiple rows sharing `(user_id, name)` — which would crash the
+    # `add_index ... unique: true` below with `PG::UniqueViolation` and
+    # abort the entire deployment. Same idea applies to the partial
+    # default-per-user index.
+    dedupe_for_user_scoped_indexes!
+
     add_index :printer_profiles, [:user_id, :name], unique: true,
               name: "index_printer_profiles_on_user_id_and_name"
     add_index :printer_profiles, :user_id, unique: true,
@@ -136,6 +146,44 @@ class ScopePrinterProfilesToUser < ActiveRecord::Migration[8.0]
     if fallback_any_id
       execute "UPDATE printer_profiles SET user_id = #{fallback_any_id} WHERE user_id IS NULL"
     end
+  end
+
+  # Used only by `up`. Resolves the two ways the post-backfill,
+  # company-scoped state can violate the soon-to-be-added user-scoped
+  # unique indexes:
+  #
+  # 1. Multiple profiles in the same company with the same `name` —
+  #    after `backfill_user_ids!` they all point at the company's
+  #    first admin, so `(user_id, name)` collides. Keep the lowest
+  #    id, delete the rest. Deletion (vs rename) is the right call
+  #    here too: an operator running this migration shouldn't be
+  #    confronted with auto-renamed-orphan rows in the new UI, and
+  #    operators can recreate genuinely-distinct profiles.
+  #
+  # 2. Multiple `is_default = TRUE` profiles assigned to the same
+  #    user (one per company they administer). Keep the lowest id
+  #    as the default, demote the rest.
+  def dedupe_for_user_scoped_indexes!
+    execute <<~SQL.squish
+      DELETE FROM printer_profiles
+       WHERE id NOT IN (
+         SELECT MIN(id)
+           FROM printer_profiles
+          GROUP BY user_id, name
+       )
+    SQL
+
+    execute <<~SQL.squish
+      UPDATE printer_profiles
+         SET is_default = FALSE
+       WHERE is_default = TRUE
+         AND id NOT IN (
+           SELECT MIN(id)
+             FROM printer_profiles
+            WHERE is_default = TRUE
+            GROUP BY user_id
+         )
+    SQL
   end
 
   # Used only by `down`. Resolves the two ways the user-scoped state
