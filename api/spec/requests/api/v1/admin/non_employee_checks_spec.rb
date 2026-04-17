@@ -221,9 +221,9 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
               memo:              check.memo,                # unchanged
               description:       "",                        # was nil — should NOT diff
               reference_number:  "",                        # was nil — should NOT diff
-              check_number:      "",                        # was nil — should NOT diff
-              edit_reason:       "Touching payable_to only"
-            }
+              check_number:      ""                         # was nil — should NOT diff
+            },
+            reason: "Touching payable_to only"
           },
           as: :json
       }.not_to change(NonEmployeeCheckEdit, :count)
@@ -243,15 +243,21 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
             payable_to:       "Updated Vendor Name",
             description:      "",
             reference_number: "",
-            check_number:     "",
-            edit_reason:      "Renamed vendor"
-          }
+            check_number:     ""
+          },
+          reason: "Renamed vendor"
         },
         as: :json
 
       expect(response).to have_http_status(:ok)
       edit = check.edits.order(created_at: :desc).first
       expect(edit.changed_fields).to eq([ "payable_to" ])
+      # While we're here, assert the reason actually lands. The previous
+      # version of this spec passed `edit_reason:` *inside*
+      # `non_employee_check:` (the strong-params permitted scope), which
+      # was silently dropped because the controller reads
+      # `params[:reason]` at the top level. Locking the round-trip in.
+      expect(edit.reason).to eq("Renamed vendor")
     end
 
     it "rejects updates to a voided check" do

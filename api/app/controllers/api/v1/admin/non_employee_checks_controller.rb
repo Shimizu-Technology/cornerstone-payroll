@@ -16,16 +16,31 @@ module Api
 
         # GET /api/v1/admin/non_employee_checks
         def index
+          # Don't include `:edits` here — the index payload only needs
+          # the *count* of edits per check, not the rows themselves, and
+          # eager-loading them would pull every audit JSONB row into
+          # memory just to call `.size` on the array. Instead, fetch
+          # only an `id → count` map in a single grouped query, then pass
+          # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by, :edits)
+            .includes(:pay_period, :created_by)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.where(check_type: params[:check_type]) if params[:check_type].present?
           checks = checks.active if params[:active] == "true"
 
-          checks = checks.order(created_at: :desc)
+          checks = checks.order(created_at: :desc).to_a
 
-          render json: { non_employee_checks: checks.map { |c| check_payload(c) } }
+          edit_counts = NonEmployeeCheckEdit
+            .where(non_employee_check_id: checks.map(&:id))
+            .group(:non_employee_check_id)
+            .count
+
+          render json: {
+            non_employee_checks: checks.map { |c|
+              check_payload(c, edit_count: edit_counts[c.id] || 0)
+            }
+          }
         end
 
         # GET /api/v1/admin/non_employee_checks/:id
@@ -211,7 +226,7 @@ module Api
           nil
         end
 
-        def check_payload(check)
+        def check_payload(check, edit_count: nil)
           {
             id: check.id,
             pay_period_id: check.pay_period_id,
@@ -230,11 +245,31 @@ module Api
             void_reason: check.void_reason,
             voided_at: check.voided_at,
             check_status: check.check_status,
-            edit_count: check.edits.size,
+            edit_count: edit_count_for(check, override: edit_count),
             created_by_id: check.created_by_id,
             created_at: check.created_at,
             updated_at: check.updated_at
           }
+        end
+
+        # Resolves `edit_count` without re-querying when callers can do
+        # better. Three cases, in priority order:
+        #
+        # 1. `override`: caller supplied a pre-computed count (e.g. the
+        #    `index` endpoint's bulk group-count map). Used as-is.
+        # 2. `check.edits.loaded?`: the `:edits` association is already in
+        #    memory (loaded by `set_check`). Use the in-memory size — no
+        #    SQL fires.
+        # 3. Fallback: issue a single SELECT COUNT. This covers
+        #    post-mutation reload paths (`mark_printed`, `void_check`)
+        #    where `@check.reload` evicts the preloaded association.
+        #
+        # Previously this just called `check.edits.size`, which on case
+        # (3) issued a per-request COUNT — Greptile's flagged N+1.
+        def edit_count_for(check, override: nil)
+          return override if override
+          return check.edits.size if check.edits.loaded?
+          check.edits.count
         end
 
         def edit_payload(edit)
