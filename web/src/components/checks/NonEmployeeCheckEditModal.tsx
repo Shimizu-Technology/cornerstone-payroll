@@ -139,11 +139,18 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
         throw new Error('Amount must be a positive number');
       }
 
+      // Coerce blank check_number to null. Postgres treats "" as NOT NULL,
+      // so the partial unique index on (company_id, check_number) would
+      // fire on the second blank check in the same company saved through
+      // this modal. The backend coerces too, but normalising here also
+      // keeps audit-log diffs clean ("" → null no-ops, not "no-op edits").
+      const checkNumberValue = form.check_number.trim() === '' ? null : form.check_number;
+
       const payload: Parameters<typeof nonEmployeeChecksApi.update>[1] = {
         payable_to: form.payable_to,
         amount: amountNum,
         check_type: form.check_type,
-        check_number: form.check_number,
+        check_number: checkNumberValue,
         reference_number: form.reference_number,
         memo: form.memo,
         description: form.description,

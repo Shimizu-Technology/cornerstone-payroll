@@ -94,6 +94,49 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(json["errors"].join(", ")).to match(/check number/i)
     end
 
+    # Regression test: editing two unrelated checks without a check number
+    # in the same company used to hit the partial unique index because the
+    # modal sent check_number: "" (which Postgres treats as NOT NULL),
+    # causing the second save to raise ActiveRecord::RecordNotUnique → 500.
+    # The controller now coerces blank → nil so each unset row is NULL and
+    # the partial index ignores them.
+    it "allows multiple blank-check_number edits in the same company without 500ing" do
+      other_check = NonEmployeeCheck.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: admin_user,
+        payable_to: "Other Vendor",
+        amount: 75.00,
+        check_type: "vendor"
+      )
+
+      # First blank-check edit — works.
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: { non_employee_check: { check_number: "", memo: "first edit" } },
+        as: :json
+      expect(response).to have_http_status(:ok)
+      expect(check.reload.check_number).to be_nil
+
+      # Second blank-check edit on a *different* check in the same company —
+      # would previously raise ActiveRecord::RecordNotUnique on the partial
+      # index. Now stays NULL on both rows and saves cleanly.
+      patch "/api/v1/admin/non_employee_checks/#{other_check.id}",
+        params: { non_employee_check: { check_number: "", memo: "second edit" } },
+        as: :json
+      expect(response).to have_http_status(:ok)
+      expect(other_check.reload.check_number).to be_nil
+      expect(other_check.reload.memo).to eq("second edit")
+    end
+
+    it "treats whitespace-only check_number as blank (coerced to nil)" do
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: { non_employee_check: { check_number: "   " } },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(check.reload.check_number).to be_nil
+    end
+
     it "allows the same check_number in a different company" do
       NonEmployeeCheck.create!(
         company: other_company,
