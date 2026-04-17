@@ -22,7 +22,7 @@ import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -117,6 +117,10 @@ export function PayPeriodDetail() {
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
+  // can detect when the FIT auto-deposit amount has been overridden away
+  // from the calculated total. Updated via the panel's onChecksLoaded prop.
+  const [nonEmployeeChecks, setNonEmployeeChecks] = useState<NonEmployeeCheck[]>([]);
   const [hoursMap, setHoursMap] = useState<Record<string, HoursEntry>>({});
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -195,6 +199,10 @@ export function PayPeriodDetail() {
 
   useEffect(() => {
     if (id) {
+      // Reset cross-pay-period observer state so divergence indicators don't
+      // momentarily render against the previous period's checks while the
+      // new panel loads.
+      setNonEmployeeChecks([]);
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
@@ -463,6 +471,23 @@ export function PayPeriodDetail() {
   const totalEmployerMedicare = payrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
   const totalEmployerTaxes = totalEmployerSS + totalEmployerMedicare;
   const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
+
+  // Detect FIT-deposit override: if the user has edited the auto-FIT
+  // non-employee check's amount, it'll no longer equal the calculated
+  // FIT total derived from PayrollItem.withholding_tax. Surfacing this
+  // divergence prevents silent desync between "what payroll says we owe"
+  // and "what we're actually depositing."
+  const fitDepositCheck = nonEmployeeChecks.find(
+    c =>
+      !c.voided &&
+      (c.auto_generated_type === 'fit_deposit' ||
+        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+  );
+  const fitDepositAmount = fitDepositCheck ? Number(fitDepositCheck.amount) : null;
+  const fitDivergence =
+    fitDepositAmount !== null && Math.abs(fitDepositAmount - totalWithholding) > 0.005
+      ? { calculated: totalWithholding, deposited: fitDepositAmount, delta: fitDepositAmount - totalWithholding }
+      : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
@@ -1276,6 +1301,23 @@ export function PayPeriodDetail() {
                       <span>FIT Subtotal</span>
                       <span>{formatCurrency(totalWithholding)}</span>
                     </div>
+                    {fitDivergence && (
+                      <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2.5 py-2 text-xs text-orange-900">
+                        <div className="flex items-start gap-1.5">
+                          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <div>
+                            <p className="font-semibold">FIT deposit overridden</p>
+                            <p className="mt-0.5 leading-snug">
+                              Calculated <span className="font-mono">{formatCurrency(fitDivergence.calculated)}</span>,{' '}
+                              depositing <span className="font-mono">{formatCurrency(fitDivergence.deposited)}</span>{' '}
+                              ({fitDivergence.delta > 0 ? '+' : ''}{formatCurrency(fitDivergence.delta)})
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {/* SS + Medicare Column */}
@@ -1313,6 +1355,15 @@ export function PayPeriodDetail() {
                 </div>
                 <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
+              {fitDivergence && (
+                <p className="mt-3 text-xs text-orange-800">
+                  ⚠ This total reflects the calculated FIT obligation. The FIT deposit check has been
+                  overridden to <span className="font-mono font-semibold">{formatCurrency(fitDivergence.deposited)}</span>{' '}
+                  — actual amount going to Treasurer of Guam differs from the total above by{' '}
+                  <span className="font-mono font-semibold">{fitDivergence.delta > 0 ? '+' : ''}{formatCurrency(fitDivergence.delta)}</span>.
+                  See the Non-Employee Checks section for edit history.
+                </p>
+              )}
             </div>
           </Card>
         )}
@@ -1357,6 +1408,7 @@ export function PayPeriodDetail() {
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
             payPeriodEndDate={payPeriod.end_date}
+            onChecksLoaded={setNonEmployeeChecks}
           />
         )}
 
