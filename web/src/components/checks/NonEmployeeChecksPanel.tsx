@@ -123,19 +123,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     // effect below (we used to call it from inside the setter, which is a
     // side-effect-during-render anti-pattern that double-fires under
     // React StrictMode).
+    //
+    // To force the history list to reload when a save adds a new edit, we
+    // include `updated_at` in the <NonEmployeeCheckHistory key=...> below.
+    // When the saved check comes back with a new updated_at, React unmounts
+    // and remounts the history component, which re-runs its fetch effect —
+    // no fragile setTimeout(0) remount trick needed.
     setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
-    // If the user has the history open for this check, force a remount so the
-    // newly-created edit row appears. We do this by toggling it off+on once.
-    if (expandedHistoryIds.has(updated.id)) {
-      setExpandedHistoryIds(prev => {
-        const next = new Set(prev);
-        next.delete(updated.id);
-        return next;
-      });
-      setTimeout(() => {
-        setExpandedHistoryIds(prev => new Set(prev).add(updated.id));
-      }, 0);
-    }
   };
 
   // Keep the parent's onChecksLoaded callback in a ref so loadChecks doesn't
@@ -570,7 +564,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                       <div className="px-3 py-1.5 text-xs font-medium text-gray-600 uppercase tracking-wide">
                         Edit History
                       </div>
-                      <NonEmployeeCheckHistory checkId={check.id} />
+                      {/* Keying on updated_at forces a remount whenever a save
+                          adds a new edit, which re-runs the history fetch. */}
+                      <NonEmployeeCheckHistory
+                        key={`${check.id}-${check.updated_at ?? ''}`}
+                        checkId={check.id}
+                      />
                     </div>
                   )}
                 </div>
