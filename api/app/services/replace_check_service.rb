@@ -281,8 +281,21 @@ class ReplaceCheckService
     employee.instance_variable_set(:@cached_ytd_social_security, prev_ss)
   end
 
+  # YTD across all reportable_committed periods *prior to* this item's
+  # pay_date in the same year (with same-pay-date deterministic ordering
+  # by pay_period.id, mirroring IssueCorrectivePaycheckService). Excludes
+  # the item itself.
+  #
+  # The pay_date cutoff is critical: PayrollCalculator uses this value
+  # as the "pre-period YTD" baseline for SS-wage-base and FIT-bracket
+  # calculations. Without the cutoff, items from *later* committed
+  # periods in the same year leak in — which can falsely push the
+  # employee past the SS wage base (zeroing SS on the replacement) or
+  # bump them into a higher FIT bracket than was correct at the time
+  # of the original period.
   def ytd_excluding_self(column)
     pay_date = @payroll_item.pay_period.pay_date
+    pay_period_id = @payroll_item.pay_period_id
     @payroll_item.employee.payroll_items
       .joins(:pay_period)
       .where(pay_periods: {
@@ -291,6 +304,8 @@ class ReplaceCheckService
                             pay_date: Date.new(pay_date.year, 1, 1)..Date.new(pay_date.year, 12, 31))
                      .select(:id)
       })
+      .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
+             pay_date, pay_date, pay_period_id)
       .where.not(id: @payroll_item.id)
       .sum(column)
   end
