@@ -4,10 +4,24 @@ module Api
   module V1
     module Admin
       class NonEmployeeChecksController < BaseController
-        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf]
+        # Fields that are user-editable AND that we audit changes to. We
+        # intentionally exclude things like printed_at / voided_at / print_count
+        # which are managed by their own lifecycle methods.
+        AUDITED_FIELDS = %w[
+          payable_to amount check_type memo description
+          reference_number check_number
+        ].freeze
+
+        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :history]
 
         # GET /api/v1/admin/non_employee_checks
         def index
+          # Don't include `:edits` here — the index payload only needs
+          # the *count* of edits per check, not the rows themselves, and
+          # eager-loading them would pull every audit JSONB row into
+          # memory just to call `.size` on the array. Instead, fetch
+          # only an `id → count` map in a single grouped query, then pass
+          # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
             .includes(:pay_period, :created_by)
 
@@ -15,9 +29,18 @@ module Api
           checks = checks.where(check_type: params[:check_type]) if params[:check_type].present?
           checks = checks.active if params[:active] == "true"
 
-          checks = checks.order(created_at: :desc)
+          checks = checks.order(created_at: :desc).to_a
 
-          render json: { non_employee_checks: checks.map { |c| check_payload(c) } }
+          edit_counts = NonEmployeeCheckEdit
+            .where(non_employee_check_id: checks.map(&:id))
+            .group(:non_employee_check_id)
+            .count
+
+          render json: {
+            non_employee_checks: checks.map { |c|
+              check_payload(c, edit_count: edit_counts[c.id] || 0)
+            }
+          }
         end
 
         # GET /api/v1/admin/non_employee_checks/:id
@@ -59,11 +82,54 @@ module Api
             attrs["pay_period_id"] = pay_period&.id
           end
 
-          if @check.update(attrs)
-            render json: { non_employee_check: check_payload(@check) }
-          else
-            render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
+          # Snapshot the audited fields before we touch the record so the audit
+          # log can capture an accurate before/after diff.
+          before_snapshot = audit_snapshot(@check)
+          reason = params[:reason].presence
+
+          # Track success inside the transaction rather than `return`-ing out of
+          # the block — non-local return inside ActiveRecord::Base.transaction
+          # works but obscures the rollback semantics and trips up readers
+          # (and static analysis). We do all the writes atomically and then
+          # render based on the outcome once we're back at the controller scope.
+          updated = false
+          ActiveRecord::Base.transaction do
+            if @check.update(attrs)
+              after_snapshot = audit_snapshot(@check)
+              changed = changed_fields(before_snapshot, after_snapshot)
+
+              if changed.any?
+                @check.edits.create!(
+                  edited_by: current_user,
+                  before: before_snapshot.slice(*changed),
+                  after: after_snapshot.slice(*changed),
+                  changed_fields: changed,
+                  reason: reason
+                )
+              end
+
+              updated = true
+            else
+              raise ActiveRecord::Rollback
+            end
           end
+
+          unless updated
+            return render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
+          end
+
+          # Reset the edits association so the freshly-created edit (or no-op)
+          # is reflected in `edit_count` without issuing a second COUNT query.
+          @check.edits.reset
+          render json: { non_employee_check: check_payload(@check) }
+        end
+
+        # GET /api/v1/admin/non_employee_checks/:id/history
+        def history
+          edits = @check.edits.includes(:edited_by)
+          render json: {
+            history: edits.map { |edit| edit_payload(edit) }
+          }
         end
 
         # DELETE /api/v1/admin/non_employee_checks/:id
@@ -107,18 +173,50 @@ module Api
         private
 
         def set_check
-          @check = NonEmployeeCheck.find_by(id: params[:id], company_id: current_company_id)
+          # Preload :edits so check_payload's `edit_count: check.edits.size`
+          # uses the loaded association instead of issuing a per-request COUNT.
+          @check = NonEmployeeCheck
+            .includes(:edits)
+            .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
           render json: { error: "Check not found" }, status: :not_found
         end
 
         def check_params
-          params.require(:non_employee_check).permit(
+          permitted = params.require(:non_employee_check).permit(
             :pay_period_id, :payable_to, :amount, :check_type,
             :memo, :description, :reference_number, :check_number
           )
+
+          # Coerce blank values to nil for all optional text fields. The Edit
+          # modal always sends the full payload, so untouched-and-unset
+          # fields arrive as "" rather than being omitted. Two reasons this
+          # matters:
+          #
+          # 1. `check_number` — Postgres treats "" as NOT NULL, so the
+          #    partial unique index `WHERE check_number IS NOT NULL` fires
+          #    on the *second* check in the same company saved through the
+          #    modal — even for an unrelated edit — raising
+          #    `ActiveRecord::RecordNotUnique` → 500. Normalising to nil
+          #    matches the partial index and the model-level `allow_nil`.
+          #
+          # 2. `memo` / `description` / `reference_number` — without
+          #    coercion, a DB row with a true `nil` value gets overwritten
+          #    with `""` on a no-op edit, causing `audit_snapshot` to
+          #    diff `nil → ""` and create a spurious audit entry for a
+          #    field the operator never touched.
+          BLANKABLE_TEXT_FIELDS.each do |field|
+            permitted[field] = nil if permitted.key?(field) && permitted[field].blank?
+          end
+
+          permitted
         end
+
+        # Optional text fields whose blank ("" or whitespace-only) values
+        # should be stored as NULL. Centralised so `check_params` and
+        # `audit_snapshot` agree on the normalisation.
+        BLANKABLE_TEXT_FIELDS = %i[check_number memo description reference_number].freeze
 
         def resolve_pay_period(pay_period_id)
           pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id)
@@ -128,7 +226,7 @@ module Api
           nil
         end
 
-        def check_payload(check)
+        def check_payload(check, edit_count: nil)
           {
             id: check.id,
             pay_period_id: check.pay_period_id,
@@ -137,6 +235,7 @@ module Api
             payable_to: check.payable_to,
             amount: check.amount,
             check_type: check.check_type,
+            auto_generated_type: check.auto_generated_type,
             memo: check.memo,
             description: check.description,
             reference_number: check.reference_number,
@@ -146,10 +245,88 @@ module Api
             void_reason: check.void_reason,
             voided_at: check.voided_at,
             check_status: check.check_status,
+            edit_count: edit_count_for(check, override: edit_count),
             created_by_id: check.created_by_id,
             created_at: check.created_at,
             updated_at: check.updated_at
           }
+        end
+
+        # Resolves `edit_count` without re-querying when callers can do
+        # better. Three cases, in priority order:
+        #
+        # 1. `override`: caller supplied a pre-computed count (e.g. the
+        #    `index` endpoint's bulk group-count map). Used as-is.
+        # 2. `check.edits.loaded?`: the `:edits` association is already in
+        #    memory (loaded by `set_check`). Use the in-memory size — no
+        #    SQL fires.
+        # 3. Fallback: issue a single SELECT COUNT. This covers
+        #    post-mutation reload paths (`mark_printed`, `void_check`)
+        #    where `@check.reload` evicts the preloaded association.
+        #
+        # Previously this just called `check.edits.size`, which on case
+        # (3) issued a per-request COUNT — Greptile's flagged N+1.
+        def edit_count_for(check, override: nil)
+          return override if override
+          return check.edits.size if check.edits.loaded?
+          check.edits.count
+        end
+
+        def edit_payload(edit)
+          {
+            id: edit.id,
+            edited_by_id: edit.edited_by_id,
+            edited_by_name: edit.edited_by_name,
+            before: edit.before,
+            after: edit.after,
+            changed_fields: edit.changed_fields,
+            reason: edit.reason,
+            created_at: edit.created_at
+          }
+        end
+
+        # Builds a stable hash of the audited fields with normalized types so
+        # the diff between before/after isn't muddied by formatting (e.g.
+        # BigDecimal vs Float, nil vs "").
+        def audit_snapshot(check)
+          AUDITED_FIELDS.each_with_object({}) do |field, snapshot|
+            value = check.public_send(field)
+            # `BigDecimal#to_s` defaults to engineering notation (e.g.
+            # "0.12550e3" for 125.50) which is unreadable in audit JSONB
+            # and hard to inspect in psql. `to_s("F")` forces fixed-point
+            # decimal notation ("125.5"), which matches what the UI
+            # renders. `Numeric#to_s` (Float/Integer) is left as-is —
+            # those already produce human-readable output. Comparison
+            # via `changed_fields` is unaffected: identical inputs still
+            # produce identical strings.
+            value = if value.is_a?(BigDecimal)
+              value.to_s("F")
+            elsif value.is_a?(Numeric)
+              value.to_s
+            else
+              value
+            end
+            snapshot[field] = value
+          end
+        end
+
+        def changed_fields(before, after)
+          # Treat nil and "" as equivalent for the optional text fields so
+          # we don't log a spurious `field: null → ""` change when the
+          # operator never touched it. `check_params` now coerces blanks
+          # to nil to keep stored data clean, but an internal-service or
+          # console caller could still write "" — this comparison
+          # normalisation makes the audit trail robust either way.
+          # Snapshots themselves remain honest (nil stays nil) so the
+          # audit log never claims a value was "" when the DB had nil.
+          AUDITED_FIELDS.select do |field|
+            normalize_for_diff(field, before[field]) != normalize_for_diff(field, after[field])
+          end
+        end
+
+        def normalize_for_diff(field, value)
+          return "" if value.nil? && BLANKABLE_TEXT_FIELDS.include?(field.to_sym)
+          value
         end
       end
     end

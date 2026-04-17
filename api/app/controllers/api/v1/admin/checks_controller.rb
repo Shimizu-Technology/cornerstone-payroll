@@ -23,7 +23,7 @@ module Api
       #   PATCH  /companies/:company_id/next_check_number        → update_next_check_number
       class ChecksController < BaseController
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -291,6 +291,74 @@ module Api
         end
 
         # -----------------------------------------------------------------------
+        # POST /api/v1/admin/payroll_items/:payroll_item_id/replace_check_preview
+        #
+        # Read-only delta preview for the Replace (uncashed) modal. Returns the
+        # original snapshot, the recomputed corrected snapshot, the mode
+        # (:in_place vs :void_and_reissue based on whether the original was
+        # printed), and a meta block driving the UI's submit-button state.
+        # -----------------------------------------------------------------------
+        def replace_preview
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Replace flow is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          preview = ReplaceCheckService.preview(
+            payroll_item:    @payroll_item,
+            corrected_inputs: permit_replace_check_inputs
+          )
+          render json: preview
+        rescue ReplaceCheckService::ReplaceError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
+        # POST /api/v1/admin/payroll_items/:payroll_item_id/replace_check
+        #
+        # Atomically:
+        #   1. Subtract the original item's contribution from employee + company YTD.
+        #   2. (printed-only) Audit-log the void of the original check #.
+        #   3. Apply the corrected inputs to the item and re-run PayrollCalculator
+        #      with YTD context that excludes this item (so taxes match a
+        #      from-scratch run with the new inputs).
+        #   4. (printed-only) Assign a fresh check #; set replaced_check_number
+        #      to the original. (unprinted: keep same check #.)
+        #   5. Re-add to YTD with the new (corrected) values.
+        #   6. Audit-log a `replaced` event with a structured before/after summary.
+        #
+        # Body: { corrected_inputs: {...}, reason: "..." }
+        # -----------------------------------------------------------------------
+        def replace_check
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Replace flow is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          # `current_user` on ApplicationController already memoizes the
+          # User object — calling `User.find(current_user_id)` would
+          # re-issue a SELECT for the same row we already loaded for
+          # auth. Use `current_user` directly.
+          unless current_user
+            return render json: { error: "User not found" }, status: :unprocessable_entity
+          end
+
+          updated_item = ReplaceCheckService.replace!(
+            payroll_item:    @payroll_item,
+            corrected_inputs: permit_replace_check_inputs,
+            reason:          params[:reason].to_s.strip,
+            actor:           current_user,
+            ip_address:      request.remote_ip
+          )
+
+          render json: { payroll_item: check_item_json(updated_item) }, status: :ok
+        rescue ReplaceCheckService::InvalidStateError, ReplaceCheckService::UnsupportedEmployeeError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ReplaceCheckService::InvalidInputError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
         # GET /api/v1/admin/companies/:company_id/check_settings
         # -----------------------------------------------------------------------
         def check_settings
@@ -398,6 +466,36 @@ module Api
         private
 
         # -----------------------------------------------------------------------
+        # Strong-params extraction for the replace-check endpoints'
+        # `corrected_inputs` payload.
+        #
+        # The service layer already does
+        # `(corrected_inputs || {}).symbolize_keys.slice(*REPLACEABLE_INPUT_FIELDS)`
+        # — so `to_unsafe_h` here was *safe*, but it bypassed the
+        # strong-params discipline the rest of the API follows. This
+        # helper expresses the contract at the controller boundary:
+        # scalar replaceable fields are explicitly permitted and the
+        # `custom_earnings` array is permitted with its known
+        # `[{label, amount}, ...]` shape. Anything else is dropped.
+        # (Replace deliberately does not accept `custom_columns_data`
+        # — see `REPLACEABLE_INPUT_FIELDS` — so no JSONB pass-through
+        # is needed here.)
+        # -----------------------------------------------------------------------
+        def permit_replace_check_inputs
+          raw = params[:corrected_inputs]
+          return {} if raw.blank?
+
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+
+          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings]
+
+          raw.permit(
+            *scalar_fields,
+            custom_earnings: [:label, :amount]
+          ).to_h
+        end
+
+        # -----------------------------------------------------------------------
         # Finders
         # -----------------------------------------------------------------------
 
@@ -440,6 +538,7 @@ module Api
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
+            replaced_check_number: item.replaced_check_number,
             events: item.check_events.to_a.sort_by(&:created_at).map { |e| check_event_json(e) }
           }
         end

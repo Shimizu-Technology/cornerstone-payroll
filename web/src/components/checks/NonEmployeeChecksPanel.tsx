@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -7,12 +7,22 @@ import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/ap
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
+import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
+import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
   payPeriodEndDate?: string;
+  /**
+   * Fired whenever the set of checks is (re)loaded or a single check is
+   * updated locally. Lets parent pages observe non-employee-check state
+   * without owning the fetch — used by the pay period page to detect when
+   * the FIT deposit amount has been overridden away from the calculated
+   * value derived from PayrollItems.
+   */
+  onChecksLoaded?: (checks: NonEmployeeCheck[]) => void;
 }
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -71,7 +81,7 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -97,6 +107,38 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [markingPrintedId, setMarkingPrintedId] = useState<number | null>(null);
   const [generatingFit, setGeneratingFit] = useState(false);
   const [fitError, setFitError] = useState<string | null>(null);
+  const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
+
+  const toggleHistory = (id: number) => {
+    setExpandedHistoryIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSavedCheck = (updated: NonEmployeeCheck) => {
+    // Pure state update — the onChecksLoaded notification is fired by the
+    // effect below (we used to call it from inside the setter, which is a
+    // side-effect-during-render anti-pattern that double-fires under
+    // React StrictMode).
+    //
+    // To force the history list to reload when a save adds a new edit, we
+    // include `updated_at` in the <NonEmployeeCheckHistory key=...> below.
+    // When the saved check comes back with a new updated_at, React unmounts
+    // and remounts the history component, which re-runs its fetch effect —
+    // no fragile setTimeout(0) remount trick needed.
+    setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+  };
+
+  // Keep the parent's onChecksLoaded callback in a ref so loadChecks doesn't
+  // need it in its dependency array. This avoids re-creating loadChecks every
+  // time the parent re-renders (which would re-trigger the load effect).
+  const onChecksLoadedRef = useRef(onChecksLoaded);
+  useEffect(() => {
+    onChecksLoadedRef.current = onChecksLoaded;
+  }, [onChecksLoaded]);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -111,6 +153,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   }, [payPeriodId]);
 
   useEffect(() => { loadChecks(); }, [loadChecks]);
+
+  // Notify the parent whenever the local checks array changes (initial load,
+  // reloads, or single-check updates). Done in an effect so it stays out of
+  // any render-phase setState updater.
+  useEffect(() => {
+    onChecksLoadedRef.current?.(checks);
+  }, [checks]);
 
   useEffect(() => {
     if (companyId) {
@@ -247,7 +296,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const hasFitCheck = checks.some(c => c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax' && !c.voided);
+  // Identify the auto-generated FIT deposit by its stable marker, falling back
+  // to the legacy string match for any rows not yet caught by the data backfill.
+  const hasFitCheck = checks.some(
+    c =>
+      !c.voided &&
+      (c.auto_generated_type === 'fit_deposit' ||
+        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+  );
   const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
 
   const handleGenerateFitCheck = async () => {
@@ -325,8 +381,15 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         </div>
       )}
 
-      {/* Form 500 callout when tax deposit checks exist */}
-      {!loading && checks.some(c => c.check_type === 'tax_deposit' && !c.voided) && (
+      {/* Form 500 callout — anchored to auto_generated_type so renaming the
+          auto-FIT check or changing its check_type via the Edit modal doesn't
+          silently hide the quick-fill helper. Falls back to the legacy
+          (tax_deposit, EFTPS) shape for pre-marker rows. */}
+      {!loading && checks.some(c =>
+        !c.voided &&
+        (c.auto_generated_type === 'fit_deposit' ||
+          (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+      ) && (
         <div className="mx-4 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
           <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -344,7 +407,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
               </a>
             </p>
             {(() => {
-              const taxDeposit = checks.find(c => c.check_type === 'tax_deposit' && !c.voided);
+              // Same lookup shape as the outer guard — match the auto-FIT
+              // marker first, fall back to the legacy EFTPS-tax_deposit row.
+              const taxDeposit = checks.find(c =>
+                !c.voided &&
+                (c.auto_generated_type === 'fit_deposit' ||
+                  (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+              );
               const taxQ = getTaxQuarter(payPeriodEndDate);
               const fullAddress = company?.address_line1
                 ? [
@@ -396,82 +465,129 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           <p className="text-sm text-gray-500 italic">No non-employee checks for this pay period.</p>
         ) : (
           <div className="space-y-3">
-            {checks.map(check => (
-              <div key={check.id} className={`flex items-center justify-between p-3 border rounded-lg ${check.voided ? 'bg-red-50 border-red-200' : 'hover:bg-gray-50'}`}>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{check.payable_to}</span>
-                    <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>
-                      {check.check_status}
-                    </Badge>
-                    <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-500 mt-1">
-                    <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
-                    {check.check_number && <span>Check #{check.check_number}</span>}
-                    {check.memo && <span>{check.memo}</span>}
-                    {check.reference_number && <span>Ref: {check.reference_number}</span>}
-                    {check.check_type === 'tax_deposit' && (
-                      <a
-                        href={DRT.FORM_500_PDF}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+            {checks.map(check => {
+              const historyOpen = expandedHistoryIds.has(check.id);
+              const editCount = check.edit_count ?? 0;
+              return (
+                <div
+                  key={check.id}
+                  className={`border rounded-lg overflow-hidden ${check.voided ? 'bg-red-50 border-red-200' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{check.payable_to}</span>
+                        <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>
+                          {check.check_status}
+                        </Badge>
+                        <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
+                        {check.auto_generated_type === 'fit_deposit' && (
+                          <Badge className="bg-amber-100 text-amber-800">Auto FIT</Badge>
+                        )}
+                        {editCount > 0 && (
+                          <button
+                            onClick={() => toggleHistory(check.id)}
+                            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                            title={historyOpen ? 'Hide edit history' : 'Show edit history'}
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {editCount} edit{editCount === 1 ? '' : 's'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
+                        <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
+                        {check.check_number && <span>Check #{check.check_number}</span>}
+                        {check.memo && <span>{check.memo}</span>}
+                        {check.reference_number && <span>Ref: {check.reference_number}</span>}
+                        {check.check_type === 'tax_deposit' && (
+                          <a
+                            href={DRT.FORM_500_PDF}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            Form 500
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePreviewPdf(check)}
+                        disabled={pdfLoading === check.id}
+                        className="text-xs px-2 py-1"
                       >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        Form 500
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePreviewPdf(check)}
-                    disabled={pdfLoading === check.id}
-                    className="text-xs px-2 py-1"
-                  >
-                    {pdfLoading === check.id ? '...' : 'Preview'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePrintSingle(check)}
-                    disabled={pdfLoading === check.id}
-                    className="text-xs px-2 py-1"
-                  >
-                    Print
-                  </Button>
-                  {!check.voided && !check.printed_at && (
-                    <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
-                      {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
-                    </Button>
-                  )}
-                  {!check.voided && voidingId !== check.id && (
-                    <Button size="sm" variant="outline" className="text-red-600 border-red-300" onClick={() => setVoidingId(check.id)}>
-                      Void
-                    </Button>
-                  )}
-                  {voidingId === check.id && (
-                    <div className="flex gap-1">
-                      <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
-                      <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
-                        {voidConfirming ? 'Voiding...' : 'Confirm'}
+                        {pdfLoading === check.id ? '...' : 'Preview'}
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePrintSingle(check)}
+                        disabled={pdfLoading === check.id}
+                        className="text-xs px-2 py-1"
+                      >
+                        Print
+                      </Button>
+                      {!check.voided && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditingCheck(check)}
+                          className="text-xs px-2 py-1"
+                        >
+                          Edit
+                        </Button>
+                      )}
+                      {!check.voided && !check.printed_at && (
+                        <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
+                          {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
+                        </Button>
+                      )}
+                      {!check.voided && voidingId !== check.id && (
+                        <Button size="sm" variant="outline" className="text-red-600 border-red-300" onClick={() => setVoidingId(check.id)}>
+                          Void
+                        </Button>
+                      )}
+                      {voidingId === check.id && (
+                        <div className="flex gap-1">
+                          <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
+                          <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
+                            {voidConfirming ? 'Voiding...' : 'Confirm'}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
+                        </div>
+                      )}
+                      {!check.printed_at && !check.voided && (
+                        <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
+                          {deletingId === check.id ? 'Deleting...' : 'Delete'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {historyOpen && (
+                    <div className="border-t bg-gray-50">
+                      <div className="px-3 py-1.5 text-xs font-medium text-gray-600 uppercase tracking-wide">
+                        Edit History
+                      </div>
+                      {/* Keying on updated_at forces a remount whenever a save
+                          adds a new edit, which re-runs the history fetch. */}
+                      <NonEmployeeCheckHistory
+                        key={`${check.id}-${check.updated_at ?? ''}`}
+                        checkId={check.id}
+                      />
                     </div>
                   )}
-                  {!check.printed_at && !check.voided && (
-                    <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
-                      {deletingId === check.id ? 'Deleting...' : 'Delete'}
-                    </Button>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="pt-2 border-t flex justify-between text-sm font-semibold">
               <span>Total ({checks.filter(c => !c.voided).length} checks)</span>
@@ -480,6 +596,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           </div>
         )}
       </div>
+
+      <NonEmployeeCheckEditModal
+        check={editingCheck}
+        onClose={() => setEditingCheck(null)}
+        onSaved={handleSavedCheck}
+      />
 
       {/* Full-page PDF Preview modal — rendered as portal for proper z-index */}
       {previewUrl && previewCheck && createPortal(

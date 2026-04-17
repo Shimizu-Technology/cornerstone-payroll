@@ -3,12 +3,17 @@
 module Api
   module V1
     module Admin
+      # Printer profiles are scoped to the logged-in user so the same
+      # calibration is available no matter which client the operator has
+      # switched into. The `apply` action still writes to the *currently
+      # active company's* check settings — that's the act of saying
+      # "use this printer's offsets for this client right now".
       class PrinterProfilesController < BaseController
         before_action :set_profile, only: [:show, :update, :destroy, :apply]
 
         # GET /api/v1/admin/printer_profiles
         def index
-          profiles = current_company.printer_profiles.ordered
+          profiles = current_user.printer_profiles.ordered
           render json: { printer_profiles: profiles.map { |p| profile_json(p) } }
         end
 
@@ -19,7 +24,7 @@ module Api
 
         # POST /api/v1/admin/printer_profiles
         def create
-          profile = current_company.printer_profiles.build(profile_params)
+          profile = current_user.printer_profiles.build(profile_params)
           if profile.save
             render json: { printer_profile: profile_json(profile) }, status: :created
           else
@@ -43,7 +48,8 @@ module Api
         end
 
         # POST /api/v1/admin/printer_profiles/:id/apply
-        # Applies this profile's settings to the company's active check settings
+        # Writes this profile's calibration into the currently-active
+        # company's check settings.
         def apply
           if current_company.update(
             check_stock_type: @profile.check_stock_type,
@@ -72,7 +78,10 @@ module Api
         end
 
         def set_profile
-          @profile = current_company.printer_profiles.find(params[:id])
+          @profile = current_user.printer_profiles.find_by(id: params[:id])
+          return if @profile
+
+          render json: { error: "Printer profile not found" }, status: :not_found
         end
 
         def profile_params
