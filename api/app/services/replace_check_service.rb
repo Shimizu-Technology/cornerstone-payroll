@@ -198,8 +198,13 @@ class ReplaceCheckService
   # Validation
   # ---------------------------------------------------------------------
   def validate_for_preview!
-    raise UnsupportedEmployeeError, "Replace flow doesn't support contractor checks" if @payroll_item.contractor?
+    # Nil-check must precede any predicate calls — otherwise a nil
+    # `@payroll_item` would `NoMethodError` on `.contractor?` before this
+    # guard fires. The controller's `before_action :set_payroll_item`
+    # makes nil unreachable in practice, but the service may also be
+    # called directly (specs, jobs, console), so order matters.
     raise InvalidStateError, "Original payroll item is missing" if @payroll_item.nil?
+    raise UnsupportedEmployeeError, "Replace flow doesn't support contractor checks" if @payroll_item.contractor?
     if @payroll_item.correction_entry?
       raise InvalidStateError,
             "Cannot replace a corrective entry directly — replace the original payroll item instead"
