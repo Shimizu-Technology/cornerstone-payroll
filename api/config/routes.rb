@@ -67,6 +67,10 @@ Rails.application.routes.draw do
             post :void
             post :create_correction_run
             get  :correction_history
+            # Per-employee corrective paycheck (off-cycle supplemental period)
+            post :corrective_paycheck_preview
+            post :corrective_paychecks
+            get  :supplemental_pay_periods
             # Payroll import (MoSa Revel PDF + Excel)
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"
@@ -92,6 +96,12 @@ Rails.application.routes.draw do
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
+        # Replace (uncashed) — void + cut a corrected check on the same item.
+        # Used when the original check is in your possession (never given out
+        # or returned by the employee uncashed) and the financial values need
+        # to change (otherwise use reprint).
+        post "payroll_items/:payroll_item_id/replace_check_preview", to: "checks#replace_preview", as: :payroll_item_replace_check_preview
+        post "payroll_items/:payroll_item_id/replace_check",         to: "checks#replace_check",   as: :payroll_item_replace_check
 
         # Reports
         get "reports/dashboard", to: "reports#dashboard"
@@ -146,6 +156,7 @@ Rails.application.routes.draw do
             post :mark_printed
             post :void_check
             get :check_pdf
+            get :history
           end
         end
 

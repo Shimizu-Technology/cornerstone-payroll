@@ -313,6 +313,11 @@ import type {
   W2GuPreflightResponse,
   W2GuFilingReadinessResponse,
   W2GuMarkReadyResponse,
+  CorrectivePaycheckInputs,
+  CorrectivePaycheckPreview,
+  SupplementalPayPeriodSummary,
+  ReplaceCheckPreview,
+  ReplaceCheckResult,
 } from '@/types';
 
 // Employees (Admin API)
@@ -667,6 +672,36 @@ export const payPeriodsApi = {
   // CPR-73: Delete a draft correction run (undoes correction run creation without voiding).
   deleteDraftCorrectionRun: (id: number, data: { reason: string }) =>
     api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
+
+  // Per-employee corrective paycheck (off-cycle supplemental period).
+  // Preview is read-only — used to drive the modal's delta display.
+  correctivePaycheckPreview: (
+    id: number,
+    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs }
+  ) =>
+    api.post<CorrectivePaycheckPreview>(
+      `/admin/pay_periods/${id}/corrective_paycheck_preview`,
+      data
+    ),
+  issueCorrectivePaycheck: (
+    id: number,
+    data: {
+      employee_id: number;
+      corrected_inputs: CorrectivePaycheckInputs;
+      pay_date: string;
+      reason: string;
+      notes?: string;
+    }
+  ) =>
+    api.post<{
+      supplemental_pay_period: PayPeriod;
+      corrective_payroll_item: PayrollItem;
+      original_pay_period_id: number;
+    }>(`/admin/pay_periods/${id}/corrective_paychecks`, data),
+  supplementalPayPeriods: (id: number) =>
+    api.get<{ supplemental_pay_periods: SupplementalPayPeriodSummary[] }>(
+      `/admin/pay_periods/${id}/supplemental_pay_periods`
+    ),
 
   // Timecard OCR import
   previewTimecardImport: async (id: number, csvFile: File) => {
@@ -1352,6 +1387,30 @@ export const checksApi = {
   reprint: (payrollItemId: number, reason?: string) =>
     api.post<{ original_check_number: string; reprint: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reprint`, { reason }),
 
+  // Replace check (uncashed) — preview the corrected snapshot + delta.
+  // Used when the original physical check has not been distributed or has
+  // been returned uncashed AND the financial values need to change.
+  replaceCheckPreview: (
+    payrollItemId: number,
+    data: { corrected_inputs: Record<string, unknown> }
+  ) =>
+    api.post<ReplaceCheckPreview>(
+      `/admin/payroll_items/${payrollItemId}/replace_check_preview`,
+      data
+    ),
+
+  // Replace check (uncashed) — commit the change. For unprinted items the
+  // check # is reused (in_place); for printed items the old # is voided
+  // and a new one assigned (void_and_reissue).
+  replaceCheck: (
+    payrollItemId: number,
+    data: { corrected_inputs: Record<string, unknown>; reason: string }
+  ) =>
+    api.post<ReplaceCheckResult>(
+      `/admin/payroll_items/${payrollItemId}/replace_check`,
+      data
+    ),
+
   // Company check settings
   getSettings: () =>
     api.get<{ check_settings: CheckSettings }>('/admin/companies/check_settings'),
@@ -1584,8 +1643,18 @@ export const nonEmployeeChecksApi = {
   update: (id: number, data: Partial<{
     payable_to: string; amount: number; check_type: string;
     memo: string; description: string; reference_number: string;
-  }>) =>
-    api.patch<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}`, { non_employee_check: data }),
+    // `check_number` is nullable so the modal can clear an existing one.
+    // Sending `null` (or omitting the key) keeps the partial unique index
+    // on (company_id, check_number) WHERE check_number IS NOT NULL from
+    // tripping when multiple checks in the same company have no number.
+    check_number: string | null;
+  }>, reason?: string) =>
+    api.patch<{ non_employee_check: NonEmployeeCheck }>(
+      `/admin/non_employee_checks/${id}`,
+      { non_employee_check: data, ...(reason ? { reason } : {}) }
+    ),
+  history: (id: number) =>
+    api.get<{ history: import('@/types').NonEmployeeCheckEdit[] }>(`/admin/non_employee_checks/${id}/history`),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/non_employee_checks/${id}`),
   markPrinted: (id: number) =>

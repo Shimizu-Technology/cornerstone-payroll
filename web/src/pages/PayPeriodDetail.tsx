@@ -18,11 +18,13 @@ import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
+import { CorrectivePaycheckModal } from '@/components/payroll/CorrectivePaycheckModal';
+import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -117,6 +119,10 @@ export function PayPeriodDetail() {
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
+  // can detect when the FIT auto-deposit amount has been overridden away
+  // from the calculated total. Updated via the panel's onChecksLoaded prop.
+  const [nonEmployeeChecks, setNonEmployeeChecks] = useState<NonEmployeeCheck[]>([]);
   const [hoursMap, setHoursMap] = useState<Record<string, HoursEntry>>({});
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -125,6 +131,10 @@ export function PayPeriodDetail() {
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
+  const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
+  const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
+  const [supplementals, setSupplementals] = useState<SupplementalPayPeriodSummary[]>([]);
+  const [supplementalsLoading, setSupplementalsLoading] = useState(false);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [hoursTableOpen, setHoursTableOpen] = useState(true);
@@ -195,9 +205,36 @@ export function PayPeriodDetail() {
 
   useEffect(() => {
     if (id) {
+      // Reset cross-pay-period observer state so divergence indicators don't
+      // momentarily render against the previous period's checks while the
+      // new panel loads.
+      setNonEmployeeChecks([]);
+      setSupplementals([]);
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
+
+  // Load any linked corrective supplemental periods for a regular,
+  // committed period. Refetches whenever a new corrective is issued.
+  const loadSupplementals = useCallback(async (payPeriodId: number) => {
+    setSupplementalsLoading(true);
+    try {
+      const res = await payPeriodsApi.supplementalPayPeriods(payPeriodId);
+      setSupplementals(res.supplemental_pay_periods);
+    } catch {
+      // Non-fatal: hide the section silently
+      setSupplementals([]);
+    } finally {
+      setSupplementalsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!payPeriod) return;
+    if (payPeriod.cycle === 'supplemental') return; // never loads its own supplementals
+    if (payPeriod.status !== 'committed') return;
+    loadSupplementals(payPeriod.id);
+  }, [payPeriod, loadSupplementals]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
     const clampedValue = Math.max(0, Math.min(MAX_HOURS_PER_PERIOD, value));
@@ -463,6 +500,23 @@ export function PayPeriodDetail() {
   const totalEmployerMedicare = payrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
   const totalEmployerTaxes = totalEmployerSS + totalEmployerMedicare;
   const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
+
+  // Detect FIT-deposit override: if the user has edited the auto-FIT
+  // non-employee check's amount, it'll no longer equal the calculated
+  // FIT total derived from PayrollItem.withholding_tax. Surfacing this
+  // divergence prevents silent desync between "what payroll says we owe"
+  // and "what we're actually depositing."
+  const fitDepositCheck = nonEmployeeChecks.find(
+    c =>
+      !c.voided &&
+      (c.auto_generated_type === 'fit_deposit' ||
+        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+  );
+  const fitDepositAmount = fitDepositCheck ? Number(fitDepositCheck.amount) : null;
+  const fitDivergence =
+    fitDepositAmount !== null && Math.abs(fitDepositAmount - totalWithholding) > 0.005
+      ? { calculated: totalWithholding, deposited: fitDepositAmount, delta: fitDepositAmount - totalWithholding }
+      : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
@@ -981,7 +1035,7 @@ export function PayPeriodDetail() {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
           const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
           const extraColCount = (hasTips ? 1 : 0) + (hasLoans ? 1 : 0);
-          const totalCols = 10 + extraColCount + (isCalculated ? 1 : 0);
+          const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
             <div className="p-4 border-b">
@@ -1022,7 +1076,7 @@ export function PayPeriodDetail() {
                     <TableHead className="text-right">Medicare</TableHead>
                     <TableHead className="text-right">Total Ded.</TableHead>
                     <TableHead className="text-right">Net Pay</TableHead>
-                    {(isCalculated) && <TableHead className="text-center w-16"></TableHead>}
+                    {(isCalculated || isCommitted) && <TableHead className="text-center w-20"></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1212,7 +1266,7 @@ export function PayPeriodDetail() {
                           <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
                           <TableCell className="text-right text-red-600 font-medium">{formatCurrency(toNumber(item.total_deductions))}</TableCell>
                           <TableCell className="text-right font-bold text-green-600">{formatCurrency(toNumber(item.net_pay))}</TableCell>
-                          {(isCalculated) && (
+                          {isCalculated && (
                             <TableCell className="text-center">
                               <button
                                 onClick={() => setEditingItem(item)}
@@ -1221,6 +1275,46 @@ export function PayPeriodDetail() {
                                 Edit
                               </button>
                             </TableCell>
+                          )}
+                          {isCommitted && !isContractor && (() => {
+                            const canCorrect = !!payPeriod?.can_issue_corrective_paycheck;
+                            // Replace (uncashed) is offered when we can cleanly
+                            // void+reissue or in-place edit a single check on
+                            // this period: must be a regular (non-supplemental)
+                            // committed period and the item must still own a
+                            // non-voided check number.
+                            const canReplace =
+                              payPeriod?.cycle !== 'supplemental' &&
+                              !item.voided &&
+                              !!item.check_number;
+                            if (!canCorrect && !canReplace) return <TableCell />;
+                            return (
+                              <TableCell className="text-center">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  {canCorrect && (
+                                    <button
+                                      onClick={() => setCorrectingItem(item)}
+                                      className="text-xs text-amber-700 hover:text-amber-900 hover:underline font-medium"
+                                      title="Issue a separate supplemental check for the difference (use when the original was cashed)"
+                                    >
+                                      Correct
+                                    </button>
+                                  )}
+                                  {canReplace && (
+                                    <button
+                                      onClick={() => setReplacingItem(item)}
+                                      className="text-xs text-orange-700 hover:text-orange-900 hover:underline font-medium"
+                                      title="Void & reissue this check (use when the original is uncashed or never distributed)"
+                                    >
+                                      Replace
+                                    </button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            );
+                          })()}
+                          {isCommitted && isContractor && (
+                            <TableCell />
                           )}
                         </TableRow>
                       </Fragment>
@@ -1243,6 +1337,7 @@ export function PayPeriodDetail() {
                         <TableCell className="text-right text-red-600">{formatCurrency(totalMedicare)}</TableCell>
                         <TableCell className="text-right text-red-600">{formatCurrency(totalDeductions)}</TableCell>
                         <TableCell className="text-right text-green-600">{formatCurrency(totalNet)}</TableCell>
+                        {(isCalculated || isCommitted) && <TableCell />}
                       </TableRow>
                     );
                   })()}
@@ -1276,6 +1371,23 @@ export function PayPeriodDetail() {
                       <span>FIT Subtotal</span>
                       <span>{formatCurrency(totalWithholding)}</span>
                     </div>
+                    {fitDivergence && (
+                      <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2.5 py-2 text-xs text-orange-900">
+                        <div className="flex items-start gap-1.5">
+                          <svg className="mt-0.5 h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <div>
+                            <p className="font-semibold">FIT deposit overridden</p>
+                            <p className="mt-0.5 leading-snug">
+                              Calculated <span className="font-mono">{formatCurrency(fitDivergence.calculated)}</span>,{' '}
+                              depositing <span className="font-mono">{formatCurrency(fitDivergence.deposited)}</span>{' '}
+                              ({fitDivergence.delta > 0 ? '+' : ''}{formatCurrency(fitDivergence.delta)})
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {/* SS + Medicare Column */}
@@ -1313,6 +1425,15 @@ export function PayPeriodDetail() {
                 </div>
                 <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
+              {fitDivergence && (
+                <p className="mt-3 text-xs text-orange-800">
+                  ⚠ This total reflects the calculated FIT obligation. The FIT deposit check has been
+                  overridden to <span className="font-mono font-semibold">{formatCurrency(fitDivergence.deposited)}</span>{' '}
+                  — actual amount going to Treasurer of Guam differs from the total above by{' '}
+                  <span className="font-mono font-semibold">{fitDivergence.delta > 0 ? '+' : ''}{formatCurrency(fitDivergence.delta)}</span>.
+                  See the Non-Employee Checks section for edit history.
+                </p>
+              )}
             </div>
           </Card>
         )}
@@ -1322,6 +1443,85 @@ export function PayPeriodDetail() {
           <div className="p-12 text-center text-gray-500">
             No active employees found. Add employees first before running payroll.
           </div>
+        )}
+
+        {/* Linked Corrections — surfaces supplemental periods that
+             corrected this period (one-off corrective paychecks). */}
+        {isCommitted && payPeriod.cycle !== 'supplemental' && (supplementals.length > 0 || supplementalsLoading) && (
+          <Card className="border-amber-200">
+            <div className="p-4 border-b border-amber-200 bg-amber-50">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-amber-900">
+                    Linked Corrections {supplementals.length > 0 && `(${supplementals.length})`}
+                  </h3>
+                  <p className="text-xs text-amber-800 mt-0.5">
+                    Off-cycle supplemental periods that adjust this committed period.
+                    YTDs, W-2s, tax sync, and reports include these corrections.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="divide-y">
+              {supplementals.map(sp => (
+                <div key={sp.id} className="p-4 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <a
+                        href={`/pay-periods/${sp.id}`}
+                        className="text-sm font-semibold text-blue-700 hover:underline"
+                      >
+                        Supplemental period · pay date {sp.pay_date}
+                      </a>
+                      <span className="text-xs text-gray-500">
+                        {sp.tax_sync_status === 'synced' ? 'tax-synced' : `tax-sync ${sp.tax_sync_status ?? 'pending'}`}
+                      </span>
+                    </div>
+                    {sp.payroll_items.map(it => (
+                      <div key={it.id} className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs text-gray-700 sm:grid-cols-2">
+                        <div>
+                          <span className="font-medium text-gray-900">{it.employee_name}</span>
+                          {it.check_number && (
+                            <span className="text-gray-500"> · check #{it.check_number}</span>
+                          )}
+                        </div>
+                        <div className="sm:text-right">
+                          Δ gross {formatCurrency(it.gross_pay)} ·
+                          Δ FIT {formatCurrency(it.withholding_tax)} ·
+                          Δ net <strong>{formatCurrency(it.net_pay)}</strong>
+                        </div>
+                        {it.correction_reason && (
+                          <div className="sm:col-span-2 italic text-gray-600">
+                            “{it.correction_reason}”
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {/* When viewing a supplemental, link back to the original. */}
+        {payPeriod.cycle === 'supplemental' && payPeriod.corrects_pay_period_id && (
+          <Card className="border-blue-200">
+            <div className="p-4 bg-blue-50">
+              <p className="text-sm text-blue-900">
+                This is a <strong>supplemental (corrective) pay period</strong>{' '}
+                tied to{' '}
+                <a
+                  href={`/pay-periods/${payPeriod.corrects_pay_period_id}`}
+                  className="font-semibold underline"
+                >
+                  the original committed period
+                </a>
+                . The figures here are <em>deltas</em> against that period;
+                they're rolled into YTDs, W-2s, and reports automatically.
+              </p>
+            </div>
+          </Card>
         )}
 
         {/* CPR-66: Checks Panel — only for committed pay periods */}
@@ -1357,6 +1557,7 @@ export function PayPeriodDetail() {
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
             payPeriodEndDate={payPeriod.end_date}
+            onChecksLoaded={setNonEmployeeChecks}
           />
         )}
 
@@ -1413,6 +1614,42 @@ export function PayPeriodDetail() {
         payPeriodId={payPeriod.id}
         onImportComplete={handleImportComplete}
       />
+
+      {/* Per-employee Corrective Paycheck Modal — only relevant on
+          committed regular periods. */}
+      {correctingItem && payPeriod && payPeriod.cycle !== 'supplemental' && (
+        <CorrectivePaycheckModal
+          open={correctingItem !== null}
+          onOpenChange={(isOpen) => { if (!isOpen) setCorrectingItem(null); }}
+          originalPayPeriod={payPeriod}
+          originalItem={correctingItem}
+          onIssued={() => {
+            setCorrectingItem(null);
+            // Refresh both the supplementals list and the parent period
+            // (so totals/badges that depend on YTD or supplemental count
+            // pick up the freshly committed corrective).
+            loadSupplementals(payPeriod.id);
+            loadPayPeriod(payPeriod.id, true);
+          }}
+        />
+      )}
+
+      {/* Replace Check (uncashed) Modal — used when the original check is
+          in our possession (never distributed or returned uncashed) and
+          the financial values need to change. Different from Correct
+          (which leaves the original alone and adds a supplemental delta). */}
+      {replacingItem && payPeriod && payPeriod.cycle !== 'supplemental' && (
+        <ReplaceCheckModal
+          open={replacingItem !== null}
+          onOpenChange={(isOpen) => { if (!isOpen) setReplacingItem(null); }}
+          payPeriod={payPeriod}
+          payrollItem={replacingItem}
+          onReplaced={() => {
+            setReplacingItem(null);
+            loadPayPeriod(payPeriod.id, true);
+          }}
+        />
+      )}
 
       {/* Payroll Item Edit Modal */}
       <PayrollItemEditModal

@@ -10,6 +10,9 @@ class User < ApplicationRecord
   has_many :user_invitations, foreign_key: :invited_by_id, dependent: :nullify
   has_many :company_assignments, dependent: :destroy
   has_many :assigned_companies, through: :company_assignments, source: :company
+  # Printer profiles are tied to the user (their physical printer) so the
+  # same calibration follows them across every client they switch into.
+  has_many :printer_profiles, dependent: :destroy
 
   enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3 }
 
