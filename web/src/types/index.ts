@@ -217,6 +217,11 @@ export interface PayPeriod {
   can_void?: boolean;
   can_create_correction_run?: boolean;
   can_delete_draft_correction_run?: boolean;
+  // Per-employee corrective paycheck (off-cycle supplemental period)
+  cycle?: 'regular' | 'supplemental';
+  corrects_pay_period_id?: number | null;
+  can_issue_corrective_paycheck?: boolean;
+  supplemental_pay_periods_count?: number;
   // Computed/included
   employee_count?: number;
   payroll_items_count?: number;
@@ -294,11 +299,104 @@ export interface PayrollItem {
   void_reason?: string | null;
   reprint_of_check_number?: string | null;
   events?: CheckEvent[];
+  // Per-employee corrective paycheck linkage
+  correction_for_payroll_item_id?: number | null;
+  correction_reason?: string | null;
   created_at?: string;
   updated_at?: string;
   // Included relations
   employee?: Employee;
   wage_rate_hours?: PayrollItemWageRateHours[];
+}
+
+// ----------------
+// Corrective paycheck (off-cycle supplemental period)
+// ----------------
+
+export interface CorrectivePaycheckInputs {
+  pay_rate?: number;
+  hours_worked?: number;
+  overtime_hours?: number;
+  holiday_hours?: number;
+  pto_hours?: number;
+  bonus?: number;
+  reported_tips?: number;
+  tip_pool?: 'boh' | 'foh' | null;
+  additional_withholding?: number;
+  custom_earnings?: { label: string; amount: number }[];
+  custom_columns_data?: Record<string, number>;
+  non_taxable_pay?: number;
+}
+
+export interface CorrectivePaycheckSnapshot {
+  gross_pay: number;
+  withholding_tax: number;
+  social_security_tax: number;
+  medicare_tax: number;
+  employer_social_security_tax: number;
+  employer_medicare_tax: number;
+  additional_withholding: number;
+  retirement_payment: number;
+  roth_retirement_payment: number;
+  employer_retirement_match: number;
+  employer_roth_retirement_match: number;
+  total_additions: number;
+  total_deductions: number;
+  net_pay: number;
+  hours_worked: number;
+  overtime_hours: number;
+  holiday_hours: number;
+  pto_hours: number;
+  bonus: number;
+  reported_tips: number;
+  pay_rate: number;
+  custom_earnings: { label: string; amount: number }[];
+  custom_columns_data: Record<string, number>;
+}
+
+export interface CorrectivePaycheckPreview {
+  original: CorrectivePaycheckSnapshot;
+  corrected: CorrectivePaycheckSnapshot;
+  deltas: Record<string, number>;
+  meta: {
+    original_pay_period_id: number;
+    original_payroll_item_id: number;
+    employee_id: number;
+    employee_name: string;
+    will_generate_check: boolean;
+    is_zero_change: boolean;
+  };
+}
+
+export interface SupplementalPayPeriodSummary {
+  id: number;
+  pay_date: string;
+  committed_at: string | null;
+  status: PayPeriodStatus;
+  cycle: 'supplemental';
+  notes: string | null;
+  tax_sync_status: TaxSyncStatus | null;
+  payroll_items: Array<{
+    id: number;
+    employee_id: number;
+    employee_name: string;
+    correction_for_payroll_item_id: number | null;
+    correction_reason: string | null;
+    gross_pay: number;
+    withholding_tax: number;
+    social_security_tax: number;
+    medicare_tax: number;
+    net_pay: number;
+    check_number: string | null;
+    check_status: 'unprinted' | 'printed' | 'voided' | null;
+  }>;
+  totals: {
+    gross_delta: number;
+    fit_delta: number;
+    ss_delta: number;
+    med_delta: number;
+    net_delta: number;
+  };
 }
 
 export interface PayrollItemWageRateHours {

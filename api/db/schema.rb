@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_16_100007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -387,8 +387,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
     t.datetime "committed_at"
     t.bigint "company_id", null: false
     t.string "correction_status"
+    t.bigint "corrects_pay_period_id"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
+    t.string "cycle", default: "regular", null: false
     t.date "end_date", null: false
     t.text "notes"
     t.date "pay_date", null: false
@@ -410,12 +412,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
     t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
+    t.index ["corrects_pay_period_id"], name: "index_pay_periods_on_corrects_pay_period_id"
+    t.index ["cycle"], name: "index_pay_periods_on_cycle"
     t.index ["source_pay_period_id"], name: "idx_pay_periods_unique_source_correction_run", unique: true, where: "((source_pay_period_id IS NOT NULL) AND ((correction_status)::text <> 'voided'::text))"
     t.index ["status"], name: "index_pay_periods_on_status"
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
+    t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying, 'supplemental'::character varying]::text[])", name: "pay_periods_cycle_check"
   end
 
   create_table "payroll_imports", force: :cascade do |t|
@@ -468,6 +473,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
     t.integer "check_print_count", default: 0, null: false
     t.datetime "check_printed_at"
     t.bigint "company_id", null: false
+    t.bigint "correction_for_payroll_item_id"
+    t.text "correction_reason"
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
     t.jsonb "custom_earnings", default: []
@@ -518,6 +525,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
     t.index ["check_number"], name: "index_payroll_items_on_check_number"
     t.index ["company_id", "check_number"], name: "index_payroll_items_on_company_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["company_id"], name: "index_payroll_items_on_company_id"
+    t.index ["correction_for_payroll_item_id"], name: "index_payroll_items_on_correction_for_payroll_item_id"
     t.index ["employee_id"], name: "index_payroll_items_on_employee_id"
     t.index ["pay_period_id", "employee_id"], name: "index_payroll_items_on_pay_period_id_and_employee_id", unique: true
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
@@ -785,6 +793,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "users", column: "actor_id", on_delete: :nullify
   add_foreign_key "pay_periods", "companies"
+  add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
@@ -795,6 +804,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
   add_foreign_key "payroll_items", "companies", on_delete: :restrict
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"
+  add_foreign_key "payroll_items", "payroll_items", column: "correction_for_payroll_item_id"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
