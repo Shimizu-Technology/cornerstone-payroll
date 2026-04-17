@@ -7,6 +7,8 @@ import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/ap
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
+import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
+import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
@@ -97,6 +99,32 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [markingPrintedId, setMarkingPrintedId] = useState<number | null>(null);
   const [generatingFit, setGeneratingFit] = useState(false);
   const [fitError, setFitError] = useState<string | null>(null);
+  const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
+
+  const toggleHistory = (id: number) => {
+    setExpandedHistoryIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSavedCheck = (updated: NonEmployeeCheck) => {
+    setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    // If the user has the history open for this check, force a remount so the
+    // newly-created edit row appears. We do this by toggling it off+on once.
+    if (expandedHistoryIds.has(updated.id)) {
+      setExpandedHistoryIds(prev => {
+        const next = new Set(prev);
+        next.delete(updated.id);
+        return next;
+      });
+      setTimeout(() => {
+        setExpandedHistoryIds(prev => new Set(prev).add(updated.id));
+      }, 0);
+    }
+  };
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -247,7 +275,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const hasFitCheck = checks.some(c => c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax' && !c.voided);
+  // Identify the auto-generated FIT deposit by its stable marker, falling back
+  // to the legacy string match for any rows not yet caught by the data backfill.
+  const hasFitCheck = checks.some(
+    c =>
+      !c.voided &&
+      (c.auto_generated_type === 'fit_deposit' ||
+        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+  );
   const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
 
   const handleGenerateFitCheck = async () => {
@@ -396,82 +431,124 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           <p className="text-sm text-gray-500 italic">No non-employee checks for this pay period.</p>
         ) : (
           <div className="space-y-3">
-            {checks.map(check => (
-              <div key={check.id} className={`flex items-center justify-between p-3 border rounded-lg ${check.voided ? 'bg-red-50 border-red-200' : 'hover:bg-gray-50'}`}>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">{check.payable_to}</span>
-                    <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>
-                      {check.check_status}
-                    </Badge>
-                    <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-gray-500 mt-1">
-                    <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
-                    {check.check_number && <span>Check #{check.check_number}</span>}
-                    {check.memo && <span>{check.memo}</span>}
-                    {check.reference_number && <span>Ref: {check.reference_number}</span>}
-                    {check.check_type === 'tax_deposit' && (
-                      <a
-                        href={DRT.FORM_500_PDF}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+            {checks.map(check => {
+              const historyOpen = expandedHistoryIds.has(check.id);
+              const editCount = check.edit_count ?? 0;
+              return (
+                <div
+                  key={check.id}
+                  className={`border rounded-lg overflow-hidden ${check.voided ? 'bg-red-50 border-red-200' : 'hover:bg-gray-50'}`}
+                >
+                  <div className="flex items-center justify-between p-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-sm">{check.payable_to}</span>
+                        <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>
+                          {check.check_status}
+                        </Badge>
+                        <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
+                        {check.auto_generated_type === 'fit_deposit' && (
+                          <Badge className="bg-amber-100 text-amber-800">Auto FIT</Badge>
+                        )}
+                        {editCount > 0 && (
+                          <button
+                            onClick={() => toggleHistory(check.id)}
+                            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                            title={historyOpen ? 'Hide edit history' : 'Show edit history'}
+                          >
+                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            {editCount} edit{editCount === 1 ? '' : 's'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
+                        <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
+                        {check.check_number && <span>Check #{check.check_number}</span>}
+                        {check.memo && <span>{check.memo}</span>}
+                        {check.reference_number && <span>Ref: {check.reference_number}</span>}
+                        {check.check_type === 'tax_deposit' && (
+                          <a
+                            href={DRT.FORM_500_PDF}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                            </svg>
+                            Form 500
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePreviewPdf(check)}
+                        disabled={pdfLoading === check.id}
+                        className="text-xs px-2 py-1"
                       >
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
-                        Form 500
-                      </a>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-1 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePreviewPdf(check)}
-                    disabled={pdfLoading === check.id}
-                    className="text-xs px-2 py-1"
-                  >
-                    {pdfLoading === check.id ? '...' : 'Preview'}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handlePrintSingle(check)}
-                    disabled={pdfLoading === check.id}
-                    className="text-xs px-2 py-1"
-                  >
-                    Print
-                  </Button>
-                  {!check.voided && !check.printed_at && (
-                    <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
-                      {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
-                    </Button>
-                  )}
-                  {!check.voided && voidingId !== check.id && (
-                    <Button size="sm" variant="outline" className="text-red-600 border-red-300" onClick={() => setVoidingId(check.id)}>
-                      Void
-                    </Button>
-                  )}
-                  {voidingId === check.id && (
-                    <div className="flex gap-1">
-                      <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
-                      <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
-                        {voidConfirming ? 'Voiding...' : 'Confirm'}
+                        {pdfLoading === check.id ? '...' : 'Preview'}
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePrintSingle(check)}
+                        disabled={pdfLoading === check.id}
+                        className="text-xs px-2 py-1"
+                      >
+                        Print
+                      </Button>
+                      {!check.voided && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditingCheck(check)}
+                          className="text-xs px-2 py-1"
+                        >
+                          Edit
+                        </Button>
+                      )}
+                      {!check.voided && !check.printed_at && (
+                        <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check.id)} disabled={markingPrintedId === check.id}>
+                          {markingPrintedId === check.id ? 'Marking...' : 'Mark Printed'}
+                        </Button>
+                      )}
+                      {!check.voided && voidingId !== check.id && (
+                        <Button size="sm" variant="outline" className="text-red-600 border-red-300" onClick={() => setVoidingId(check.id)}>
+                          Void
+                        </Button>
+                      )}
+                      {voidingId === check.id && (
+                        <div className="flex gap-1">
+                          <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
+                          <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
+                            {voidConfirming ? 'Voiding...' : 'Confirm'}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => { setVoidingId(null); setVoidReason(''); }} disabled={voidConfirming}>Cancel</Button>
+                        </div>
+                      )}
+                      {!check.printed_at && !check.voided && (
+                        <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
+                          {deletingId === check.id ? 'Deleting...' : 'Delete'}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {historyOpen && (
+                    <div className="border-t bg-gray-50">
+                      <div className="px-3 py-1.5 text-xs font-medium text-gray-600 uppercase tracking-wide">
+                        Edit History
+                      </div>
+                      <NonEmployeeCheckHistory checkId={check.id} />
                     </div>
                   )}
-                  {!check.printed_at && !check.voided && (
-                    <Button size="sm" variant="ghost" className="text-red-400" onClick={() => handleDelete(check.id)} disabled={deletingId === check.id}>
-                      {deletingId === check.id ? 'Deleting...' : 'Delete'}
-                    </Button>
-                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             <div className="pt-2 border-t flex justify-between text-sm font-semibold">
               <span>Total ({checks.filter(c => !c.voided).length} checks)</span>
@@ -480,6 +557,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           </div>
         )}
       </div>
+
+      <NonEmployeeCheckEditModal
+        check={editingCheck}
+        onClose={() => setEditingCheck(null)}
+        onSaved={handleSavedCheck}
+      />
 
       {/* Full-page PDF Preview modal — rendered as portal for proper z-index */}
       {previewUrl && previewCheck && createPortal(

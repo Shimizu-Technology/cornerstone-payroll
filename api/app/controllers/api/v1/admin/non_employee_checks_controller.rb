@@ -4,12 +4,20 @@ module Api
   module V1
     module Admin
       class NonEmployeeChecksController < BaseController
-        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf]
+        # Fields that are user-editable AND that we audit changes to. We
+        # intentionally exclude things like printed_at / voided_at / print_count
+        # which are managed by their own lifecycle methods.
+        AUDITED_FIELDS = %w[
+          payable_to amount check_type memo description
+          reference_number check_number
+        ].freeze
+
+        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :history]
 
         # GET /api/v1/admin/non_employee_checks
         def index
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by)
+            .includes(:pay_period, :created_by, :edits)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.where(check_type: params[:check_type]) if params[:check_type].present?
@@ -59,11 +67,40 @@ module Api
             attrs["pay_period_id"] = pay_period&.id
           end
 
-          if @check.update(attrs)
-            render json: { non_employee_check: check_payload(@check) }
-          else
-            render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
+          # Snapshot the audited fields before we touch the record so the audit
+          # log can capture an accurate before/after diff.
+          before_snapshot = audit_snapshot(@check)
+          reason = params[:reason].presence
+
+          ActiveRecord::Base.transaction do
+            unless @check.update(attrs)
+              return render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
+            end
+
+            after_snapshot = audit_snapshot(@check)
+            changed = changed_fields(before_snapshot, after_snapshot)
+
+            if changed.any?
+              NonEmployeeCheckEdit.create!(
+                non_employee_check: @check,
+                edited_by: current_user,
+                before: before_snapshot.slice(*changed),
+                after: after_snapshot.slice(*changed),
+                changed_fields: changed,
+                reason: reason
+              )
+            end
           end
+
+          render json: { non_employee_check: check_payload(@check) }
+        end
+
+        # GET /api/v1/admin/non_employee_checks/:id/history
+        def history
+          edits = @check.edits.includes(:edited_by)
+          render json: {
+            history: edits.map { |edit| edit_payload(edit) }
+          }
         end
 
         # DELETE /api/v1/admin/non_employee_checks/:id
@@ -137,6 +174,7 @@ module Api
             payable_to: check.payable_to,
             amount: check.amount,
             check_type: check.check_type,
+            auto_generated_type: check.auto_generated_type,
             memo: check.memo,
             description: check.description,
             reference_number: check.reference_number,
@@ -146,10 +184,39 @@ module Api
             void_reason: check.void_reason,
             voided_at: check.voided_at,
             check_status: check.check_status,
+            edit_count: check.edits.size,
             created_by_id: check.created_by_id,
             created_at: check.created_at,
             updated_at: check.updated_at
           }
+        end
+
+        def edit_payload(edit)
+          {
+            id: edit.id,
+            edited_by_id: edit.edited_by_id,
+            edited_by_name: edit.edited_by_name,
+            before: edit.before,
+            after: edit.after,
+            changed_fields: edit.changed_fields,
+            reason: edit.reason,
+            created_at: edit.created_at
+          }
+        end
+
+        # Builds a stable hash of the audited fields with normalized types so
+        # the diff between before/after isn't muddied by formatting (e.g.
+        # BigDecimal vs Float, nil vs "").
+        def audit_snapshot(check)
+          AUDITED_FIELDS.each_with_object({}) do |field, snapshot|
+            value = check.public_send(field)
+            value = value.to_s if value.is_a?(BigDecimal) || value.is_a?(Numeric)
+            snapshot[field] = value
+          end
+        end
+
+        def changed_fields(before, after)
+          AUDITED_FIELDS.select { |field| before[field] != after[field] }
         end
       end
     end

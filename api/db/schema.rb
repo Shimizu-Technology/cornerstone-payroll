@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_16_100005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -60,6 +60,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
     t.index ["payroll_item_id", "event_type"], name: "index_check_events_on_payroll_item_id_and_event_type"
     t.index ["payroll_item_id"], name: "index_check_events_on_payroll_item_id"
     t.index ["user_id"], name: "index_check_events_on_user_id"
+  end
+
+  create_table "check_signoff_sheets", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "entries", default: []
+    t.datetime "generated_at"
+    t.jsonb "notes", default: []
+    t.bigint "pay_period_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["company_id"], name: "index_check_signoff_sheets_on_company_id"
+    t.index ["pay_period_id"], name: "index_check_signoff_sheets_on_pay_period_id", unique: true
+    t.index ["updated_by_id"], name: "index_check_signoff_sheets_on_updated_by_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -306,8 +320,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
     t.index ["transaction_type"], name: "index_loan_transactions_on_transaction_type"
   end
 
+  create_table "non_employee_check_edits", force: :cascade do |t|
+    t.jsonb "after", default: {}, null: false
+    t.jsonb "before", default: {}, null: false
+    t.jsonb "changed_fields", default: [], null: false
+    t.datetime "created_at", null: false
+    t.bigint "edited_by_id"
+    t.bigint "non_employee_check_id", null: false
+    t.string "reason"
+    t.index ["created_at"], name: "index_non_employee_check_edits_on_created_at"
+    t.index ["edited_by_id"], name: "index_non_employee_check_edits_on_edited_by_id"
+    t.index ["non_employee_check_id"], name: "index_non_employee_check_edits_on_non_employee_check_id"
+  end
+
   create_table "non_employee_checks", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2, null: false
+    t.string "auto_generated_type"
     t.string "check_number"
     t.string "check_type", null: false
     t.bigint "company_id", null: false
@@ -324,11 +352,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
     t.string "void_reason"
     t.boolean "voided", default: false, null: false
     t.datetime "voided_at"
+    t.index ["auto_generated_type"], name: "index_non_employee_checks_on_auto_generated_type", where: "(auto_generated_type IS NOT NULL)"
     t.index ["check_type"], name: "index_non_employee_checks_on_check_type"
     t.index ["company_id", "check_number"], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
-    t.index ["pay_period_id", "company_id"], name: "idx_unique_non_voided_fit_check_per_period", unique: true, where: "(((check_type)::text = 'tax_deposit'::text) AND ((payable_to)::text = 'EFTPS - Federal Income Tax'::text) AND (voided = false))"
+    t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
   end
 
@@ -724,6 +753,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
   add_foreign_key "audit_logs", "users"
   add_foreign_key "check_events", "payroll_items"
   add_foreign_key "check_events", "users", on_delete: :nullify
+  add_foreign_key "check_signoff_sheets", "companies"
+  add_foreign_key "check_signoff_sheets", "pay_periods"
+  add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_ytd_totals", "companies"
@@ -743,6 +775,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100002) do
   add_foreign_key "loan_transactions", "employee_loans"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"
+  add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
+  add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"

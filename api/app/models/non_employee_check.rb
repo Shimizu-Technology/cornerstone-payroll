@@ -3,9 +3,19 @@
 class NonEmployeeCheck < ApplicationRecord
   CHECK_TYPES = %w[contractor tax_deposit child_support garnishment vendor reimbursement other].freeze
 
+  # Stable identifiers for auto-generated checks. Survives user-driven renames
+  # of `payable_to`. Used by the unique index that prevents duplicate
+  # auto-generated checks per pay period.
+  AUTO_GENERATED_TYPES = {
+    fit_deposit: "fit_deposit"
+  }.freeze
+
   belongs_to :pay_period
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
+  has_many :edits, -> { order(created_at: :desc) },
+           class_name: "NonEmployeeCheckEdit",
+           dependent: :destroy
 
   validates :payable_to, presence: true
   validates :amount, presence: true, numericality: { greater_than: 0 }
