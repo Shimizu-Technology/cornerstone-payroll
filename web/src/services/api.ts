@@ -313,6 +313,9 @@ import type {
   W2GuPreflightResponse,
   W2GuFilingReadinessResponse,
   W2GuMarkReadyResponse,
+  CorrectivePaycheckInputs,
+  CorrectivePaycheckPreview,
+  SupplementalPayPeriodSummary,
 } from '@/types';
 
 // Employees (Admin API)
@@ -667,6 +670,36 @@ export const payPeriodsApi = {
   // CPR-73: Delete a draft correction run (undoes correction run creation without voiding).
   deleteDraftCorrectionRun: (id: number, data: { reason: string }) =>
     api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
+
+  // Per-employee corrective paycheck (off-cycle supplemental period).
+  // Preview is read-only — used to drive the modal's delta display.
+  correctivePaycheckPreview: (
+    id: number,
+    data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs }
+  ) =>
+    api.post<CorrectivePaycheckPreview>(
+      `/admin/pay_periods/${id}/corrective_paycheck_preview`,
+      data
+    ),
+  issueCorrectivePaycheck: (
+    id: number,
+    data: {
+      employee_id: number;
+      corrected_inputs: CorrectivePaycheckInputs;
+      pay_date: string;
+      reason: string;
+      notes?: string;
+    }
+  ) =>
+    api.post<{
+      supplemental_pay_period: PayPeriod;
+      corrective_payroll_item: PayrollItem;
+      original_pay_period_id: number;
+    }>(`/admin/pay_periods/${id}/corrective_paychecks`, data),
+  supplementalPayPeriods: (id: number) =>
+    api.get<{ supplemental_pay_periods: SupplementalPayPeriodSummary[] }>(
+      `/admin/pay_periods/${id}/supplemental_pay_periods`
+    ),
 
   // Timecard OCR import
   previewTimecardImport: async (id: number, csvFile: File) => {

@@ -8,13 +8,15 @@ module Api
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run, :generate_fit_check
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
-          :void, :create_correction_run, :correction_history, :generate_fit_check
+          :void, :create_correction_run, :correction_history, :generate_fit_check,
+          :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods
         ]
 
         # GET /api/v1/admin/pay_periods
         def index
           @pay_periods = PayPeriod.where(company_id: current_company_id)
-                                   .includes(:payroll_items, :voided_by, :correction_events)
+                                   .includes(:payroll_items, :voided_by, :correction_events,
+                                             :supplemental_pay_periods)
                                    .order(pay_date: :desc)
 
           # Filter by status
@@ -485,6 +487,77 @@ module Api
           }
         end
 
+        # ----------------------------------------------------------------
+        # Per-employee corrective paycheck (off-cycle supplemental period)
+        # ----------------------------------------------------------------
+
+        # POST /api/v1/admin/pay_periods/:id/corrective_paycheck_preview
+        # Body: { employee_id, corrected_inputs: {...} }
+        # Returns the original snapshot, recomputed corrected snapshot,
+        # and per-field deltas — without persisting anything.
+        def corrective_paycheck_preview
+          employee = current_company.employees.find_by(id: params[:employee_id])
+          unless employee
+            return render json: { error: "Employee not found in this company" }, status: :not_found
+          end
+
+          preview = IssueCorrectivePaycheckService.preview(
+            original_pay_period: @pay_period,
+            employee:            employee,
+            corrected_inputs:    params[:corrected_inputs]&.to_unsafe_h || {}
+          )
+
+          render json: preview
+        rescue IssueCorrectivePaycheckService::CorrectionError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/corrective_paychecks
+        # Body: { employee_id, corrected_inputs: {...}, pay_date, reason, notes }
+        # Creates and commits a supplemental pay_period containing one
+        # corrective payroll_item linked to the original. Returns the
+        # supplemental pay_period and the corrective item.
+        def corrective_paychecks
+          employee = current_company.employees.find_by(id: params[:employee_id])
+          unless employee
+            return render json: { error: "Employee not found in this company" }, status: :not_found
+          end
+
+          supplemental, corrective_item = IssueCorrectivePaycheckService.issue!(
+            original_pay_period: @pay_period,
+            employee:            employee,
+            corrected_inputs:    params[:corrected_inputs]&.to_unsafe_h || {},
+            pay_date:            params[:pay_date],
+            reason:              params[:reason],
+            actor:               current_user,
+            notes:               params[:notes]
+          )
+
+          render json: {
+            supplemental_pay_period: pay_period_json(supplemental, include_items: true),
+            corrective_payroll_item: payroll_item_summary_json(corrective_item),
+            original_pay_period_id:  @pay_period.id
+          }, status: :created
+        rescue IssueCorrectivePaycheckService::CorrectionError, ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+        end
+
+        # GET /api/v1/admin/pay_periods/:id/supplemental_pay_periods
+        # Lists supplemental periods that correct this period (and a one-line
+        # summary of each — handy for the "Linked Corrections" UI section).
+        def supplemental_pay_periods
+          unless @pay_period.regular_cycle?
+            return render json: { error: "Only regular pay periods have supplementals" }, status: :unprocessable_entity
+          end
+
+          supplementals = @pay_period.supplemental_pay_periods.includes(:payroll_items)
+          render json: {
+            supplemental_pay_periods: supplementals.map { |sp| supplemental_summary_json(sp) }
+          }
+        end
+
         # POST /api/v1/admin/pay_periods/:id/generate_fit_check
         def generate_fit_check
           unless @pay_period.status == "committed"
@@ -629,6 +702,11 @@ module Api
             can_void:                        pay_period.can_void?,
             can_create_correction_run:       pay_period.can_create_correction_run?,
             can_delete_draft_correction_run: pay_period.can_delete_draft_correction_run?,
+            # Per-employee corrective paycheck (off-cycle supplemental period)
+            cycle:                              pay_period.cycle,
+            corrects_pay_period_id:             pay_period.corrects_pay_period_id,
+            can_issue_corrective_paycheck:      pay_period.can_issue_corrective_paycheck?,
+            supplemental_pay_periods_count:     (pay_period.regular_cycle? ? pay_period.supplemental_pay_periods.size : 0),
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }
@@ -701,6 +779,67 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+        end
+
+        # Compact summary of a corrective payroll_item — shipped back to the
+        # frontend after issuing a correction so the UI can show the new
+        # check number / net amount immediately.
+        def payroll_item_summary_json(item)
+          {
+            id:                              item.id,
+            employee_id:                     item.employee_id,
+            employee_name:                   item.employee_full_name,
+            pay_period_id:                   item.pay_period_id,
+            correction_for_payroll_item_id:  item.correction_for_payroll_item_id,
+            correction_reason:               item.correction_reason,
+            gross_pay:                       item.gross_pay,
+            withholding_tax:                 item.withholding_tax,
+            social_security_tax:             item.social_security_tax,
+            medicare_tax:                    item.medicare_tax,
+            employer_social_security_tax:    item.employer_social_security_tax,
+            employer_medicare_tax:           item.employer_medicare_tax,
+            net_pay:                         item.net_pay,
+            check_number:                    item.check_number,
+            check_status:                    item.check_status
+          }
+        end
+
+        # Compact summary of a supplemental pay period for the
+        # "Linked Corrections" UI section on the original period's page.
+        def supplemental_summary_json(supplemental)
+          items = supplemental.payroll_items
+          {
+            id:                supplemental.id,
+            pay_date:          supplemental.pay_date,
+            committed_at:      supplemental.committed_at,
+            status:            supplemental.status,
+            cycle:             supplemental.cycle,
+            notes:             supplemental.notes,
+            tax_sync_status:   supplemental.tax_sync_status,
+            payroll_items: items.map do |item|
+              {
+                id:                              item.id,
+                employee_id:                     item.employee_id,
+                employee_name:                   item.employee_full_name,
+                correction_for_payroll_item_id:  item.correction_for_payroll_item_id,
+                correction_reason:               item.correction_reason,
+                gross_pay:                       item.gross_pay,
+                withholding_tax:                 item.withholding_tax,
+                social_security_tax:             item.social_security_tax,
+                medicare_tax:                    item.medicare_tax,
+                net_pay:                         item.net_pay,
+                check_number:                    item.check_number,
+                check_status:                    item.check_status
+              }
+            end,
+            totals: {
+              gross_delta: items.sum { |i| i.gross_pay.to_f },
+              fit_delta:   items.sum { |i| i.withholding_tax.to_f },
+              ss_delta:    items.sum { |i| i.social_security_tax.to_f },
+              med_delta:   items.sum { |i| i.medicare_tax.to_f },
+              net_delta:   items.sum { |i| i.net_pay.to_f }
+            }
+          }
         end
 
         def correction_event_json(event)

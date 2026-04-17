@@ -67,6 +67,10 @@ Rails.application.routes.draw do
             post :void
             post :create_correction_run
             get  :correction_history
+            # Per-employee corrective paycheck (off-cycle supplemental period)
+            post :corrective_paycheck_preview
+            post :corrective_paychecks
+            get  :supplemental_pay_periods
             # Payroll import (MoSa Revel PDF + Excel)
             post :preview_import, to: "payroll_imports#preview"
             post :apply_import, to: "payroll_imports#apply"
