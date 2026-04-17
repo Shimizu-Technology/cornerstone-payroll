@@ -122,6 +122,38 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
     end
   end
 
+  describe "DELETE /api/v1/admin/non_employee_checks/:id" do
+    let!(:check) do
+      NonEmployeeCheck.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: admin_user,
+        payable_to: "Island Vendor",
+        amount: 125.50,
+        check_type: "vendor"
+      )
+    end
+
+    # Regression test for the dependent: :destroy / readonly? conflict —
+    # NonEmployeeCheckEdit#readonly? is true once persisted, so the prior
+    # `dependent: :destroy` raised ActiveRecord::ReadOnlyRecord on delete.
+    it "deletes a check that has audit edits without raising ReadOnlyRecord" do
+      check.edits.create!(
+        edited_by: admin_user,
+        before: { "amount" => "125.5" },
+        after: { "amount" => "150.0" },
+        changed_fields: ["amount"]
+      )
+
+      expect {
+        delete "/api/v1/admin/non_employee_checks/#{check.id}"
+      }.to change(NonEmployeeCheck, :count).by(-1)
+        .and change(NonEmployeeCheckEdit, :count).by(-1)
+
+      expect(response).to have_http_status(:ok)
+    end
+  end
+
   describe "GET /api/v1/admin/non_employee_checks/:id/history" do
     let!(:check) do
       NonEmployeeCheck.create!(

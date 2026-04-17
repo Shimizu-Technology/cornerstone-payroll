@@ -13,9 +13,13 @@ class NonEmployeeCheck < ApplicationRecord
   belongs_to :pay_period
   belongs_to :company
   belongs_to :created_by, class_name: "User", optional: true
+  # Use :delete_all (not :destroy) because NonEmployeeCheckEdit#readonly? is
+  # true once persisted (audit records are immutable). :destroy would call
+  # `destroy` on each edit which raises ActiveRecord::ReadOnlyRecord. The DB
+  # also has ON DELETE CASCADE so the edits get cleaned up either way.
   has_many :edits, -> { order(created_at: :desc) },
            class_name: "NonEmployeeCheckEdit",
-           dependent: :destroy
+           dependent: :delete_all
 
   validates :payable_to, presence: true
   validates :amount, presence: true, numericality: { greater_than: 0 }

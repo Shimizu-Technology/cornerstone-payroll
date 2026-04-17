@@ -13,7 +13,9 @@ class Company < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
-  has_many :printer_profiles, dependent: :destroy
+  # NOTE: printer_profiles used to be company-scoped but moved to per-user
+  # scope (a printer belongs to its operator, not to a tenant). See
+  # ScopePrinterProfilesToUser migration.
 
   before_validation :normalize_blanks
 
