@@ -552,7 +552,11 @@ module Api
             return render json: { error: "Only regular pay periods have supplementals" }, status: :unprocessable_entity
           end
 
-          supplementals = @pay_period.supplemental_pay_periods.includes(:payroll_items)
+          # Eager-load `payroll_items: :employee` so `supplemental_summary_json`
+          # can call `item.employee_full_name` without firing one
+          # `SELECT employees.*` query per payroll_item (N+1).
+          supplementals = @pay_period.supplemental_pay_periods
+                                      .includes(payroll_items: :employee)
           render json: {
             supplemental_pay_periods: supplementals.map { |sp| supplemental_summary_json(sp) }
           }
