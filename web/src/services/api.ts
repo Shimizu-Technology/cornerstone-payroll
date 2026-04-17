@@ -1643,7 +1643,11 @@ export const nonEmployeeChecksApi = {
   update: (id: number, data: Partial<{
     payable_to: string; amount: number; check_type: string;
     memo: string; description: string; reference_number: string;
-    check_number: string;
+    // `check_number` is nullable so the modal can clear an existing one.
+    // Sending `null` (or omitting the key) keeps the partial unique index
+    // on (company_id, check_number) WHERE check_number IS NOT NULL from
+    // tripping when multiple checks in the same company have no number.
+    check_number: string | null;
   }>, reason?: string) =>
     api.patch<{ non_employee_check: NonEmployeeCheck }>(
       `/admin/non_employee_checks/${id}`,

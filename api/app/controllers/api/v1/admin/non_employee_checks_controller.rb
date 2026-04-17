@@ -169,10 +169,26 @@ module Api
         end
 
         def check_params
-          params.require(:non_employee_check).permit(
+          permitted = params.require(:non_employee_check).permit(
             :pay_period_id, :payable_to, :amount, :check_type,
             :memo, :description, :reference_number, :check_number
           )
+
+          # Coerce blank `check_number` to nil. The Edit modal always sends
+          # `check_number` in the full payload, even when the operator never
+          # set one, so unset checks come through as "". Postgres treats ""
+          # as NOT NULL, which means the partial unique index
+          # `WHERE check_number IS NOT NULL` would fire on the *second*
+          # check in the same company saved through the modal — even for an
+          # unrelated edit — raising ActiveRecord::RecordNotUnique → 500.
+          # Normalising to nil here makes the partial index behave as
+          # intended and matches the model-level `allow_nil: true` on the
+          # uniqueness validator.
+          if permitted.key?(:check_number) && permitted[:check_number].blank?
+            permitted[:check_number] = nil
+          end
+
+          permitted
         end
 
         def resolve_pay_period(pay_period_id)
