@@ -72,12 +72,29 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
   // Track which fields have changed so we can show a clear summary of pending
   // edits and warn loudly when the amount is being changed.
+  //
+  // Amount needs numeric (not string) comparison: the API returns amounts like
+  // "125.5" while a user editing the field may save "125.50" — these are the
+  // same value and shouldn't register as a change.
   const changedSummary = useMemo(() => {
     if (!check || !form) return { fields: [] as string[], amountChanged: false };
     const before = buildInitialState(check);
     const fields: string[] = [];
     (Object.keys(before) as (keyof FormState)[]).forEach(key => {
       if (key === 'reason') return;
+      if (key === 'amount') {
+        const beforeNum = parseFloat(before.amount);
+        const afterNum = parseFloat(form.amount);
+        const beforeValid = Number.isFinite(beforeNum);
+        const afterValid = Number.isFinite(afterNum);
+        // Treat unparseable values as a change so we still surface the issue.
+        if (!beforeValid || !afterValid) {
+          if ((form.amount || '') !== (before.amount || '')) fields.push('amount');
+        } else if (Math.abs(beforeNum - afterNum) > 0.005) {
+          fields.push('amount');
+        }
+        return;
+      }
       if ((form[key] || '') !== (before[key] || '')) fields.push(key);
     });
     return { fields, amountChanged: fields.includes('amount') };

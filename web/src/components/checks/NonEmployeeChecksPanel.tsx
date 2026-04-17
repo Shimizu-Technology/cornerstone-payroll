@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -119,11 +119,11 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   };
 
   const handleSavedCheck = (updated: NonEmployeeCheck) => {
-    setChecks(prev => {
-      const next = prev.map(c => (c.id === updated.id ? updated : c));
-      onChecksLoaded?.(next);
-      return next;
-    });
+    // Pure state update — the onChecksLoaded notification is fired by the
+    // effect below (we used to call it from inside the setter, which is a
+    // side-effect-during-render anti-pattern that double-fires under
+    // React StrictMode).
+    setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
     // If the user has the history open for this check, force a remount so the
     // newly-created edit row appears. We do this by toggling it off+on once.
     if (expandedHistoryIds.has(updated.id)) {
@@ -138,20 +138,34 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
+  // Keep the parent's onChecksLoaded callback in a ref so loadChecks doesn't
+  // need it in its dependency array. This avoids re-creating loadChecks every
+  // time the parent re-renders (which would re-trigger the load effect).
+  const onChecksLoadedRef = useRef(onChecksLoaded);
+  useEffect(() => {
+    onChecksLoadedRef.current = onChecksLoaded;
+  }, [onChecksLoaded]);
+
   const loadChecks = useCallback(async () => {
     setLoading(true);
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
       setChecks(res.non_employee_checks);
-      onChecksLoaded?.(res.non_employee_checks);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [payPeriodId, onChecksLoaded]);
+  }, [payPeriodId]);
 
   useEffect(() => { loadChecks(); }, [loadChecks]);
+
+  // Notify the parent whenever the local checks array changes (initial load,
+  // reloads, or single-check updates). Done in an effect so it stays out of
+  // any render-phase setState updater.
+  useEffect(() => {
+    onChecksLoadedRef.current?.(checks);
+  }, [checks]);
 
   useEffect(() => {
     if (companyId) {

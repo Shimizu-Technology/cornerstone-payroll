@@ -81,8 +81,7 @@ module Api
             changed = changed_fields(before_snapshot, after_snapshot)
 
             if changed.any?
-              NonEmployeeCheckEdit.create!(
-                non_employee_check: @check,
+              @check.edits.create!(
                 edited_by: current_user,
                 before: before_snapshot.slice(*changed),
                 after: after_snapshot.slice(*changed),
@@ -92,6 +91,9 @@ module Api
             end
           end
 
+          # Reset the edits association so the freshly-created edit (or no-op)
+          # is reflected in `edit_count` without issuing a second COUNT query.
+          @check.edits.reset
           render json: { non_employee_check: check_payload(@check) }
         end
 
@@ -144,7 +146,11 @@ module Api
         private
 
         def set_check
-          @check = NonEmployeeCheck.find_by(id: params[:id], company_id: current_company_id)
+          # Preload :edits so check_payload's `edit_count: check.edits.size`
+          # uses the loaded association instead of issuing a per-request COUNT.
+          @check = NonEmployeeCheck
+            .includes(:edits)
+            .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
           render json: { error: "Check not found" }, status: :not_found

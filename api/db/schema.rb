@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_16_100005) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_16_100006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -556,16 +556,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100005) do
     t.decimal "check_offset_x", precision: 5, scale: 3, default: "0.0", null: false
     t.decimal "check_offset_y", precision: 5, scale: 3, default: "0.0", null: false
     t.string "check_stock_type", default: "top_check", null: false
-    t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.text "description"
     t.boolean "is_default", default: false, null: false
     t.string "name", null: false
     t.text "notes"
     t.datetime "updated_at", null: false
-    t.index ["company_id", "name"], name: "index_printer_profiles_on_company_id_and_name", unique: true
-    t.index ["company_id"], name: "index_printer_profiles_on_company_id"
-    t.index ["company_id"], name: "index_printer_profiles_one_default_per_company", unique: true, where: "(is_default = true)"
+    t.bigint "user_id", null: false
+    t.index ["user_id", "name"], name: "index_printer_profiles_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_printer_profiles_on_user_id"
+    t.index ["user_id"], name: "index_printer_profiles_one_default_per_user", unique: true, where: "(is_default = true)"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -799,7 +799,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100005) do
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"
-  add_foreign_key "printer_profiles", "companies"
+  add_foreign_key "printer_profiles", "users"
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"

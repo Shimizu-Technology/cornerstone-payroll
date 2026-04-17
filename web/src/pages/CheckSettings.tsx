@@ -306,6 +306,11 @@ export function CheckSettingsPage() {
               <p className="text-sm text-gray-500 mt-0.5">
                 Save and switch between alignment settings for different printers.
               </p>
+              <p className="text-xs text-blue-700 mt-1">
+                These profiles follow your account across every client &mdash; calibrate
+                your printer once and reuse it everywhere. <span className="font-medium">Use This Printer</span>
+                {' '}applies the profile to the active client only.
+              </p>
             </div>
             <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
               {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
