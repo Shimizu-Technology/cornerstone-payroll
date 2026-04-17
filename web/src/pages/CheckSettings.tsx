@@ -617,7 +617,8 @@ export function CheckSettingsPage() {
                 <Label className="text-sm font-medium text-gray-900">Auto-Create FIT Tax Deposit Check</Label>
                 <p className="text-xs text-gray-500 mt-0.5">
                   When enabled, committing payroll automatically creates a non-employee check
-                  for the total Federal Income Tax withheld, payable to &quot;EFTPS - Federal Income Tax&quot;.
+                  for the total Federal Income Tax withheld, payable to &quot;Treasurer of Guam&quot;
+                  (remit via Guam DRT Form 500).
                 </p>
               </div>
               <button

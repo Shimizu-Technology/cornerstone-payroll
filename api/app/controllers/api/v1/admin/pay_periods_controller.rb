@@ -494,8 +494,7 @@ module Api
           fit_query = {
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
-            check_type: "tax_deposit",
-            payable_to: "EFTPS - Federal Income Tax",
+            auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
             voided: false
           }
 
@@ -533,8 +532,7 @@ module Api
           return if NonEmployeeCheck.exists?(
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
-            check_type: "tax_deposit",
-            payable_to: "EFTPS - Federal Income Tax",
+            auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
             voided: false
           )
 
@@ -545,11 +543,12 @@ module Api
           NonEmployeeCheck.create!(
             pay_period: @pay_period,
             company_id: @pay_period.company_id,
-            payable_to: "EFTPS - Federal Income Tax",
+            payable_to: "Treasurer of Guam",
             amount: total_fit,
             check_type: "tax_deposit",
-            memo: "FIT deposit for PPE #{@pay_period.end_date.strftime('%m/%d/%Y')}",
-            description: "Auto-generated FIT tax deposit for payroll commit",
+            auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
+            memo: "FIT Withholding · PPE #{@pay_period.end_date.strftime('%m/%d/%Y')} · Form 500",
+            description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
             created_by: current_user
           )
         rescue ActiveRecord::RecordNotUnique

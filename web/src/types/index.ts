@@ -622,6 +622,7 @@ export interface NonEmployeeCheck {
   payable_to: string;
   amount: number;
   check_type: NonEmployeeCheckType;
+  auto_generated_type?: string | null;
   memo?: string;
   description?: string;
   reference_number?: string;
@@ -631,9 +632,21 @@ export interface NonEmployeeCheck {
   void_reason?: string;
   voided_at?: string;
   check_status: string;
+  edit_count?: number;
   created_by_id?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface NonEmployeeCheckEdit {
+  id: number;
+  edited_by_id?: number | null;
+  edited_by_name?: string | null;
+  before: Record<string, string | number | null>;
+  after: Record<string, string | number | null>;
+  changed_fields: string[];
+  reason?: string | null;
+  created_at: string;
 }
 
 // ----------------

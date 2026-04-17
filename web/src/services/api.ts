@@ -1584,8 +1584,14 @@ export const nonEmployeeChecksApi = {
   update: (id: number, data: Partial<{
     payable_to: string; amount: number; check_type: string;
     memo: string; description: string; reference_number: string;
-  }>) =>
-    api.patch<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}`, { non_employee_check: data }),
+    check_number: string;
+  }>, reason?: string) =>
+    api.patch<{ non_employee_check: NonEmployeeCheck }>(
+      `/admin/non_employee_checks/${id}`,
+      { non_employee_check: data, ...(reason ? { reason } : {}) }
+    ),
+  history: (id: number) =>
+    api.get<{ history: import('@/types').NonEmployeeCheckEdit[] }>(`/admin/non_employee_checks/${id}/history`),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/non_employee_checks/${id}`),
   markPrinted: (id: number) =>
