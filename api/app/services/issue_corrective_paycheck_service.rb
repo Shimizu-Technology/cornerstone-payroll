@@ -162,6 +162,28 @@ class IssueCorrectivePaycheckService
       # Lock the original to prevent a concurrent void/correction on top
       # of us. We also re-read the latest state under lock.
       locked_original = PayPeriod.lock("FOR UPDATE").find(@original_pay_period.id)
+
+      # Re-read the payroll item under a row-level lock so
+      # `assert_correctable!` (and the corrected-item rebuild below) see the
+      # latest voided?/check state, not the snapshot memoized during
+      # `validate_for_issue!`. Without this, a concurrent void of the
+      # original payroll item that commits in the window between
+      # `validate_for_issue!` and this `FOR UPDATE` acquisition would slip
+      # past the `original_item.voided?` guard — and a corrective delta
+      # would then be applied against a YTD base the void has already
+      # removed, corrupting the employee's year-end totals.
+      refreshed = locked_original.payroll_items
+                                 .lock("FOR UPDATE")
+                                 .find_by(employee_id: @employee.id)
+      if refreshed.nil?
+        raise InvalidStateError,
+              "Original payroll item no longer exists for this employee on the locked period"
+      end
+      @original_item = refreshed
+      # Force corrected_item to be rebuilt against the freshly-locked
+      # original (its inputs are derived from `original_item.*`).
+      @corrected_item = nil
+
       assert_correctable!(locked_original)
 
       supplemental = create_supplemental_period!(locked_original)
