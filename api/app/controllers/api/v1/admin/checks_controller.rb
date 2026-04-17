@@ -23,7 +23,7 @@ module Api
       #   PATCH  /companies/:company_id/next_check_number        → update_next_check_number
       class ChecksController < BaseController
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -291,6 +291,69 @@ module Api
         end
 
         # -----------------------------------------------------------------------
+        # POST /api/v1/admin/payroll_items/:payroll_item_id/replace_check_preview
+        #
+        # Read-only delta preview for the Replace (uncashed) modal. Returns the
+        # original snapshot, the recomputed corrected snapshot, the mode
+        # (:in_place vs :void_and_reissue based on whether the original was
+        # printed), and a meta block driving the UI's submit-button state.
+        # -----------------------------------------------------------------------
+        def replace_preview
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Replace flow is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          preview = ReplaceCheckService.preview(
+            payroll_item:    @payroll_item,
+            corrected_inputs: params[:corrected_inputs]&.to_unsafe_h || {}
+          )
+          render json: preview
+        rescue ReplaceCheckService::ReplaceError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
+        # POST /api/v1/admin/payroll_items/:payroll_item_id/replace_check
+        #
+        # Atomically:
+        #   1. Subtract the original item's contribution from employee + company YTD.
+        #   2. (printed-only) Audit-log the void of the original check #.
+        #   3. Apply the corrected inputs to the item and re-run PayrollCalculator
+        #      with YTD context that excludes this item (so taxes match a
+        #      from-scratch run with the new inputs).
+        #   4. (printed-only) Assign a fresh check #; set replaced_check_number
+        #      to the original. (unprinted: keep same check #.)
+        #   5. Re-add to YTD with the new (corrected) values.
+        #   6. Audit-log a `replaced` event with a structured before/after summary.
+        #
+        # Body: { corrected_inputs: {...}, reason: "..." }
+        # -----------------------------------------------------------------------
+        def replace_check
+          unless @payroll_item.pay_period.committed?
+            return render json: { error: "Replace flow is only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          user = User.find(current_user_id)
+          updated_item = ReplaceCheckService.replace!(
+            payroll_item:    @payroll_item,
+            corrected_inputs: params[:corrected_inputs]&.to_unsafe_h || {},
+            reason:          params[:reason].to_s.strip,
+            actor:           user,
+            ip_address:      request.remote_ip
+          )
+
+          render json: { payroll_item: check_item_json(updated_item) }, status: :ok
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "User not found" }, status: :unprocessable_entity
+        rescue ReplaceCheckService::InvalidStateError, ReplaceCheckService::UnsupportedEmployeeError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ReplaceCheckService::InvalidInputError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
         # GET /api/v1/admin/companies/:company_id/check_settings
         # -----------------------------------------------------------------------
         def check_settings
@@ -440,6 +503,7 @@ module Api
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
+            replaced_check_number: item.replaced_check_number,
             events: item.check_events.to_a.sort_by(&:created_at).map { |e| check_event_json(e) }
           }
         end

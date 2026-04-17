@@ -381,8 +381,15 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         </div>
       )}
 
-      {/* Form 500 callout when tax deposit checks exist */}
-      {!loading && checks.some(c => c.check_type === 'tax_deposit' && !c.voided) && (
+      {/* Form 500 callout — anchored to auto_generated_type so renaming the
+          auto-FIT check or changing its check_type via the Edit modal doesn't
+          silently hide the quick-fill helper. Falls back to the legacy
+          (tax_deposit, EFTPS) shape for pre-marker rows. */}
+      {!loading && checks.some(c =>
+        !c.voided &&
+        (c.auto_generated_type === 'fit_deposit' ||
+          (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+      ) && (
         <div className="mx-4 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
           <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -400,7 +407,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
               </a>
             </p>
             {(() => {
-              const taxDeposit = checks.find(c => c.check_type === 'tax_deposit' && !c.voided);
+              // Same lookup shape as the outer guard — match the auto-FIT
+              // marker first, fall back to the legacy EFTPS-tax_deposit row.
+              const taxDeposit = checks.find(c =>
+                !c.voided &&
+                (c.auto_generated_type === 'fit_deposit' ||
+                  (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+              );
               const taxQ = getTaxQuarter(payPeriodEndDate);
               const fullAddress = company?.address_line1
                 ? [

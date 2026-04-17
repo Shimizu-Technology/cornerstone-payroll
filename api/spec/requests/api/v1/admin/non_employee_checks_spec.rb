@@ -68,6 +68,53 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       )
     end
 
+    # Regression test for the missing model-level uniqueness validation on
+    # check_number. The DB has a partial unique index but without the model
+    # validation a duplicate value would raise ActiveRecord::RecordNotUnique
+    # and surface as a 500 instead of a clean 422 with field errors.
+    it "returns 422 (not 500) when check_number is already used in the same company" do
+      existing = NonEmployeeCheck.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: admin_user,
+        payable_to: "Other Vendor",
+        amount: 50.00,
+        check_type: "vendor",
+        check_number: "1001"
+      )
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: { check_number: existing.check_number }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json = JSON.parse(response.body)
+      expect(json["errors"].join(", ")).to match(/check number/i)
+    end
+
+    it "allows the same check_number in a different company" do
+      NonEmployeeCheck.create!(
+        company: other_company,
+        pay_period: other_pay_period,
+        created_by: admin_user,
+        payable_to: "Other Co Vendor",
+        amount: 99.00,
+        check_type: "vendor",
+        check_number: "2002"
+      )
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: { check_number: "2002" }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(check.reload.check_number).to eq("2002")
+    end
+
     it "rejects changing the pay period to another company" do
       patch "/api/v1/admin/non_employee_checks/#{check.id}",
         params: {

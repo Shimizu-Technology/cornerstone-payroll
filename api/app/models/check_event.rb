@@ -4,7 +4,11 @@ class CheckEvent < ApplicationRecord
   belongs_to :payroll_item
   belongs_to :user, optional: true
 
-  VALID_EVENT_TYPES = %w[printed voided reprinted batch_downloaded].freeze
+  # `replaced` covers the "void + cut new check at corrected amount" flow used
+  # when the original check was uncashed (operator has it in hand or it was
+  # never given out). The void of the old check # is logged separately as a
+  # `voided` event for backwards compatibility with existing reports.
+  VALID_EVENT_TYPES = %w[printed voided reprinted batch_downloaded replaced].freeze
 
   validates :event_type, inclusion: { in: VALID_EVENT_TYPES }
   validates :check_number, presence: true
@@ -13,4 +17,5 @@ class CheckEvent < ApplicationRecord
   scope :prints,      -> { where(event_type: "printed") }
   scope :voids,       -> { where(event_type: "voided") }
   scope :reprints,    -> { where(event_type: "reprinted") }
+  scope :replacements, -> { where(event_type: "replaced") }
 end

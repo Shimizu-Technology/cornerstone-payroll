@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_16_100007) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_16_100008) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -498,6 +498,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100007) do
     t.bigint "pay_period_id", null: false
     t.decimal "pay_rate", precision: 12, scale: 6, null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
+    t.string "replaced_check_number"
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
     t.string "reprint_of_check_number"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
@@ -529,6 +530,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100007) do
     t.index ["employee_id"], name: "index_payroll_items_on_employee_id"
     t.index ["pay_period_id", "employee_id"], name: "index_payroll_items_on_pay_period_id_and_employee_id", unique: true
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
+    t.index ["replaced_check_number"], name: "index_payroll_items_on_replaced_check_number", where: "(replaced_check_number IS NOT NULL)"
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
     t.index ["voided"], name: "index_payroll_items_on_voided"
   end
