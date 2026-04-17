@@ -1,10 +1,4 @@
 namespace :db do
-  # The fixed numeric advisory-lock id Rails uses for the migration
-  # mutex (see ActiveRecord::Migration#generate_migrator_advisory_lock_id).
-  # Rails computes a per-database 64-bit id; we don't need to recreate it
-  # because the `pg_locks` query below filters by `locktype = 'advisory'`
-  # which already narrows to migration-style locks.
-
   desc "Release stale advisory locks before running migrations (fixes Neon/PgBouncer orphaned locks)"
   task clear_advisory_locks: :environment do
     conn = ActiveRecord::Base.connection
@@ -59,73 +53,118 @@ namespace :db do
     end
   end
 
-  desc "Safe migration: clear stale locks, run db:prepare, recover from Neon's mid-migration connection recycling"
-  task safe_prepare: :clear_advisory_locks do
-    # Invoke db:prepare INSIDE the rescue (not as a Rake prereq) so we
-    # can catch ConcurrentMigrationError and decide whether to recover
-    # or re-raise.
+  desc "Safe migration: clear stale locks, run db:prepare, retry on Neon's mid-migration connection recycling"
+  task safe_prepare: :environment do
+    max_attempts = (ENV["SAFE_PREPARE_MAX_ATTEMPTS"] || "4").to_i
+    attempt      = 0
+
     begin
+      attempt += 1
+
+      # Re-enable the prereq + downstream tasks so each retry actually
+      # re-runs them. Rake marks tasks as "invoked" after their first
+      # run and silently no-ops subsequent invocations otherwise.
+      %w[db:clear_advisory_locks db:prepare db:migrate db:schema:load].each do |t|
+        Rake::Task[t].reenable if Rake::Task.task_defined?(t)
+      end
+
+      Rake::Task["db:clear_advisory_locks"].invoke
       Rake::Task["db:prepare"].invoke
+
+      if attempt > 1
+        warn "[db:safe_prepare] Migrations completed on attempt #{attempt}/#{max_attempts}."
+      end
     rescue ActiveRecord::ConcurrentMigrationError => e
-      handle_orphaned_advisory_lock_error!(e)
+      decision = handle_concurrent_migration_error!(e, attempt: attempt, max_attempts: max_attempts)
+      case decision
+      when :retry     then retry
+      when :recovered then :ok # fall through to success
+      else                 raise
+      end
     end
   end
 
   # ----------------------------------------------------------------------
-  # Recovery helper for Neon's serverless connection recycling.
+  # Recovery + retry handler for Neon's serverless connection recycling.
   #
-  # Symptom (from real Render deploy logs):
+  # Symptoms (from real Render deploy logs against this codebase):
   #
   #   WARNING:  you don't own a lock of type ExclusiveLock
   #   ActiveRecord::ConcurrentMigrationError: Failed to release advisory lock
   #
-  # Root cause: Neon aggressively recycles idle Postgres connections.
-  # When a long migration's underlying connection gets recycled while
-  # the migration is running, the migration body's individual SQL
-  # statements still commit (each in its own transaction), but Rails'
-  # final `pg_advisory_unlock` cleanup fires `false` because the new
-  # connection doesn't own the lock the original one took. Rails
-  # raises ConcurrentMigrationError and crashes the deploy — even
-  # though the schema has actually advanced.
+  #   ActiveRecord::ConcurrentMigrationError: Cannot run migrations
+  #   because another migration process is currently running.
   #
-  # We distinguish that *phantom* failure from a real concurrency
-  # conflict by re-checking migration status against the database. If
-  # everything on disk is in `schema_migrations`, proceed (logging
-  # loudly). Otherwise, re-raise so the deploy fails fast.
+  # Both shapes have the same root cause: Neon's pooler recycles idle
+  # Postgres connections aggressively, and Rails 8 takes the migration
+  # advisory lock *per migration* (not per batch). A long migration
+  # (e.g. ScopePrinterProfilesToUser, 8 SQL statements + dedupe + index
+  # rebuild) can outlive its underlying connection. Each individual
+  # statement still commits (separate transactions), but Rails'
+  # `pg_advisory_unlock` cleanup at the end of the migration fires
+  # `false` because the new connection doesn't own the lock the
+  # original one took. ConcurrentMigrationError fires; subsequent
+  # pending migrations in the same batch never run.
+  #
+  # Strategy:
+  #   * If `migrations_pending?` is false → schema is already in the
+  #     intended end state. The error was the orphaned-lock-after-
+  #     success scenario; log loudly and continue (`:recovered`).
+  #   * If `migrations_pending?` is true → some migrations applied
+  #     but more are needed. Postgres auto-releases the orphaned
+  #     session-scoped lock when the dead session is reaped, so the
+  #     next attempt starts clean. Retry up to `max_attempts`
+  #     (`:retry`).
+  #   * If we've exhausted retries → `:reraise`.
   # ----------------------------------------------------------------------
-  def handle_orphaned_advisory_lock_error!(error)
-    # Force a fresh connection so the status check below reads the
-    # *real* schema_migrations state, not anything cached on the
-    # doomed connection that just raised.
+  def handle_concurrent_migration_error!(error, attempt:, max_attempts:)
     ActiveRecord::Base.connection_pool.disconnect!
 
     if migrations_pending?
-      warn "[db:safe_prepare] db:prepare raised ConcurrentMigrationError AND migrations are still pending — re-raising."
-      raise error
+      if attempt >= max_attempts
+        warn "[db:safe_prepare] Still pending after #{attempt}/#{max_attempts} attempts — giving up."
+        warn "[db:safe_prepare]   Last error: #{error.message}"
+        :reraise
+      else
+        warn "[db:safe_prepare] Attempt #{attempt}/#{max_attempts} hit ConcurrentMigrationError with " \
+             "pending migrations remaining. Retrying with fresh connections after a brief backoff..."
+        warn "[db:safe_prepare]   Error: #{error.message}"
+        sleep_for_backoff(attempt)
+        :retry
+      end
+    else
+      warn "[db:safe_prepare] Recovered from ConcurrentMigrationError after a successful migration run " \
+           "(Neon connection recycling). All migrations are applied; continuing the deploy."
+      warn "[db:safe_prepare]   Original error: #{error.message}"
+      :recovered
     end
-
-    warn "[db:safe_prepare] Recovered from ConcurrentMigrationError after a successful migration run " \
-         "(Neon connection recycling). All migrations are applied; continuing the deploy."
-    warn "[db:safe_prepare]   Original error: #{error.message}"
   end
 
   # Cross-Rails-version migration-status check. Rails 8 moved
   # `migration_context` off the connection adapter onto the connection
   # pool, so the obvious `connection.migration_context.needs_migration?`
-  # crashes with NoMethodError on Rails 8 (which is what hit us on the
-  # last deploy). Rather than version-detect, we just compare on-disk
+  # crashes with NoMethodError on Rails 8. We just compare on-disk
   # migration files to the `schema_migrations` table directly — that
   # API is stable across every Rails version we've ever shipped on.
   def migrations_pending?
-    paths           = ActiveRecord::Migrator.migrations_paths
-    on_disk         = ActiveRecord::MigrationContext.new(paths).migrations.map(&:version).map(&:to_i)
-    applied_rows    = ActiveRecord::Base.connection.execute("SELECT version FROM schema_migrations")
-    applied_set     = applied_rows.map { |row| row["version"].to_i }.to_set
+    paths        = ActiveRecord::Migrator.migrations_paths
+    on_disk      = ActiveRecord::MigrationContext.new(paths).migrations.map(&:version).map(&:to_i)
+    applied_rows = ActiveRecord::Base.connection.execute("SELECT version FROM schema_migrations")
+    applied_set  = applied_rows.map { |row| row["version"].to_i }.to_set
 
     pending = on_disk.reject { |v| applied_set.include?(v) }
     if pending.any?
       Rails.logger.warn "[db:safe_prepare] Pending migrations after recovery check: #{pending.inspect}"
     end
     pending.any?
+  end
+
+  # Capped exponential-ish backoff so the retry isn't instant (gives
+  # Postgres a moment to reap the recycled session and release the
+  # orphaned lock if it hasn't already).
+  def sleep_for_backoff(attempt)
+    secs = [2 * attempt, 10].min
+    Rails.logger.info "[db:safe_prepare] Sleeping #{secs}s before retry..."
+    sleep(secs)
   end
 end
