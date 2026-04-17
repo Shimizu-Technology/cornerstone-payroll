@@ -174,22 +174,34 @@ module Api
             :memo, :description, :reference_number, :check_number
           )
 
-          # Coerce blank `check_number` to nil. The Edit modal always sends
-          # `check_number` in the full payload, even when the operator never
-          # set one, so unset checks come through as "". Postgres treats ""
-          # as NOT NULL, which means the partial unique index
-          # `WHERE check_number IS NOT NULL` would fire on the *second*
-          # check in the same company saved through the modal — even for an
-          # unrelated edit — raising ActiveRecord::RecordNotUnique → 500.
-          # Normalising to nil here makes the partial index behave as
-          # intended and matches the model-level `allow_nil: true` on the
-          # uniqueness validator.
-          if permitted.key?(:check_number) && permitted[:check_number].blank?
-            permitted[:check_number] = nil
+          # Coerce blank values to nil for all optional text fields. The Edit
+          # modal always sends the full payload, so untouched-and-unset
+          # fields arrive as "" rather than being omitted. Two reasons this
+          # matters:
+          #
+          # 1. `check_number` — Postgres treats "" as NOT NULL, so the
+          #    partial unique index `WHERE check_number IS NOT NULL` fires
+          #    on the *second* check in the same company saved through the
+          #    modal — even for an unrelated edit — raising
+          #    `ActiveRecord::RecordNotUnique` → 500. Normalising to nil
+          #    matches the partial index and the model-level `allow_nil`.
+          #
+          # 2. `memo` / `description` / `reference_number` — without
+          #    coercion, a DB row with a true `nil` value gets overwritten
+          #    with `""` on a no-op edit, causing `audit_snapshot` to
+          #    diff `nil → ""` and create a spurious audit entry for a
+          #    field the operator never touched.
+          BLANKABLE_TEXT_FIELDS.each do |field|
+            permitted[field] = nil if permitted.key?(field) && permitted[field].blank?
           end
 
           permitted
         end
+
+        # Optional text fields whose blank ("" or whitespace-only) values
+        # should be stored as NULL. Centralised so `check_params` and
+        # `audit_snapshot` agree on the normalisation.
+        BLANKABLE_TEXT_FIELDS = %i[check_number memo description reference_number].freeze
 
         def resolve_pay_period(pay_period_id)
           pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id)
@@ -250,7 +262,22 @@ module Api
         end
 
         def changed_fields(before, after)
-          AUDITED_FIELDS.select { |field| before[field] != after[field] }
+          # Treat nil and "" as equivalent for the optional text fields so
+          # we don't log a spurious `field: null → ""` change when the
+          # operator never touched it. `check_params` now coerces blanks
+          # to nil to keep stored data clean, but an internal-service or
+          # console caller could still write "" — this comparison
+          # normalisation makes the audit trail robust either way.
+          # Snapshots themselves remain honest (nil stays nil) so the
+          # audit log never claims a value was "" when the DB had nil.
+          AUDITED_FIELDS.select do |field|
+            normalize_for_diff(field, before[field]) != normalize_for_diff(field, after[field])
+          end
+        end
+
+        def normalize_for_diff(field, value)
+          return "" if value.nil? && BLANKABLE_TEXT_FIELDS.include?(field.to_sym)
+          value
         end
       end
     end
