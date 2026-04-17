@@ -15,6 +15,14 @@ interface NonEmployeeChecksPanelProps {
   companyId: number;
   payPeriodStatus?: string;
   payPeriodEndDate?: string;
+  /**
+   * Fired whenever the set of checks is (re)loaded or a single check is
+   * updated locally. Lets parent pages observe non-employee-check state
+   * without owning the fetch — used by the pay period page to detect when
+   * the FIT deposit amount has been overridden away from the calculated
+   * value derived from PayrollItems.
+   */
+  onChecksLoaded?: (checks: NonEmployeeCheck[]) => void;
 }
 
 function CopyField({ label, value }: { label: string; value: string }) {
@@ -73,7 +81,7 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -111,7 +119,11 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   };
 
   const handleSavedCheck = (updated: NonEmployeeCheck) => {
-    setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    setChecks(prev => {
+      const next = prev.map(c => (c.id === updated.id ? updated : c));
+      onChecksLoaded?.(next);
+      return next;
+    });
     // If the user has the history open for this check, force a remount so the
     // newly-created edit row appears. We do this by toggling it off+on once.
     if (expandedHistoryIds.has(updated.id)) {
@@ -131,12 +143,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
       setChecks(res.non_employee_checks);
+      onChecksLoaded?.(res.non_employee_checks);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [payPeriodId]);
+  }, [payPeriodId, onChecksLoaded]);
 
   useEffect(() => { loadChecks(); }, [loadChecks]);
 
