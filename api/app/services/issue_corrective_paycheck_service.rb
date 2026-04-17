@@ -221,7 +221,44 @@ class IssueCorrectivePaycheckService
     validate_for_preview!
     raise ArgumentError, "reason is required" if @reason.blank?
     raise ArgumentError, "pay_date is required" if @pay_date.blank?
+
+    # Temporal guard — the supplemental's `pay_date` must NOT predate the
+    # original period's `pay_date`. `ytd_sum_excluding_original` (used to
+    # build the pre-period YTD context for the corrected recompute) only
+    # excludes items strictly *after* the original by `pay_date`. And
+    # `reportable_committed` deliberately includes correction supplementals
+    # (they're how YTD-aggregating reports stay correct).
+    #
+    # If a first correction is committed with a backdated `pay_date`
+    # (older than the original) and then a second correction is issued
+    # for the same original later, the first correction's delta would
+    # land inside `ytd_sum_excluding_original`'s window — inflating the
+    # second correction's pre-period YTD basis and corrupting its SS/FIT
+    # math. The model-level `pay_date_after_end_date` validation only
+    # enforces `pay_date >= end_date`, which (because there's typically
+    # a gap between `end_date` and `pay_date`) leaves a window between
+    # original's `end_date` and original's `pay_date` where this bug
+    # is reachable through the API.
+    parsed_pay_date = parsed_pay_date_for_validation
+    if parsed_pay_date && parsed_pay_date < @original_pay_period.pay_date
+      raise ArgumentError,
+            "pay_date must be on or after the original period's pay_date " \
+            "(#{@original_pay_period.pay_date})"
+    end
+
     assert_correctable!(@original_pay_period)
+  end
+
+  # Coerces `@pay_date` (which may arrive as a Date, Time, or ISO string
+  # from controllers) to a Date for the temporal-guard comparison.
+  # Returns nil if it can't be parsed; the presence check above already
+  # raises on a blank value, and the Postgres column-type cast catches
+  # truly-malformed strings later in the flow — so we don't need to
+  # ourselves raise here.
+  def parsed_pay_date_for_validation
+    return @pay_date if @pay_date.is_a?(Date)
+    return @pay_date.to_date if @pay_date.respond_to?(:to_date) && !@pay_date.is_a?(String)
+    Date.parse(@pay_date.to_s) rescue nil
   end
 
   def assert_correctable!(period)

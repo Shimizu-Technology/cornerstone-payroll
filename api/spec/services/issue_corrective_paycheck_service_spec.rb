@@ -289,6 +289,65 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(original_period.reload.supplemental_pay_periods.count).to eq(0)
     end
 
+    # Regression for the temporal-validation gap flagged by Greptile (P1).
+    # `reportable_committed` includes correction supplementals (so YTD-
+    # aggregating reports stay correct). `ytd_sum_excluding_original`
+    # filters by `pay_periods.pay_date < original.pay_date`. The
+    # model-level `pay_date_after_end_date` validation only enforces
+    # `pay_date >= end_date` — and because regular pay periods always
+    # have a gap between `end_date` and `pay_date`, a supplemental's
+    # `pay_date` can be "valid" by the model but still pre-date the
+    # original's `pay_date`. If a first correction is committed with
+    # such a backdated `pay_date` and a second correction is then
+    # issued for the same original, the first correction's delta lands
+    # inside `ytd_sum_excluding_original`'s window — inflating the
+    # second's pre-period YTD basis and corrupting its SS/FIT math.
+    # The service-level temporal guard closes that hole.
+    it "rejects a supplemental pay_date that pre-dates the original period's pay_date" do
+      # original_period: end_date 2024-01-14, pay_date 2024-01-19.
+      # 2024-01-15 passes the model's `pay_date_after_end_date` validation
+      # (>= end_date) but is BEFORE the original's pay_date — this is
+      # exactly the gap the bug exploits.
+      expect {
+        described_class.issue!(
+          original_pay_period: original_period,
+          employee:            employee,
+          corrected_inputs:    { hours_worked: 80 },
+          pay_date:            Date.new(2024, 1, 15),
+          reason:              "Backdated pay_date should be rejected",
+          actor:               actor
+        )
+      }.to raise_error(ArgumentError, /on or after the original period's pay_date/)
+
+      expect(original_period.reload.supplemental_pay_periods.count).to eq(0)
+    end
+
+    it "accepts a supplemental pay_date equal to the original's pay_date (boundary)" do
+      expect {
+        described_class.issue!(
+          original_pay_period: original_period,
+          employee:            employee,
+          corrected_inputs:    { hours_worked: 80 },
+          pay_date:            original_period.pay_date,
+          reason:              "Same-day correction is allowed",
+          actor:               actor
+        )
+      }.to change(PayPeriod, :count).by(1)
+    end
+
+    it "accepts an ISO-string pay_date (controllers send strings)" do
+      expect {
+        described_class.issue!(
+          original_pay_period: original_period,
+          employee:            employee,
+          corrected_inputs:    { hours_worked: 80 },
+          pay_date:            "2024-01-26",
+          reason:              "String-typed pay_date should still parse for validation",
+          actor:               actor
+        )
+      }.to change(PayPeriod, :count).by(1)
+    end
+
     it "raises cleanly when the original payroll item is deleted between validate and lock" do
       service = described_class.new(
         original_pay_period: original_period,
