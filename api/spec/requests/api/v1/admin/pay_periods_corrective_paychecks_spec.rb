@@ -145,6 +145,76 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
 
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    # Regression for the strong-params controller-layer fix (Greptile P2).
+    # Until this commit the controller called `params[:corrected_inputs].to_unsafe_h`,
+    # which forwarded *every* key the client sent into the service. The
+    # service's own `.slice(*CORRECTABLE_INPUT_FIELDS)` still dropped
+    # unknown keys before they reached AR — so this was safe in practice
+    # — but the controller layer was no longer expressing the
+    # permitted shape. Now we permit explicitly: arbitrary extra keys
+    # (`voided`, `id`, `gross_pay`, `withholding_tax`, etc.) must be
+    # dropped before the service ever sees them.
+    it "drops keys outside CORRECTABLE_INPUT_FIELDS at the controller layer" do
+      expect(IssueCorrectivePaycheckService).to receive(:issue!) do |**kwargs|
+        # The controller helper is the layer being tested — assert that
+        # it only forwards keys we explicitly permit, no matter what
+        # the client sends.
+        forwarded = kwargs[:corrected_inputs]
+        expect(forwarded.keys.map(&:to_s)).to contain_exactly("hours_worked", "bonus")
+        expect(forwarded).not_to have_key("voided")
+        expect(forwarded).not_to have_key("id")
+        expect(forwarded).not_to have_key("gross_pay")
+        expect(forwarded).not_to have_key("withholding_tax")
+        # Stub a successful return so the controller can render a 201.
+        # The shape only needs to satisfy `pay_period_json` /
+        # `payroll_item_summary_json` enough to render — easiest is to
+        # reuse real records from the let! blocks.
+        [original_period, original_period.payroll_items.first]
+      end
+
+      post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paychecks",
+           params: {
+             employee_id: employee.id,
+             corrected_inputs: {
+               hours_worked:    80,
+               bonus:           50,
+               voided:          true,        # not in allow-list — must be dropped
+               id:              999_999,     # not in allow-list — must be dropped
+               gross_pay:       9_999.99,    # service-computed — must be dropped
+               withholding_tax: 1_234.56     # service-computed — must be dropped
+             },
+             pay_date: "2024-01-26",
+             reason:   "Strong-params drop check"
+           },
+           as: :json
+    end
+
+    # Regression for the `audit_actions` registration (Greptile P2).
+    # `:corrective_paychecks` was missing from the allow-list, so
+    # admin actions on this endpoint were being made invisible to the
+    # generic AuditLog stream that powers the compliance/admin
+    # activity views. The new endpoint mutates payroll state (creates
+    # a supplemental period + corrective item, mutates YTD), so it
+    # belongs in the same stream as commit/void/run_payroll.
+    it "writes a generic AuditLog row when issuing a corrective paycheck" do
+      expect {
+        post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paychecks",
+             params: {
+               employee_id:      employee.id,
+               corrected_inputs: { hours_worked: 80 },
+               pay_date:         "2024-01-26",
+               reason:           "Audit-log regression"
+             },
+             as: :json
+      }.to change { AuditLog.where(action: "pay_periods#corrective_paychecks").count }.by(1)
+
+      expect(response).to have_http_status(:created)
+      log = AuditLog.where(action: "pay_periods#corrective_paychecks").last
+      expect(log.user_id).to eq(admin_user.id)
+      expect(log.record_type).to eq("pay_periods")
+      expect(log.record_id.to_s).to eq(original_period.id.to_s)
+    end
   end
 
   describe "GET /api/v1/admin/pay_periods/:id/supplemental_pay_periods" do

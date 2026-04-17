@@ -5,7 +5,15 @@ module Api
     module Admin
       class PayPeriodsController < BaseController
         include Auditable
-        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :create_correction_run, :generate_fit_check
+        # `:corrective_paychecks` is the new off-cycle supplemental
+        # endpoint — it mutates payroll state (creates a supplemental
+        # period + a corrective payroll_item, mutates YTD), so it
+        # belongs in the same AuditLog stream as commit/void/run_payroll.
+        # Read-only previews (`:corrective_paycheck_preview`,
+        # `:supplemental_pay_periods`) are deliberately omitted.
+        audit_actions :approve, :unapprove, :commit, :run_payroll, :void,
+                      :create_correction_run, :generate_fit_check,
+                      :corrective_paychecks
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
           :void, :create_correction_run, :correction_history, :generate_fit_check,
@@ -504,7 +512,7 @@ module Api
           preview = IssueCorrectivePaycheckService.preview(
             original_pay_period: @pay_period,
             employee:            employee,
-            corrected_inputs:    params[:corrected_inputs]&.to_unsafe_h || {}
+            corrected_inputs:    permit_corrective_paycheck_inputs
           )
 
           render json: preview
@@ -526,7 +534,7 @@ module Api
           supplemental, corrective_item = IssueCorrectivePaycheckService.issue!(
             original_pay_period: @pay_period,
             employee:            employee,
-            corrected_inputs:    params[:corrected_inputs]&.to_unsafe_h || {},
+            corrected_inputs:    permit_corrective_paycheck_inputs,
             pay_date:            params[:pay_date],
             reason:              params[:reason],
             actor:               current_user,
@@ -604,6 +612,47 @@ module Api
         end
 
         private
+
+        # Strong-params extraction for the corrective-paycheck endpoints'
+        # `corrected_inputs` payload.
+        #
+        # Functionally, the service layer already does
+        # `(corrected_inputs || {}).symbolize_keys.slice(*CORRECTABLE_INPUT_FIELDS)`
+        # — so `to_unsafe_h` here was *safe*, but it bypassed the
+        # strong-params discipline the rest of the API follows and
+        # tripped Greptile's "unfiltered params" signal.
+        #
+        # This helper expresses the contract at the controller boundary:
+        # scalar correctable fields are explicitly permitted; the
+        # `custom_earnings` array is permitted with its known shape
+        # (`[{label, amount}, ...]`); and `custom_columns_data` — a
+        # JSONB hash whose top-level keys are operator-configured per
+        # company and whose values may themselves be nested (e.g.
+        # `wage_rate_hours: [...]`) — is read via `to_unsafe_h` *only*
+        # after the parent permit call has already narrowed the surface.
+        # Anything outside the allow-list is dropped at this layer.
+        def permit_corrective_paycheck_inputs
+          raw = params[:corrected_inputs]
+          return {} if raw.blank?
+
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+
+          scalar_fields = IssueCorrectivePaycheckService::CORRECTABLE_INPUT_FIELDS -
+                          %i[custom_earnings custom_columns_data]
+
+          permitted = raw.permit(
+            *scalar_fields,
+            custom_earnings: [:label, :amount]
+          ).to_h
+
+          if raw[:custom_columns_data].present?
+            nested = raw[:custom_columns_data]
+            permitted["custom_columns_data"] = nested.is_a?(ActionController::Parameters) ?
+              nested.to_unsafe_h : nested
+          end
+
+          permitted
+        end
 
         def create_fit_tax_deposit_check!(items)
           return if NonEmployeeCheck.exists?(

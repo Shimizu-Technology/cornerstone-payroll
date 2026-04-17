@@ -305,7 +305,7 @@ module Api
 
           preview = ReplaceCheckService.preview(
             payroll_item:    @payroll_item,
-            corrected_inputs: params[:corrected_inputs]&.to_unsafe_h || {}
+            corrected_inputs: permit_replace_check_inputs
           )
           render json: preview
         rescue ReplaceCheckService::ReplaceError => e
@@ -343,7 +343,7 @@ module Api
 
           updated_item = ReplaceCheckService.replace!(
             payroll_item:    @payroll_item,
-            corrected_inputs: params[:corrected_inputs]&.to_unsafe_h || {},
+            corrected_inputs: permit_replace_check_inputs,
             reason:          params[:reason].to_s.strip,
             actor:           current_user,
             ip_address:      request.remote_ip
@@ -464,6 +464,36 @@ module Api
         end
 
         private
+
+        # -----------------------------------------------------------------------
+        # Strong-params extraction for the replace-check endpoints'
+        # `corrected_inputs` payload.
+        #
+        # The service layer already does
+        # `(corrected_inputs || {}).symbolize_keys.slice(*REPLACEABLE_INPUT_FIELDS)`
+        # — so `to_unsafe_h` here was *safe*, but it bypassed the
+        # strong-params discipline the rest of the API follows. This
+        # helper expresses the contract at the controller boundary:
+        # scalar replaceable fields are explicitly permitted and the
+        # `custom_earnings` array is permitted with its known
+        # `[{label, amount}, ...]` shape. Anything else is dropped.
+        # (Replace deliberately does not accept `custom_columns_data`
+        # — see `REPLACEABLE_INPUT_FIELDS` — so no JSONB pass-through
+        # is needed here.)
+        # -----------------------------------------------------------------------
+        def permit_replace_check_inputs
+          raw = params[:corrected_inputs]
+          return {} if raw.blank?
+
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+
+          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings]
+
+          raw.permit(
+            *scalar_fields,
+            custom_earnings: [:label, :amount]
+          ).to_h
+        end
 
         # -----------------------------------------------------------------------
         # Finders
