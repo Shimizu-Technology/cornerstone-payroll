@@ -256,7 +256,21 @@ module Api
         def audit_snapshot(check)
           AUDITED_FIELDS.each_with_object({}) do |field, snapshot|
             value = check.public_send(field)
-            value = value.to_s if value.is_a?(BigDecimal) || value.is_a?(Numeric)
+            # `BigDecimal#to_s` defaults to engineering notation (e.g.
+            # "0.12550e3" for 125.50) which is unreadable in audit JSONB
+            # and hard to inspect in psql. `to_s("F")` forces fixed-point
+            # decimal notation ("125.5"), which matches what the UI
+            # renders. `Numeric#to_s` (Float/Integer) is left as-is —
+            # those already produce human-readable output. Comparison
+            # via `changed_fields` is unaffected: identical inputs still
+            # produce identical strings.
+            value = if value.is_a?(BigDecimal)
+              value.to_s("F")
+            elsif value.is_a?(Numeric)
+              value.to_s
+            else
+              value
+            end
             snapshot[field] = value
           end
         end
