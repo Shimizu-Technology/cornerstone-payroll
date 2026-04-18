@@ -297,7 +297,7 @@ export function ReplaceCheckModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-5xl xl:max-w-6xl">
         <DialogHeader>
           <DialogTitle>Replace check (uncashed)</DialogTitle>
           <DialogDescription>
@@ -345,7 +345,7 @@ export function ReplaceCheckModal({
                         {formatCurrency(row.rate)}/hr
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <BucketInput
                         label="Regular"
                         value={row.regular_hours}
