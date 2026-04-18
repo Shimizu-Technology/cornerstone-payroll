@@ -198,7 +198,7 @@ export function CorrectivePaycheckModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Issue Corrective Paycheck</DialogTitle>
           <DialogDescription>
