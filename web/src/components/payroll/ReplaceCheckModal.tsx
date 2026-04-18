@@ -297,7 +297,7 @@ export function ReplaceCheckModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl xl:max-w-6xl">
+      <DialogContent className="dialog-wide max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Replace check (uncashed)</DialogTitle>
           <DialogDescription>

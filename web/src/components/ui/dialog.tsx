@@ -16,7 +16,15 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
         className="fixed inset-0 bg-black/50"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50 w-full max-w-lg [&:has(.dialog-wide)]:max-w-6xl">{children}</div>
+      {/*
+        Default modal sits at max-w-lg (~512px) — fine for confirmation dialogs.
+        Any DialogContent that adds `.dialog-wide` opts into the wider tier:
+          - lg+ screens: capped at max-w-7xl (1280px)
+          - smaller screens: shrinks to fit (with the inner mx-4 gutter)
+        ImportModal additionally clamps itself to max-w-6xl for its own layout;
+        Replace/Corrective modals leave it uncapped so they fill the 7xl tier.
+      */}
+      <div className="relative z-50 w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
     </div>
   );
 }
