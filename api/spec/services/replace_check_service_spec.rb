@@ -313,6 +313,103 @@ RSpec.describe ReplaceCheckService do
       }.to raise_error(ReplaceCheckService::InvalidStateError, /already-voided/)
     end
 
+    # Regression for the multi-rate gap that surfaced live with Ma Cristina
+    # Salas: she's a multi-rate pilot (Flight $30/hr, Admin $10/hr, Ground
+    # $30/hr) whose check was committed with the wrong bucket
+    # distribution (1h Admin instead of 14.3h Flight + 3.2h Ground). Without
+    # `wage_rate_hours` in REPLACEABLE_INPUT_FIELDS, the operator could only
+    # edit aggregate scalars — which the multi-rate calculator silently
+    # overwrites from the OLD per-bucket entries — so the corrected gross
+    # would never apply. These specs lock in that the bucket payload is
+    # accepted, written through to custom_columns_data, and drives gross
+    # recompute end-to-end.
+    describe "multi-rate redistribution" do
+      let(:multirate_employee) do
+        create(:employee, company: company, department: department,
+                          pay_rate: 30.00, pay_frequency: "biweekly",
+                          filing_status: "single", allowances: 0)
+      end
+      let!(:multirate_item) do
+        item = pay_period.payroll_items.build(
+          employee:        multirate_employee,
+          company_id:      company.id,
+          employment_type: "hourly",
+          pay_rate:        30.00
+        )
+        item.wage_rate_hours = [
+          { "label" => "Flight Hours",  "rate" => 30.0, "regular_hours" => 0, "is_primary" => true },
+          { "label" => "Admin Duties",  "rate" => 10.0, "regular_hours" => 1 },
+          { "label" => "Ground Instr",  "rate" => 30.0, "regular_hours" => 0 }
+        ]
+        PayrollCalculator.for(multirate_employee, item).calculate
+        item.save!
+        EmployeeYtdTotal.find_or_create_by!(employee_id: multirate_employee.id, year: 2024).add_payroll_item!(item)
+        CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(item)
+        company.assign_check_numbers!([item])
+        item.reload
+      end
+
+      it "redistributes hours across rate buckets and recomputes gross from the new bucket sums" do
+        expect(multirate_item.gross_pay).to be_within(0.01).of(10.00) # 1h × $10 admin
+
+        corrected_buckets = [
+          { "label" => "Flight Hours", "rate" => 30.0, "regular_hours" => 14.3, "is_primary" => true },
+          { "label" => "Admin Duties", "rate" => 10.0, "regular_hours" => 0 },
+          { "label" => "Ground Instr", "rate" => 30.0, "regular_hours" => 3.2 }
+        ]
+
+        described_class.replace!(
+          payroll_item:    multirate_item,
+          corrected_inputs: { wage_rate_hours: corrected_buckets },
+          reason:          "Wrong bucket distribution — corrected hours from client",
+          actor:           actor
+        )
+
+        reloaded = multirate_item.reload
+        # 14.3 * 30 + 3.2 * 30 = 429 + 96 = 525.00
+        expect(reloaded.gross_pay).to be_within(0.01).of(525.00)
+        # The calculator overwrites the aggregate scalars from the bucket sums:
+        expect(reloaded.hours_worked.to_f).to be_within(0.001).of(17.5)
+        # Bucket payload persisted through to custom_columns_data:
+        expect(reloaded.wage_rate_hours.find { |b| b["label"] == "Flight Hours" }["regular_hours"]).to eq(14.3)
+        expect(reloaded.wage_rate_hours.find { |b| b["label"] == "Admin Duties" }["regular_hours"]).to eq(0.0)
+      end
+
+      it "updates YTD by the gross delta, not the old aggregate scalars" do
+        original_ytd = EmployeeYtdTotal.find_by(employee_id: multirate_employee.id, year: 2024).gross_pay
+
+        described_class.replace!(
+          payroll_item:    multirate_item,
+          corrected_inputs: {
+            wage_rate_hours: [
+              { "label" => "Flight Hours", "rate" => 30.0, "regular_hours" => 14.3, "is_primary" => true },
+              { "label" => "Admin Duties", "rate" => 10.0, "regular_hours" => 0 },
+              { "label" => "Ground Instr", "rate" => 30.0, "regular_hours" => 3.2 }
+            ]
+          },
+          reason:          "Wrong bucket distribution — corrected hours from client",
+          actor:           actor
+        )
+
+        new_ytd = EmployeeYtdTotal.find_by(employee_id: multirate_employee.id, year: 2024).gross_pay
+        expect(new_ytd - original_ytd).to be_within(0.01).of(515.00) # 525 - 10
+      end
+
+      it "flags zero_change when the bucket payload matches the existing breakdown" do
+        result = described_class.preview(
+          payroll_item:    multirate_item,
+          corrected_inputs: {
+            wage_rate_hours: [
+              { "label" => "Flight Hours", "rate" => 30.0, "regular_hours" => 0, "is_primary" => true },
+              { "label" => "Admin Duties", "rate" => 10.0, "regular_hours" => 1 },
+              { "label" => "Ground Instr", "rate" => 30.0, "regular_hours" => 0 }
+            ]
+          }
+        )
+        expect(result[:meta][:is_zero_change]).to eq(true)
+      end
+    end
+
     it "rejects items on a supplemental period" do
       supplemental = create(:pay_period, :committed, company: company,
                             start_date: pay_period.start_date,

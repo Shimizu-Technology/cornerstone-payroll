@@ -45,6 +45,15 @@ class ReplaceCheckService
 
   # Same set the corrective service accepts. Anything not provided falls
   # back to the existing payroll_item value.
+  #
+  # `wage_rate_hours` is the per-rate-bucket breakdown for multi-rate
+  # employees (e.g., a pilot with separate Flight / Admin / Ground rates).
+  # When present, the calculator overrides the aggregate `hours_worked`,
+  # `overtime_hours`, etc. with sums computed from the per-bucket entries
+  # — so editing just `hours_worked` for a multi-rate employee would be
+  # silently ignored. This field lets the Replace flow correctly redistribute
+  # hours across buckets (e.g., move 1 admin hour → 14.3 flight + 3.2 ground).
+  # Setter on PayrollItem normalizes entries into custom_columns_data.
   REPLACEABLE_INPUT_FIELDS = %i[
     pay_rate
     hours_worked
@@ -56,6 +65,7 @@ class ReplaceCheckService
     additional_withholding
     custom_earnings
     non_taxable_pay
+    wage_rate_hours
   ].freeze
 
   # Fields we snapshot for the audit summary. Compact subset — the full

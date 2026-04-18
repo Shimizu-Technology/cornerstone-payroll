@@ -16,6 +16,7 @@ import { formatCurrency } from '@/lib/utils';
 import type {
   PayPeriod,
   PayrollItem,
+  PayrollItemWageRateHours,
   ReplaceCheckPreview,
   ReplaceCheckResult,
 } from '@/types';
@@ -52,6 +53,22 @@ interface FormState {
   bonus: string;
   reported_tips: string;
   reason: string;
+  // Per-bucket hours for multi-rate employees. Empty array for single-rate.
+  // Each bucket carries its label + rate (immutable in this UI) plus the
+  // four hour columns the operator can edit.
+  wage_rate_hours: WageRateRowForm[];
+}
+
+interface WageRateRowForm {
+  employee_wage_rate_id?: number;
+  label: string;
+  rate: number;
+  is_primary?: boolean;
+  active?: boolean;
+  regular_hours: string;
+  overtime_hours: string;
+  holiday_hours: string;
+  pto_hours: string;
 }
 
 const MIN_REASON_LENGTH = 10;
@@ -66,6 +83,54 @@ function num(value: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isMultiRateItem(item: PayrollItem): boolean {
+  // We treat any item with at least one active wage_rate_hours entry as
+  // multi-rate. The calculator only takes the bucket path when the array
+  // is present, so this matches the backend's branching.
+  const entries = (item.wage_rate_hours ?? []).filter((e) => e.active !== false);
+  return entries.length > 0;
+}
+
+function bucketsToForm(entries: PayrollItemWageRateHours[] | undefined): WageRateRowForm[] {
+  return (entries ?? [])
+    .filter((e) => e.active !== false)
+    .map((e) => ({
+      employee_wage_rate_id: e.employee_wage_rate_id,
+      label: e.label,
+      rate: e.rate,
+      is_primary: e.is_primary,
+      active: e.active,
+      regular_hours: toStr(e.regular_hours),
+      overtime_hours: toStr(e.overtime_hours),
+      holiday_hours: toStr(e.holiday_hours),
+      pto_hours: toStr(e.pto_hours),
+    }));
+}
+
+function bucketsToPayload(rows: WageRateRowForm[]): PayrollItemWageRateHours[] {
+  return rows.map((row) => ({
+    employee_wage_rate_id: row.employee_wage_rate_id,
+    label: row.label,
+    rate: row.rate,
+    is_primary: row.is_primary,
+    active: row.active ?? true,
+    regular_hours: num(row.regular_hours),
+    overtime_hours: num(row.overtime_hours),
+    holiday_hours: num(row.holiday_hours),
+    pto_hours: num(row.pto_hours),
+  }));
+}
+
+function bucketGross(rows: WageRateRowForm[]): number {
+  return rows.reduce((sum, row) => {
+    const reg = num(row.regular_hours) * row.rate;
+    const ot = num(row.overtime_hours) * row.rate * 1.5;
+    const hol = num(row.holiday_hours) * row.rate;
+    const pto = num(row.pto_hours) * row.rate;
+    return sum + reg + ot + hol + pto;
+  }, 0);
+}
+
 export function ReplaceCheckModal({
   open,
   onOpenChange,
@@ -73,6 +138,8 @@ export function ReplaceCheckModal({
   payrollItem,
   onReplaced,
 }: ReplaceCheckModalProps) {
+  const isMultiRate = useMemo(() => isMultiRateItem(payrollItem), [payrollItem]);
+
   const [form, setForm] = useState<FormState>(() => initialForm(payrollItem));
   const [preview, setPreview] = useState<ReplaceCheckPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -89,8 +156,20 @@ export function ReplaceCheckModal({
     setSubmitError(null);
   }, [open, payrollItem.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const correctedInputs = useMemo(
-    () => ({
+  const correctedInputs = useMemo(() => {
+    // For multi-rate items the calculator overwrites the aggregate scalar
+    // hour fields from the wage_rate_hours sums — so sending those scalars
+    // would be silently ignored. Instead, send the per-bucket payload (and
+    // omit pay_rate, which is per-bucket too). Bonus/tips remain useful for
+    // both modes.
+    if (isMultiRate) {
+      return {
+        wage_rate_hours: bucketsToPayload(form.wage_rate_hours),
+        bonus: num(form.bonus),
+        reported_tips: num(form.reported_tips),
+      };
+    }
+    return {
       hours_worked: num(form.hours_worked),
       overtime_hours: num(form.overtime_hours),
       holiday_hours: num(form.holiday_hours),
@@ -98,20 +177,41 @@ export function ReplaceCheckModal({
       pay_rate: num(form.pay_rate),
       bonus: num(form.bonus),
       reported_tips: num(form.reported_tips),
-    }),
-    [
-      form.hours_worked,
-      form.overtime_hours,
-      form.holiday_hours,
-      form.pto_hours,
-      form.pay_rate,
-      form.bonus,
-      form.reported_tips,
-    ],
-  );
+    };
+  }, [
+    isMultiRate,
+    form.wage_rate_hours,
+    form.hours_worked,
+    form.overtime_hours,
+    form.holiday_hours,
+    form.pto_hours,
+    form.pay_rate,
+    form.bonus,
+    form.reported_tips,
+  ]);
 
   const inputsChanged = useMemo(() => {
     const o = payrollItem;
+    if (isMultiRate) {
+      const original = bucketsToForm(o.wage_rate_hours);
+      // Length mismatch (e.g., a hidden inactive bucket) implies a change.
+      if (form.wage_rate_hours.length !== original.length) return true;
+      const bucketDiff = form.wage_rate_hours.some((row, i) => {
+        const orig = original[i];
+        if (!orig) return true;
+        return (
+          Math.abs(num(row.regular_hours) - num(orig.regular_hours)) > 0.001 ||
+          Math.abs(num(row.overtime_hours) - num(orig.overtime_hours)) > 0.001 ||
+          Math.abs(num(row.holiday_hours) - num(orig.holiday_hours)) > 0.001 ||
+          Math.abs(num(row.pto_hours) - num(orig.pto_hours)) > 0.001
+        );
+      });
+      return (
+        bucketDiff ||
+        Math.abs(num(form.bonus) - (o.bonus ?? 0)) > 0.005 ||
+        Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005
+      );
+    }
     return (
       Math.abs(num(form.hours_worked) - (o.hours_worked ?? 0)) > 0.001 ||
       Math.abs(num(form.overtime_hours) - (o.overtime_hours ?? 0)) > 0.001 ||
@@ -121,7 +221,7 @@ export function ReplaceCheckModal({
       Math.abs(num(form.bonus) - (o.bonus ?? 0)) > 0.005 ||
       Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005
     );
-  }, [form, payrollItem]);
+  }, [form, payrollItem, isMultiRate]);
 
   // Debounced preview fetch — same pattern as CorrectivePaycheckModal so the
   // UI doesn't fire on every keystroke.
@@ -153,13 +253,25 @@ export function ReplaceCheckModal({
   }, [open, fetchPreview]);
 
   const reasonValid = form.reason.trim().length >= MIN_REASON_LENGTH;
+  // For single-rate, the gating used to ensure pay_rate stayed non-negative.
+  // For multi-rate the rate is per-bucket and immutable in this UI, so the
+  // analogous guard is "no bucket has a negative hour entry."
+  const numericValid = isMultiRate
+    ? form.wage_rate_hours.every(
+        (row) =>
+          num(row.regular_hours) >= 0 &&
+          num(row.overtime_hours) >= 0 &&
+          num(row.holiday_hours) >= 0 &&
+          num(row.pto_hours) >= 0,
+      )
+    : num(form.pay_rate) >= 0;
   const canSubmit =
     inputsChanged &&
     !!preview &&
     !preview.meta.is_zero_change &&
     reasonValid &&
     !submitting &&
-    correctedInputs.pay_rate >= 0;
+    numericValid;
 
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -207,46 +319,151 @@ export function ReplaceCheckModal({
           {/* Inputs */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">Corrected values</h3>
-            <p className="text-xs text-gray-500">
-              Enter what the values should be on the replacement check. Pay
-              rate is editable in case the original used the wrong rate.
-            </p>
+            {isMultiRate ? (
+              <p className="text-xs text-gray-500">
+                This employee is paid at multiple rates. Enter the correct
+                hours for each rate bucket — gross is recomputed from these
+                buckets, then taxes are recomputed from the corrected gross.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500">
+                Enter what the values should be on the replacement check. Pay
+                rate is editable in case the original used the wrong rate.
+              </p>
+            )}
 
-            <FieldRow label="Regular hours" original={payrollItem.hours_worked}>
-              <Input type="number" step="0.01" min={0}
-                value={form.hours_worked}
-                onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="Overtime hours" original={payrollItem.overtime_hours}>
-              <Input type="number" step="0.01" min={0}
-                value={form.overtime_hours}
-                onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="Holiday hours" original={payrollItem.holiday_hours}>
-              <Input type="number" step="0.01" min={0}
-                value={form.holiday_hours}
-                onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="PTO hours" original={payrollItem.pto_hours}>
-              <Input type="number" step="0.01" min={0}
-                value={form.pto_hours}
-                onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="Pay rate" original={payrollItem.pay_rate} prefix="$">
-              <Input type="number" step="0.01" min={0}
-                value={form.pay_rate}
-                onChange={e => setForm(f => ({ ...f, pay_rate: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
-              <Input type="number" step="0.01" min={0}
-                value={form.bonus}
-                onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))} />
-            </FieldRow>
-            <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
-              <Input type="number" step="0.01" min={0}
-                value={form.reported_tips}
-                onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))} />
-            </FieldRow>
+            {isMultiRate ? (
+              <div className="space-y-3">
+                {form.wage_rate_hours.map((row, i) => (
+                  <div
+                    key={`${row.label}-${row.employee_wage_rate_id ?? i}`}
+                    className="rounded border border-gray-200 bg-white p-3"
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-900">{row.label}</span>
+                      <span className="text-xs text-gray-500">
+                        {formatCurrency(row.rate)}/hr
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <BucketInput
+                        label="Regular"
+                        value={row.regular_hours}
+                        onChange={(v) =>
+                          setForm((f) => ({
+                            ...f,
+                            wage_rate_hours: f.wage_rate_hours.map((r, idx) =>
+                              idx === i ? { ...r, regular_hours: v } : r,
+                            ),
+                          }))
+                        }
+                      />
+                      <BucketInput
+                        label="Overtime"
+                        value={row.overtime_hours}
+                        onChange={(v) =>
+                          setForm((f) => ({
+                            ...f,
+                            wage_rate_hours: f.wage_rate_hours.map((r, idx) =>
+                              idx === i ? { ...r, overtime_hours: v } : r,
+                            ),
+                          }))
+                        }
+                      />
+                      <BucketInput
+                        label="Holiday"
+                        value={row.holiday_hours}
+                        onChange={(v) =>
+                          setForm((f) => ({
+                            ...f,
+                            wage_rate_hours: f.wage_rate_hours.map((r, idx) =>
+                              idx === i ? { ...r, holiday_hours: v } : r,
+                            ),
+                          }))
+                        }
+                      />
+                      <BucketInput
+                        label="PTO"
+                        value={row.pto_hours}
+                        onChange={(v) =>
+                          setForm((f) => ({
+                            ...f,
+                            wage_rate_hours: f.wage_rate_hours.map((r, idx) =>
+                              idx === i ? { ...r, pto_hours: v } : r,
+                            ),
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+                <div className="rounded bg-gray-100 px-3 py-2 text-xs text-gray-700">
+                  Bucket gross (locally computed):{' '}
+                  <span className="font-semibold">
+                    {formatCurrency(bucketGross(form.wage_rate_hours))}
+                  </span>{' '}
+                  — final taxes & net come from the server preview on the right.
+                </div>
+                <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={form.bonus}
+                    onChange={(e) => setForm((f) => ({ ...f, bonus: e.target.value }))}
+                  />
+                </FieldRow>
+                <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={form.reported_tips}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, reported_tips: e.target.value }))
+                    }
+                  />
+                </FieldRow>
+              </div>
+            ) : (
+              <>
+                <FieldRow label="Regular hours" original={payrollItem.hours_worked}>
+                  <Input type="number" step="0.01" min={0}
+                    value={form.hours_worked}
+                    onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="Overtime hours" original={payrollItem.overtime_hours}>
+                  <Input type="number" step="0.01" min={0}
+                    value={form.overtime_hours}
+                    onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="Holiday hours" original={payrollItem.holiday_hours}>
+                  <Input type="number" step="0.01" min={0}
+                    value={form.holiday_hours}
+                    onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="PTO hours" original={payrollItem.pto_hours}>
+                  <Input type="number" step="0.01" min={0}
+                    value={form.pto_hours}
+                    onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="Pay rate" original={payrollItem.pay_rate} prefix="$">
+                  <Input type="number" step="0.01" min={0}
+                    value={form.pay_rate}
+                    onChange={e => setForm(f => ({ ...f, pay_rate: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
+                  <Input type="number" step="0.01" min={0}
+                    value={form.bonus}
+                    onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))} />
+                </FieldRow>
+                <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
+                  <Input type="number" step="0.01" min={0}
+                    value={form.reported_tips}
+                    onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))} />
+                </FieldRow>
+              </>
+            )}
           </div>
 
           {/* Preview */}
@@ -361,7 +578,29 @@ function initialForm(item: PayrollItem): FormState {
     bonus: toStr(item.bonus),
     reported_tips: toStr(item.reported_tips),
     reason: '',
+    wage_rate_hours: bucketsToForm(item.wage_rate_hours),
   };
+}
+
+interface BucketInputProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}
+
+function BucketInput({ label, value, onChange }: BucketInputProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Label className="text-xs text-gray-600">{label}</Label>
+      <Input
+        type="number"
+        step="0.01"
+        min={0}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
 }
 
 interface ModeBannerProps {
