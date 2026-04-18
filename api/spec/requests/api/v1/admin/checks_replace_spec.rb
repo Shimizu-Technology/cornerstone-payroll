@@ -135,5 +135,53 @@ RSpec.describe "Api::V1::Admin::Checks#replace_check", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body)["error"]).to match(/No change/)
     end
+
+    # Lock in that strong-params accepts a nested wage_rate_hours array,
+    # passes it through to the service, and the change actually applies for
+    # multi-rate employees. Mirrors Ma Cristina's real-world case (1h Admin
+    # @ $10 → 14.3h Flight + 3.2h Ground @ $30 = $525 corrected gross).
+    it "accepts and applies a nested wage_rate_hours payload for multi-rate employees" do
+      multirate_employee = create(:employee, company: company, department: department,
+                                             pay_rate: 30.00, pay_frequency: "biweekly",
+                                             filing_status: "single", allowances: 0)
+      multirate_item = pay_period.payroll_items.build(
+        employee:        multirate_employee,
+        company_id:      company.id,
+        employment_type: "hourly",
+        pay_rate:        30.00
+      )
+      multirate_item.wage_rate_hours = [
+        { "label" => "Flight Hours", "rate" => 30.0, "regular_hours" => 0, "is_primary" => true },
+        { "label" => "Admin Duties", "rate" => 10.0, "regular_hours" => 1 },
+        { "label" => "Ground Instr", "rate" => 30.0, "regular_hours" => 0 }
+      ]
+      PayrollCalculator.for(multirate_employee, multirate_item).calculate
+      multirate_item.save!
+      EmployeeYtdTotal.find_or_create_by!(employee_id: multirate_employee.id, year: 2024).add_payroll_item!(multirate_item)
+      CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(multirate_item)
+      company.assign_check_numbers!([multirate_item])
+      multirate_item.reload
+
+      expect(multirate_item.gross_pay).to be_within(0.01).of(10.00)
+
+      post "/api/v1/admin/payroll_items/#{multirate_item.id}/replace_check",
+           params: {
+             corrected_inputs: {
+               wage_rate_hours: [
+                 { label: "Flight Hours", rate: 30.0, regular_hours: 14.3, is_primary: true },
+                 { label: "Admin Duties", rate: 10.0, regular_hours: 0 },
+                 { label: "Ground Instr", rate: 30.0, regular_hours: 3.2 }
+               ]
+             },
+             reason: "Wrong bucket distribution — corrected hours from client"
+           },
+           as: :json
+
+      expect(response).to have_http_status(:ok)
+      multirate_item.reload
+      expect(multirate_item.gross_pay).to be_within(0.01).of(525.00)
+      flight_bucket = multirate_item.wage_rate_hours.find { |b| b["label"] == "Flight Hours" }
+      expect(flight_bucket["regular_hours"]).to eq(14.3)
+    end
   end
 end

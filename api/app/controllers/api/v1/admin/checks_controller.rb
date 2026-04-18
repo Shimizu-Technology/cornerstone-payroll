@@ -474,12 +474,11 @@ module Api
         # — so `to_unsafe_h` here was *safe*, but it bypassed the
         # strong-params discipline the rest of the API follows. This
         # helper expresses the contract at the controller boundary:
-        # scalar replaceable fields are explicitly permitted and the
-        # `custom_earnings` array is permitted with its known
-        # `[{label, amount}, ...]` shape. Anything else is dropped.
-        # (Replace deliberately does not accept `custom_columns_data`
-        # — see `REPLACEABLE_INPUT_FIELDS` — so no JSONB pass-through
-        # is needed here.)
+        # scalar replaceable fields are explicitly permitted, and the
+        # array fields (`custom_earnings`, `wage_rate_hours`) are
+        # permitted with their known nested shapes. Anything else is
+        # dropped. The `wage_rate_hours` shape mirrors the one used by
+        # PayrollItemsController#payroll_item_params for consistency.
         # -----------------------------------------------------------------------
         def permit_replace_check_inputs
           raw = params[:corrected_inputs]
@@ -487,11 +486,15 @@ module Api
 
           raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
 
-          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings]
+          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings wage_rate_hours]
 
           raw.permit(
             *scalar_fields,
-            custom_earnings: [:label, :amount]
+            custom_earnings: [:label, :amount],
+            wage_rate_hours: [
+              :employee_wage_rate_id, :label, :rate, :regular_hours,
+              :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
+            ]
           ).to_h
         end
 
