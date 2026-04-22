@@ -29,23 +29,27 @@ export function NonEmployeeCheckHistory({ checkId }: NonEmployeeCheckHistoryProp
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    nonEmployeeChecksApi
-      .history(checkId)
-      .then(res => {
-        if (cancelled) return;
-        setEdits(res.history);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load history');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const requestTimer = window.setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      nonEmployeeChecksApi
+        .history(checkId)
+        .then(res => {
+          if (cancelled) return;
+          setEdits(res.history);
+        })
+        .catch(err => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : 'Failed to load history');
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 0);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(requestTimer);
     };
   }, [checkId]);
 

@@ -1194,7 +1194,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     }, 5000);
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter]);
+  }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter, processingIds.size]);
 
   const handleSearch = () => {
     setPage(1);

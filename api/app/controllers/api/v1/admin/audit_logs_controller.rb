@@ -7,10 +7,10 @@ module Api
         before_action :require_admin!
 
         # GET /api/v1/admin/audit_logs
-        # Super admins see audit logs across all companies they can access.
-        # Optionally filter by company_id param to scope to active client.
+        # Admins can view audit logs across all companies.
+        # Optionally filter by company_id param to scope to an active client.
         def index
-          logs = if current_user.super_admin?
+          logs = if current_user.admin?
             if params[:company_id].present?
               AuditLog.where(company_id: params[:company_id])
             else

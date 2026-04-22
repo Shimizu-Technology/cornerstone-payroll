@@ -43,7 +43,6 @@ export interface User {
   role: UserRole;
   company_id?: number;
   active?: boolean;
-  super_admin?: boolean;
   assigned_company_ids?: number[];
   invitation_status?: 'pending' | 'accepted';
   invitation_pending?: boolean;

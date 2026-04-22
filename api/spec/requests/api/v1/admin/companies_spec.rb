@@ -32,6 +32,10 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       get "/api/v1/admin/companies"
 
       expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include(
+        "can_manage_clients" => true,
+        "can_switch_company" => true
+      )
       companies = response.parsed_body.fetch("companies")
 
       staff_payload = companies.find { |row| row.fetch("id") == staff_company.id }

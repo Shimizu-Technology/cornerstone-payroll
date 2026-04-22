@@ -207,7 +207,6 @@ module Api
             role: user.role,
             company_id: user.company_id,
             active: user.active,
-            super_admin: user.super_admin?,
             invitation_status: user.invitation_status,
             invitation_pending: user.invitation_pending?,
             invited_at: user.invited_at,

@@ -96,10 +96,10 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
   # POST /checks/batch_pdf
   # -----------------------------------------------------------------------
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/checks/batch_pdf" do
-    it "returns 422 when combine_pdf is unavailable (no silent partial output)" do
+    it "returns a combined PDF when check merging is available" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to match(/combine_pdf/i)
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
     end
 
     it "returns 422 for draft periods" do
@@ -107,10 +107,10 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
     end
 
-    it "does not log batch_downloaded events when batch generation fails" do
+    it "logs batch_downloaded events for each printable check" do
       expect {
         post "/api/v1/admin/pay_periods/#{pay_period.id}/checks/batch_pdf"
-      }.not_to change { CheckEvent.where(event_type: "batch_downloaded").count }
+      }.to change { CheckEvent.where(event_type: "batch_downloaded").count }.by(2)
     end
   end
 
