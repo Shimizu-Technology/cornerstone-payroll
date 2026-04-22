@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,10 +28,15 @@ import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 
 export function PayPeriods() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    return state?.companySwitchNotice ?? null;
+  });
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   
@@ -73,6 +78,14 @@ export function PayPeriods() {
   useEffect(() => {
     loadPayPeriods();
   }, [loadPayPeriods]);
+
+  useEffect(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    if (!state?.companySwitchNotice) return;
+
+    setSwitchNotice(state.companySwitchNotice);
+    navigate('.', { replace: true, state: null });
+  }, [location.state, navigate]);
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -232,6 +245,11 @@ export function PayPeriods() {
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
+          </div>
+        )}
+        {switchNotice && (
+          <div className="mb-4 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800">
+            {switchNotice}
           </div>
         )}
 

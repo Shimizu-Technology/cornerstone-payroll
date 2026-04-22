@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Plus, 
   Search, 
@@ -44,6 +44,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export function EmployeeList() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -54,6 +55,10 @@ export function EmployeeList() {
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    return state?.companySwitchNotice ?? null;
+  });
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -99,6 +104,14 @@ export function EmployeeList() {
     fetchEmployees();
     fetchDepartments();
   }, [fetchEmployees, fetchDepartments]);
+
+  useEffect(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    if (!state?.companySwitchNotice) return;
+
+    setSwitchNotice(state.companySwitchNotice);
+    navigate('.', { replace: true, state: null });
+  }, [location.state, navigate]);
 
   const updateFilter = (key: string, value: string): void => {
     const newParams = new URLSearchParams(searchParams);
@@ -215,6 +228,11 @@ export function EmployeeList() {
         {error && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg text-danger-700">
             {error}
+          </div>
+        )}
+        {switchNotice && (
+          <div className="mb-6 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800">
+            {switchNotice}
           </div>
         )}
 

@@ -170,14 +170,17 @@ export function PayPeriodDetail() {
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
+  const [tipsLoansVisibilityMode, setTipsLoansVisibilityMode] = useState<'auto' | 'manual'>('auto');
 
   const syncDerivedPayrollState = useCallback((items: PayrollItem[]) => {
     const derivedState = derivePayrollUiState(items);
     setSalaryOverrideMap(derivedState.salaryOverrides);
     setTipsMap(derivedState.tips);
     setLoansMap(derivedState.loans);
-    setShowTipsLoans(derivedState.showTipsLoans);
-  }, []);
+    setShowTipsLoans((previous) => (
+      tipsLoansVisibilityMode === 'manual' ? previous : derivedState.showTipsLoans
+    ));
+  }, [tipsLoansVisibilityMode]);
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -228,6 +231,7 @@ export function PayPeriodDetail() {
       // new panel loads.
       setNonEmployeeChecks([]);
       setSupplementals([]);
+      setTipsLoansVisibilityMode('auto');
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
@@ -767,7 +771,10 @@ export function PayPeriodDetail() {
                   <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
-                      onClick={() => setShowTipsLoans(prev => !prev)}
+                      onClick={() => {
+                        setTipsLoansVisibilityMode('manual');
+                        setShowTipsLoans(prev => !prev);
+                      }}
                       className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
                         showTipsLoans
                           ? 'bg-blue-100 text-blue-700 border-blue-300'
