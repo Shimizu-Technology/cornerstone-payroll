@@ -1,5 +1,3 @@
-.DS_Store
-
 # MoSa payroll data - large PDFs/Excel files
 data/mosa-2025/raw/
 data/mosa-2025/manifest.json
