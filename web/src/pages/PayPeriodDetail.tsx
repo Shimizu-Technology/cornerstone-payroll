@@ -106,6 +106,35 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
   return hours;
 }
 
+function derivePayrollUiState(payrollItems: PayrollItem[]) {
+  const salaryOverrides: Record<string, number> = {};
+  const tips: Record<string, { amount: number; pool: string }> = {};
+  const loans: Record<string, number> = {};
+
+  payrollItems.forEach((item) => {
+    if (item.salary_override && toNumber(item.salary_override) > 0) {
+      salaryOverrides[String(item.employee_id)] = toNumber(item.salary_override);
+    }
+
+    const tipAmount = toNumber(item.reported_tips);
+    if (tipAmount > 0) {
+      tips[String(item.employee_id)] = { amount: tipAmount, pool: item.tip_pool || '' };
+    }
+
+    const loanAmount = toNumber(item.loan_deduction);
+    if (loanAmount > 0) {
+      loans[String(item.employee_id)] = loanAmount;
+    }
+  });
+
+  return {
+    salaryOverrides,
+    tips,
+    loans,
+    showTipsLoans: Object.keys(tips).length > 0 || Object.keys(loans).length > 0,
+  };
+}
+
 const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
   pending: { label: 'Tax Sync Pending', variant: 'default' },
   syncing: { label: 'Tax Syncing...', variant: 'info' },
@@ -141,6 +170,17 @@ export function PayPeriodDetail() {
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
+  const [tipsLoansVisibilityMode, setTipsLoansVisibilityMode] = useState<'auto' | 'manual'>('auto');
+
+  const syncDerivedPayrollState = useCallback((items: PayrollItem[]) => {
+    const derivedState = derivePayrollUiState(items);
+    setSalaryOverrideMap(derivedState.salaryOverrides);
+    setTipsMap(derivedState.tips);
+    setLoansMap(derivedState.loans);
+    setShowTipsLoans((previous) => (
+      tipsLoansVisibilityMode === 'manual' ? previous : derivedState.showTipsLoans
+    ));
+  }, [tipsLoansVisibilityMode]);
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -176,32 +216,13 @@ export function PayPeriodDetail() {
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
-      // Initialize salary override map from existing payroll items
-      const overrides: Record<string, number> = {};
-      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
-        if (item.salary_override && toNumber(item.salary_override) > 0) {
-          overrides[String(item.employee_id)] = toNumber(item.salary_override);
-        }
-      });
-      setSalaryOverrideMap(overrides);
-      // Initialize tips/loans maps from existing payroll items
-      const tips: Record<string, { amount: number; pool: string }> = {};
-      const loans: Record<string, number> = {};
-      (ppResponse.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
-        const tipAmt = toNumber(item.reported_tips);
-        if (tipAmt > 0) tips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
-        const loanAmt = toNumber(item.loan_deduction);
-        if (loanAmt > 0) loans[String(item.employee_id)] = loanAmt;
-      });
-      setTipsMap(tips);
-      setLoansMap(loans);
-      if (Object.keys(tips).length > 0 || Object.keys(loans).length > 0) setShowTipsLoans(true);
+      syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [loadAllActiveEmployees]);
+  }, [loadAllActiveEmployees, syncDerivedPayrollState]);
 
   useEffect(() => {
     if (id) {
@@ -210,6 +231,7 @@ export function PayPeriodDetail() {
       // new panel loads.
       setNonEmployeeChecks([]);
       setSupplementals([]);
+      setTipsLoansVisibilityMode('auto');
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
@@ -362,25 +384,7 @@ export function PayPeriodDetail() {
       setPayPeriod(response.pay_period);
       setPayrollItems(response.pay_period.payroll_items || []);
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
-      // Refresh salary override map from results
-      const newOverrides: Record<string, number> = {};
-      (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
-        if (item.salary_override && toNumber(item.salary_override) > 0) {
-          newOverrides[String(item.employee_id)] = toNumber(item.salary_override);
-        }
-      });
-      setSalaryOverrideMap(newOverrides);
-      // Refresh tips/loans maps from results
-      const newTips: Record<string, { amount: number; pool: string }> = {};
-      const newLoans: Record<string, number> = {};
-      (response.pay_period.payroll_items || []).forEach((item: PayrollItem) => {
-        const tipAmt = toNumber(item.reported_tips);
-        if (tipAmt > 0) newTips[String(item.employee_id)] = { amount: tipAmt, pool: item.tip_pool || '' };
-        const loanAmt = toNumber(item.loan_deduction);
-        if (loanAmt > 0) newLoans[String(item.employee_id)] = loanAmt;
-      });
-      setTipsMap(newTips);
-      setLoansMap(newLoans);
+      syncDerivedPayrollState(response.pay_period.payroll_items || []);
       setAdditionalEmployeeIds(new Set());
 
       if (response.results.errors.length > 0) {
@@ -457,6 +461,8 @@ export function PayPeriodDetail() {
     setPayPeriod(updatedPayPeriod);
     setPayrollItems(updatedPayPeriod.payroll_items || []);
     setHoursMap(buildHoursMap(updatedPayPeriod.payroll_items || [], employees));
+    syncDerivedPayrollState(updatedPayPeriod.payroll_items || []);
+    setAdditionalEmployeeIds(new Set());
   };
 
   const handlePayrollItemSaved = (updated: PayrollItem) => {
@@ -732,9 +738,17 @@ export function PayPeriodDetail() {
         {/* Hours Input (Draft Mode) */}
         {(isDraft || isCalculated) && (
           <Card>
-            <button
-              className="w-full p-4 border-b text-left hover:bg-gray-50/50 transition-colors"
+            <div
+              role="button"
+              tabIndex={0}
+              className="w-full border-b p-4 text-left transition-colors hover:bg-gray-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 focus-visible:ring-inset"
               onClick={() => setHoursTableOpen(prev => !prev)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setHoursTableOpen(prev => !prev);
+                }
+              }}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-center gap-2">
@@ -756,7 +770,11 @@ export function PayPeriodDetail() {
                 {hoursTableOpen && (
                   <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => setShowTipsLoans(prev => !prev)}
+                      type="button"
+                      onClick={() => {
+                        setTipsLoansVisibilityMode('manual');
+                        setShowTipsLoans(prev => !prev);
+                      }}
                       className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
                         showTipsLoans
                           ? 'bg-blue-100 text-blue-700 border-blue-300'
@@ -765,12 +783,12 @@ export function PayPeriodDetail() {
                     >
                       {showTipsLoans ? 'Tips & Loans ✓' : '+ Tips & Loans'}
                     </button>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Search employees..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Search employees..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-48 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                       <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -780,7 +798,7 @@ export function PayPeriodDetail() {
                   </div>
                 )}
               </div>
-            </button>
+            </div>
             {hoursTableOpen && (
             <div className="overflow-x-auto">
               <Table style={{ minWidth: 1380 + (showTipsLoans ? 280 : 0) }}>
@@ -995,6 +1013,7 @@ export function PayPeriodDetail() {
                               <option value="">—</option>
                               <option value="foh">FOH</option>
                               <option value="boh">BOH</option>
+                              <option value="mixed">Mixed</option>
                             </select>
                           </div>
                         </TableCell>
@@ -1049,7 +1068,7 @@ export function PayPeriodDetail() {
                 <div className="relative shrink-0">
                   <input
                     type="text"
-                    placeholder="Search employees..."
+                    placeholder="Search employees and checks..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1082,7 +1101,13 @@ export function PayPeriodDetail() {
                 <TableBody>
                   {(() => {
                     const displayItems = searchTerm.trim()
-                      ? sortedPayrollItems.filter(i => i.employee_name?.toLowerCase().includes(searchTerm.toLowerCase()))
+                      ? sortedPayrollItems.filter((item) => {
+                          const term = searchTerm.toLowerCase();
+                          return (
+                            item.employee_name?.toLowerCase().includes(term) ||
+                            item.check_number?.toLowerCase().includes(term)
+                          );
+                        })
                       : sortedPayrollItems;
                     return displayItems.map((item, idx) => {
                     const isManual = !item.import_source;
@@ -1234,7 +1259,13 @@ export function PayPeriodDetail() {
                               <span>
                                 {formatCurrency(toNumber(item.reported_tips))}
                                 {item.tip_pool && (
-                                  <span className={`ml-1 text-[10px] font-medium uppercase ${item.tip_pool === 'boh' ? 'text-amber-600' : 'text-blue-600'}`}>
+                                  <span className={`ml-1 text-[10px] font-medium uppercase ${
+                                    item.tip_pool === 'boh'
+                                      ? 'text-amber-600'
+                                      : item.tip_pool === 'mixed'
+                                      ? 'text-violet-600'
+                                      : 'text-blue-600'
+                                  }`}>
                                     {item.tip_pool}
                                   </span>
                                 )}
@@ -1537,7 +1568,7 @@ export function PayPeriodDetail() {
               </a>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} />
+              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} />
             </div>
           </Card>
         )}

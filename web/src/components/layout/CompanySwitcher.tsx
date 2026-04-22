@@ -1,9 +1,35 @@
 import { useState, useRef, useEffect } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 
+interface CompanySwitchRedirect {
+  notice: string;
+  to: string;
+}
+
+function getCompanySwitchRedirect(pathname: string): CompanySwitchRedirect | null {
+  if (matchPath('/pay-periods/:id', pathname)) {
+    return {
+      notice: 'Switched clients. Showing pay periods for the selected client.',
+      to: '/pay-periods',
+    };
+  }
+
+  if (pathname !== '/employees/new' && matchPath('/employees/:id', pathname)) {
+    return {
+      notice: 'Switched clients. Showing employees for the selected client.',
+      to: '/employees',
+    };
+  }
+
+  return null;
+}
+
 export function CompanySwitcher() {
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -13,9 +39,28 @@ export function CompanySwitcher() {
         setIsOpen(false);
       }
     }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
   }, []);
+
+  const handleCompanySelect = (companyId: number) => {
+    setIsOpen(false);
+
+    if (companyId === activeCompany?.id) {
+      return;
+    }
+
+    const redirect = getCompanySwitchRedirect(location.pathname);
+
+    analytics.companySwitch(companyId);
+    switchCompany(companyId);
+
+    if (redirect) {
+      navigate(redirect.to, {
+        state: { companySwitchNotice: redirect.notice },
+      });
+    }
+  };
 
   if (!canSwitchCompany || companies.length <= 1) {
     return (
@@ -32,6 +77,7 @@ export function CompanySwitcher() {
     <div className="relative border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
       <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
       <button
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="mt-1 flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50/70 px-3 py-2 text-left transition-colors hover:bg-neutral-100"
       >
@@ -55,12 +101,9 @@ export function CompanySwitcher() {
         <div className="absolute left-2 right-2 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg">
           {companies.map(company => (
             <button
+              type="button"
               key={company.id}
-              onClick={() => {
-                switchCompany(company.id);
-                analytics.companySwitch(company.id);
-                setIsOpen(false);
-              }}
+              onClick={() => handleCompanySelect(company.id)}
               className={`flex w-full items-center justify-between border-b border-neutral-100 px-4 py-3 text-left transition-colors last:border-0 hover:bg-primary-50 ${
                 company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''
               }`}

@@ -13,6 +13,7 @@ import { ReprintCheckModal } from './ReprintCheckModal';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
+  searchTerm?: string;
 }
 
 function checkStatusBadge(item: CheckItem) {
@@ -31,7 +32,7 @@ function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
-export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -223,6 +224,24 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
   }
 
   const unprintedCount = meta?.unprinted ?? 0;
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredChecks = normalizedSearch
+    ? checks.filter((item) => {
+        const statusLabel = item.voided
+          ? 'voided'
+          : item.check_printed_at
+          ? 'printed'
+          : item.check_number
+          ? 'unprinted'
+          : 'no check';
+
+        return [
+          item.employee_name,
+          item.check_number,
+          statusLabel,
+        ].some((value) => value?.toLowerCase().includes(normalizedSearch));
+      })
+    : checks;
 
   return (
     <div className="space-y-4">
@@ -238,6 +257,12 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
                 <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
               )}
             </>
+          )}
+          {normalizedSearch && (
+            <span>
+              Showing <span className="font-medium text-gray-900">{filteredChecks.length}</span> of{' '}
+              <span className="font-medium text-gray-900">{checks.length}</span>
+            </span>
           )}
         </div>
 
@@ -274,9 +299,9 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
       </div>
 
       {/* Checks table */}
-      {checks.length === 0 ? (
+      {filteredChecks.length === 0 ? (
         <div className="py-8 text-center text-gray-500 text-sm">
-          No checks found for this pay period.
+          {normalizedSearch ? 'No checks match this search.' : 'No checks found for this pay period.'}
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -291,7 +316,7 @@ export function ChecksPanel({ payPeriod }: ChecksPanelProps) {
               </tr>
             </thead>
             <tbody>
-              {checks.map((item) => (
+              {filteredChecks.map((item) => (
                 <tr
                   key={item.id}
                   className={`border-b border-gray-100 hover:bg-gray-50 ${item.voided ? 'opacity-60' : ''}`}
