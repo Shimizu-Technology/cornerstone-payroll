@@ -272,7 +272,7 @@ export interface PayrollItem {
   // Import fields (MoSa)
   tips?: number;
   loan_deduction?: number;
-  tip_pool?: 'boh' | 'foh' | null;
+  tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   import_source?: string | null;
   // Custom/flexible deductions
   custom_columns_data?: Record<string, number>;
@@ -320,7 +320,7 @@ export interface CorrectivePaycheckInputs {
   pto_hours?: number;
   bonus?: number;
   reported_tips?: number;
-  tip_pool?: 'boh' | 'foh' | null;
+  tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   additional_withholding?: number;
   custom_earnings?: { label: string; amount: number }[];
   custom_columns_data?: Record<string, number>;

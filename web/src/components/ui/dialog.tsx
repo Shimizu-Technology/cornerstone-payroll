@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 
 interface DialogProps {
@@ -10,22 +11,32 @@ interface DialogProps {
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100]">
       <div
-        className="fixed inset-0 bg-black/50"
+        className="absolute inset-0 bg-black/55 backdrop-blur-[1.5px]"
         onClick={() => onOpenChange(false)}
       />
+
       {/*
         Default modal sits at max-w-lg (~512px) — fine for confirmation dialogs.
         Any DialogContent that adds `.dialog-wide` opts into the wider tier:
           - lg+ screens: capped at max-w-7xl (1280px)
           - smaller screens: shrinks to fit (with the inner mx-4 gutter)
-        ImportModal additionally clamps itself to max-w-6xl for its own layout;
-        Replace/Corrective modals leave it uncapped so they fill the 7xl tier.
+        ImportModal additionally opts into `.dialog-top` so the workflow starts near the
+        top of the viewport instead of the vertical midpoint.
       */}
-      <div className="relative z-50 w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
-    </div>
+      <div className="relative z-10 h-full overflow-y-auto p-4 sm:p-6">
+        <div className="flex min-h-full items-center justify-center py-4 [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
+          <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 

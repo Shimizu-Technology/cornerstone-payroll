@@ -53,7 +53,7 @@ function applyCompanyResponse(
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const userId = user?.id ?? null;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<number | null>(
@@ -101,6 +101,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     if (!isAuthenticated || userId === null) {
       const resetTimer = window.setTimeout(() => {
         if (!mountedRef.current) return;
@@ -116,23 +120,26 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }, 0);
 
     return () => window.clearTimeout(initTimer);
-  }, [isAuthenticated, userId, resetCompanyState]);
+  }, [authLoading, isAuthenticated, userId, resetCompanyState]);
 
   useEffect(() => {
-    if (!isAuthenticated || userId === null || fetched) return;
+    if (authLoading || !isAuthenticated || userId === null || fetched) return;
 
     const fetchTimer = window.setTimeout(() => {
       void refreshCompanies();
     }, 0);
 
     return () => window.clearTimeout(fetchTimer);
-  }, [isAuthenticated, userId, fetched, refreshCompanies]);
+  }, [authLoading, isAuthenticated, userId, fetched, refreshCompanies]);
 
   const switchCompany = useCallback((companyId: number) => {
+    if (companyId === activeCompanyId) {
+      return;
+    }
+
     setActiveCompanyId(companyId);
     companiesApi.switchCompany(companyId);
-    window.location.href = '/';
-  }, []);
+  }, [activeCompanyId]);
 
   const activeCompany = companies.find(c => c.id === activeCompanyId) || null;
 
