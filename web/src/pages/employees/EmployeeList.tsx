@@ -113,6 +113,16 @@ export function EmployeeList() {
     navigate('.', { replace: true, state: null });
   }, [location.state, navigate]);
 
+  useEffect(() => {
+    if (!switchNotice) return;
+
+    const timer = window.setTimeout(() => {
+      setSwitchNotice(null);
+    }, 6000);
+
+    return () => window.clearTimeout(timer);
+  }, [switchNotice]);
+
   const updateFilter = (key: string, value: string): void => {
     const newParams = new URLSearchParams(searchParams);
     if (value) {
@@ -231,8 +241,19 @@ export function EmployeeList() {
           </div>
         )}
         {switchNotice && (
-          <div className="mb-6 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800">
-            {switchNotice}
+          <div
+            role="status"
+            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800"
+          >
+            <span>{switchNotice}</span>
+            <button
+              type="button"
+              onClick={() => setSwitchNotice(null)}
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 hover:text-primary-900"
+              aria-label="Dismiss company switch notice"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
