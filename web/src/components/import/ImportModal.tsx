@@ -113,7 +113,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="dialog-wide max-w-6xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="dialog-top dialog-wide max-w-6xl max-h-[calc(100vh-8rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Import Payroll Data</DialogTitle>
           <DialogDescription>

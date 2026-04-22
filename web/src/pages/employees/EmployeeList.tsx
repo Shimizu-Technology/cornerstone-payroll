@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Plus, 
   Search, 
@@ -44,6 +44,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 export function EmployeeList() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -54,6 +55,10 @@ export function EmployeeList() {
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    return state?.companySwitchNotice ?? null;
+  });
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -99,6 +104,24 @@ export function EmployeeList() {
     fetchEmployees();
     fetchDepartments();
   }, [fetchEmployees, fetchDepartments]);
+
+  useEffect(() => {
+    const state = location.state as { companySwitchNotice?: string } | null;
+    if (!state?.companySwitchNotice) return;
+
+    setSwitchNotice(state.companySwitchNotice);
+    navigate('.', { replace: true, state: null });
+  }, [location.state, navigate]);
+
+  useEffect(() => {
+    if (!switchNotice) return;
+
+    const timer = window.setTimeout(() => {
+      setSwitchNotice(null);
+    }, 6000);
+
+    return () => window.clearTimeout(timer);
+  }, [switchNotice]);
 
   const updateFilter = (key: string, value: string): void => {
     const newParams = new URLSearchParams(searchParams);
@@ -215,6 +238,22 @@ export function EmployeeList() {
         {error && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg text-danger-700">
             {error}
+          </div>
+        )}
+        {switchNotice && (
+          <div
+            role="status"
+            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-primary-200 bg-primary-50 p-4 text-primary-800"
+          >
+            <span>{switchNotice}</span>
+            <button
+              type="button"
+              onClick={() => setSwitchNotice(null)}
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 hover:text-primary-900"
+              aria-label="Dismiss company switch notice"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
