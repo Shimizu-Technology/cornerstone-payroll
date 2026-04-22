@@ -19,7 +19,6 @@ module Api
             company_id: current_company_id,
             company_name: current_company&.name,
             home_company_id: current_user.company_id,
-            super_admin: current_user.super_admin?,
             assigned_company_ids: current_user.accessible_company_ids
           }
         }

@@ -16,11 +16,10 @@ module Api
           end
         end
 
-        # Accountants can only access companies they're assigned to.
-        # Super admins and regular admins bypass this check.
+        # Admins can access every company. Other staff must stay inside their
+        # assigned client scope.
         def enforce_company_access!
           return if current_user.nil?
-          return if current_user.super_admin?
           return if current_user.admin?
 
           unless current_user.can_access_company?(current_company_id)

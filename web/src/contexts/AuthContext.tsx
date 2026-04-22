@@ -10,7 +10,6 @@ interface User {
   role: string;
   company_id: number;
   company_name: string;
-  super_admin: boolean;
   assigned_company_ids: number[];
 }
 
@@ -36,8 +35,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     role: user.role,
     company_id: user.company_id,
     company_name: user.company_name,
-    super_admin: (user as Record<string, unknown>).super_admin as boolean || false,
-    assigned_company_ids: (user as Record<string, unknown>).assigned_company_ids as number[] || [],
+    assigned_company_ids: user.assigned_company_ids || [],
   };
 }
 

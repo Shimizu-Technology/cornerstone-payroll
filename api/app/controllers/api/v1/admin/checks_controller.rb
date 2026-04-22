@@ -389,6 +389,12 @@ module Api
             return render json: { errors: [ "#{key} must be a number" ] }, status: :unprocessable_entity
           end
 
+          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
+            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
+          elsif permitted[:check_layout_config].is_a?(Hash)
+            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
+          end
+
           if @company.update(permitted)
             render json: { check_settings: company_check_settings_json(@company) }
           else
@@ -570,6 +576,19 @@ module Api
             auto_create_fit_check: company.auto_create_fit_check,
             check_layout_config: company.check_layout_config || {}
           }
+        end
+
+        def normalize_layout_numeric_values(value)
+          case value
+          when Hash
+            value.transform_values { |nested| normalize_layout_numeric_values(nested) }
+          when Array
+            value.map { |nested| normalize_layout_numeric_values(nested) }
+          when String
+            value.match?(/\A-?\d+(\.\d+)?\z/) ? value.to_f : value
+          else
+            value
+          end
         end
 
         # -----------------------------------------------------------------------

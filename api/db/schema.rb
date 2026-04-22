@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_16_100008) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_22_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -732,7 +732,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_16_100008) do
     t.datetime "last_login_at"
     t.string "name", null: false
     t.integer "role", default: 0, null: false
-    t.boolean "super_admin", default: false, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
     t.index ["clerk_id"], name: "index_users_on_clerk_id", unique: true

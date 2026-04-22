@@ -7,8 +7,7 @@ module Api
         skip_before_action :enforce_company_access!, only: [:index]
 
         # GET /api/v1/admin/companies
-        # Super admins see all companies; accountants see assigned companies;
-        # regular users see only their own.
+        # Admins see all companies; non-admin staff see only accessible ones.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
           companies = Company.where(id: accessible_ids).order(:name)
@@ -26,8 +25,8 @@ module Api
                 active_employee_counts: active_employee_counts
               )
             end,
-            is_super_admin: current_user&.super_admin? || false,
-            can_switch_company: current_user&.super_admin? || company_ids.length > 1,
+            can_manage_clients: current_user&.admin? || false,
+            can_switch_company: current_user&.admin? || company_ids.length > 1,
             current_company_id: current_company_id
           }
         end
@@ -44,8 +43,8 @@ module Api
 
         # POST /api/v1/admin/companies
         def create
-          unless current_user&.super_admin?
-            return render json: { error: "Only super admins can create companies" }, status: :forbidden
+          unless current_user&.admin?
+            return render json: { error: "Only admins can create companies" }, status: :forbidden
           end
 
           company = Company.new(company_params)
@@ -66,8 +65,8 @@ module Api
         # PATCH/PUT /api/v1/admin/companies/:id
         def update
           company = Company.find(params[:id])
-          unless current_user&.super_admin?
-            return render json: { error: "Only super admins can update companies" }, status: :forbidden
+          unless current_user&.admin?
+            return render json: { error: "Only admins can update companies" }, status: :forbidden
           end
 
           if company.update(company_params)

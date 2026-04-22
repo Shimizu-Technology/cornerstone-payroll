@@ -36,12 +36,12 @@ class User < ApplicationRecord
   end
 
   # Returns all companies this user can access:
-  # - super_admin: all companies
-  # - staff with assignments: home company + assigned companies
+  # - admins: all companies
+  # - managers/accountants: explicitly assigned companies (or home company)
   # - everyone else: just their home company
   def accessible_company_ids
     @accessible_company_ids ||= begin
-      if super_admin? || admin?
+      if admin?
         Company.ids
       else
         assigned_ids = if association(:company_assignments).loaded?
@@ -61,7 +61,7 @@ class User < ApplicationRecord
   end
 
   def can_access_company?(cid)
-    return true if super_admin? || admin?
+    return true if admin?
 
     accessible_company_ids.include?(cid)
   end
