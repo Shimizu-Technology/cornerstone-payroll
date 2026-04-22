@@ -165,9 +165,8 @@ module Api
 
         def pay_stub_key(item)
           year = item.pay_period.pay_date.year
-          employee_id = item.employee_id
           pay_date = item.pay_period.pay_date.strftime("%Y%m%d")
-          "paystubs/#{year}/#{employee_id}/paystub_#{pay_date}.pdf"
+          "paystubs/#{year}/company_#{item.company_id}/employee_#{item.employee_id}/payroll_item_#{item.id}_#{pay_date}.pdf"
         end
 
         def pay_stub_exists?

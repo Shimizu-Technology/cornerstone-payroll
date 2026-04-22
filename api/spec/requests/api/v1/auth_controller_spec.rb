@@ -31,7 +31,13 @@ RSpec.describe "Api::V1::Auth", type: :request do
       get "/api/v1/auth/me"
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("user", "id")).to eq(user.id)
+      expect(response.parsed_body.fetch("user")).to include(
+        "id" => user.id,
+        "role" => "admin",
+        "home_company_id" => company.id,
+        "assigned_company_ids" => [company.id]
+      )
+      expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
     end
   end
 end

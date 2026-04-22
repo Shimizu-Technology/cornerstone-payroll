@@ -68,8 +68,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       expect(data.map { |row| row.fetch("user_id") }).not_to include(foreign_user.id)
     end
 
-    it "keeps super admins scoped to their staff company" do
-      admin_user.update!(super_admin: true)
+    it "keeps admins scoped to their staff company even when switched to another client" do
       allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_company_id).and_return(switched_staff_company.id)
 
       get "/api/v1/admin/company_assignments", params: { user_id: managed_user.id }
@@ -92,12 +91,12 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
   end
 
   describe "PUT /api/v1/admin/company_assignments/bulk_update" do
-    it "rejects inaccessible company ids" do
+    it "allows admins to assign any payroll client they can access globally" do
       put "/api/v1/admin/company_assignments/bulk_update",
         params: { user_id: managed_user.id, company_ids: [other_company.id] }
 
-      expect(response).to have_http_status(:forbidden)
-      expect(managed_user.company_assignments.reload.map(&:company_id)).to eq([client_company.id])
+      expect(response).to have_http_status(:ok)
+      expect(managed_user.company_assignments.reload.map(&:company_id)).to eq([other_company.id])
     end
   end
 end

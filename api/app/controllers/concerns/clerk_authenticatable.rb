@@ -143,7 +143,8 @@ module ClerkAuthenticatable
     end
 
     invitation = UserInvitation.active.where("LOWER(email) = ?", email).order(invited_at: :desc).first
-    return bootstrap_first_user!(payload, email, clerk_name) unless invitation
+    return bootstrap_first_user!(payload, email, clerk_name) if initial_admin_bootstrap_allowed?(email)
+    return nil unless invitation
 
     User.transaction do
       new_user = User.create!(
@@ -178,12 +179,24 @@ module ClerkAuthenticatable
         clerk_id: payload["sub"],
         company: company,
         role: "admin",
-        super_admin: true,
         invitation_status: "accepted"
       )
     end.tap do |user|
-      Rails.logger.warn("Bootstrapped first production user #{user.email} as super admin")
+      Rails.logger.warn("Bootstrapped first production admin #{user.email}")
     end
+  end
+
+  def initial_admin_bootstrap_allowed?(email)
+    return false if User.exists?
+
+    allowed_emails = ENV.fetch("INITIAL_ADMIN_EMAILS", "")
+                        .split(",")
+                        .map { |value| value.strip.downcase }
+                        .reject(&:blank?)
+
+    return true if allowed_emails.include?(email)
+
+    ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"] == "true"
   end
 
   def fetch_clerk_user(clerk_id)

@@ -19,15 +19,14 @@ RSpec.describe User, type: :model do
   end
 
   describe "#accessible_company_ids" do
-    it "memoizes the super-admin company lookup" do
+    it "memoizes the admin company lookup" do
       company = create(:company)
       user = User.create!(
         company: company,
-        email: "super-admin-access@example.com",
-        name: "Super Admin",
+        email: "admin-access@example.com",
+        name: "Admin",
         role: "admin",
-        active: true,
-        super_admin: true
+        active: true
       )
 
       expect(Company).to receive(:ids).once.and_return([company.id])
