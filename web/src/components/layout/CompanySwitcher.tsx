@@ -1,9 +1,35 @@
 import { useState, useRef, useEffect } from 'react';
+import { matchPath, useLocation, useNavigate } from 'react-router-dom';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 
+interface CompanySwitchRedirect {
+  notice: string;
+  to: string;
+}
+
+function getCompanySwitchRedirect(pathname: string): CompanySwitchRedirect | null {
+  if (matchPath('/pay-periods/:id', pathname)) {
+    return {
+      notice: 'Switched clients. Showing pay periods for the selected client.',
+      to: '/pay-periods',
+    };
+  }
+
+  if (pathname !== '/employees/new' && matchPath('/employees/:id', pathname)) {
+    return {
+      notice: 'Switched clients. Showing employees for the selected client.',
+      to: '/employees',
+    };
+  }
+
+  return null;
+}
+
 export function CompanySwitcher() {
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -24,8 +50,16 @@ export function CompanySwitcher() {
       return;
     }
 
+    const redirect = getCompanySwitchRedirect(location.pathname);
+
     analytics.companySwitch(companyId);
     switchCompany(companyId);
+
+    if (redirect) {
+      navigate(redirect.to, {
+        state: { companySwitchNotice: redirect.notice },
+      });
+    }
   };
 
   if (!canSwitchCompany || companies.length <= 1) {
