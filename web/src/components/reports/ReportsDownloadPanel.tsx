@@ -70,7 +70,11 @@ function SignoffEditorModal({
   const [periodDesc, setPeriodDesc] = useState('');
 
   useEffect(() => {
-    if (!open) { setInitialized(false); return; }
+    if (!open) {
+      const resetTimer = window.setTimeout(() => setInitialized(false), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handleEsc);
     return () => document.removeEventListener('keydown', handleEsc);
@@ -78,42 +82,56 @@ function SignoffEditorModal({
 
   useEffect(() => {
     if (!open || initialized) return;
-    setLoadingPreview(true);
-    setNewNote('');
-    reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
-      setCompanyName(data.company_name);
-      if (data.period_start && data.period_end) {
-        const [sY, sM, sD] = data.period_start.split('-').map(Number);
-        const [eY, eM, eD] = data.period_end.split('-').map(Number);
-        const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
-        setPeriodDesc(sM === eM && sY === eY
-          ? `${months[sM]} ${sD}-${eD}, ${eY}`
-          : `${months[sM]} ${sD} - ${months[eM]} ${eD}, ${eY}`);
-      }
+    let cancelled = false;
+    const requestTimer = window.setTimeout(() => {
+      setLoadingPreview(true);
+      setNewNote('');
+      reportsApi.checkSignoffPreview(payPeriodId).then((data) => {
+        if (cancelled) return;
 
-      const saved = data.saved_signoff;
-      if (saved) {
-        setSavedState({ generated_at: saved.generated_at });
-        const savedNames = new Set(saved.entries.map((e: { name: string }) => e.name));
-        const mergedEntries = saved.entries.map((e: { name: string; check_number: string }) => ({
-          name: e.name, check_number: e.check_number, included: true
-        }));
-        data.entries.forEach(e => {
-          if (!savedNames.has(e.name)) {
-            mergedEntries.push({ name: e.name, check_number: e.check_number, included: false });
-          }
-        });
-        setEntries(mergedEntries);
-        setNotes(saved.notes?.length ? [...saved.notes] : []);
-      } else {
-        setSavedState(null);
-        setEntries(data.entries.map(e => ({
-          name: e.name, check_number: e.check_number, included: true
-        })));
-        setNotes([]);
-      }
-      setInitialized(true);
-    }).catch(() => { setInitialized(true); }).finally(() => setLoadingPreview(false));
+        setCompanyName(data.company_name);
+        if (data.period_start && data.period_end) {
+          const [sY, sM, sD] = data.period_start.split('-').map(Number);
+          const [eY, eM, eD] = data.period_end.split('-').map(Number);
+          const months = ['','January','February','March','April','May','June','July','August','September','October','November','December'];
+          setPeriodDesc(sM === eM && sY === eY
+            ? `${months[sM]} ${sD}-${eD}, ${eY}`
+            : `${months[sM]} ${sD} - ${months[eM]} ${eD}, ${eY}`);
+        }
+
+        const saved = data.saved_signoff;
+        if (saved) {
+          setSavedState({ generated_at: saved.generated_at });
+          const savedNames = new Set(saved.entries.map((e: { name: string }) => e.name));
+          const mergedEntries = saved.entries.map((e: { name: string; check_number: string }) => ({
+            name: e.name, check_number: e.check_number, included: true
+          }));
+          data.entries.forEach(e => {
+            if (!savedNames.has(e.name)) {
+              mergedEntries.push({ name: e.name, check_number: e.check_number, included: false });
+            }
+          });
+          setEntries(mergedEntries);
+          setNotes(saved.notes?.length ? [...saved.notes] : []);
+        } else {
+          setSavedState(null);
+          setEntries(data.entries.map(e => ({
+            name: e.name, check_number: e.check_number, included: true
+          })));
+          setNotes([]);
+        }
+        setInitialized(true);
+      }).catch(() => {
+        if (!cancelled) setInitialized(true);
+      }).finally(() => {
+        if (!cancelled) setLoadingPreview(false);
+      });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(requestTimer);
+    };
   }, [open, payPeriodId, initialized]);
 
   if (!open) return null;
@@ -366,8 +384,8 @@ function TransmittalEditorModal({
 
   useEffect(() => {
     if (!open) {
-      setInitialized(false);
-      return;
+      const resetTimer = window.setTimeout(() => setInitialized(false), 0);
+      return () => window.clearTimeout(resetTimer);
     }
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -378,53 +396,67 @@ function TransmittalEditorModal({
 
   useEffect(() => {
     if (!open || initialized) return;
-    setLoadingPreview(true);
-    setNewNote('');
-    setNewReport('');
-    transmittalApi.preview(payPeriodId).then((data) => {
-      setPreview(data);
-      setSavedState(data.saved_transmittal);
+    let cancelled = false;
+    const requestTimer = window.setTimeout(() => {
+      setLoadingPreview(true);
+      setNewNote('');
+      setNewReport('');
+      transmittalApi.preview(payPeriodId).then((data) => {
+        if (cancelled) return;
 
-      const saved = data.saved_transmittal;
-      if (saved) {
-        setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
-        setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
-        setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
-        setCheckFirst(saved.check_number_first || data.payroll_checks.first || '');
-        setCheckLast(saved.check_number_last || data.payroll_checks.last || '');
-        const neNums: Record<number, string> = {};
-        data.non_employee_checks.forEach(c => {
-          const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
-          neNums[c.id] = savedNum || c.check_number || '';
-        });
-        setNeCheckNumbers(neNums);
-        setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
-      } else {
+        setPreview(data);
+        setSavedState(data.saved_transmittal);
+
+        const saved = data.saved_transmittal;
+        if (saved) {
+          setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
+          setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
+          setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
+          setCheckFirst(saved.check_number_first || data.payroll_checks.first || '');
+          setCheckLast(saved.check_number_last || data.payroll_checks.last || '');
+          const neNums: Record<number, string> = {};
+          data.non_employee_checks.forEach(c => {
+            const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
+            neNums[c.id] = savedNum || c.check_number || '';
+          });
+          setNeCheckNumbers(neNums);
+          setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
+        } else {
+          setPreparerName('Cornerstone Tax Services');
+          setReportList([...DEFAULT_REPORT_LIST]);
+          setCheckFirst(data.payroll_checks.first || '');
+          setCheckLast(data.payroll_checks.last || '');
+          const neNums: Record<number, string> = {};
+          data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
+          setNeCheckNumbers(neNums);
+          setCustomEntries([]);
+          const autoNotes: string[] = [];
+          if (data.tax_totals.total_fica > 0) {
+            autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
+          }
+          if (data.tax_totals.fit > 0) {
+            autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+          }
+          autoNotes.push(...DEFAULT_NOTES);
+          setNotes(autoNotes);
+        }
+        setInitialized(true);
+      }).catch(() => {
+        if (cancelled) return;
+
         setPreparerName('Cornerstone Tax Services');
         setReportList([...DEFAULT_REPORT_LIST]);
-        setCheckFirst(data.payroll_checks.first || '');
-        setCheckLast(data.payroll_checks.last || '');
-        const neNums: Record<number, string> = {};
-        data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
-        setNeCheckNumbers(neNums);
-        setCustomEntries([]);
-        const autoNotes: string[] = [];
-        if (data.tax_totals.total_fica > 0) {
-          autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
-        }
-        if (data.tax_totals.fit > 0) {
-          autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
-        }
-        autoNotes.push(...DEFAULT_NOTES);
-        setNotes(autoNotes);
-      }
-      setInitialized(true);
-    }).catch(() => {
-      setPreparerName('Cornerstone Tax Services');
-      setReportList([...DEFAULT_REPORT_LIST]);
-      setNotes([...DEFAULT_NOTES]);
-      setInitialized(true);
-    }).finally(() => setLoadingPreview(false));
+        setNotes([...DEFAULT_NOTES]);
+        setInitialized(true);
+      }).finally(() => {
+        if (!cancelled) setLoadingPreview(false);
+      });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(requestTimer);
+    };
   }, [open, payPeriodId, initialized]);
 
   if (!open) return null;

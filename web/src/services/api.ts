@@ -1507,10 +1507,28 @@ export interface CompanyFormData {
   next_check_number?: number;
 }
 
+interface CompanyListResponse {
+  companies: CompanyListItem[];
+  can_manage_clients: boolean;
+  can_switch_company: boolean;
+  current_company_id: number;
+}
+
+interface AuthApiUser {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  company_id: number;
+  company_name: string;
+  home_company_id: number;
+  assigned_company_ids: number[];
+}
+
 export const companiesApi = {
   list: (params?: { active?: boolean }) => {
     const query = params?.active !== undefined ? `?active=${params.active}` : '';
-    return api.get<{ companies: CompanyListItem[]; is_super_admin: boolean; can_switch_company: boolean; current_company_id: number }>(`/admin/companies${query}`);
+    return api.get<CompanyListResponse>(`/admin/companies${query}`);
   },
   get: (id: number) =>
     api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`),
@@ -1521,6 +1539,10 @@ export const companiesApi = {
   switchCompany: (companyId: number) => {
     api.setActiveCompanyId(companyId);
     localStorage.setItem('activeCompanyId', String(companyId));
+  },
+  clearActiveCompanyId: () => {
+    api.setActiveCompanyId(null);
+    localStorage.removeItem('activeCompanyId');
   },
   getActiveCompanyId: (): number | null => {
     const stored = localStorage.getItem('activeCompanyId');
@@ -1711,12 +1733,13 @@ export const dashboardApi = {
 
 // Auth
 export const authApi = {
-  me: () => api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string; super_admin: boolean; home_company_id: number } }>('/auth/me'),
+  me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
   login: (token: string) => {
     api.setAuthToken(token);
-    return api.get<{ user: { id: number; email: string; name: string; role: string; company_id: number; company_name: string; super_admin: boolean; home_company_id: number } }>('/auth/me');
+    return api.get<{ user: AuthApiUser }>('/auth/me');
   },
   logout: () => {
     api.setAuthToken(null);
+    companiesApi.clearActiveCompanyId();
   },
 };

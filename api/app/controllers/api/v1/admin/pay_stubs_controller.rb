@@ -9,6 +9,8 @@ module Api
         # GET /api/v1/admin/pay_stubs/:payroll_item_id
         # Get pay stub info (not the PDF itself)
         def show
+          existing_key = existing_storage_key
+
           render json: {
             pay_stub: {
               payroll_item_id: @payroll_item.id,
@@ -16,8 +18,8 @@ module Api
               pay_period: @payroll_item.pay_period.period_description,
               pay_date: @payroll_item.pay_period.pay_date,
               net_pay: @payroll_item.net_pay,
-              generated: pay_stub_exists?,
-              storage_key: storage_key
+              generated: existing_key.present?,
+              storage_key: existing_key || storage_key
             }
           }
         end
@@ -52,9 +54,10 @@ module Api
         # Download the PDF (generate on-the-fly or from storage)
         def download
           # Try to get from storage first
-          if r2_configured? && pay_stub_exists?
+          if r2_configured?
             storage = R2StorageService.new
-            pdf_data = storage.download(storage_key)
+            key = existing_storage_key(storage: storage)
+            pdf_data = storage.download(key) if key.present?
           end
 
           # Generate fresh if not in storage
@@ -165,18 +168,29 @@ module Api
 
         def pay_stub_key(item)
           year = item.pay_period.pay_date.year
-          employee_id = item.employee_id
           pay_date = item.pay_period.pay_date.strftime("%Y%m%d")
-          "paystubs/#{year}/#{employee_id}/paystub_#{pay_date}.pdf"
+          "paystubs/#{year}/company_#{item.company_id}/employee_#{item.employee_id}/payroll_item_#{item.id}_#{pay_date}.pdf"
+        end
+
+        def legacy_pay_stub_key(item)
+          year = item.pay_period.pay_date.year
+          pay_date = item.pay_period.pay_date.strftime("%Y%m%d")
+          "paystubs/#{year}/#{item.employee_id}/paystub_#{pay_date}.pdf"
+        end
+
+        def existing_storage_key(item = @payroll_item, storage: nil)
+          return nil unless r2_configured?
+
+          storage ||= R2StorageService.new
+          [pay_stub_key(item), legacy_pay_stub_key(item)].uniq.find do |key|
+            storage.exists?(key)
+          end
+        rescue StandardError
+          nil
         end
 
         def pay_stub_exists?
-          return false unless r2_configured?
-
-          storage = R2StorageService.new
-          storage.exists?(storage_key)
-        rescue StandardError
-          false
+          existing_storage_key.present?
         end
 
         def r2_configured?

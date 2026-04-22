@@ -30,6 +30,8 @@ RSpec.describe "Clerk Authentication", type: :request do
     end
 
     it "rejects requests with invalid token" do
+      allow_any_instance_of(ApplicationController).to receive(:fetch_jwks).and_return([])
+
       get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer invalid.token.here" }
       expect(response).to have_http_status(:unauthorized)
       expect(JSON.parse(response.body)["error"]).to eq("Invalid or expired token")
@@ -62,11 +64,39 @@ RSpec.describe "Clerk Authentication", type: :request do
       }
     end
 
-    it "bootstraps the first user as a super admin when no users exist" do
+    it "bootstraps the first user as an admin only when explicitly allowed" do
+      User.delete_all
+      Company.delete_all
+      original_bootstrap_setting = ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"]
+      ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"] = "true"
+
+      begin
+        # Stub the auth chain to simulate a valid token for unknown user
+        allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
+          "sub" => "user_new456"
+        })
+        allow_any_instance_of(ApplicationController).to receive(:fetch_clerk_user)
+          .with("user_new456").and_return(clerk_user_response)
+
+        expect {
+          get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+        }.to change(User, :count).by(1)
+
+        new_user = User.find_by(clerk_id: "user_new456")
+        expect(new_user).to be_present
+        expect(new_user.email).to eq("new@example.com")
+        expect(new_user.name).to eq("New User")
+        expect(new_user.role).to eq("admin")
+        expect(new_user.company).to be_present
+      ensure
+        ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"] = original_bootstrap_setting
+      end
+    end
+
+    it "rejects unknown first users when bootstrap is not explicitly enabled" do
       User.delete_all
       Company.delete_all
 
-      # Stub the auth chain to simulate a valid token for unknown user
       allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
         "sub" => "user_new456"
       })
@@ -75,15 +105,9 @@ RSpec.describe "Clerk Authentication", type: :request do
 
       expect {
         get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
-      }.to change(User, :count).by(1)
+      }.not_to change(User, :count)
 
-      new_user = User.find_by(clerk_id: "user_new456")
-      expect(new_user).to be_present
-      expect(new_user.email).to eq("new@example.com")
-      expect(new_user.name).to eq("New User")
-      expect(new_user.role).to eq("admin")
-      expect(new_user.super_admin).to be(true)
-      expect(new_user.company).to be_present
+      expect(response).to have_http_status(:unauthorized)
     end
 
     it "rejects unknown users when the system has already been bootstrapped" do

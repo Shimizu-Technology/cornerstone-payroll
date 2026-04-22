@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { companiesApi, ApiError } from '@/services/api';
 import type { CompanyListItem, CompanyFormData } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const payFrequencyOptions = [
   { value: 'biweekly', label: 'Biweekly' },
@@ -50,10 +51,10 @@ function formatEIN(value: string): string {
 
 export function Clients() {
   const { refreshCompanies } = useCompany();
+  const { isAdmin: canManageClients } = useAuth();
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -68,7 +69,6 @@ export function Clients() {
       setError(null);
       const data = await companiesApi.list();
       setCompanies(data.companies);
-      setIsSuperAdmin(data.is_super_admin);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load clients');
     } finally {
@@ -175,7 +175,7 @@ export function Clients() {
         )}
 
         {/* Add new button */}
-        {isSuperAdmin && !showForm && (
+        {canManageClients && !showForm && (
           <div className="flex justify-end">
             <Button onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-2" />
@@ -395,13 +395,13 @@ export function Clients() {
                   <TableHead>Pay Frequency</TableHead>
                   <TableHead className="text-center">Employees</TableHead>
                   <TableHead className="text-center">Status</TableHead>
-                  {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
+                  {canManageClients && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={isSuperAdmin ? 6 : 5} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={canManageClients ? 6 : 5} className="text-center py-8 text-gray-500">
                       No clients found. Click "Add New Client" to get started.
                     </TableCell>
                   </TableRow>
@@ -427,7 +427,7 @@ export function Clients() {
                           <Badge variant="default">Inactive</Badge>
                         )}
                       </TableCell>
-                      {isSuperAdmin && (
+                      {canManageClients && (
                         <TableCell className="text-right">
                           <Button
                             size="sm"

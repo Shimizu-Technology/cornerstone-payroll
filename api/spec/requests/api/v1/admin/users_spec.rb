@@ -50,7 +50,6 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
     end
 
     it "admins see all users regardless of selected company" do
-      admin_user.update!(super_admin: true)
       allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_company_id).and_return(other_company.id)
 
       get "/api/v1/admin/users"

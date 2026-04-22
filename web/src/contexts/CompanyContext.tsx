@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -6,7 +7,7 @@ interface CompanyContextValue {
   companies: CompanyListItem[];
   activeCompany: CompanyListItem | null;
   activeCompanyId: number | null;
-  isSuperAdmin: boolean;
+  canManageClients: boolean;
   canSwitchCompany: boolean;
   loading: boolean;
   switchCompany: (companyId: number) => void;
@@ -17,7 +18,7 @@ const CompanyContext = createContext<CompanyContextValue>({
   companies: [],
   activeCompany: null,
   activeCompanyId: null,
-  isSuperAdmin: false,
+  canManageClients: false,
   canSwitchCompany: false,
   loading: true,
   switchCompany: () => {},
@@ -29,16 +30,16 @@ export function useCompany() {
 }
 
 function applyCompanyResponse(
-  res: { companies: CompanyListItem[]; is_super_admin: boolean; can_switch_company: boolean; current_company_id: number },
+  res: { companies: CompanyListItem[]; can_manage_clients: boolean; can_switch_company: boolean; current_company_id: number },
   setCompanies: (c: CompanyListItem[]) => void,
-  setIsSuperAdmin: (v: boolean) => void,
+  setCanManageClients: (v: boolean) => void,
   setCanSwitchCompany: (v: boolean) => void,
   setActiveCompanyId: (id: number | null) => void,
   setFetched: (v: boolean) => void,
 ) {
   setCompanies(res.companies);
-  setIsSuperAdmin(res.is_super_admin);
-  setCanSwitchCompany(res.can_switch_company ?? res.is_super_admin);
+  setCanManageClients(res.can_manage_clients);
+  setCanSwitchCompany(res.can_switch_company ?? res.can_manage_clients);
 
   const storedId = companiesApi.getActiveCompanyId();
   if (storedId && res.companies.some(c => c.id === storedId)) {
@@ -53,11 +54,12 @@ function applyCompanyResponse(
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, user } = useAuth();
+  const userId = user?.id ?? null;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<number | null>(
     companiesApi.getActiveCompanyId()
   );
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [canManageClients, setCanManageClients] = useState(false);
   const [canSwitchCompany, setCanSwitchCompany] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fetched, setFetched] = useState(false);
@@ -68,18 +70,28 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return () => { mountedRef.current = false; };
   }, []);
 
+  const resetCompanyState = useCallback(() => {
+    companiesApi.clearActiveCompanyId();
+    setCompanies([]);
+    setActiveCompanyId(null);
+    setCanManageClients(false);
+    setCanSwitchCompany(false);
+    setFetched(false);
+    setLoading(false);
+  }, []);
+
   const refreshCompanies = useCallback(async () => {
     try {
       const res = await companiesApi.list();
       if (!mountedRef.current) return;
-      applyCompanyResponse(res, setCompanies, setIsSuperAdmin, setCanSwitchCompany, setActiveCompanyId, setFetched);
+      applyCompanyResponse(res, setCompanies, setCanManageClients, setCanSwitchCompany, setActiveCompanyId, setFetched);
     } catch {
       // Retry once after a short delay (handles race with auth/server startup)
       setTimeout(async () => {
         try {
           const res = await companiesApi.list();
           if (!mountedRef.current) return;
-          applyCompanyResponse(res, setCompanies, setIsSuperAdmin, setCanSwitchCompany, setActiveCompanyId, setFetched);
+          applyCompanyResponse(res, setCompanies, setCanManageClients, setCanSwitchCompany, setActiveCompanyId, setFetched);
         } catch { /* give up */ }
         if (mountedRef.current) setLoading(false);
       }, 1500);
@@ -89,13 +101,32 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (isAuthenticated && user && !fetched) {
-      refreshCompanies();
+    if (!isAuthenticated || userId === null) {
+      const resetTimer = window.setTimeout(() => {
+        if (!mountedRef.current) return;
+        resetCompanyState();
+      }, 0);
+      return () => window.clearTimeout(resetTimer);
     }
-    if (!isAuthenticated) {
-      setLoading(false);
-    }
-  }, [isAuthenticated, user, fetched, refreshCompanies]);
+
+    const initTimer = window.setTimeout(() => {
+      if (!mountedRef.current) return;
+      setLoading(true);
+      setFetched(false);
+    }, 0);
+
+    return () => window.clearTimeout(initTimer);
+  }, [isAuthenticated, userId, resetCompanyState]);
+
+  useEffect(() => {
+    if (!isAuthenticated || userId === null || fetched) return;
+
+    const fetchTimer = window.setTimeout(() => {
+      void refreshCompanies();
+    }, 0);
+
+    return () => window.clearTimeout(fetchTimer);
+  }, [isAuthenticated, userId, fetched, refreshCompanies]);
 
   const switchCompany = useCallback((companyId: number) => {
     setActiveCompanyId(companyId);
@@ -111,7 +142,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         companies,
         activeCompany,
         activeCompanyId,
-        isSuperAdmin,
+        canManageClients,
         canSwitchCompany,
         loading,
         switchCompany,
