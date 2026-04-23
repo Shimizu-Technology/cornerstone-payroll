@@ -463,9 +463,9 @@ export const usersApi = {
     api.get<{ data: User[] }>('/admin/users', params),
   get: (id: number) =>
     api.get<{ data: User }>(`/admin/users/${id}`),
-  create: (data: { email: string; name: string; role: User['role'] }) =>
+  create: (data: { email: string; name: string; role: User['role']; company_ids?: number[] }) =>
     api.post<UserCreateResponse>('/admin/users', { user: data }),
-  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>>) =>
+  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>> & { company_ids?: number[] }) =>
     api.patch<{ data: User }>(`/admin/users/${id}`, { user: data }),
   activate: (id: number) =>
     api.post<{ data: User }>(`/admin/users/${id}/activate`),

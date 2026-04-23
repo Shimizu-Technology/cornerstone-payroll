@@ -35,6 +35,11 @@ export interface Department {
 
 export type UserRole = 'admin' | 'manager' | 'employee' | 'accountant';
 
+export interface AssignedCompanySummary {
+  id: number;
+  name: string;
+}
+
 export interface User {
   id: number;
   workos_id?: string;
@@ -44,6 +49,7 @@ export interface User {
   company_id?: number;
   active?: boolean;
   assigned_company_ids?: number[];
+  assigned_companies?: AssignedCompanySummary[];
   invitation_status?: 'pending' | 'accepted';
   invitation_pending?: boolean;
   invited_at?: string | null;
