@@ -179,15 +179,16 @@ export function Users() {
   };
 
   // --- Edit user ---
-  const handleStartEdit = async (user: User): Promise<void> => {
-    if (currentUser?.company_id === user.company_id && availableCompanies.length === 0) {
-      await loadCompanies();
-    }
+  const handleStartEdit = (user: User): void => {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
     setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
+
+    if (currentUser?.company_id === user.company_id && availableCompanies.length === 0) {
+      void loadCompanies();
+    }
   };
 
   const handleSaveEdit = async (): Promise<void> => {
