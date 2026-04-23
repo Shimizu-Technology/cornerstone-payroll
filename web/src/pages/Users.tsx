@@ -44,6 +44,8 @@ export function Users() {
   const [isSavingNew, setIsSavingNew] = useState(false);
   const [newClientIds, setNewClientIds] = useState<number[]>([]);
   const [availableCompanies, setAvailableCompanies] = useState<CompanyListItem[]>([]);
+  const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
+  const [companiesLoadError, setCompaniesLoadError] = useState<string | null>(null);
 
   // Edit user
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -71,11 +73,16 @@ export function Users() {
   }, []);
 
   const loadCompanies = useCallback(async () => {
+    setIsLoadingCompanies(true);
+    setCompaniesLoadError(null);
     try {
       const res = await companiesApi.list();
       setAvailableCompanies(res.companies);
-    } catch {
-      // Non-blocking. User management remains usable without preloading clients.
+    } catch (err) {
+      setCompaniesLoadError(err instanceof Error ? err.message : 'Failed to load payroll clients');
+    }
+    finally {
+      setIsLoadingCompanies(false);
     }
   }, []);
 
@@ -266,6 +273,64 @@ export function Users() {
     );
   };
 
+  const renderClientAssignmentPicker = (
+    selectedIds: number[],
+    setSelectedIds: Dispatch<SetStateAction<number[]>>,
+    summaryLabel?: string
+  ) => {
+    if (companiesLoadError && availableCompanies.length === 0) {
+      return (
+        <div className="rounded-lg border border-danger-200 bg-danger-50 p-3">
+          <p className="text-sm text-danger-700">{companiesLoadError}</p>
+          <div className="mt-3">
+            <Button size="sm" variant="outline" onClick={() => void loadCompanies()} disabled={isLoadingCompanies}>
+              {isLoadingCompanies ? 'Retrying...' : 'Retry'}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    if (isLoadingCompanies && availableCompanies.length === 0) {
+      return <p className="text-sm text-gray-500">Loading payroll clients...</p>;
+    }
+
+    if (availableCompanies.length === 0) {
+      return <p className="text-sm text-gray-500">No payroll clients available.</p>;
+    }
+
+    return (
+      <>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {availableCompanies.map(company => (
+            <label
+              key={company.id}
+              className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
+                selectedIds.includes(company.id)
+                  ? 'border-primary-300 bg-primary-50'
+                  : 'border-gray-200 bg-white hover:bg-gray-50'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(company.id)}
+                onChange={() => toggleCompanySelection(company.id, setSelectedIds)}
+                className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+              />
+              <div className="min-w-0">
+                <p className="font-medium text-gray-900 truncate">{company.name}</p>
+                <p className="text-xs text-gray-500">{company.active_employees} employees</p>
+              </div>
+            </label>
+          ))}
+        </div>
+        {summaryLabel && (
+          <p className="text-xs text-gray-500 mt-2">{summaryLabel}</p>
+        )}
+      </>
+    );
+  };
+
   return (
     <div>
       <Header
@@ -337,35 +402,16 @@ export function Users() {
               </Select>
             </div>
 
-            {needsClientAssignment(newRole) && availableCompanies.length > 0 && (
+            {needsClientAssignment(newRole) && (
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <p className="text-sm font-medium text-gray-700 mb-2">
                   Assign Payroll Clients
                   <span className="text-xs font-normal text-gray-400 ml-2">(can also be changed later)</span>
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {availableCompanies.map(company => (
-                    <label
-                      key={company.id}
-                      className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
-                        newClientIds.includes(company.id) ? 'border-primary-300 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={newClientIds.includes(company.id)}
-                        onChange={() => setNewClientIds(prev => prev.includes(company.id) ? prev.filter(id => id !== company.id) : [...prev, company.id])}
-                        className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                      />
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                        <p className="text-xs text-gray-500">{company.active_employees} employees</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-                {newClientIds.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-2">{newClientIds.length} client{newClientIds.length !== 1 ? 's' : ''} selected</p>
+                {renderClientAssignmentPicker(
+                  newClientIds,
+                  setNewClientIds,
+                  newClientIds.length > 0 ? `${newClientIds.length} client${newClientIds.length !== 1 ? 's' : ''} selected` : undefined
                 )}
               </div>
             )}
@@ -516,33 +562,7 @@ export function Users() {
                                   </span>
                                 </div>
 
-                                {availableCompanies.length > 0 ? (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                    {availableCompanies.map(company => (
-                                      <label
-                                        key={company.id}
-                                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
-                                          editClientIds.includes(company.id)
-                                            ? 'border-primary-300 bg-primary-50'
-                                            : 'border-gray-200 bg-white hover:bg-gray-50'
-                                        }`}
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          checked={editClientIds.includes(company.id)}
-                                          onChange={() => toggleCompanySelection(company.id, setEditClientIds)}
-                                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                                        />
-                                        <div className="min-w-0">
-                                          <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                                          <p className="text-xs text-gray-500">{company.active_employees} employees</p>
-                                        </div>
-                                      </label>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <p className="text-sm text-gray-500">Loading payroll clients...</p>
-                                )}
+                                {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
                               </>
                             ) : (
                               <p className="text-sm text-gray-500">
