@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, Fragment } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Building2, Mail, RefreshCw, Trash2, ChevronUp } from 'lucide-react';
+import { useState, useEffect, useCallback, Fragment, type Dispatch, type SetStateAction } from 'react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,9 +13,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { usersApi, companiesApi, companyAssignmentsApi, ApiError } from '@/services/api';
+import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
-import type { CompanyListItem, CompanyAssignment } from '@/services/api';
+import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
 const roleOptions: { value: UserRole; label: string; description: string }[] = [
@@ -28,7 +28,7 @@ const roleOptions: { value: UserRole; label: string; description: string }[] = [
 const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant';
 
 export function Users() {
-  const { user: currentUser, isAdmin } = useAuth();
+  const { user: currentUser } = useAuth();
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,19 +49,13 @@ export function Users() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('employee');
+  const [editClientIds, setEditClientIds] = useState<number[]>([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
-
-  // Inline client assignment (for existing users)
-  const [assigningUserId, setAssigningUserId] = useState<number | null>(null);
-  const [assignCompanies, setAssignCompanies] = useState<CompanyListItem[]>([]);
-  const [selectedCompanyIds, setSelectedCompanyIds] = useState<number[]>([]);
-  const [isSavingAssignments, setIsSavingAssignments] = useState(false);
-  const [assignmentError, setAssignmentError] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -76,9 +70,22 @@ export function Users() {
     }
   }, []);
 
+  const loadCompanies = useCallback(async () => {
+    try {
+      const res = await companiesApi.list();
+      setAvailableCompanies(res.companies);
+    } catch {
+      // Non-blocking. User management remains usable without preloading clients.
+    }
+  }, []);
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  useEffect(() => {
+    loadCompanies();
+  }, [loadCompanies]);
 
   useEffect(() => {
     if (successMessage) {
@@ -92,10 +99,9 @@ export function Users() {
     setIsAddingNew(true);
     setNewError(null);
     setNewClientIds([]);
-    try {
-      const res = await companiesApi.list();
-      setAvailableCompanies(res.companies);
-    } catch { /* non-blocking */ }
+    if (availableCompanies.length === 0) {
+      await loadCompanies();
+    }
   };
 
   const handleCancelAddNew = () => {
@@ -119,13 +125,10 @@ export function Users() {
         email: newEmail.trim(),
         name: newName.trim() || newEmail.trim().split('@')[0],
         role: newRole,
+        company_ids: needsClientAssignment(newRole) ? newClientIds : [],
       };
       const response = await usersApi.create(payload);
       const createdUser = response.data;
-
-      if (newClientIds.length > 0 && createdUser.id) {
-        try { await companyAssignmentsApi.bulkUpdate(createdUser.id, newClientIds); } catch { /* non-blocking */ }
-      }
 
       if (response.invitation_sent) {
         setSuccessMessage(`Invitation sent to ${createdUser.email}`);
@@ -167,6 +170,7 @@ export function Users() {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
+    setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
   };
 
@@ -175,8 +179,13 @@ export function Users() {
     setIsSavingEdit(true);
     setEditError(null);
     try {
-      await usersApi.update(editingId, { name: editName.trim(), role: editRole });
+      await usersApi.update(editingId, {
+        name: editName.trim(),
+        role: editRole,
+        company_ids: needsClientAssignment(editRole) ? editClientIds : [],
+      });
       setEditingId(null);
+      setEditClientIds([]);
       fetchUsers();
     } catch (err) {
       setEditError(err instanceof ApiError ? err.message : 'Failed to update user');
@@ -185,7 +194,11 @@ export function Users() {
     }
   };
 
-  const handleCancelEdit = (): void => { setEditingId(null); setEditError(null); };
+  const handleCancelEdit = (): void => {
+    setEditingId(null);
+    setEditClientIds([]);
+    setEditError(null);
+  };
 
   // --- Activate / Deactivate ---
   const handleToggleActive = async (user: User): Promise<void> => {
@@ -216,45 +229,38 @@ export function Users() {
     }
   };
 
-  // --- Inline client assignment ---
-  const handleToggleAssignments = async (user: User): Promise<void> => {
-    if (assigningUserId === user.id) {
-      setAssigningUserId(null);
-      return;
-    }
-    setAssigningUserId(user.id);
-    setAssignmentError(null);
-    try {
-      const [companiesRes, assignmentsRes] = await Promise.all([
-        companiesApi.list(),
-        companyAssignmentsApi.list(user.id),
-      ]);
-      setAssignCompanies(companiesRes.companies);
-      setSelectedCompanyIds(assignmentsRes.data.map((a: CompanyAssignment) => a.company_id));
-    } catch (err) {
-      setAssignmentError(err instanceof Error ? err.message : 'Failed to load assignments');
-    }
-  };
-
-  const handleToggleCompany = (companyId: number): void => {
-    setSelectedCompanyIds(prev =>
+  const toggleCompanySelection = (
+    companyId: number,
+    setSelectedIds: Dispatch<SetStateAction<number[]>>
+  ): void => {
+    setSelectedIds(prev =>
       prev.includes(companyId) ? prev.filter(id => id !== companyId) : [...prev, companyId]
     );
   };
 
-  const handleSaveAssignments = async (): Promise<void> => {
-    if (!assigningUserId) return;
-    setIsSavingAssignments(true);
-    setAssignmentError(null);
-    try {
-      await companyAssignmentsApi.bulkUpdate(assigningUserId, selectedCompanyIds);
-      setAssigningUserId(null);
-      fetchUsers();
-    } catch (err) {
-      setAssignmentError(err instanceof Error ? err.message : 'Failed to save assignments');
-    } finally {
-      setIsSavingAssignments(false);
+  const assignedCompaniesForUser = (user: User) =>
+    needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
+
+  const renderAssignedCompanies = (user: User) => {
+    const assignedCompanies = assignedCompaniesForUser(user);
+    if (assignedCompanies.length === 0) {
+      return needsClientAssignment(user.role) ? (
+        <p className="mt-1 text-xs text-gray-400">No assigned payroll clients</p>
+      ) : null;
     }
+
+    return (
+      <div className="mt-1 flex flex-wrap gap-1.5">
+        {assignedCompanies.map((company) => (
+          <span
+            key={company.id}
+            className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600"
+          >
+            {company.name}
+          </span>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -420,14 +426,12 @@ export function Users() {
                             ))}
                           </Select>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5">
-                            {roleOptions.find((role) => role.value === user.role)?.label || user.role}
-                            {user.assigned_company_ids && user.assigned_company_ids.length > 0 && (
-                              <span className="text-xs text-gray-400">
-                                ({user.assigned_company_ids.length} client{user.assigned_company_ids.length !== 1 ? 's' : ''})
-                              </span>
-                            )}
-                          </span>
+                          <div>
+                            <span className="inline-flex items-center gap-1.5">
+                              {roleOptions.find((role) => role.value === user.role)?.label || user.role}
+                            </span>
+                            {renderAssignedCompanies(user)}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell>
@@ -454,19 +458,6 @@ export function Users() {
                         ) : (
                           <div className="flex justify-end gap-2">
                             <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
-                            {isAdmin && needsClientAssignment(user.role) && (
-                              <Button
-                                size="sm"
-                                variant={assigningUserId === user.id ? 'default' : 'outline'}
-                                onClick={() => handleToggleAssignments(user)}
-                              >
-                                {assigningUserId === user.id ? (
-                                  <><ChevronUp className="w-4 h-4 mr-1" />Clients</>
-                                ) : (
-                                  <><Building2 className="w-4 h-4 mr-1" />Clients</>
-                                )}
-                              </Button>
-                            )}
                             {user.invitation_pending && (
                               <Button
                                 size="sm"
@@ -506,57 +497,55 @@ export function Users() {
                       </TableCell>
                     </TableRow>
 
-                    {/* Inline client assignment row */}
-                    {assigningUserId === user.id && (
+                    {/* Inline edit details row */}
+                    {editingId === user.id && (
                       <TableRow>
                         <TableCell colSpan={6} className="bg-gray-50 p-0">
                           <div className="px-6 py-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <p className="text-sm font-medium text-gray-700">
-                                Payroll clients for <strong>{user.name}</strong>
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-500">
-                                  {selectedCompanyIds.length} selected
-                                </span>
-                                <Button size="sm" onClick={handleSaveAssignments} disabled={isSavingAssignments}>
-                                  {isSavingAssignments ? 'Saving...' : 'Save'}
-                                </Button>
-                                <Button size="sm" variant="ghost" onClick={() => setAssigningUserId(null)}>
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
+                            {needsClientAssignment(editRole) ? (
+                              <>
+                                <div className="mb-3 flex items-center justify-between">
+                                  <p className="text-sm font-medium text-gray-700">
+                                    Payroll clients for <strong>{editName || user.name}</strong>
+                                  </p>
+                                  <span className="text-xs text-gray-500">
+                                    {editClientIds.length} selected
+                                  </span>
+                                </div>
 
-                            {assignmentError && (
-                              <div className="mb-3 p-2 bg-danger-50 border border-danger-200 rounded text-sm text-danger-700">
-                                {assignmentError}
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                              {assignCompanies.map(company => (
-                                <label
-                                  key={company.id}
-                                  className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
-                                    selectedCompanyIds.includes(company.id)
-                                      ? 'border-primary-300 bg-primary-50'
-                                      : 'border-gray-200 bg-white hover:bg-gray-50'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedCompanyIds.includes(company.id)}
-                                    onChange={() => handleToggleCompany(company.id)}
-                                    className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
-                                  />
-                                  <div className="min-w-0">
-                                    <p className="font-medium text-gray-900 truncate">{company.name}</p>
-                                    <p className="text-xs text-gray-500">{company.active_employees} employees</p>
+                                {availableCompanies.length > 0 ? (
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                    {availableCompanies.map(company => (
+                                      <label
+                                        key={company.id}
+                                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors text-sm ${
+                                          editClientIds.includes(company.id)
+                                            ? 'border-primary-300 bg-primary-50'
+                                            : 'border-gray-200 bg-white hover:bg-gray-50'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={editClientIds.includes(company.id)}
+                                          onChange={() => toggleCompanySelection(company.id, setEditClientIds)}
+                                          className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
+                                        />
+                                        <div className="min-w-0">
+                                          <p className="font-medium text-gray-900 truncate">{company.name}</p>
+                                          <p className="text-xs text-gray-500">{company.active_employees} employees</p>
+                                        </div>
+                                      </label>
+                                    ))}
                                   </div>
-                                </label>
-                              ))}
-                            </div>
+                                ) : (
+                                  <p className="text-sm text-gray-500">Loading payroll clients...</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-sm text-gray-500">
+                                This role does not use payroll client assignments. Saving will clear any existing client assignments.
+                              </p>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

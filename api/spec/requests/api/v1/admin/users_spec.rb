@@ -39,7 +39,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   end
 
   describe "GET /api/v1/admin/users" do
-    it "includes assigned company ids for listed users" do
+    it "includes assigned company ids and company summaries for listed users" do
       get "/api/v1/admin/users"
 
       expect(response).to have_http_status(:ok)
@@ -47,6 +47,12 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       managed_payload = data.find { |row| row.fetch("id") == managed_user.id }
 
       expect(managed_payload).to include("assigned_company_ids" => [client_company.id])
+      expect(managed_payload.fetch("assigned_companies")).to include(
+        include(
+          "id" => client_company.id,
+          "name" => client_company.name
+        )
+      )
     end
 
     it "admins see all users regardless of selected company" do
@@ -57,6 +63,80 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
       expect(data.map { |row| row.fetch("id") }).to include(admin_user.id, managed_user.id, switched_company_user.id)
+    end
+  end
+
+  describe "POST /api/v1/admin/users" do
+    it "creates a user and saves client assignments in the same request" do
+      expect {
+        post "/api/v1/admin/users",
+          params: {
+            user: {
+              email: "new-accountant@example.com",
+              name: "New Accountant",
+              role: "accountant",
+              company_ids: [client_company.id, other_company.id]
+            }
+          }
+      }.to change(User, :count).by(1)
+        .and change(CompanyAssignment, :count).by(2)
+
+      expect(response).to have_http_status(:created)
+      payload = response.parsed_body.fetch("data")
+      created_user = User.find(payload.fetch("id"))
+
+      expect(created_user.company_assignments.order(:company_id).pluck(:company_id)).to eq([client_company.id, other_company.id])
+      expect(payload.fetch("assigned_company_ids")).to match_array([client_company.id, other_company.id])
+      expect(payload.fetch("assigned_companies")).to match_array([
+        include("id" => client_company.id, "name" => client_company.name),
+        include("id" => other_company.id, "name" => other_company.name)
+      ])
+    end
+  end
+
+  describe "PATCH /api/v1/admin/users/:id" do
+    it "updates role and client assignments together" do
+      patch "/api/v1/admin/users/#{managed_user.id}",
+        params: {
+          user: {
+            name: "Updated Accountant",
+            role: "manager",
+            company_ids: [other_company.id]
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      managed_user.reload
+      expect(managed_user.name).to eq("Updated Accountant")
+      expect(managed_user.role).to eq("manager")
+      expect(managed_user.company_assignments.pluck(:company_id)).to eq([other_company.id])
+
+      payload = response.parsed_body.fetch("data")
+      expect(payload.fetch("assigned_company_ids")).to eq([other_company.id])
+      expect(payload.fetch("assigned_companies")).to eq([
+        {
+          "id" => other_company.id,
+          "name" => other_company.name
+        }
+      ])
+    end
+
+    it "clears stale client assignments when the role no longer uses them" do
+      patch "/api/v1/admin/users/#{managed_user.id}",
+        params: {
+          user: {
+            role: "employee"
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      managed_user.reload
+      expect(managed_user.role).to eq("employee")
+      expect(managed_user.company_assignments).to be_empty
+
+      payload = response.parsed_body.fetch("data")
+      expect(payload).not_to have_key("assigned_company_ids")
+      expect(payload).not_to have_key("assigned_companies")
     end
   end
 end
