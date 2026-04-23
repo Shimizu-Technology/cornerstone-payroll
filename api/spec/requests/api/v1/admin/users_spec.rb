@@ -36,6 +36,9 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
     allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(admin_user.id)
+    allow_any_instance_of(Api::V1::Admin::UsersController)
+      .to receive(:create_clerk_invitation)
+      .and_return({ success: false, error: "Clerk API not configured" })
   end
 
   describe "GET /api/v1/admin/users" do

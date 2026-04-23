@@ -6,7 +6,14 @@
 
 ## Purpose
 
-Cornerstone wants to fully leave QuickBooks and move historical payroll data into Cornerstone Payroll. This document defines what the current system can and cannot do, what QuickBooks data we still need to inspect, and what must be built so historical QuickBooks payroll can be imported safely without mutating or reinterpreting prior payroll history.
+Cornerstone wants to fully leave QuickBooks and move historical company data into Cornerstone Payroll. The working assumption now is:
+
+- import data for **all clients**
+- import roughly the last **3-4 years**
+- import **all payroll history**
+- import other QuickBooks-backed payroll-supporting data wherever QuickBooks is currently acting as the archive of record
+
+This document defines what the current system can and cannot do, what QuickBooks data we still need to inspect, and what must be built so historical QuickBooks data can be imported safely without mutating or reinterpreting prior payroll history.
 
 This is intentionally a planning document, not an implementation spec for the existing MoSa import flow.
 
@@ -59,15 +66,32 @@ That is correct for live operations, but dangerous for QuickBooks history becaus
 
 ## Product Goal
 
-Support a **historical import lane** that can ingest exported QuickBooks payroll history and represent it in Cornerstone Payroll without reinterpreting prior payroll.
+Support a **historical import lane** that can ingest exported QuickBooks history across all payroll clients and represent it in Cornerstone Payroll without reinterpreting prior records.
 
 Primary outcome:
 
-- Cornerstone can browse/search/report on prior pay periods inside our app after leaving QuickBooks.
+- Cornerstone can browse/search/report on prior pay periods and related historical payroll data inside our app after leaving QuickBooks.
 
 Secondary outcome:
 
-- imported history should support tax reports, employee history, and audit review without operators needing QuickBooks as the archive of record.
+- imported history should support tax reports, employee history, check history, and audit review without operators needing QuickBooks as the archive of record.
+
+### In Scope For Discovery
+
+At minimum, discovery and import design should cover:
+
+- companies / clients
+- employees and historical staff relationships
+- pay periods
+- employee paycheck-level payroll records
+- employer tax totals tied to payroll
+- deductions, contributions, loans, and benefits that affect payroll history
+- check numbers / payment history where QuickBooks is the retained source
+- year-to-date and quarter-to-date reporting support data if not safely derivable
+
+Open question:
+
+- whether Cornerstone also needs non-payroll accounting data from QuickBooks, or only payroll-domain data plus enough supporting metadata to replace QuickBooks for payroll operations and audit lookup
 
 ## Discovery Work Still Required
 
@@ -88,6 +112,8 @@ For one representative client, collect:
 - quarterly filing support exports if available
 - year-end export if available
 - any company setup or employee tax setup export QuickBooks provides
+
+For the broader build, we will need the same sample set from more than one client because export shape and data quality may differ by client and QuickBooks usage pattern.
 
 ### Questions to answer from sample files
 
@@ -117,9 +143,12 @@ For one representative client, collect:
    - loans
    - retirement
    - custom deductions
+   - employer contributions
+   - check/payment status
 8. How are terminated employees represented?
 9. How are historical pay-rate changes represented?
 10. Do historical YTD totals need to be imported directly, or can they be derived safely from imported paychecks?
+11. Which non-payroll QuickBooks records, if any, are still required for payroll audit/support workflows after migration?
 
 ## Recommended Import Strategy
 
@@ -295,6 +324,7 @@ Recommendation:
 ### Phase 0 — Sample Intake
 
 - collect real QuickBooks sample exports
+- collect samples from multiple clients, not just one
 - catalog each file type and field set
 - choose MVP import package
 - define exact source-to-target mapping
@@ -326,7 +356,7 @@ Recommendation:
 
 ## MVP Recommendation
 
-For the first deliverable later this week, do **not** try to support every possible QuickBooks export.
+For the first deliverable later this week, do **not** try to support every possible QuickBooks export or every client at once.
 
 MVP should be:
 
@@ -337,6 +367,12 @@ MVP should be:
 - reconciliation report
 
 That is enough to validate architecture before broadening to all client/company export variants.
+
+After MVP validates the approach, the production target expands to:
+
+- all active Cornerstone payroll clients
+- roughly 3-4 historical years
+- payroll-domain QuickBooks history, not just pay-period rows
 
 ## Immediate Next Steps
 
