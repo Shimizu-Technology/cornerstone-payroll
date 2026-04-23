@@ -142,13 +142,14 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(payload).not_to have_key("assigned_companies")
     end
 
-    it "allows non-assignment edits for users in another staff workspace when assignments are unchanged" do
+    it "allows non-assignment edits for users in another staff workspace without mutating existing assignments" do
+      CompanyAssignment.create!(user: switched_company_user, company: client_company)
+
       patch "/api/v1/admin/users/#{switched_company_user.id}",
         params: {
           user: {
             name: "Renamed Other Company User",
-            role: "accountant",
-            company_ids: []
+            role: "accountant"
           }
         }
 
@@ -156,7 +157,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Renamed Other Company User")
       expect(switched_company_user.role).to eq("accountant")
-      expect(switched_company_user.company_assignments).to be_empty
+      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
 
     it "rejects assignment changes for users in another staff workspace" do
@@ -175,6 +176,28 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       switched_company_user.reload
       expect(switched_company_user.name).to eq("Other Company User")
       expect(switched_company_user.company_assignments).to be_empty
+    end
+
+    it "rejects role changes for users in another staff workspace when the change would clear assignments" do
+      CompanyAssignment.create!(user: switched_company_user, company: client_company)
+
+      patch "/api/v1/admin/users/#{switched_company_user.id}",
+        params: {
+          user: {
+            name: "Renamed Other Company User",
+            role: "employee"
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include(
+        "Role changes that clear client assignments can only be made in the user's staff workspace"
+      )
+
+      switched_company_user.reload
+      expect(switched_company_user.name).to eq("Other Company User")
+      expect(switched_company_user.role).to eq("accountant")
+      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
   end
 end

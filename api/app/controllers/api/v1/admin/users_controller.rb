@@ -181,6 +181,11 @@ module Api
         end
 
         def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:)
+          if user.company_id != current_user.company_id
+            enforce_foreign_workspace_assignment_guard!(user, company_ids:, role:, company_ids_provided:)
+            return unless role_requires_client_assignment?(role) && company_ids_provided
+          end
+
           unless role_requires_client_assignment?(role)
             user.company_assignments.destroy_all if user.company_assignments.exists?
             return
@@ -189,13 +194,6 @@ module Api
           return unless company_ids_provided
 
           normalized_company_ids = normalize_company_ids(company_ids)
-
-          if user.company_id != current_user.company_id
-            return if normalized_company_ids.sort == current_assignment_ids_for(user).sort
-
-            user.errors.add(:base, "Client assignments can only be edited for users in your staff workspace")
-            raise ActiveRecord::RecordInvalid, user
-          end
 
           unauthorized_ids = normalized_company_ids - assignable_company_ids
           if unauthorized_ids.any?
@@ -215,6 +213,25 @@ module Api
 
             value.to_i
           end.uniq
+        end
+
+        def enforce_foreign_workspace_assignment_guard!(user, company_ids:, role:, company_ids_provided:)
+          current_assignment_ids = current_assignment_ids_for(user)
+
+          unless role_requires_client_assignment?(role)
+            return if current_assignment_ids.empty?
+
+            user.errors.add(:base, "Role changes that clear client assignments can only be made in the user's staff workspace")
+            raise ActiveRecord::RecordInvalid, user
+          end
+
+          return unless company_ids_provided
+
+          normalized_company_ids = normalize_company_ids(company_ids)
+          return if normalized_company_ids.sort == current_assignment_ids.sort
+
+          user.errors.add(:base, "Client assignments can only be edited for users in your staff workspace")
+          raise ActiveRecord::RecordInvalid, user
         end
 
         def current_assignment_ids_for(user)
