@@ -141,5 +141,40 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(payload).not_to have_key("assigned_company_ids")
       expect(payload).not_to have_key("assigned_companies")
     end
+
+    it "allows non-assignment edits for users in another staff workspace when assignments are unchanged" do
+      patch "/api/v1/admin/users/#{switched_company_user.id}",
+        params: {
+          user: {
+            name: "Renamed Other Company User",
+            role: "accountant",
+            company_ids: []
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      switched_company_user.reload
+      expect(switched_company_user.name).to eq("Renamed Other Company User")
+      expect(switched_company_user.role).to eq("accountant")
+      expect(switched_company_user.company_assignments).to be_empty
+    end
+
+    it "rejects assignment changes for users in another staff workspace" do
+      patch "/api/v1/admin/users/#{switched_company_user.id}",
+        params: {
+          user: {
+            name: "Renamed Other Company User",
+            role: "accountant",
+            company_ids: [client_company.id]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Client assignments can only be edited for users in your staff workspace")
+
+      switched_company_user.reload
+      expect(switched_company_user.name).to eq("Other Company User")
+      expect(switched_company_user.company_assignments).to be_empty
+    end
   end
 end

@@ -174,7 +174,7 @@ export function Users() {
 
   // --- Edit user ---
   const handleStartEdit = async (user: User): Promise<void> => {
-    if (availableCompanies.length === 0) {
+    if (currentUser?.company_id === user.company_id && availableCompanies.length === 0) {
       await loadCompanies();
     }
     setEditingId(user.id);
@@ -189,11 +189,17 @@ export function Users() {
     setIsSavingEdit(true);
     setEditError(null);
     try {
-      await usersApi.update(editingId, {
+      const editingUser = users.find((user) => user.id === editingId);
+      const payload: { name: string; role: UserRole; company_ids?: number[] } = {
         name: editName.trim(),
         role: editRole,
-        company_ids: needsClientAssignment(editRole) ? editClientIds : [],
-      });
+      };
+
+      if (editingUser && currentUser?.company_id === editingUser.company_id && needsClientAssignment(editRole)) {
+        payload.company_ids = editClientIds;
+      }
+
+      await usersApi.update(editingId, payload);
       setEditingId(null);
       setEditClientIds([]);
       fetchUsers();
@@ -247,6 +253,9 @@ export function Users() {
       prev.includes(companyId) ? prev.filter(id => id !== companyId) : [...prev, companyId]
     );
   };
+
+  const canEditClientAssignments = (user: User) =>
+    currentUser?.company_id === user.company_id;
 
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
@@ -552,18 +561,27 @@ export function Users() {
                         <TableCell colSpan={6} className="bg-gray-50 p-0">
                           <div className="px-6 py-4">
                             {needsClientAssignment(editRole) ? (
-                              <>
-                                <div className="mb-3 flex items-center justify-between">
-                                  <p className="text-sm font-medium text-gray-700">
-                                    Payroll clients for <strong>{editName || user.name}</strong>
-                                  </p>
-                                  <span className="text-xs text-gray-500">
-                                    {editClientIds.length} selected
-                                  </span>
-                                </div>
+                              canEditClientAssignments(user) ? (
+                                <>
+                                  <div className="mb-3 flex items-center justify-between">
+                                    <p className="text-sm font-medium text-gray-700">
+                                      Payroll clients for <strong>{editName || user.name}</strong>
+                                    </p>
+                                    <span className="text-xs text-gray-500">
+                                      {editClientIds.length} selected
+                                    </span>
+                                  </div>
 
-                                {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
-                              </>
+                                  {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-sm text-gray-500">
+                                    Payroll client assignments for users in another staff workspace are preserved here but can&apos;t be edited from this company context.
+                                  </p>
+                                  {renderAssignedCompanies(user)}
+                                </>
+                              )
                             ) : (
                               <p className="text-sm text-gray-500">
                                 This role does not use payroll client assignments. Saving will clear any existing client assignments.
