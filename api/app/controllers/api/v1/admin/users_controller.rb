@@ -188,12 +188,15 @@ module Api
 
           return unless company_ids_provided
 
+          normalized_company_ids = normalize_company_ids(company_ids)
+
           if user.company_id != current_user.company_id
+            return if normalized_company_ids.sort == current_assignment_ids_for(user).sort
+
             user.errors.add(:base, "Client assignments can only be edited for users in your staff workspace")
             raise ActiveRecord::RecordInvalid, user
           end
 
-          normalized_company_ids = normalize_company_ids(company_ids)
           unauthorized_ids = normalized_company_ids - assignable_company_ids
           if unauthorized_ids.any?
             user.errors.add(:base, "One or more companies are not accessible")
@@ -212,6 +215,14 @@ module Api
 
             value.to_i
           end.uniq
+        end
+
+        def current_assignment_ids_for(user)
+          if user.association(:company_assignments).loaded?
+            user.company_assignments.map(&:company_id)
+          else
+            user.company_assignments.pluck(:company_id)
+          end
         end
 
         def assignable_company_ids
