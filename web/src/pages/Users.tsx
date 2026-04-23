@@ -166,7 +166,10 @@ export function Users() {
   };
 
   // --- Edit user ---
-  const handleStartEdit = (user: User): void => {
+  const handleStartEdit = async (user: User): Promise<void> => {
+    if (availableCompanies.length === 0) {
+      await loadCompanies();
+    }
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
