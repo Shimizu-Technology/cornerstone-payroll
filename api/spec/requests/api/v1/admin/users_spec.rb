@@ -160,6 +160,33 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
 
+    it "treats same-set foreign-workspace assignment submissions as a no-op" do
+      existing_assignments = [
+        CompanyAssignment.create!(user: switched_company_user, company: client_company),
+        CompanyAssignment.create!(user: switched_company_user, company: other_company)
+      ]
+
+      expect {
+        patch "/api/v1/admin/users/#{switched_company_user.id}",
+          params: {
+            user: {
+              name: "Renamed Other Company User",
+              role: "accountant",
+              company_ids: [other_company.id, client_company.id]
+            }
+          }
+      }.not_to change(CompanyAssignment, :count)
+
+      expect(response).to have_http_status(:ok)
+      switched_company_user.reload
+
+      expect(switched_company_user.name).to eq("Renamed Other Company User")
+      expect(switched_company_user.company_assignments.order(:id).pluck(:id))
+        .to eq(existing_assignments.map(&:id).sort)
+      expect(switched_company_user.company_assignments.order(:company_id).pluck(:company_id))
+        .to eq([client_company.id, other_company.id])
+    end
+
     it "rejects assignment changes for users in another staff workspace" do
       patch "/api/v1/admin/users/#{switched_company_user.id}",
         params: {

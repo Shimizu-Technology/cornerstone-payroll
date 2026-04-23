@@ -183,7 +183,7 @@ module Api
         def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:)
           if user.company_id != current_user.company_id
             enforce_foreign_workspace_assignment_guard!(user, company_ids:, role:, company_ids_provided:)
-            return unless role_requires_client_assignment?(role) && company_ids_provided
+            return
           end
 
           unless role_requires_client_assignment?(role)
