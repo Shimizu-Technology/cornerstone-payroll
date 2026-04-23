@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment, type Dispatch, type SetStateAction } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,7 @@ export function Users() {
   const [availableCompanies, setAvailableCompanies] = useState<CompanyListItem[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
   const [companiesLoadError, setCompaniesLoadError] = useState<string | null>(null);
+  const companiesRequestIdRef = useRef(0);
 
   // Edit user
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -73,15 +74,20 @@ export function Users() {
   }, []);
 
   const loadCompanies = useCallback(async () => {
+    const requestId = companiesRequestIdRef.current + 1;
+    companiesRequestIdRef.current = requestId;
     setIsLoadingCompanies(true);
     setCompaniesLoadError(null);
     try {
       const res = await companiesApi.list();
+      if (requestId !== companiesRequestIdRef.current) return;
       setAvailableCompanies(res.companies);
     } catch (err) {
+      if (requestId !== companiesRequestIdRef.current) return;
       setCompaniesLoadError(err instanceof Error ? err.message : 'Failed to load payroll clients');
     }
     finally {
+      if (requestId !== companiesRequestIdRef.current) return;
       setIsLoadingCompanies(false);
     }
   }, []);
@@ -198,8 +204,8 @@ export function Users() {
         role: editRole,
       };
 
-      if (editingUser && currentUser?.company_id === editingUser.company_id && needsClientAssignment(editRole)) {
-        payload.company_ids = editClientIds;
+      if (editingUser && currentUser?.company_id === editingUser.company_id) {
+        payload.company_ids = needsClientAssignment(editRole) ? editClientIds : [];
       }
 
       await usersApi.update(editingId, payload);
@@ -262,9 +268,10 @@ export function Users() {
 
   const editingUser = editingId ? users.find((user) => user.id === editingId) ?? null : null;
   const editingUserAssignmentCount = editingUser?.assigned_company_ids?.length || 0;
+  const editingUserCanEditClientAssignments = editingUser ? canEditClientAssignments(editingUser) : false;
   const blocksForeignWorkspaceRoleChange =
-    Boolean(editingUser) &&
-    !canEditClientAssignments(editingUser) &&
+    editingUser !== null &&
+    !editingUserCanEditClientAssignments &&
     !needsClientAssignment(editRole) &&
     editingUserAssignmentCount > 0;
 
