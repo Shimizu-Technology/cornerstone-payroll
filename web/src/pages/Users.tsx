@@ -186,10 +186,13 @@ export function Users() {
 
   const handleSaveEdit = async (): Promise<void> => {
     if (!editingId || !editName.trim()) { setEditError('Name is required'); return; }
+    if (blocksForeignWorkspaceRoleChange) {
+      setEditError('Change this user from their own staff workspace before switching to a role that clears payroll client assignments.');
+      return;
+    }
     setIsSavingEdit(true);
     setEditError(null);
     try {
-      const editingUser = users.find((user) => user.id === editingId);
       const payload: { name: string; role: UserRole; company_ids?: number[] } = {
         name: editName.trim(),
         role: editRole,
@@ -256,6 +259,14 @@ export function Users() {
 
   const canEditClientAssignments = (user: User) =>
     currentUser?.company_id === user.company_id;
+
+  const editingUser = editingId ? users.find((user) => user.id === editingId) ?? null : null;
+  const editingUserAssignmentCount = editingUser?.assigned_company_ids?.length || 0;
+  const blocksForeignWorkspaceRoleChange =
+    Boolean(editingUser) &&
+    !canEditClientAssignments(editingUser) &&
+    !needsClientAssignment(editRole) &&
+    editingUserAssignmentCount > 0;
 
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
@@ -505,7 +516,7 @@ export function Users() {
                       <TableCell className="text-right">
                         {editingId === user.id ? (
                           <div className="flex justify-end gap-2">
-                            <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                            <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit || blocksForeignWorkspaceRoleChange}>
                               <Check className="w-4 h-4 mr-1" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
@@ -582,6 +593,13 @@ export function Users() {
                                   {renderAssignedCompanies(user)}
                                 </>
                               )
+                            ) : blocksForeignWorkspaceRoleChange ? (
+                              <>
+                                <p className="text-sm text-gray-500">
+                                  Switch this user to <strong>employee</strong> or <strong>admin</strong> from their own staff workspace, because that change clears payroll client assignments.
+                                </p>
+                                {renderAssignedCompanies(user)}
+                              </>
                             ) : (
                               <p className="text-sm text-gray-500">
                                 This role does not use payroll client assignments. Saving will clear any existing client assignments.
