@@ -95,6 +95,23 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         include("id" => other_company.id, "name" => other_company.name)
       ])
     end
+
+    it "returns validation errors without persisting a user" do
+      expect {
+        post "/api/v1/admin/users",
+          params: {
+            user: {
+              email: "",
+              name: "Invalid User",
+              role: "accountant",
+              company_ids: [client_company.id]
+            }
+          }
+      }.not_to change(User, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Email can't be blank")
+    end
   end
 
   describe "PATCH /api/v1/admin/users/:id" do
