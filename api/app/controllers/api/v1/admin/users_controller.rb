@@ -283,7 +283,7 @@ module Api
           data[:assigned_company_ids] = assigned if assigned.any?
 
           assigned_companies = if user.association(:company_assignments).loaded?
-            user.company_assignments.map { |assignment| assignment.company }
+            user.company_assignments.filter_map(&:company)
           else
             Company.where(id: assigned)
           end
