@@ -40,10 +40,7 @@ module Api
           user.name = user.email.split("@").first.titleize if user.name.blank?
 
           ActiveRecord::Base.transaction do
-            unless user.save
-              return render json: { error: user.errors.full_messages }, status: :unprocessable_entity
-            end
-
+            user.save!
             sync_company_assignments!(user, company_ids: company_ids, role: user.role, company_ids_provided: company_ids_provided)
           end
 
