@@ -52,8 +52,9 @@ module Api
             email_queued = true
           end
 
+          user = User.includes(company_assignments: :company).find(user.id)
           render json: {
-            data: user_json(user.reload),
+            data: user_json(user),
             invitation_sent: email_queued,
             invitation_error: clerk_result[:success] ? nil : clerk_result[:error]
           }, status: :created
@@ -83,7 +84,8 @@ module Api
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
           end
 
-          render json: { data: user_json(@user.reload) }
+          @user = User.includes(company_assignments: :company).find(@user.id)
+          render json: { data: user_json(@user) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
