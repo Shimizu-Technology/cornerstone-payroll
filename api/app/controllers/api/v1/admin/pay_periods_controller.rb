@@ -944,9 +944,9 @@ module Api
           Date.strptime(value.to_s, "%Y-%m-%d")
         end
 
-        # Precompute YTD gross and social security for all employees in one query
-        # and cache the values on the Employee instances so PayrollCalculator
-        # doesn't issue 2×N individual queries during run_payroll.
+        # Precompute pre-period YTD totals for all employees in one grouped query
+        # and cache the results on the Employee instances so PayrollCalculator
+        # can reuse them during run_payroll without N per-employee aggregate reads.
         def preload_ytd_caches!(employees, pay_period)
           return if employees.empty?
 
@@ -966,23 +966,41 @@ module Api
                               .pluck(
                                 :employee_id,
                                 Arel.sql("COALESCE(SUM(gross_pay), 0)"),
-                                Arel.sql("COALESCE(SUM(social_security_tax), 0)")
+                                Arel.sql("COALESCE(SUM(net_pay), 0)"),
+                                Arel.sql("COALESCE(SUM(withholding_tax), 0)"),
+                                Arel.sql("COALESCE(SUM(social_security_tax), 0)"),
+                                Arel.sql("COALESCE(SUM(medicare_tax), 0)"),
+                                Arel.sql("COALESCE(SUM(additional_withholding), 0)"),
+                                Arel.sql("COALESCE(SUM(retirement_payment), 0)"),
+                                Arel.sql("COALESCE(SUM(roth_retirement_payment), 0)"),
+                                Arel.sql("COALESCE(SUM(insurance_payment), 0)"),
+                                Arel.sql("COALESCE(SUM(loan_payment), 0)")
                               )
-            ytd_map = rows.each_with_object({}) do |(eid, gross, ss), h|
-              h[eid] = { gross: gross.to_f, ss: ss.to_f }
+            ytd_map = rows.each_with_object({}) do |(eid, gross, net, fit, ss, medicare, addl_wh, retirement, roth_retirement, insurance, loans), h|
+              h[eid] = {
+                gross_pay: gross.to_f,
+                net_pay: net.to_f,
+                withholding_tax: fit.to_f,
+                social_security_tax: ss.to_f,
+                medicare_tax: medicare.to_f,
+                additional_withholding: addl_wh.to_f,
+                retirement: retirement.to_f,
+                roth_retirement: roth_retirement.to_f,
+                insurance: insurance.to_f,
+                loans: loans.to_f
+              }
             end
           else
             ytd_map = {}
           end
 
           employees.each do |emp|
-            data = ytd_map[emp.id] || { gross: 0.0, ss: 0.0 }
+            data = ytd_map[emp.id] || Employee::YTD_AGGREGATE_COLUMNS.keys.index_with { 0.0 }
             emp.cache_ytd_values!(
-              gross: data[:gross],
-              social_security: data[:ss],
               year: year,
               as_of_pay_date: pay_period.pay_date,
-              before_pay_period_id: pay_period.id
+              before_pay_period_id: pay_period.id,
+              totals: data
             )
           end
         end

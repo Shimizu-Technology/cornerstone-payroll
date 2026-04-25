@@ -277,21 +277,29 @@ class ReplaceCheckService
     end
   end
 
-  # The PayrollCalculator queries the DB directly for ytd_gross, which
-  # would still include this item's *old* values. We override the cache
-  # with the YTD excluding this item so the recomputed taxes match what
-  # would have been withheld had the corrected inputs been entered
-  # originally.
+  # Override the employee's cached pre-period YTD totals with figures that
+  # exclude this item, so PayrollCalculator uses the corrected baseline
+  # instead of re-reading aggregates that still include the old row.
   def recompute_with_ytd_excluding_self(item)
     employee = item.employee
     previous_snapshot = employee.cached_ytd_snapshot
 
     employee.cache_ytd_values!(
-      gross: ytd_excluding_self(:gross_pay),
-      social_security: ytd_excluding_self(:social_security_tax),
       year: item.pay_period.pay_date.year,
       as_of_pay_date: item.pay_period.pay_date,
-      before_pay_period_id: item.pay_period_id
+      before_pay_period_id: item.pay_period_id,
+      totals: {
+        gross_pay: ytd_excluding_self(:gross_pay),
+        net_pay: ytd_excluding_self(:net_pay),
+        withholding_tax: ytd_excluding_self(:withholding_tax),
+        social_security_tax: ytd_excluding_self(:social_security_tax),
+        medicare_tax: ytd_excluding_self(:medicare_tax),
+        additional_withholding: ytd_excluding_self(:additional_withholding),
+        retirement: ytd_excluding_self(:retirement_payment),
+        roth_retirement: ytd_excluding_self(:roth_retirement_payment),
+        insurance: ytd_excluding_self(:insurance_payment),
+        loans: ytd_excluding_self(:loan_payment)
+      }
     )
 
     PayrollCalculator.for(employee, item).calculate

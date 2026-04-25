@@ -325,19 +325,28 @@ class IssueCorrectivePaycheckService
     temp
   end
 
-  # Set the employee's @cached_ytd_gross / @cached_ytd_social_security to
-  # the YTD figures excluding the original payroll item (so the
-  # calculator's `ytd_gross_before` / `ytd_ss_before` use them instead of
-  # querying). Restores the previous cache values afterwards.
+  # Override the employee's cached pre-period YTD totals with figures that
+  # exclude the original payroll item, so PayrollCalculator uses the
+  # corrected baseline while recomputing the supplemental delta.
   def with_ytd_excluding_original
     previous_snapshot = @employee.cached_ytd_snapshot
 
     @employee.cache_ytd_values!(
-      gross: ytd_gross_excluding_original,
-      social_security: ytd_ss_excluding_original,
       year: @original_pay_period.pay_date.year,
       as_of_pay_date: @original_pay_period.pay_date,
-      before_pay_period_id: @original_pay_period.id
+      before_pay_period_id: @original_pay_period.id,
+      totals: {
+        gross_pay: ytd_gross_excluding_original,
+        net_pay: ytd_sum_excluding_original(:net_pay),
+        withholding_tax: ytd_sum_excluding_original(:withholding_tax),
+        social_security_tax: ytd_ss_excluding_original,
+        medicare_tax: ytd_sum_excluding_original(:medicare_tax),
+        additional_withholding: ytd_sum_excluding_original(:additional_withholding),
+        retirement: ytd_sum_excluding_original(:retirement_payment),
+        roth_retirement: ytd_sum_excluding_original(:roth_retirement_payment),
+        insurance: ytd_sum_excluding_original(:insurance_payment),
+        loans: ytd_sum_excluding_original(:loan_payment)
+      }
     )
 
     yield

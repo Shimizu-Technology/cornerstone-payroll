@@ -130,9 +130,14 @@ class Employee < ApplicationRecord
     employee_ytd_totals.find_or_create_by(year: year)
   end
 
-  def cache_ytd_values!(gross:, social_security:, year:, as_of_pay_date:, before_pay_period_id:)
-    @cached_ytd_gross = gross
-    @cached_ytd_social_security = social_security
+  def cache_ytd_values!(year:, as_of_pay_date:, before_pay_period_id:, totals:)
+    normalized_totals = YTD_AGGREGATE_COLUMNS.keys.each_with_object({}) do |key, acc|
+      acc[key] = totals[key].to_f
+    end
+
+    @cached_ytd_before_totals = normalized_totals
+    @cached_ytd_gross = normalized_totals[:gross_pay]
+    @cached_ytd_social_security = normalized_totals[:social_security_tax]
     @cached_ytd_year = year
     @cached_ytd_as_of_pay_date = as_of_pay_date
     @cached_ytd_before_pay_period_id = before_pay_period_id
@@ -142,6 +147,7 @@ class Employee < ApplicationRecord
     {
       gross: defined?(@cached_ytd_gross) ? @cached_ytd_gross : nil,
       social_security: defined?(@cached_ytd_social_security) ? @cached_ytd_social_security : nil,
+      before_totals: defined?(@cached_ytd_before_totals) ? @cached_ytd_before_totals&.dup : nil,
       year: defined?(@cached_ytd_year) ? @cached_ytd_year : nil,
       as_of_pay_date: defined?(@cached_ytd_as_of_pay_date) ? @cached_ytd_as_of_pay_date : nil,
       before_pay_period_id: defined?(@cached_ytd_before_pay_period_id) ? @cached_ytd_before_pay_period_id : nil
@@ -151,12 +157,18 @@ class Employee < ApplicationRecord
   def restore_cached_ytd_snapshot!(snapshot)
     @cached_ytd_gross = snapshot[:gross]
     @cached_ytd_social_security = snapshot[:social_security]
+    @cached_ytd_before_totals = snapshot[:before_totals]
     @cached_ytd_year = snapshot[:year]
     @cached_ytd_as_of_pay_date = snapshot[:as_of_pay_date]
     @cached_ytd_before_pay_period_id = snapshot[:before_pay_period_id]
   end
 
   def ytd_totals_before(year:, pay_date:, pay_period_id:)
+    if cached_ytd_matches?(year, pay_date, pay_period_id) &&
+       defined?(@cached_ytd_before_totals) && @cached_ytd_before_totals.present?
+      return @cached_ytd_before_totals.dup
+    end
+
     ytd_aggregate_totals(
       year: year,
       pay_date: pay_date,
@@ -263,7 +275,7 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    values = scope.pick(*YTD_AGGREGATE_COLUMNS.values.map { |sql| Arel.sql(sql) }) || Array.new(YTD_AGGREGATE_COLUMNS.length, 0)
+    values = scope.pluck(*YTD_AGGREGATE_COLUMNS.values.map { |sql| Arel.sql(sql) }).first || Array.new(YTD_AGGREGATE_COLUMNS.length, 0)
     YTD_AGGREGATE_COLUMNS.keys.zip(values).to_h.transform_values(&:to_f)
   end
 
