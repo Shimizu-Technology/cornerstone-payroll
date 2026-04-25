@@ -38,7 +38,8 @@ interface EditableFields {
   reported_tips: number;
   salary_override: string;
   non_taxable_pay: number;
-  additional_withholding: number;
+  additional_withholding_override: string;
+  withholding_tax_adjustment: string;
   withholding_tax_override: string;
   wage_rate_hours: PayrollItemWageRateHours[];
   check_date: string;
@@ -65,7 +66,8 @@ export function PayrollItemEditModal({
     reported_tips: 0,
     salary_override: '',
     non_taxable_pay: 0,
-    additional_withholding: 0,
+    additional_withholding_override: '',
+    withholding_tax_adjustment: '',
     withholding_tax_override: '',
     wage_rate_hours: [],
     check_date: '',
@@ -102,7 +104,8 @@ export function PayrollItemEditModal({
         reported_tips: item.reported_tips || 0,
         salary_override: item.salary_override != null ? String(item.salary_override) : '',
         non_taxable_pay: item.non_taxable_pay || 0,
-        additional_withholding: item.additional_withholding || 0,
+        additional_withholding_override: item.additional_withholding_override != null ? String(item.additional_withholding_override) : '',
+        withholding_tax_adjustment: item.withholding_tax_adjustment != null ? String(item.withholding_tax_adjustment) : '',
         withholding_tax_override: item.withholding_tax_override != null ? String(item.withholding_tax_override) : '',
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
@@ -123,6 +126,7 @@ export function PayrollItemEditModal({
   const isContractorHourly = isContractor && contractorPayType === 'hourly';
   const isContractorFlat = isContractor && contractorPayType !== 'hourly';
   const hasMultiRate = (item.employment_type === 'hourly' || isContractorHourly) && fields.wage_rate_hours.length > 1;
+  const employeeAdditionalWithholding = Number(item.additional_withholding || 0);
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -189,7 +193,8 @@ export function PayrollItemEditModal({
         bonus: parseFloat(String(fields.bonus)) || 0,
         reported_tips: parseFloat(String(fields.reported_tips)) || 0,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
-        additional_withholding: parseFloat(String(fields.additional_withholding)) || 0,
+        additional_withholding_override: fields.additional_withholding_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.additional_withholding_override)) ? parseFloat(fields.additional_withholding_override) : null),
+        withholding_tax_adjustment: fields.withholding_tax_adjustment.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_adjustment)) ? parseFloat(fields.withholding_tax_adjustment) : null),
         withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
         check_date: fields.check_date || null,
         check_memo: fields.check_memo || null,
@@ -527,25 +532,41 @@ export function PayrollItemEditModal({
           {!isContractor && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">Tax Adjustments</h4>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">
-                    Additional Withholding (W-4 4c)
+                    W-4 4(c) Extra Withholding This Pay Period
                   </label>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
-                    value={fields.additional_withholding}
-                    onChange={(e) => handleChange('additional_withholding', e.target.value)}
+                    placeholder={employeeAdditionalWithholding > 0 ? employeeAdditionalWithholding.toFixed(2) : 'Use employee default'}
+                    value={fields.additional_withholding_override}
+                    onChange={(e) => handleChange('additional_withholding_override', e.target.value)}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Extra $ withheld each pay period per W-4
+                    Blank uses the employee's W-4 default of {formatCurrency(employeeAdditionalWithholding)}. Set to 0.00 here to skip the normal extra withholding for just this pay period.
                   </p>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">
-                    FIT Override
+                    FIT Adjustment
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={fields.withholding_tax_adjustment}
+                    onChange={(e) => handleChange('withholding_tax_adjustment', e.target.value)}
+                  />
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    One-time adjustment to the calculated FIT tax only. This does not change the W-4 4(c) amount shown to the left.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    Final FIT Override
                   </label>
                   <Input
                     type="number"
@@ -556,7 +577,7 @@ export function PayrollItemEditModal({
                     onChange={(e) => handleChange('withholding_tax_override', e.target.value)}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Leave blank for normal calculation; set to override FIT (e.g. 0 for exempt)
+                    Advanced: leave blank for normal calculation; set to force the final FIT tax amount for this pay period.
                   </p>
                 </div>
               </div>

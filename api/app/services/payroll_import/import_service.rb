@@ -102,6 +102,7 @@ module PayrollImport
             # Set employment info
             payroll_item.employment_type = employee.employment_type
             payroll_item.pay_rate = employee.pay_rate
+            payroll_item.additional_withholding = employee.additional_withholding.to_f if payroll_item.new_record?
 
             # Set hours from PDF
             payroll_item.hours_worked = row[:regular_hours].to_f if row[:regular_hours]

@@ -1202,13 +1202,18 @@ export function PayPeriodDetail() {
                                       Manual
                                     </span>
                                   )}
+                                  {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))} for this pay period`}>
+                                      FIT Adj
+                                    </span>
+                                  )}
                                   {item.withholding_tax_override != null && (
-                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title="FIT manually overridden for this pay period">
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="Final FIT manually overridden for this pay period">
                                       FIT Override
                                     </span>
                                   )}
                                   {toNumber(item.additional_withholding) > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={`W-4 Step 4c: Additional withholding of ${formatCurrency(toNumber(item.additional_withholding))} per period`}>
+                                    <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={item.additional_withholding_override != null ? `W-4 Step 4(c) overridden for this pay period: ${formatCurrency(toNumber(item.additional_withholding))}` : `W-4 Step 4(c) extra withholding for this pay period: ${formatCurrency(toNumber(item.additional_withholding))}`}>
                                       +{formatCurrency(toNumber(item.additional_withholding))} W/H
                                     </span>
                                   )}
@@ -1316,8 +1321,11 @@ export function PayPeriodDetail() {
                           )}
                           <TableCell className="text-right text-red-600">
                             {formatCurrency(toNumber(item.withholding_tax))}
+                            {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
+                              <span className="ml-0.5 text-[10px] text-orange-600" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
+                            )}
                             {item.withholding_tax_override != null && (
-                              <span className="ml-0.5 text-[10px] text-amber-600" title="FIT manually overridden">*</span>
+                              <span className="ml-0.5 text-[10px] text-amber-600" title="Final FIT manually overridden">*</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right text-red-600">

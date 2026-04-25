@@ -96,18 +96,24 @@ class PayrollCalculator
 
     taxes = tax_calculator.calculate(**tax_args)
 
+    calculated_withholding = taxes[:withholding].to_f
     if payroll_item.withholding_tax_override.present?
       payroll_item.withholding_tax = payroll_item.withholding_tax_override.to_f
     else
-      payroll_item.withholding_tax = taxes[:withholding]
+      payroll_item.withholding_tax = [ calculated_withholding + payroll_item.withholding_tax_adjustment.to_f, 0 ].max
     end
     payroll_item.social_security_tax = taxes[:social_security]
     payroll_item.medicare_tax = taxes[:medicare]
 
     payroll_item.employer_social_security_tax = taxes[:employer_social_security]
     payroll_item.employer_medicare_tax = taxes[:employer_medicare]
+    payroll_item.additional_withholding =
+      if payroll_item.additional_withholding_override.present?
+        payroll_item.additional_withholding_override.to_f
+      else
+        employee.additional_withholding.to_f
+      end
 
-    payroll_item.additional_withholding = employee.additional_withholding.to_f
   end
 
   def calculate_retirement

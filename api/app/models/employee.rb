@@ -40,6 +40,7 @@ class Employee < ApplicationRecord
   has_many :employee_wage_rates, dependent: :destroy
 
   before_validation :normalize_pay_rate_precision
+  before_validation :normalize_w4_currency_precision
 
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
@@ -67,6 +68,7 @@ class Employee < ApplicationRecord
     validates :w4_dependent_credit, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
+    validates :address_line1, :city, :state, :zip, presence: true
   end
 
   scope :active, -> { where(status: "active") }
@@ -97,7 +99,21 @@ class Employee < ApplicationRecord
   end
 
   def full_address
-    [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
+    city_state_zip = [
+      city.presence,
+      state.presence,
+      zip.presence
+    ].compact
+
+    city_state_zip_line = if city_state_zip.empty?
+      nil
+    elsif city.present? && state.present?
+      [ "#{city}, #{state}", zip.presence ].compact.join(" ")
+    else
+      city_state_zip.join(" ")
+    end
+
+    [ address_line1, address_line2, city_state_zip_line ].compact_blank.join("\n")
   end
 
   def active?
@@ -316,6 +332,13 @@ class Employee < ApplicationRecord
 
   def normalize_pay_rate_precision
     self.pay_rate = round_currency_value(pay_rate)
+  end
+
+  def normalize_w4_currency_precision
+    self.additional_withholding = round_currency_value(additional_withholding)
+    self.w4_dependent_credit = round_currency_value(w4_dependent_credit)
+    self.w4_step4a_other_income = round_currency_value(w4_step4a_other_income)
+    self.w4_step4b_deductions = round_currency_value(w4_step4b_deductions)
   end
 
   def round_currency_value(value)

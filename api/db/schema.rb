@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_25_123000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_25_183000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -466,6 +466,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_123000) do
 
   create_table "payroll_items", force: :cascade do |t|
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
+    t.decimal "additional_withholding_override", precision: 10, scale: 2
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
     t.date "check_date"
     t.string "check_memo"
@@ -515,6 +516,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_123000) do
     t.datetime "voided_at"
     t.bigint "voided_by_user_id"
     t.decimal "withholding_tax", precision: 10, scale: 2, default: "0.0"
+    t.decimal "withholding_tax_adjustment", precision: 10, scale: 2
     t.decimal "withholding_tax_override", precision: 10, scale: 2
     t.decimal "ytd_gross", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_medicare_tax", precision: 14, scale: 2, default: "0.0"
