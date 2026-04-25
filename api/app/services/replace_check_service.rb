@@ -284,16 +284,19 @@ class ReplaceCheckService
   # originally.
   def recompute_with_ytd_excluding_self(item)
     employee = item.employee
-    prev_gross = employee.instance_variable_get(:@cached_ytd_gross)
-    prev_ss    = employee.instance_variable_get(:@cached_ytd_social_security)
+    previous_snapshot = employee.cached_ytd_snapshot
 
-    employee.instance_variable_set(:@cached_ytd_gross, ytd_excluding_self(:gross_pay))
-    employee.instance_variable_set(:@cached_ytd_social_security, ytd_excluding_self(:social_security_tax))
+    employee.cache_ytd_values!(
+      gross: ytd_excluding_self(:gross_pay),
+      social_security: ytd_excluding_self(:social_security_tax),
+      year: item.pay_period.pay_date.year,
+      as_of_pay_date: item.pay_period.pay_date,
+      before_pay_period_id: item.pay_period_id
+    )
 
     PayrollCalculator.for(employee, item).calculate
   ensure
-    employee.instance_variable_set(:@cached_ytd_gross, prev_gross)
-    employee.instance_variable_set(:@cached_ytd_social_security, prev_ss)
+    employee.restore_cached_ytd_snapshot!(previous_snapshot)
   end
 
   # YTD across all reportable_committed periods *prior to* this item's

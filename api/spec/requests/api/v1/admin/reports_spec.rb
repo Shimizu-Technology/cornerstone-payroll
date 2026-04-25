@@ -21,6 +21,40 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
   end
 
+  describe "GET /api/v1/admin/reports/transmittal_preview" do
+    let!(:pay_period) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 1, 1),
+        end_date: Date.new(2026, 1, 14),
+        pay_date: Date.new(2026, 1, 16))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        gross_pay: 1200.00,
+        net_pay: 968.20,
+        withholding_tax: 100.00,
+        social_security_tax: 74.40,
+        employer_social_security_tax: 74.40,
+        medicare_tax: 17.40,
+        employer_medicare_tax: 17.40)
+    end
+
+    it "reports total DRT deposit as FIT only" do
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      tax_totals = response.parsed_body["tax_totals"]
+      expect(tax_totals["fit"].to_f).to eq(100.0)
+      expect(tax_totals["total_fica"].to_f).to eq(183.6)
+      expect(tax_totals["total_drt_deposit"].to_f).to eq(100.0)
+    end
+  end
+
   describe "GET /api/v1/admin/reports/form_941_gu" do
     let!(:pay_period_q1) do
       create(:pay_period, :committed,

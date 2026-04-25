@@ -330,16 +330,19 @@ class IssueCorrectivePaycheckService
   # calculator's `ytd_gross_before` / `ytd_ss_before` use them instead of
   # querying). Restores the previous cache values afterwards.
   def with_ytd_excluding_original
-    prev_gross = @employee.instance_variable_get(:@cached_ytd_gross)
-    prev_ss    = @employee.instance_variable_get(:@cached_ytd_social_security)
+    previous_snapshot = @employee.cached_ytd_snapshot
 
-    @employee.instance_variable_set(:@cached_ytd_gross, ytd_gross_excluding_original)
-    @employee.instance_variable_set(:@cached_ytd_social_security, ytd_ss_excluding_original)
+    @employee.cache_ytd_values!(
+      gross: ytd_gross_excluding_original,
+      social_security: ytd_ss_excluding_original,
+      year: @original_pay_period.pay_date.year,
+      as_of_pay_date: @original_pay_period.pay_date,
+      before_pay_period_id: @original_pay_period.id
+    )
 
     yield
   ensure
-    @employee.instance_variable_set(:@cached_ytd_gross, prev_gross)
-    @employee.instance_variable_set(:@cached_ytd_social_security, prev_ss)
+    @employee.restore_cached_ytd_snapshot!(previous_snapshot)
   end
 
   # YTD across all reportable_committed periods *prior to* the original
