@@ -331,6 +331,7 @@ export interface CorrectivePaycheckInputs {
   tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;
+  withholding_tax_adjustment?: number | null;
   custom_earnings?: { label: string; amount: number }[];
   custom_columns_data?: Record<string, number>;
   non_taxable_pay?: number;

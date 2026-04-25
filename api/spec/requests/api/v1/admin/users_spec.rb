@@ -32,6 +32,15 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       active: true
     )
   end
+  let!(:manager_user) do
+    User.create!(
+      company: company,
+      email: "manager@example.com",
+      name: "Manager User",
+      role: "manager",
+      active: true
+    )
+  end
 
   before do
     allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
@@ -66,6 +75,18 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
       expect(data.map { |row| row.fetch("id") }).to include(admin_user.id, managed_user.id, switched_company_user.id)
+    end
+  end
+
+  describe "authorization" do
+    it "returns 403 for manager users because user management is admin-only" do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(manager_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(manager_user.id)
+
+      get "/api/v1/admin/users"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Admin access required")
     end
   end
 
