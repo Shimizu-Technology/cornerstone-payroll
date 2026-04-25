@@ -40,6 +40,7 @@ class Employee < ApplicationRecord
   has_many :employee_wage_rates, dependent: :destroy
 
   before_validation :normalize_pay_rate_precision
+  before_validation :normalize_w4_currency_precision
 
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
@@ -331,6 +332,13 @@ class Employee < ApplicationRecord
 
   def normalize_pay_rate_precision
     self.pay_rate = round_currency_value(pay_rate)
+  end
+
+  def normalize_w4_currency_precision
+    self.additional_withholding = round_currency_value(additional_withholding)
+    self.w4_dependent_credit = round_currency_value(w4_dependent_credit)
+    self.w4_step4a_other_income = round_currency_value(w4_step4a_other_income)
+    self.w4_step4b_deductions = round_currency_value(w4_step4b_deductions)
   end
 
   def round_currency_value(value)

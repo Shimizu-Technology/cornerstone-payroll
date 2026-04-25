@@ -121,7 +121,7 @@ module Api
           permitted = params.require(:payroll_item).permit(
             :employee_id, :employment_type, :pay_rate,
             :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
-            :bonus, :additional_withholding, :withholding_tax_adjustment, :withholding_tax_override, :check_number,
+            :bonus, :additional_withholding, :additional_withholding_override, :withholding_tax_adjustment, :withholding_tax_override, :check_number,
             :salary_override, :non_taxable_pay, :reported_tips,
             :check_date, :check_memo,
             wage_rate_hours: [
@@ -159,6 +159,7 @@ module Api
             medicare_tax: item.medicare_tax,
             retirement_payment: item.retirement_payment,
             additional_withholding: item.additional_withholding,
+            additional_withholding_override: item.additional_withholding_override,
             withholding_tax_adjustment: item.withholding_tax_adjustment,
             withholding_tax_override: item.withholding_tax_override,
             total_deductions: item.total_deductions,

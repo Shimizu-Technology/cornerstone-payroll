@@ -33,7 +33,11 @@ RSpec.describe CheckGenerator do
       first_name: "John",
       last_name: "Santos",
       employment_type: "hourly",
-      pay_rate: 15.24)
+      pay_rate: 15.24,
+      address_line1: "123 Test St",
+      city: "Barrigada",
+      state: "GU",
+      zip: "96913")
   end
 
   let(:payroll_item) do
@@ -76,6 +80,13 @@ RSpec.describe CheckGenerator do
       expect(text).not_to include("Memo:")
       expect(text).not_to include("BENEFITS")
       expect(text).not_to include("Pay Period:")
+    end
+
+    it "prints the employee mailing address on the check face" do
+      text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+      expect(text).to include("123 Test St")
+      expect(text).to include("Barrigada, GU 96913")
     end
   end
 
@@ -194,9 +205,10 @@ RSpec.describe CheckGenerator do
     it "uses the tuned default field coordinates" do
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :date, :y)).to eq(216.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee, :x)).to eq(64.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee, :y)).to eq(180.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee, :y)).to eq(168.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :payee_address, :y)).to eq(102.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :amount, :y)).to eq(182.0)
-      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :amount_words, :y)).to eq(156.0)
+      expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :amount_words, :y)).to eq(136.0)
       expect(CheckGenerator::DEFAULT_LAYOUT.dig(:check_face, :memo, :y)).to eq(64.0)
     end
 

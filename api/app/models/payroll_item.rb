@@ -45,6 +45,7 @@ class PayrollItem < ApplicationRecord
   validates :company_id, presence: true
   validates :withholding_tax_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :withholding_tax_adjustment, numericality: true, allow_nil: true
+  validates :additional_withholding_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :company_matches_pay_period
 
   # Validate that each employee only appears once per pay period
@@ -225,6 +226,13 @@ class PayrollItem < ApplicationRecord
 
   def normalize_pay_precision
     self.pay_rate = round_currency_value(pay_rate)
+    self.additional_withholding = round_currency_value(additional_withholding)
+    self.additional_withholding_override = round_currency_value(additional_withholding_override) if additional_withholding_override.present?
+    self.withholding_tax_adjustment = round_currency_value(withholding_tax_adjustment) if withholding_tax_adjustment.present?
+    self.withholding_tax_override = round_currency_value(withholding_tax_override) if withholding_tax_override.present?
+    self.bonus = round_currency_value(bonus)
+    self.reported_tips = round_currency_value(reported_tips)
+    self.non_taxable_pay = round_currency_value(non_taxable_pay)
 
     return unless custom_columns_data.is_a?(Hash)
 

@@ -130,5 +130,13 @@ RSpec.describe PayrollCalculator do
 
       expect(payroll_item.withholding_tax).to eq(12.34)
     end
+
+    it "lets a payroll item override the employee's W-4 Step 4(c) amount for one pay period" do
+      payroll_item.additional_withholding_override = 0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.additional_withholding).to eq(0)
+    end
   end
 end

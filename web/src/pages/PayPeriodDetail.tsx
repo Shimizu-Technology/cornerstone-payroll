@@ -1213,7 +1213,7 @@ export function PayPeriodDetail() {
                                     </span>
                                   )}
                                   {toNumber(item.additional_withholding) > 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={`W-4 Step 4c: Additional withholding of ${formatCurrency(toNumber(item.additional_withholding))} per period`}>
+                                    <span className="inline-flex items-center rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={item.additional_withholding_override != null ? `W-4 Step 4(c) overridden for this pay period: ${formatCurrency(toNumber(item.additional_withholding))}` : `W-4 Step 4(c) extra withholding for this pay period: ${formatCurrency(toNumber(item.additional_withholding))}`}>
                                       +{formatCurrency(toNumber(item.additional_withholding))} W/H
                                     </span>
                                   )}

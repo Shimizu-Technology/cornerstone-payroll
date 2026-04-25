@@ -222,6 +222,7 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.employment_type = employee.employment_type
                 payroll_item.hours_worked = 0
+                payroll_item.additional_withholding = employee.additional_withholding.to_f
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
@@ -798,6 +799,7 @@ module Api
             bonus: item.bonus,
             reported_tips: item.reported_tips,
             additional_withholding: item.additional_withholding,
+            additional_withholding_override: item.additional_withholding_override,
             withholding_tax_adjustment: item.withholding_tax_adjustment,
             withholding_tax_override: item.withholding_tax_override,
             gross_pay: item.gross_pay,

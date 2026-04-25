@@ -115,6 +115,23 @@ RSpec.describe Employee, type: :model do
 
       expect(employee.pay_rate.to_f).to eq(9.99)
     end
+
+    it "rounds W-4 monetary fields to cents before validation" do
+      employee = build(
+        :employee,
+        additional_withholding: 14.999,
+        w4_dependent_credit: 1234.567,
+        w4_step4a_other_income: 99.999,
+        w4_step4b_deductions: 88.888
+      )
+
+      employee.validate
+
+      expect(employee.additional_withholding.to_f).to eq(15.0)
+      expect(employee.w4_dependent_credit.to_f).to eq(1234.57)
+      expect(employee.w4_step4a_other_income.to_f).to eq(100.0)
+      expect(employee.w4_step4b_deductions.to_f).to eq(88.89)
+    end
   end
 
   describe "address validation" do
