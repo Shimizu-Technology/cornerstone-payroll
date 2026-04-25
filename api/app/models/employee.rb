@@ -155,12 +155,12 @@ class Employee < ApplicationRecord
   end
 
   def restore_cached_ytd_snapshot!(snapshot)
-    @cached_ytd_gross = snapshot[:gross]
-    @cached_ytd_social_security = snapshot[:social_security]
-    @cached_ytd_before_totals = snapshot[:before_totals]
-    @cached_ytd_year = snapshot[:year]
-    @cached_ytd_as_of_pay_date = snapshot[:as_of_pay_date]
-    @cached_ytd_before_pay_period_id = snapshot[:before_pay_period_id]
+    restore_cached_ytd_ivar(:@cached_ytd_gross, snapshot[:gross])
+    restore_cached_ytd_ivar(:@cached_ytd_social_security, snapshot[:social_security])
+    restore_cached_ytd_ivar(:@cached_ytd_before_totals, snapshot[:before_totals])
+    restore_cached_ytd_ivar(:@cached_ytd_year, snapshot[:year])
+    restore_cached_ytd_ivar(:@cached_ytd_as_of_pay_date, snapshot[:as_of_pay_date])
+    restore_cached_ytd_ivar(:@cached_ytd_before_pay_period_id, snapshot[:before_pay_period_id])
   end
 
   def ytd_totals_before(year:, pay_date:, pay_period_id:)
@@ -178,6 +178,9 @@ class Employee < ApplicationRecord
   end
 
   def ytd_totals_through(year:, pay_date:, pay_period_id:)
+    # This intentionally bypasses the pre-period cache because "through"
+    # totals are used for display/rendering and must include the current
+    # pay period's own row in the aggregate window.
     ytd_aggregate_totals(
       year: year,
       pay_date: pay_date,
@@ -258,6 +261,14 @@ class Employee < ApplicationRecord
       @cached_ytd_as_of_pay_date == as_of_pay_date &&
       defined?(@cached_ytd_before_pay_period_id) &&
       @cached_ytd_before_pay_period_id == before_pay_period_id
+  end
+
+  def restore_cached_ytd_ivar(name, value)
+    if value.nil?
+      remove_instance_variable(name) if instance_variable_defined?(name)
+    else
+      instance_variable_set(name, value)
+    end
   end
 
   def ytd_aggregate_totals(year:, pay_date:, pay_period_id:, include_current_period:)

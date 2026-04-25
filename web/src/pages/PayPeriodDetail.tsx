@@ -53,7 +53,9 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
     const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
 
     return configuredRates.map((rate) => {
-      const matchedExisting = existingById.get(rate.id) || existingByLabel.get(rate.label.trim().toLowerCase());
+      const matchedExisting =
+        (rate.id != null ? existingById.get(rate.id) : undefined) ||
+        existingByLabel.get(rate.label.trim().toLowerCase());
 
       return {
         employee_wage_rate_id: rate.id,
