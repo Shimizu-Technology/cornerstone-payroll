@@ -221,9 +221,10 @@ module Api
               if payroll_item.new_record?
                 payroll_item.company_id = current_company_id
                 payroll_item.employment_type = employee.employment_type
-                payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
                 payroll_item.hours_worked = 0
               end
+
+              sync_pay_rate_from_employee(payroll_item, employee)
 
               # Use hours from params if provided
               if params[:hours] && params[:hours][employee_id.to_s]
@@ -234,6 +235,7 @@ module Api
                   apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
                 else
                   payroll_item.clear_wage_rate_hours!
+                  sync_pay_rate_from_employee(payroll_item, employee)
                   payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
                   payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
                   payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
@@ -839,6 +841,12 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+        end
+
+        def sync_pay_rate_from_employee(payroll_item, employee)
+          return if payroll_item.wage_rate_hours.present?
+
+          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
         end
 
         # Compact summary of a corrective payroll_item — shipped back to the

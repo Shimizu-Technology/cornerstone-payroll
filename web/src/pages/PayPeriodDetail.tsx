@@ -40,6 +40,35 @@ const toNumber = (value: unknown): number => {
 
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
+  const configuredRates = employee.wage_rates || [];
+  if (configuredRates.length > 0) {
+    const existingById = new Map(
+      (existing || []).flatMap((entry) => (
+        entry.employee_wage_rate_id != null ? [[entry.employee_wage_rate_id, entry]] : []
+      ))
+    );
+    const existingByLabel = new Map(
+      (existing || []).map((entry) => [entry.label.trim().toLowerCase(), entry])
+    );
+    const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
+
+    return configuredRates.map((rate) => {
+      const matchedExisting = existingById.get(rate.id) || existingByLabel.get(rate.label.trim().toLowerCase());
+
+      return {
+        employee_wage_rate_id: rate.id,
+        label: rate.label,
+        rate: toNumber(rate.rate),
+        regular_hours: matchedExisting ? toNumber(matchedExisting.regular_hours) : (rate.is_primary ? defaultPrimaryHours : 0),
+        overtime_hours: matchedExisting ? toNumber(matchedExisting.overtime_hours) : (rate.is_primary ? toNumber(payrollItem?.overtime_hours ?? 0) : 0),
+        holiday_hours: matchedExisting ? toNumber(matchedExisting.holiday_hours) : (rate.is_primary ? toNumber(payrollItem?.holiday_hours ?? 0) : 0),
+        pto_hours: matchedExisting ? toNumber(matchedExisting.pto_hours) : (rate.is_primary ? toNumber(payrollItem?.pto_hours ?? 0) : 0),
+        is_primary: rate.is_primary,
+        active: rate.active,
+      };
+    });
+  }
+
   if (existing && existing.length > 0) {
     return existing.map((entry) => ({
       employee_wage_rate_id: entry.employee_wage_rate_id,
@@ -54,14 +83,11 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
     }));
   }
 
-  const configuredRates = employee.wage_rates || [];
-  const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
-
   return configuredRates.map((rate) => ({
     employee_wage_rate_id: rate.id,
     label: rate.label,
     rate: toNumber(rate.rate),
-    regular_hours: rate.is_primary ? defaultPrimaryHours : 0,
+    regular_hours: rate.is_primary ? toNumber(payrollItem?.hours_worked ?? 0) : 0,
     overtime_hours: rate.is_primary ? toNumber(payrollItem?.overtime_hours ?? 0) : 0,
     holiday_hours: rate.is_primary ? toNumber(payrollItem?.holiday_hours ?? 0) : 0,
     pto_hours: rate.is_primary ? toNumber(payrollItem?.pto_hours ?? 0) : 0,
