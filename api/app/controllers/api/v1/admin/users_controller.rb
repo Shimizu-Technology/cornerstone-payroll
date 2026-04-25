@@ -165,6 +165,10 @@ module Api
         private
 
         def set_user
+          # Staff users are global to the payroll workspace rather than scoped to
+          # the currently selected client company. This endpoint remains safe
+          # because the controller is admin-only, and assignment writes are
+          # separately constrained by `assignable_company_ids`.
           @user = User.includes(company_assignments: :company).find_by(id: params[:id])
           return if @user
 

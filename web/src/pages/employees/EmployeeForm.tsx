@@ -51,6 +51,12 @@ interface WageRateFormRow extends EmployeeWageRate {
   temp_id: string;
 }
 
+type W4MonetaryField =
+  | 'additional_withholding'
+  | 'w4_dependent_credit'
+  | 'w4_step4a_other_income'
+  | 'w4_step4b_deductions';
+
 const defaultHourlyWageRate = (): WageRateFormRow => ({
   temp_id: crypto.randomUUID(),
   label: 'Regular',
@@ -63,6 +69,9 @@ const roundCurrencyValue = (value: number): number => {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 100) / 100;
 };
+
+const toCurrencyDraft = (value: number | null | undefined): string =>
+  String(roundCurrencyValue(Number(value) || 0));
 
 const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormData => ({
   ...form,
@@ -85,6 +94,12 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
+  const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
+    additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
+    w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
+    w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
+    w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
+  });
   const [ssnLastFour, setSsnLastFour] = useState<string | null>(null);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
@@ -107,7 +122,7 @@ export function EmployeeForm() {
       const response = await employeesApi.get(parseInt(id, 10));
       const employee = response.data;
       
-      setForm({
+      const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
@@ -137,6 +152,13 @@ export function EmployeeForm() {
         city: employee.city || '',
         state: employee.state || '',
         zip: employee.zip || '',
+      };
+      setForm(nextForm);
+      setW4CurrencyDrafts({
+        additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
+        w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
+        w4_step4a_other_income: toCurrencyDraft(nextForm.w4_step4a_other_income),
+        w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
       const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
@@ -212,6 +234,16 @@ export function EmployeeForm() {
         return newErrors;
       });
     }
+  };
+
+  const handleW4CurrencyDraftChange = (field: W4MonetaryField, value: string): void => {
+    setW4CurrencyDrafts((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const commitW4CurrencyDraft = (field: W4MonetaryField): void => {
+    const normalized = roundCurrencyValue(parseFloat(w4CurrencyDrafts[field]) || 0);
+    handleChange(field, normalized);
+    setW4CurrencyDrafts((prev) => ({ ...prev, [field]: toCurrencyDraft(normalized) }));
   };
 
   const replaceWageRates = (nextRates: WageRateFormRow[]) => {
@@ -340,8 +372,14 @@ export function EmployeeForm() {
     try {
       const normalizedWageRates = supportsMultipleHourlyRates ? normalizeWageRates() : [];
       const primaryRate = normalizedWageRates.find((rate) => rate.is_primary) || normalizedWageRates[0];
+      const normalizedW4Values = {
+        additional_withholding: roundCurrencyValue(parseFloat(w4CurrencyDrafts.additional_withholding) || 0),
+        w4_dependent_credit: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_dependent_credit) || 0),
+        w4_step4a_other_income: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4a_other_income) || 0),
+        w4_step4b_deductions: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0),
+      };
       const employeePayload = {
-        ...normalizeEmployeeMonetaryFields(form),
+        ...normalizeEmployeeMonetaryFields({ ...form, ...normalizedW4Values }),
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
           : roundCurrencyValue(form.pay_rate),
@@ -891,11 +929,11 @@ export function EmployeeForm() {
                       Total Annual Dependent Credit ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_dependent_credit}
-                      onChange={(e) => handleChange('w4_dependent_credit', roundCurrencyValue(parseFloat(e.target.value) || 0))}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_dependent_credit}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_dependent_credit', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_dependent_credit')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       $2,000 per qualifying child under 17 + $500 per other dependent
@@ -913,11 +951,11 @@ export function EmployeeForm() {
                       4(a) Other Income ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_step4a_other_income}
-                      onChange={(e) => handleChange('w4_step4a_other_income', roundCurrencyValue(parseFloat(e.target.value) || 0))}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_step4a_other_income}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_step4a_other_income', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_step4a_other_income')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual estimate of non-job income (interest, dividends, etc.)
@@ -928,11 +966,11 @@ export function EmployeeForm() {
                       4(b) Deductions ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_step4b_deductions}
-                      onChange={(e) => handleChange('w4_step4b_deductions', roundCurrencyValue(parseFloat(e.target.value) || 0))}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_step4b_deductions}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_step4b_deductions', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_step4b_deductions')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual amount if deductions exceed the standard deduction
@@ -943,11 +981,11 @@ export function EmployeeForm() {
                       4(c) Extra Withholding ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.additional_withholding}
-                      onChange={(e) => handleChange('additional_withholding', roundCurrencyValue(parseFloat(e.target.value) || 0))}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.additional_withholding}
+                      onChange={(e) => handleW4CurrencyDraftChange('additional_withholding', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('additional_withholding')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Extra amount to withhold each pay period
