@@ -201,6 +201,15 @@ class Employee < ApplicationRecord
     )
   end
 
+  def ytd_totals_for_scope(scope)
+    select_list = YTD_AGGREGATE_COLUMNS.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
+    row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
+
+    YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, totals|
+      totals[key] = row[key.to_s].to_f
+    end
+  end
+
   # Calculate YTD gross from payroll items.
   # Returns the precomputed cache when set by batch operations (e.g. run_payroll).
   def calculate_ytd_gross(year, as_of_pay_date: nil, before_pay_period_id: nil)
@@ -298,12 +307,7 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    select_list = YTD_AGGREGATE_COLUMNS.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
-    row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
-
-    YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, totals|
-      totals[key] = row[key.to_s].to_f
-    end
+    ytd_totals_for_scope(scope)
   end
 
   def pay_date_range_for_year(year)
