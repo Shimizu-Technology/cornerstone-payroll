@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, employeeWageRatesApi, ApiError } from '@/services/api';
@@ -300,6 +300,20 @@ export function EmployeeForm() {
     }
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
+    }
+    if (form.employment_type !== 'contractor') {
+      if (!String(form.address_line1 || '').trim()) {
+        newErrors.address_line1 = ['Address line 1 is required'];
+      }
+      if (!String(form.city || '').trim()) {
+        newErrors.city = ['City is required'];
+      }
+      if (!String(form.state || '').trim()) {
+        newErrors.state = ['State is required'];
+      }
+      if (!String(form.zip || '').trim()) {
+        newErrors.zip = ['ZIP code is required'];
+      }
     }
 
     setErrors(newErrors);
@@ -973,18 +987,23 @@ export function EmployeeForm() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Address</CardTitle>
+            {form.employment_type !== 'contractor' && (
+              <CardDescription>Mailing address is required for W-2 employees and printed on payroll checks.</CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1
+                  Address Line 1 {form.employment_type !== 'contractor' ? '*' : ''}
                 </label>
                 <Input
                   value={form.address_line1 || ''}
                   onChange={(e) => handleChange('address_line1', e.target.value)}
                   placeholder="Street address"
+                  required={form.employment_type !== 'contractor'}
                 />
+                {errors.address_line1 && <p className="mt-1 text-sm text-red-600">{errors.address_line1[0]}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -999,33 +1018,39 @@ export function EmployeeForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City
+                    City {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.city || ''}
                     onChange={(e) => handleChange('city', e.target.value)}
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.city && <p className="mt-1 text-sm text-red-600">{errors.city[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State
+                    State {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.state || ''}
                     onChange={(e) => handleChange('state', e.target.value)}
                     maxLength={2}
                     placeholder="GU"
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.state && <p className="mt-1 text-sm text-red-600">{errors.state[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code
+                    ZIP Code {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.zip || ''}
                     onChange={(e) => handleChange('zip', e.target.value)}
                     placeholder="96910"
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.zip && <p className="mt-1 text-sm text-red-600">{errors.zip[0]}</p>}
                 </div>
               </div>
             </div>

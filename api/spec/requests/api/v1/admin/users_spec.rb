@@ -177,34 +177,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
 
-    it "treats same-set foreign-workspace assignment submissions as a no-op" do
-      existing_assignments = [
-        CompanyAssignment.create!(user: switched_company_user, company: client_company),
-        CompanyAssignment.create!(user: switched_company_user, company: other_company)
-      ]
-
-      expect {
-        patch "/api/v1/admin/users/#{switched_company_user.id}",
-          params: {
-            user: {
-              name: "Renamed Other Company User",
-              role: "accountant",
-              company_ids: [other_company.id, client_company.id]
-            }
-          }
-      }.not_to change(CompanyAssignment, :count)
-
-      expect(response).to have_http_status(:ok)
-      switched_company_user.reload
-
-      expect(switched_company_user.name).to eq("Renamed Other Company User")
-      expect(switched_company_user.company_assignments.order(:id).pluck(:id))
-        .to eq(existing_assignments.map(&:id).sort)
-      expect(switched_company_user.company_assignments.order(:company_id).pluck(:company_id))
-        .to eq([client_company.id, other_company.id])
-    end
-
-    it "rejects assignment changes for users in another staff workspace" do
+    it "allows assignment changes for users in another staff workspace" do
       patch "/api/v1/admin/users/#{switched_company_user.id}",
         params: {
           user: {
@@ -214,15 +187,13 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           }
         }
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("Client assignments can only be edited for users in your staff workspace")
-
+      expect(response).to have_http_status(:ok)
       switched_company_user.reload
-      expect(switched_company_user.name).to eq("Other Company User")
-      expect(switched_company_user.company_assignments).to be_empty
+      expect(switched_company_user.name).to eq("Renamed Other Company User")
+      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
 
-    it "rejects role changes for users in another staff workspace when the change would clear assignments" do
+    it "allows role changes for users in another staff workspace when the change would clear assignments" do
       CompanyAssignment.create!(user: switched_company_user, company: client_company)
 
       patch "/api/v1/admin/users/#{switched_company_user.id}",
@@ -233,15 +204,27 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           }
         }
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include(
-        "Role changes that clear client assignments can only be made in the user's staff workspace"
-      )
-
+      expect(response).to have_http_status(:ok)
       switched_company_user.reload
-      expect(switched_company_user.name).to eq("Other Company User")
-      expect(switched_company_user.role).to eq("accountant")
-      expect(switched_company_user.company_assignments.pluck(:company_id)).to eq([client_company.id])
+      expect(switched_company_user.name).to eq("Renamed Other Company User")
+      expect(switched_company_user.role).to eq("employee")
+      expect(switched_company_user.company_assignments).to be_empty
+    end
+
+    it "rejects assignment changes outside the admin's accessible companies" do
+      allow(admin_user).to receive(:accessible_company_ids).and_return([client_company.id])
+
+      patch "/api/v1/admin/users/#{managed_user.id}",
+        params: {
+          user: {
+            role: "accountant",
+            company_ids: [other_company.id]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("One or more companies are not accessible")
+      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
   end
 end

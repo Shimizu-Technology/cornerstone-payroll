@@ -1202,8 +1202,13 @@ export function PayPeriodDetail() {
                                       Manual
                                     </span>
                                   )}
+                                  {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
+                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))} for this pay period`}>
+                                      FIT Adj
+                                    </span>
+                                  )}
                                   {item.withholding_tax_override != null && (
-                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700" title="FIT manually overridden for this pay period">
+                                    <span className="inline-flex items-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700" title="Final FIT manually overridden for this pay period">
                                       FIT Override
                                     </span>
                                   )}
@@ -1316,8 +1321,11 @@ export function PayPeriodDetail() {
                           )}
                           <TableCell className="text-right text-red-600">
                             {formatCurrency(toNumber(item.withholding_tax))}
+                            {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
+                              <span className="ml-0.5 text-[10px] text-orange-600" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
+                            )}
                             {item.withholding_tax_override != null && (
-                              <span className="ml-0.5 text-[10px] text-amber-600" title="FIT manually overridden">*</span>
+                              <span className="ml-0.5 text-[10px] text-amber-600" title="Final FIT manually overridden">*</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right text-red-600">
