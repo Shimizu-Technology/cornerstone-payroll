@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
@@ -357,7 +358,15 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           {formError && <p className="text-sm text-red-600 mb-2">{formError}</p>}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
-            <Input className="px-3 py-2 text-sm" placeholder="Amount *" type="text" inputMode="decimal" value={formData.amount} onChange={e => setFormData(p => ({ ...p, amount: e.target.value }))} />
+            <NumericInput
+              className="px-3 py-2 text-sm"
+              placeholder="Amount *"
+              min={0.01}
+              fixedDecimalsOnBlur={2}
+              inputMode="decimal"
+              value={formData.amount === '' ? null : Number(formData.amount)}
+              onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
+            />
             <select className="border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
               {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
                 <option key={val} value={val}>{label}</option>

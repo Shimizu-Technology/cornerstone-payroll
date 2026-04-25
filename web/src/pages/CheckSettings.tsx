@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
@@ -662,12 +663,15 @@ export function CheckSettingsPage() {
             <div className="flex items-end gap-3">
               <div className="space-y-1">
                 <Label htmlFor="next-check-number">Next Check Number</Label>
-                <Input
+                <NumericInput
                   id="next-check-number"
-                  type="text"
+                  min={1}
+                  fixedDecimalsOnBlur={0}
                   inputMode="numeric"
-                  value={nextCheckNumber}
-                  onChange={(e) => setNextCheckNumber(e.target.value)}
+                  value={nextCheckNumber === '' ? null : Number(nextCheckNumber)}
+                  onValueChange={(value) =>
+                    setNextCheckNumber(value == null ? '' : String(Math.max(1, Math.round(value))))
+                  }
                   className="w-32 font-mono"
                 />
               </div>
