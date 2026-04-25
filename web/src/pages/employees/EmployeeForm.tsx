@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, employeeWageRatesApi, ApiError } from '@/services/api';
@@ -51,6 +51,12 @@ interface WageRateFormRow extends EmployeeWageRate {
   temp_id: string;
 }
 
+type W4MonetaryField =
+  | 'additional_withholding'
+  | 'w4_dependent_credit'
+  | 'w4_step4a_other_income'
+  | 'w4_step4b_deductions';
+
 const defaultHourlyWageRate = (): WageRateFormRow => ({
   temp_id: crypto.randomUUID(),
   label: 'Regular',
@@ -64,6 +70,18 @@ const roundCurrencyValue = (value: number): number => {
   return Math.round(value * 100) / 100;
 };
 
+const toCurrencyDraft = (value: number | null | undefined): string =>
+  String(roundCurrencyValue(Number(value) || 0));
+
+const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormData => ({
+  ...form,
+  pay_rate: roundCurrencyValue(form.pay_rate),
+  additional_withholding: roundCurrencyValue(form.additional_withholding),
+  w4_dependent_credit: roundCurrencyValue(form.w4_dependent_credit),
+  w4_step4a_other_income: roundCurrencyValue(form.w4_step4a_other_income),
+  w4_step4b_deductions: roundCurrencyValue(form.w4_step4b_deductions),
+});
+
 export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -76,6 +94,12 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
+  const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
+    additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
+    w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
+    w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
+    w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
+  });
   const [ssnLastFour, setSsnLastFour] = useState<string | null>(null);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
@@ -98,7 +122,7 @@ export function EmployeeForm() {
       const response = await employeesApi.get(parseInt(id, 10));
       const employee = response.data;
       
-      setForm({
+      const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
@@ -128,6 +152,13 @@ export function EmployeeForm() {
         city: employee.city || '',
         state: employee.state || '',
         zip: employee.zip || '',
+      };
+      setForm(nextForm);
+      setW4CurrencyDrafts({
+        additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
+        w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
+        w4_step4a_other_income: toCurrencyDraft(nextForm.w4_step4a_other_income),
+        w4_step4b_deductions: toCurrencyDraft(nextForm.w4_step4b_deductions),
       });
 
       const fetchedWageRates = (employee.wage_rates || []).map((rate) => ({
@@ -203,6 +234,16 @@ export function EmployeeForm() {
         return newErrors;
       });
     }
+  };
+
+  const handleW4CurrencyDraftChange = (field: W4MonetaryField, value: string): void => {
+    setW4CurrencyDrafts((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const commitW4CurrencyDraft = (field: W4MonetaryField): void => {
+    const normalized = roundCurrencyValue(parseFloat(w4CurrencyDrafts[field]) || 0);
+    handleChange(field, normalized);
+    setW4CurrencyDrafts((prev) => ({ ...prev, [field]: toCurrencyDraft(normalized) }));
   };
 
   const replaceWageRates = (nextRates: WageRateFormRow[]) => {
@@ -301,6 +342,20 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
+    if (form.employment_type !== 'contractor') {
+      if (!String(form.address_line1 || '').trim()) {
+        newErrors.address_line1 = ['Address line 1 is required'];
+      }
+      if (!String(form.city || '').trim()) {
+        newErrors.city = ['City is required'];
+      }
+      if (!String(form.state || '').trim()) {
+        newErrors.state = ['State is required'];
+      }
+      if (!String(form.zip || '').trim()) {
+        newErrors.zip = ['ZIP code is required'];
+      }
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -317,8 +372,14 @@ export function EmployeeForm() {
     try {
       const normalizedWageRates = supportsMultipleHourlyRates ? normalizeWageRates() : [];
       const primaryRate = normalizedWageRates.find((rate) => rate.is_primary) || normalizedWageRates[0];
+      const normalizedW4Values = {
+        additional_withholding: roundCurrencyValue(parseFloat(w4CurrencyDrafts.additional_withholding) || 0),
+        w4_dependent_credit: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_dependent_credit) || 0),
+        w4_step4a_other_income: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4a_other_income) || 0),
+        w4_step4b_deductions: roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0),
+      };
       const employeePayload = {
-        ...form,
+        ...normalizeEmployeeMonetaryFields({ ...form, ...normalizedW4Values }),
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
           : roundCurrencyValue(form.pay_rate),
@@ -868,11 +929,11 @@ export function EmployeeForm() {
                       Total Annual Dependent Credit ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_dependent_credit}
-                      onChange={(e) => handleChange('w4_dependent_credit', parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_dependent_credit}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_dependent_credit', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_dependent_credit')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       $2,000 per qualifying child under 17 + $500 per other dependent
@@ -890,11 +951,11 @@ export function EmployeeForm() {
                       4(a) Other Income ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_step4a_other_income}
-                      onChange={(e) => handleChange('w4_step4a_other_income', parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_step4a_other_income}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_step4a_other_income', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_step4a_other_income')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual estimate of non-job income (interest, dividends, etc.)
@@ -905,11 +966,11 @@ export function EmployeeForm() {
                       4(b) Deductions ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.w4_step4b_deductions}
-                      onChange={(e) => handleChange('w4_step4b_deductions', parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.w4_step4b_deductions}
+                      onChange={(e) => handleW4CurrencyDraftChange('w4_step4b_deductions', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('w4_step4b_deductions')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual amount if deductions exceed the standard deduction
@@ -920,11 +981,11 @@ export function EmployeeForm() {
                       4(c) Extra Withholding ($)
                     </label>
                     <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={form.additional_withholding}
-                      onChange={(e) => handleChange('additional_withholding', parseFloat(e.target.value) || 0)}
+                      type="text"
+                      inputMode="decimal"
+                      value={w4CurrencyDrafts.additional_withholding}
+                      onChange={(e) => handleW4CurrencyDraftChange('additional_withholding', e.target.value)}
+                      onBlur={() => commitW4CurrencyDraft('additional_withholding')}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Extra amount to withhold each pay period
@@ -973,18 +1034,23 @@ export function EmployeeForm() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Address</CardTitle>
+            {form.employment_type !== 'contractor' && (
+              <CardDescription>Mailing address is required for W-2 employees and printed on payroll checks.</CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1
+                  Address Line 1 {form.employment_type !== 'contractor' ? '*' : ''}
                 </label>
                 <Input
                   value={form.address_line1 || ''}
                   onChange={(e) => handleChange('address_line1', e.target.value)}
                   placeholder="Street address"
+                  required={form.employment_type !== 'contractor'}
                 />
+                {errors.address_line1 && <p className="mt-1 text-sm text-red-600">{errors.address_line1[0]}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -999,33 +1065,39 @@ export function EmployeeForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City
+                    City {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.city || ''}
                     onChange={(e) => handleChange('city', e.target.value)}
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.city && <p className="mt-1 text-sm text-red-600">{errors.city[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State
+                    State {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.state || ''}
                     onChange={(e) => handleChange('state', e.target.value)}
                     maxLength={2}
                     placeholder="GU"
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.state && <p className="mt-1 text-sm text-red-600">{errors.state[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code
+                    ZIP Code {form.employment_type !== 'contractor' ? '*' : ''}
                   </label>
                   <Input
                     value={form.zip || ''}
                     onChange={(e) => handleChange('zip', e.target.value)}
                     placeholder="96910"
+                    required={form.employment_type !== 'contractor'}
                   />
+                  {errors.zip && <p className="mt-1 text-sm text-red-600">{errors.zip[0]}</p>}
                 </div>
               </div>
             </div>

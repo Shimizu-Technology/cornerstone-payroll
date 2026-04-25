@@ -16,6 +16,10 @@ FactoryBot.define do
     retirement_rate { 0 }
     roth_retirement_rate { 0 }
     hire_date { Date.new(2024, 1, 1) }
+    address_line1 { "123 Marine Corps Dr" }
+    city { "Hagatna" }
+    state { "GU" }
+    zip { "96910" }
 
     trait :hourly do
       employment_type { "hourly" }
@@ -41,6 +45,16 @@ FactoryBot.define do
 
     trait :head_of_household do
       filing_status { "head_of_household" }
+    end
+
+    trait :contractor do
+      employment_type { "contractor" }
+      contractor_type { "individual" }
+      contractor_pay_type { "flat_fee" }
+      address_line1 { nil }
+      city { nil }
+      state { nil }
+      zip { nil }
     end
   end
 end

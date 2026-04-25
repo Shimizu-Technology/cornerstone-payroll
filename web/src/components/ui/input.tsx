@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes } from 'react';
+import { forwardRef, type InputHTMLAttributes, type WheelEvent } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -8,8 +8,15 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, label, error, helperText, id, type = 'text', ...props }, ref) => {
+  ({ className, label, error, helperText, id, type = 'text', onWheel, ...props }, ref) => {
     const inputId = id || label?.toLowerCase().replace(/\s+/g, '-');
+    const handleWheel = (event: WheelEvent<HTMLInputElement>) => {
+      if (type === 'number' && document.activeElement === event.currentTarget) {
+        event.currentTarget.blur();
+      }
+
+      onWheel?.(event);
+    };
 
     return (
       <div className="space-y-1.5">
@@ -34,6 +41,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           aria-invalid={error ? 'true' : 'false'}
           aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-helper` : undefined}
           {...props}
+          onWheel={handleWheel}
         />
         {error && (
           <p id={`${inputId}-error`} className="text-sm text-danger-600">

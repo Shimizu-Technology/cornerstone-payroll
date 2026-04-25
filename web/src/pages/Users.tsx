@@ -78,17 +78,24 @@ export function Users() {
     companiesRequestIdRef.current = requestId;
     setIsLoadingCompanies(true);
     setCompaniesLoadError(null);
+    let shouldUpdate = true;
     try {
       const res = await companiesApi.list();
-      if (requestId !== companiesRequestIdRef.current) return;
+      if (requestId !== companiesRequestIdRef.current) {
+        shouldUpdate = false;
+        return;
+      }
       setAvailableCompanies(res.companies);
     } catch (err) {
-      if (requestId !== companiesRequestIdRef.current) return;
+      if (requestId !== companiesRequestIdRef.current) {
+        shouldUpdate = false;
+        return;
+      }
       setCompaniesLoadError(err instanceof Error ? err.message : 'Failed to load payroll clients');
-    }
-    finally {
-      if (requestId !== companiesRequestIdRef.current) return;
+    } finally {
+      if (shouldUpdate && requestId === companiesRequestIdRef.current) {
       setIsLoadingCompanies(false);
+      }
     }
   }, []);
 
@@ -186,17 +193,13 @@ export function Users() {
     setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
 
-    if (currentUser?.company_id === user.company_id && availableCompanies.length === 0) {
+    if (availableCompanies.length === 0) {
       void loadCompanies();
     }
   };
 
   const handleSaveEdit = async (): Promise<void> => {
     if (!editingId || !editName.trim()) { setEditError('Name is required'); return; }
-    if (blocksForeignWorkspaceRoleChange) {
-      setEditError('Change this user from their own staff workspace before switching to a role that clears payroll client assignments.');
-      return;
-    }
     setIsSavingEdit(true);
     setEditError(null);
     try {
@@ -205,9 +208,7 @@ export function Users() {
         role: editRole,
       };
 
-      if (editingUser && currentUser?.company_id === editingUser.company_id) {
-        payload.company_ids = needsClientAssignment(editRole) ? editClientIds : [];
-      }
+      payload.company_ids = needsClientAssignment(editRole) ? editClientIds : [];
 
       await usersApi.update(editingId, payload);
       setEditingId(null);
@@ -263,18 +264,6 @@ export function Users() {
       prev.includes(companyId) ? prev.filter(id => id !== companyId) : [...prev, companyId]
     );
   };
-
-  const canEditClientAssignments = (user: User) =>
-    currentUser?.company_id === user.company_id;
-
-  const editingUser = editingId ? users.find((user) => user.id === editingId) ?? null : null;
-  const editingUserAssignmentCount = editingUser?.assigned_company_ids?.length || 0;
-  const editingUserCanEditClientAssignments = editingUser ? canEditClientAssignments(editingUser) : false;
-  const blocksForeignWorkspaceRoleChange =
-    editingUser !== null &&
-    !editingUserCanEditClientAssignments &&
-    !needsClientAssignment(editRole) &&
-    editingUserAssignmentCount > 0;
 
   const assignedCompaniesForUser = (user: User) =>
     needsClientAssignment(user.role) ? (user.assigned_companies || []) : [];
@@ -524,7 +513,7 @@ export function Users() {
                       <TableCell className="text-right">
                         {editingId === user.id ? (
                           <div className="flex justify-end gap-2">
-                            <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit || blocksForeignWorkspaceRoleChange}>
+                            <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
                               <Check className="w-4 h-4 mr-1" />
                               {isSavingEdit ? 'Saving...' : 'Save'}
                             </Button>
@@ -580,33 +569,17 @@ export function Users() {
                         <TableCell colSpan={6} className="bg-gray-50 p-0">
                           <div className="px-6 py-4">
                             {needsClientAssignment(editRole) ? (
-                              canEditClientAssignments(user) ? (
-                                <>
-                                  <div className="mb-3 flex items-center justify-between">
-                                    <p className="text-sm font-medium text-gray-700">
-                                      Payroll clients for <strong>{editName || user.name}</strong>
-                                    </p>
-                                    <span className="text-xs text-gray-500">
-                                      {editClientIds.length} selected
-                                    </span>
-                                  </div>
-
-                                  {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
-                                </>
-                              ) : (
-                                <>
-                                  <p className="text-sm text-gray-500">
-                                    Payroll client assignments for users in another staff workspace are preserved here but can&apos;t be edited from this company context.
-                                  </p>
-                                  {renderAssignedCompanies(user)}
-                                </>
-                              )
-                            ) : blocksForeignWorkspaceRoleChange ? (
                               <>
-                                <p className="text-sm text-gray-500">
-                                  Switch this user to <strong>employee</strong> or <strong>admin</strong> from their own staff workspace, because that change clears payroll client assignments.
-                                </p>
-                                {renderAssignedCompanies(user)}
+                                <div className="mb-3 flex items-center justify-between">
+                                  <p className="text-sm font-medium text-gray-700">
+                                    Payroll clients for <strong>{editName || user.name}</strong>
+                                  </p>
+                                  <span className="text-xs text-gray-500">
+                                    {editClientIds.length} selected
+                                  </span>
+                                </div>
+
+                                {renderClientAssignmentPicker(editClientIds, setEditClientIds)}
                               </>
                             ) : (
                               <p className="text-sm text-gray-500">
