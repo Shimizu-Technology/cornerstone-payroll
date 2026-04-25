@@ -288,18 +288,7 @@ class ReplaceCheckService
       year: item.pay_period.pay_date.year,
       as_of_pay_date: item.pay_period.pay_date,
       before_pay_period_id: item.pay_period_id,
-      totals: {
-        gross_pay: ytd_excluding_self(:gross_pay),
-        net_pay: ytd_excluding_self(:net_pay),
-        withholding_tax: ytd_excluding_self(:withholding_tax),
-        social_security_tax: ytd_excluding_self(:social_security_tax),
-        medicare_tax: ytd_excluding_self(:medicare_tax),
-        additional_withholding: ytd_excluding_self(:additional_withholding),
-        retirement: ytd_excluding_self(:retirement_payment),
-        roth_retirement: ytd_excluding_self(:roth_retirement_payment),
-        insurance: ytd_excluding_self(:insurance_payment),
-        loans: ytd_excluding_self(:loan_payment)
-      }
+      totals: cached_ytd_totals_excluding_self
     )
 
     PayrollCalculator.for(employee, item).calculate
@@ -334,6 +323,12 @@ class ReplaceCheckService
              pay_date, pay_date, pay_period_id)
       .where.not(id: @payroll_item.id)
       .sum(column)
+  end
+
+  def cached_ytd_totals_excluding_self
+    Employee::YTD_AGGREGATE_SOURCE_COLUMNS.each_with_object({}) do |(key, source_column), totals|
+      totals[key] = ytd_excluding_self(source_column)
+    end
   end
 
   # ---------------------------------------------------------------------

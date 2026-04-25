@@ -335,18 +335,7 @@ class IssueCorrectivePaycheckService
       year: @original_pay_period.pay_date.year,
       as_of_pay_date: @original_pay_period.pay_date,
       before_pay_period_id: @original_pay_period.id,
-      totals: {
-        gross_pay: ytd_gross_excluding_original,
-        net_pay: ytd_sum_excluding_original(:net_pay),
-        withholding_tax: ytd_sum_excluding_original(:withholding_tax),
-        social_security_tax: ytd_ss_excluding_original,
-        medicare_tax: ytd_sum_excluding_original(:medicare_tax),
-        additional_withholding: ytd_sum_excluding_original(:additional_withholding),
-        retirement: ytd_sum_excluding_original(:retirement_payment),
-        roth_retirement: ytd_sum_excluding_original(:roth_retirement_payment),
-        insurance: ytd_sum_excluding_original(:insurance_payment),
-        loans: ytd_sum_excluding_original(:loan_payment)
-      }
+      totals: cached_ytd_totals_excluding_original
     )
 
     yield
@@ -364,6 +353,12 @@ class IssueCorrectivePaycheckService
 
   def ytd_ss_excluding_original
     ytd_sum_excluding_original(:social_security_tax)
+  end
+
+  def cached_ytd_totals_excluding_original
+    Employee::YTD_AGGREGATE_SOURCE_COLUMNS.each_with_object({}) do |(key, source_column), totals|
+      totals[key] = ytd_sum_excluding_original(source_column)
+    end
   end
 
   def ytd_sum_excluding_original(column)
