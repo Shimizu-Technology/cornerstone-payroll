@@ -177,7 +177,7 @@ class TransmittalLogPdfGenerator
     emp_med    = items.sum(:medicare_tax)
     er_med     = items.sum(:employer_medicare_tax)
     total_fica = emp_ss + er_ss + emp_med + er_med
-    total_drt  = total_fit + total_fica
+    total_drt  = total_fit
 
     return unless total_drt > 0
 
@@ -186,7 +186,7 @@ class TransmittalLogPdfGenerator
     pdf.move_down 8
 
     pdf.font_size(11) { pdf.text "Employer Tax Obligations", style: :bold }
-    pdf.font_size(8) { pdf.text "Amounts Cornerstone must deposit with Guam DRT", color: TEXT_MUTED }
+    pdf.font_size(8) { pdf.text "Guam FIT deposit plus related FICA obligations for this pay period", color: TEXT_MUTED }
     pdf.move_down 6
 
     col_width = (pdf.bounds.width - 20) / 2
@@ -222,7 +222,7 @@ class TransmittalLogPdfGenerator
 
     pdf.move_down 10
     pdf.font_size(11) { pdf.text "Total DRT Deposit", style: :bold }
-    pdf.font_size(8) { pdf.text "FIT + Employee & Employer SS & Medicare", color: TEXT_MUTED }
+    pdf.font_size(8) { pdf.text "Guam FIT withholding only", color: TEXT_MUTED }
     pdf.move_down 2
     pdf.font_size(14) { pdf.text fmt(total_drt), style: :bold, color: "B45309" }
     pdf.move_down 8

@@ -5,6 +5,18 @@ class Employee < ApplicationRecord
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
+  YTD_AGGREGATE_COLUMNS = {
+    gross_pay: "COALESCE(SUM(gross_pay), 0)",
+    net_pay: "COALESCE(SUM(net_pay), 0)",
+    withholding_tax: "COALESCE(SUM(withholding_tax), 0)",
+    social_security_tax: "COALESCE(SUM(social_security_tax), 0)",
+    medicare_tax: "COALESCE(SUM(medicare_tax), 0)",
+    additional_withholding: "COALESCE(SUM(additional_withholding), 0)",
+    retirement: "COALESCE(SUM(retirement_payment), 0)",
+    roth_retirement: "COALESCE(SUM(roth_retirement_payment), 0)",
+    insurance: "COALESCE(SUM(insurance_payment), 0)",
+    loans: "COALESCE(SUM(loan_payment), 0)"
+  }.freeze
 
   belongs_to :company
   belongs_to :department, optional: true
@@ -44,8 +56,6 @@ class Employee < ApplicationRecord
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
   end
-
-  attr_writer :cached_ytd_gross, :cached_ytd_social_security
 
   scope :active, -> { where(status: "active") }
   scope :hourly, -> { where(employment_type: "hourly") }
@@ -120,10 +130,61 @@ class Employee < ApplicationRecord
     employee_ytd_totals.find_or_create_by(year: year)
   end
 
+  def cache_ytd_values!(gross:, social_security:, year:, as_of_pay_date:, before_pay_period_id:)
+    @cached_ytd_gross = gross
+    @cached_ytd_social_security = social_security
+    @cached_ytd_year = year
+    @cached_ytd_as_of_pay_date = as_of_pay_date
+    @cached_ytd_before_pay_period_id = before_pay_period_id
+  end
+
+  def cached_ytd_snapshot
+    {
+      gross: defined?(@cached_ytd_gross) ? @cached_ytd_gross : nil,
+      social_security: defined?(@cached_ytd_social_security) ? @cached_ytd_social_security : nil,
+      year: defined?(@cached_ytd_year) ? @cached_ytd_year : nil,
+      as_of_pay_date: defined?(@cached_ytd_as_of_pay_date) ? @cached_ytd_as_of_pay_date : nil,
+      before_pay_period_id: defined?(@cached_ytd_before_pay_period_id) ? @cached_ytd_before_pay_period_id : nil
+    }
+  end
+
+  def restore_cached_ytd_snapshot!(snapshot)
+    @cached_ytd_gross = snapshot[:gross]
+    @cached_ytd_social_security = snapshot[:social_security]
+    @cached_ytd_year = snapshot[:year]
+    @cached_ytd_as_of_pay_date = snapshot[:as_of_pay_date]
+    @cached_ytd_before_pay_period_id = snapshot[:before_pay_period_id]
+  end
+
+  def ytd_totals_before(year:, pay_date:, pay_period_id:)
+    ytd_aggregate_totals(
+      year: year,
+      pay_date: pay_date,
+      pay_period_id: pay_period_id,
+      include_current_period: false
+    )
+  end
+
+  def ytd_totals_through(year:, pay_date:, pay_period_id:)
+    ytd_aggregate_totals(
+      year: year,
+      pay_date: pay_date,
+      pay_period_id: pay_period_id,
+      include_current_period: true
+    )
+  end
+
   # Calculate YTD gross from payroll items.
   # Returns the precomputed cache when set by batch operations (e.g. run_payroll).
-  def calculate_ytd_gross(year)
-    return @cached_ytd_gross if defined?(@cached_ytd_gross) && @cached_ytd_gross
+  def calculate_ytd_gross(year, as_of_pay_date: nil, before_pay_period_id: nil)
+    if cached_ytd_matches?(year, as_of_pay_date, before_pay_period_id) &&
+       defined?(@cached_ytd_gross) && !@cached_ytd_gross.nil?
+      return @cached_ytd_gross
+    end
+
+    if as_of_pay_date.present? && before_pay_period_id.present?
+      return ytd_totals_before(year: year, pay_date: as_of_pay_date, pay_period_id: before_pay_period_id)[:gross_pay]
+    end
 
     payroll_items
       .joins(:pay_period)
@@ -137,8 +198,15 @@ class Employee < ApplicationRecord
 
   # Calculate YTD Social Security tax withheld.
   # Returns the precomputed cache when set by batch operations.
-  def calculate_ytd_social_security(year)
-    return @cached_ytd_social_security if defined?(@cached_ytd_social_security) && @cached_ytd_social_security
+  def calculate_ytd_social_security(year, as_of_pay_date: nil, before_pay_period_id: nil)
+    if cached_ytd_matches?(year, as_of_pay_date, before_pay_period_id) &&
+       defined?(@cached_ytd_social_security) && !@cached_ytd_social_security.nil?
+      return @cached_ytd_social_security
+    end
+
+    if as_of_pay_date.present? && before_pay_period_id.present?
+      return ytd_totals_before(year: year, pay_date: as_of_pay_date, pay_period_id: before_pay_period_id)[:social_security_tax]
+    end
 
     payroll_items
       .joins(:pay_period)
@@ -166,6 +234,38 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def cached_ytd_matches?(year, as_of_pay_date, before_pay_period_id)
+    if as_of_pay_date.nil? && before_pay_period_id.nil?
+      return !defined?(@cached_ytd_year) || @cached_ytd_year.nil? || @cached_ytd_year == year
+    end
+
+    defined?(@cached_ytd_year) &&
+      @cached_ytd_year == year &&
+      defined?(@cached_ytd_as_of_pay_date) &&
+      @cached_ytd_as_of_pay_date == as_of_pay_date &&
+      defined?(@cached_ytd_before_pay_period_id) &&
+      @cached_ytd_before_pay_period_id == before_pay_period_id
+  end
+
+  def ytd_aggregate_totals(year:, pay_date:, pay_period_id:, include_current_period:)
+    scope = payroll_items
+      .joins(:pay_period)
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .select(:id)
+      })
+
+    comparator = include_current_period ? "<=" : "<"
+    scope = scope.where(
+      "(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id #{comparator} ?)",
+      pay_date, pay_date, pay_period_id
+    )
+
+    values = scope.pick(*YTD_AGGREGATE_COLUMNS.values.map { |sql| Arel.sql(sql) }) || Array.new(YTD_AGGREGATE_COLUMNS.length, 0)
+    YTD_AGGREGATE_COLUMNS.keys.zip(values).to_h.transform_values(&:to_f)
+  end
 
   def normalize_pay_rate_precision
     self.pay_rate = round_currency_value(pay_rate)

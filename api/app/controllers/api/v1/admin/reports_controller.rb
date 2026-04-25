@@ -471,7 +471,7 @@ module Api
               employee_medicare: emp_med.to_f,
               employer_medicare: er_med.to_f,
               total_fica: total_fica.to_f,
-              total_drt_deposit: (total_fit + total_fica).to_f
+              total_drt_deposit: total_fit.to_f
             },
             saved_transmittal: saved ? {
               preparer_name: saved.preparer_name,

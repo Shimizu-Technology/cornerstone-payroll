@@ -956,6 +956,8 @@ module Api
           committed_period_ids = PayPeriod.reportable_committed
                                           .where(company_id: current_company_id)
                                           .for_year(year)
+                                          .where("(pay_date < ?) OR (pay_date = ? AND id < ?)",
+                                                 pay_period.pay_date, pay_period.pay_date, pay_period.id)
                                           .pluck(:id)
 
           if committed_period_ids.any?
@@ -975,8 +977,13 @@ module Api
 
           employees.each do |emp|
             data = ytd_map[emp.id] || { gross: 0.0, ss: 0.0 }
-            emp.cached_ytd_gross = data[:gross]
-            emp.cached_ytd_social_security = data[:ss]
+            emp.cache_ytd_values!(
+              gross: data[:gross],
+              social_security: data[:ss],
+              year: year,
+              as_of_pay_date: pay_period.pay_date,
+              before_pay_period_id: pay_period.id
+            )
           end
         end
       end

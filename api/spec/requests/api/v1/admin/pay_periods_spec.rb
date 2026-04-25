@@ -272,6 +272,52 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.hours_worked).to eq(80)
       expect(item.overtime_hours).to eq(10)
     end
+
+    it "stores YTD values as of the pay date and excludes later committed payroll" do
+      pay_period.update!(
+        start_date: Date.new(Date.today.year, 1, 1),
+        end_date: Date.new(Date.today.year, 1, 14),
+        pay_date: Date.new(Date.today.year, 1, 17)
+      )
+
+      later_period = PayPeriod.create!(
+        company: company,
+        start_date: Date.new(Date.today.year, 2, 1),
+        end_date: Date.new(Date.today.year, 2, 14),
+        pay_date: Date.new(Date.today.year, 2, 17),
+        status: "committed",
+        committed_at: Time.current
+      )
+
+      PayrollItem.create!(
+        pay_period: later_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 10,
+        gross_pay: 150.00,
+        net_pay: 120.00,
+        withholding_tax: 10.00,
+        social_security_tax: 9.30,
+        medicare_tax: 2.18
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: {
+          employee.id.to_s => { regular: 80, overtime: 0 }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+
+      item = pay_period.reload.payroll_items.first
+      expect(item.gross_pay.to_f).to eq(1200.0)
+      expect(item.ytd_gross.to_f).to eq(1200.0)
+      expect(item.ytd_withholding_tax.to_f).to eq(item.withholding_tax.to_f)
+      expect(item.ytd_social_security_tax.to_f).to eq(item.social_security_tax.to_f)
+      expect(item.ytd_medicare_tax.to_f).to eq(item.medicare_tax.to_f)
+    end
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/approve" do

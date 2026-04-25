@@ -76,11 +76,11 @@ class PayrollCalculator
   end
 
   def ytd_gross_before
-    employee.calculate_ytd_gross(pay_period.pay_date.year)
+    ytd_before_totals[:gross_pay]
   end
 
   def ytd_ss_before
-    employee.calculate_ytd_social_security(pay_period.pay_date.year)
+    ytd_before_totals[:social_security_tax]
   end
 
   def calculate_taxes(withholding_gross: payroll_item.gross_pay)
@@ -264,18 +264,26 @@ class PayrollCalculator
   end
 
   def update_ytd_on_item
-    ytd = employee.ytd_totals_for(pay_period.pay_date.year)
+    ytd = ytd_before_totals
 
-    payroll_item.ytd_gross = ytd.gross_pay.to_f + payroll_item.gross_pay.to_f
-    payroll_item.ytd_net = ytd.net_pay.to_f + payroll_item.net_pay.to_f
-    payroll_item.ytd_withholding_tax = ytd.withholding_tax.to_f + payroll_item.withholding_tax.to_f
-    payroll_item.ytd_social_security_tax = ytd.social_security_tax.to_f + payroll_item.social_security_tax.to_f
-    payroll_item.ytd_medicare_tax = ytd.medicare_tax.to_f + payroll_item.medicare_tax.to_f
-    payroll_item.ytd_retirement = ytd.retirement.to_f + payroll_item.retirement_payment.to_f
-    payroll_item.ytd_roth_retirement = ytd.roth_retirement.to_f + payroll_item.roth_retirement_payment.to_f
+    payroll_item.ytd_gross = ytd[:gross_pay].to_f + payroll_item.gross_pay.to_f
+    payroll_item.ytd_net = ytd[:net_pay].to_f + payroll_item.net_pay.to_f
+    payroll_item.ytd_withholding_tax = ytd[:withholding_tax].to_f + payroll_item.withholding_tax.to_f
+    payroll_item.ytd_social_security_tax = ytd[:social_security_tax].to_f + payroll_item.social_security_tax.to_f
+    payroll_item.ytd_medicare_tax = ytd[:medicare_tax].to_f + payroll_item.medicare_tax.to_f
+    payroll_item.ytd_retirement = ytd[:retirement].to_f + payroll_item.retirement_payment.to_f
+    payroll_item.ytd_roth_retirement = ytd[:roth_retirement].to_f + payroll_item.roth_retirement_payment.to_f
   end
 
   private
+
+  def ytd_before_totals
+    @ytd_before_totals ||= employee.ytd_totals_before(
+      year: pay_period.pay_date.year,
+      pay_date: pay_period.pay_date,
+      pay_period_id: pay_period.id
+    )
+  end
 
   def record_employer_contribution(label, amount)
     return if amount.to_f.zero?
