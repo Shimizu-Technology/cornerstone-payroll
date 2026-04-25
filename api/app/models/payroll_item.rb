@@ -31,6 +31,7 @@ class PayrollItem < ApplicationRecord
   # Uses ||= so an explicitly-passed company_id (e.g. in copy_payroll_items!)
   # is respected without triggering a pay_period reload query.
   before_validation :sync_company_from_pay_period, on: :create
+  before_validation :normalize_pay_precision
 
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
@@ -202,7 +203,7 @@ class PayrollItem < ApplicationRecord
       {
         "employee_wage_rate_id" => normalized["employee_wage_rate_id"] || normalized[:employee_wage_rate_id],
         "label" => label,
-        "rate" => (normalized["rate"] || normalized[:rate]).to_f,
+        "rate" => round_currency_value(normalized["rate"] || normalized[:rate]).to_f,
         "regular_hours" => (normalized["regular_hours"] || normalized[:regular_hours]).to_f,
         "overtime_hours" => (normalized["overtime_hours"] || normalized[:overtime_hours]).to_f,
         "holiday_hours" => (normalized["holiday_hours"] || normalized[:holiday_hours]).to_f,
@@ -221,11 +222,28 @@ class PayrollItem < ApplicationRecord
 
   private
 
+  def normalize_pay_precision
+    self.pay_rate = round_currency_value(pay_rate)
+
+    return unless custom_columns_data.is_a?(Hash)
+
+    entries = custom_columns_data["wage_rate_hours"] || custom_columns_data[:wage_rate_hours]
+    return if entries.blank?
+
+    self.wage_rate_hours = entries
+  end
+
   def normalize_wage_rate_entry(entry)
     return entry.to_unsafe_h if entry.respond_to?(:to_unsafe_h)
     return entry.to_h if entry.respond_to?(:to_h)
 
     {}
+  end
+
+  def round_currency_value(value)
+    return value if value.nil?
+
+    BigDecimal(value.to_s).round(2)
   end
 
   def sync_company_from_pay_period
