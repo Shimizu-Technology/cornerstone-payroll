@@ -53,7 +53,9 @@ function templateWageRates(employee: Employee, payrollItem?: PayrollItem): Payro
     const defaultPrimaryHours = configuredRates.length > 1 ? 0 : toNumber(payrollItem?.hours_worked ?? 0);
 
     return configuredRates.map((rate) => {
-      const matchedExisting = existingById.get(rate.id) || existingByLabel.get(rate.label.trim().toLowerCase());
+      const matchedExisting =
+        (rate.id != null ? existingById.get(rate.id) : undefined) ||
+        existingByLabel.get(rate.label.trim().toLowerCase());
 
       return {
         employee_wage_rate_id: rate.id,
@@ -530,8 +532,7 @@ export function PayPeriodDetail() {
   const totalNet = payrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
   const totalEmployerSS = payrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
   const totalEmployerMedicare = payrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
-  const totalEmployerTaxes = totalEmployerSS + totalEmployerMedicare;
-  const totalDRTDeposit = totalWithholding + totalSS + totalMedicare + totalEmployerTaxes;
+  const totalDRTDeposit = totalWithholding;
 
   // Detect FIT-deposit override: if the user has edited the auto-FIT
   // non-employee check's amount, it'll no longer equal the calculated
@@ -542,7 +543,8 @@ export function PayPeriodDetail() {
     c =>
       !c.voided &&
       (c.auto_generated_type === 'fit_deposit' ||
-        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+        (c.check_type === 'tax_deposit' &&
+          (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
   );
   const fitDepositAmount = fitDepositCheck ? Number(fitDepositCheck.amount) : null;
   const fitDivergence =
@@ -1413,7 +1415,7 @@ export function PayPeriodDetail() {
             <div className="p-4 border-b border-amber-200 bg-amber-50">
               <h3 className="font-semibold text-amber-900">Employer Tax Obligations</h3>
               <p className="text-sm text-amber-700 mt-1">
-                Amounts Cornerstone must deposit with Guam DRT
+                Guam FIT deposit plus related FICA obligations for this pay period
               </p>
             </div>
             <div className="p-4">
@@ -1480,7 +1482,7 @@ export function PayPeriodDetail() {
               <div className="mt-6 flex flex-col gap-3 border-t-2 border-amber-300 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-lg font-bold text-amber-900">Total DRT Deposit</p>
-                  <p className="text-sm text-amber-700">FIT + Employee & Employer SS & Medicare</p>
+                  <p className="text-sm text-amber-700">Guam FIT withholding only</p>
                 </div>
                 <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
@@ -1615,7 +1617,7 @@ export function PayPeriodDetail() {
             payPeriodId={payPeriod.id}
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
-            payPeriodEndDate={payPeriod.end_date}
+            payDate={payPeriod.pay_date}
             onChecksLoaded={setNonEmployeeChecks}
           />
         )}

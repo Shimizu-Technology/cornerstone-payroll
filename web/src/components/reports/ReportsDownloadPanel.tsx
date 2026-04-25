@@ -432,7 +432,7 @@ function TransmittalEditorModal({
           setCustomEntries([]);
           const autoNotes: string[] = [];
           if (data.tax_totals.total_fica > 0) {
-            autoNotes.push(`EFTPS Payment (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)} — to be deducted from bank account`);
+            autoNotes.push(`FICA Obligation (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)}`);
           }
           if (data.tax_totals.fit > 0) {
             autoNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
@@ -729,7 +729,7 @@ function TransmittalEditorModal({
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-amber-300 flex justify-between text-base font-bold text-amber-800">
-                    <span>Total DRT Deposit (FIT + FICA)</span>
+                    <span>Total DRT Deposit (FIT only)</span>
                     <span>{fmt(preview.tax_totals.total_drt_deposit)}</span>
                   </div>
                 </div>

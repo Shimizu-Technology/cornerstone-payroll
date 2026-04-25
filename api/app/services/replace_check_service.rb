@@ -277,23 +277,23 @@ class ReplaceCheckService
     end
   end
 
-  # The PayrollCalculator queries the DB directly for ytd_gross, which
-  # would still include this item's *old* values. We override the cache
-  # with the YTD excluding this item so the recomputed taxes match what
-  # would have been withheld had the corrected inputs been entered
-  # originally.
+  # Override the employee's cached pre-period YTD totals with figures that
+  # exclude this item, so PayrollCalculator uses the corrected baseline
+  # instead of re-reading aggregates that still include the old row.
   def recompute_with_ytd_excluding_self(item)
     employee = item.employee
-    prev_gross = employee.instance_variable_get(:@cached_ytd_gross)
-    prev_ss    = employee.instance_variable_get(:@cached_ytd_social_security)
+    previous_snapshot = employee.cached_ytd_snapshot
 
-    employee.instance_variable_set(:@cached_ytd_gross, ytd_excluding_self(:gross_pay))
-    employee.instance_variable_set(:@cached_ytd_social_security, ytd_excluding_self(:social_security_tax))
+    employee.cache_ytd_values!(
+      year: item.pay_period.pay_date.year,
+      as_of_pay_date: item.pay_period.pay_date,
+      before_pay_period_id: item.pay_period_id,
+      totals: cached_ytd_totals_excluding_self
+    )
 
     PayrollCalculator.for(employee, item).calculate
   ensure
-    employee.instance_variable_set(:@cached_ytd_gross, prev_gross)
-    employee.instance_variable_set(:@cached_ytd_social_security, prev_ss)
+    employee.restore_cached_ytd_snapshot!(previous_snapshot)
   end
 
   # YTD across all reportable_committed periods *prior to* this item's
@@ -323,6 +323,24 @@ class ReplaceCheckService
              pay_date, pay_date, pay_period_id)
       .where.not(id: @payroll_item.id)
       .sum(column)
+  end
+
+  def cached_ytd_totals_excluding_self
+    pay_date = @payroll_item.pay_period.pay_date
+    pay_period_id = @payroll_item.pay_period_id
+    scope = @payroll_item.employee.payroll_items
+      .joins(:pay_period)
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+                     .where(company_id: @payroll_item.company_id,
+                            pay_date: Date.new(pay_date.year, 1, 1)..Date.new(pay_date.year, 12, 31))
+                     .select(:id)
+      })
+      .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
+             pay_date, pay_date, pay_period_id)
+      .where.not(id: @payroll_item.id)
+
+    @payroll_item.employee.ytd_totals_for_scope(scope)
   end
 
   # ---------------------------------------------------------------------

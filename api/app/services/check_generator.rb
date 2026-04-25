@@ -110,31 +110,28 @@ class CheckGenerator
   def ytd
     @ytd ||= begin
       year = pay_period.pay_date&.year || Date.current.year
-      reportable_ids = PayPeriod.reportable_committed
-        .where(company_id: company.id)
-        .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", year)
-        .select(:id)
+      totals = employee.ytd_totals_through(
+        year: year,
+        pay_date: pay_period.pay_date,
+        pay_period_id: pay_period.id
+      )
 
-      items = PayrollItem.joins(:pay_period)
-        .where(employee_id: employee.id)
-        .where(pay_periods: { id: reportable_ids })
-
-      gross   = items.sum(:gross_pay).to_f
-      fit     = items.sum(:withholding_tax).to_f
-      ss      = items.sum(:social_security_tax).to_f
-      med     = items.sum(:medicare_tax).to_f
-      addl_wh = items.sum(:additional_withholding).to_f
-      retire  = items.sum(:retirement_payment).to_f
-      roth    = items.sum(:roth_retirement_payment).to_f
-      ins     = items.sum(:insurance_payment).to_f
-      loan    = items.sum(:loan_payment).to_f
+      gross   = totals[:gross_pay].to_f
+      fit     = totals[:withholding_tax].to_f
+      ss      = totals[:social_security_tax].to_f
+      med     = totals[:medicare_tax].to_f
+      addl_wh = totals[:additional_withholding].to_f
+      retire  = totals[:retirement].to_f
+      roth    = totals[:roth_retirement].to_f
+      ins     = totals[:insurance].to_f
+      loan    = totals[:loans].to_f
 
       taxes = fit + ss + med + addl_wh
       deds  = retire + roth + ins + loan
 
       { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
         retire: retire, roth: roth, ins: ins, loan: loan,
-        taxes: taxes, deds: deds, net: items.sum(:net_pay).to_f }
+        taxes: taxes, deds: deds, net: totals[:net_pay].to_f }
     end
   end
 

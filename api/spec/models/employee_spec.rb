@@ -116,4 +116,45 @@ RSpec.describe Employee, type: :model do
       expect(employee.pay_rate.to_f).to eq(9.99)
     end
   end
+
+  describe "YTD cache usage" do
+    let!(:company) { create(:company) }
+    let!(:employee) { create(:employee, company: company) }
+
+    it "returns cached pre-period totals without hitting payroll_items again" do
+      employee.cache_ytd_values!(
+        year: 2026,
+        as_of_pay_date: Date.new(2026, 2, 14),
+        before_pay_period_id: 123,
+        totals: {
+          gross_pay: 1000.0,
+          net_pay: 800.0,
+          withholding_tax: 75.0,
+          social_security_tax: 62.0,
+          medicare_tax: 14.5,
+          additional_withholding: 5.0,
+          retirement: 10.0,
+          roth_retirement: 6.0,
+          insurance: 4.0,
+          loans: 3.0
+        }
+      )
+
+      expect(employee).not_to receive(:payroll_items)
+
+      totals = employee.ytd_totals_before(
+        year: 2026,
+        pay_date: Date.new(2026, 2, 14),
+        pay_period_id: 123
+      )
+
+      expect(totals).to include(
+        gross_pay: 1000.0,
+        net_pay: 800.0,
+        withholding_tax: 75.0,
+        social_security_tax: 62.0,
+        medicare_tax: 14.5
+      )
+    end
+  end
 end
