@@ -356,9 +356,18 @@ class IssueCorrectivePaycheckService
   end
 
   def cached_ytd_totals_excluding_original
-    Employee::YTD_AGGREGATE_SOURCE_COLUMNS.each_with_object({}) do |(key, source_column), totals|
-      totals[key] = ytd_sum_excluding_original(source_column)
-    end
+    pay_date = @original_pay_period.pay_date
+    year = pay_date.year
+    scope = @employee.payroll_items
+      .joins(:pay_period)
+      .where(pay_periods: { id: PayPeriod.reportable_committed
+                                          .where(company_id: @original_pay_period.company_id,
+                                                 pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                          .select(:id) })
+      .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
+             pay_date, pay_date, @original_pay_period.id)
+
+    @employee.ytd_totals_for_scope(scope)
   end
 
   def ytd_sum_excluding_original(column)

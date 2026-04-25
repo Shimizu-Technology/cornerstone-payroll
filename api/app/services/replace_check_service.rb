@@ -326,9 +326,21 @@ class ReplaceCheckService
   end
 
   def cached_ytd_totals_excluding_self
-    Employee::YTD_AGGREGATE_SOURCE_COLUMNS.each_with_object({}) do |(key, source_column), totals|
-      totals[key] = ytd_excluding_self(source_column)
-    end
+    pay_date = @payroll_item.pay_period.pay_date
+    pay_period_id = @payroll_item.pay_period_id
+    scope = @payroll_item.employee.payroll_items
+      .joins(:pay_period)
+      .where(pay_periods: {
+        id: PayPeriod.reportable_committed
+                     .where(company_id: @payroll_item.company_id,
+                            pay_date: Date.new(pay_date.year, 1, 1)..Date.new(pay_date.year, 12, 31))
+                     .select(:id)
+      })
+      .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
+             pay_date, pay_date, pay_period_id)
+      .where.not(id: @payroll_item.id)
+
+    @payroll_item.employee.ytd_totals_for_scope(scope)
   end
 
   # ---------------------------------------------------------------------
