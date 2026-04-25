@@ -67,6 +67,7 @@ class Employee < ApplicationRecord
     validates :w4_dependent_credit, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
+    validates :address_line1, :city, :state, :zip, presence: true
   end
 
   scope :active, -> { where(status: "active") }
@@ -97,7 +98,21 @@ class Employee < ApplicationRecord
   end
 
   def full_address
-    [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
+    city_state_zip = [
+      city.presence,
+      state.presence,
+      zip.presence
+    ].compact
+
+    city_state_zip_line = if city_state_zip.empty?
+      nil
+    elsif city.present? && state.present?
+      [ "#{city}, #{state}", zip.presence ].compact.join(" ")
+    else
+      city_state_zip.join(" ")
+    end
+
+    [ address_line1, address_line2, city_state_zip_line ].compact_blank.join("\n")
   end
 
   def active?

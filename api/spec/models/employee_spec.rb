@@ -117,6 +117,30 @@ RSpec.describe Employee, type: :model do
     end
   end
 
+  describe "address validation" do
+    it "requires mailing address fields for W-2 employees" do
+      employee = build(:employee, address_line1: "", city: "", state: "", zip: "")
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:address_line1]).to include("can't be blank")
+      expect(employee.errors[:city]).to include("can't be blank")
+      expect(employee.errors[:state]).to include("can't be blank")
+      expect(employee.errors[:zip]).to include("can't be blank")
+    end
+
+    it "does not require mailing address fields for contractors" do
+      employee = build(:employee, :contractor, pay_rate: 50.0)
+
+      expect(employee).to be_valid
+    end
+
+    it "does not emit a malformed city/state/zip line when address parts are blank" do
+      employee = build(:employee, :contractor, address_line1: nil, address_line2: nil, city: nil, state: nil, zip: nil)
+
+      expect(employee.full_address).to eq("")
+    end
+  end
+
   describe "YTD cache usage" do
     let!(:company) { create(:company) }
     let!(:employee) { create(:employee, company: company) }

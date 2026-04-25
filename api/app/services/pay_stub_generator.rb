@@ -246,7 +246,13 @@ class PayStubGenerator
 
     if payroll_item.withholding_tax_override.present?
       deductions_data << [
-        "  (FIT Override Applied)",
+        "  (Final FIT Override Applied)",
+        "",
+        ""
+      ]
+    elsif payroll_item.withholding_tax_adjustment.to_f.nonzero?
+      deductions_data << [
+        format("  (FIT Adjustment %s%s)", payroll_item.withholding_tax_adjustment.to_f.positive? ? "+" : "", format_currency(payroll_item.withholding_tax_adjustment).delete("$")),
         "",
         ""
       ]

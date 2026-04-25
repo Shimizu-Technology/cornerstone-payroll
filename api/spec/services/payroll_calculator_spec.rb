@@ -75,4 +75,60 @@ RSpec.describe PayrollCalculator do
       expect(conflicting.reload.category).to eq("pre_tax")
     end
   end
+
+  describe "#calculate" do
+    let(:employee) do
+      create(
+        :employee,
+        company: company,
+        department: department,
+        pay_rate: 10.0,
+        additional_withholding: 15.0
+      )
+    end
+
+    let(:payroll_item) do
+      create(
+        :payroll_item,
+        employee: employee,
+        pay_period: pay_period,
+        pay_rate: 10.0,
+        hours_worked: 100,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        reported_tips: 0,
+        bonus: 0
+      )
+    end
+
+    it "applies a one-time FIT adjustment on top of the normal W-4 calculation" do
+      calculator = described_class.for(employee, payroll_item)
+
+      calculator.calculate
+      base_fit = payroll_item.withholding_tax
+
+      payroll_item.withholding_tax_adjustment = -15.0
+      calculator.calculate
+
+      expect(payroll_item.withholding_tax).to eq(base_fit - 15.0)
+    end
+
+    it "floors adjusted FIT at zero when the adjustment would make it negative" do
+      payroll_item.withholding_tax_adjustment = -10_000
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.withholding_tax).to eq(0)
+    end
+
+    it "still honors a final FIT override when one is provided" do
+      payroll_item.withholding_tax_adjustment = -15.0
+      payroll_item.withholding_tax_override = 12.34
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.withholding_tax).to eq(12.34)
+    end
+  end
 end

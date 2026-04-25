@@ -908,6 +908,7 @@ module Api
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             additional_withholding: item.additional_withholding.to_f,
+            withholding_tax_adjustment: item.withholding_tax_adjustment.to_f,
             withholding_tax_override: item.withholding_tax_override,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,

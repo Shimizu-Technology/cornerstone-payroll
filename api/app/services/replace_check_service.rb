@@ -63,6 +63,7 @@ class ReplaceCheckService
     bonus
     reported_tips
     additional_withholding
+    withholding_tax_adjustment
     custom_earnings
     non_taxable_pay
     wage_rate_hours

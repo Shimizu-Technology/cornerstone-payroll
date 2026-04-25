@@ -187,7 +187,8 @@ class CheckGenerator
 
     # ---- Payee name (left) + amount (right) ----
     pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f) do
-      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.full_name }
+      payee_lines = [ employee.full_name, employee.full_address.presence ].compact
+      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text payee_lines.join("\n"), leading: 1.5 }
     end
     pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
       pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(payroll_item.net_pay), align: :right }
@@ -430,7 +431,9 @@ class CheckGenerator
     w4_notes << "4a" if employee.w4_step4a_other_income.to_f > 0
     w4_notes << "4b" if employee.w4_step4b_deductions.to_f > 0
     if payroll_item.withholding_tax_override.present?
-      fit_parts << "*Override"
+      fit_parts << "*Final Override"
+    elsif payroll_item.withholding_tax_adjustment.to_f.nonzero?
+      fit_parts << format("(Adj %s%s)", payroll_item.withholding_tax_adjustment.to_f.positive? ? "+" : "", fn(payroll_item.withholding_tax_adjustment))
     elsif w4_notes.any?
       fit_parts << "(#{w4_notes.join(',')})"
     end
