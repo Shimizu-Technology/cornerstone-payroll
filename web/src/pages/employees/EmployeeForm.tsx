@@ -59,6 +59,11 @@ const defaultHourlyWageRate = (): WageRateFormRow => ({
   active: true,
 });
 
+const roundCurrencyValue = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 100) / 100;
+};
+
 export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -213,7 +218,7 @@ export function EmployeeForm() {
 
     const primaryRate = normalized.find((rate) => rate.is_primary) || normalized[0];
     if (primaryRate) {
-      setForm((prev) => ({ ...prev, pay_rate: Number(primaryRate.rate) || 0 }));
+      setForm((prev) => ({ ...prev, pay_rate: roundCurrencyValue(Number(primaryRate.rate) || 0) }));
     }
   };
 
@@ -245,7 +250,7 @@ export function EmployeeForm() {
       .map((rate) => ({
         ...rate,
         label: rate.label.trim(),
-        rate: Number(rate.rate) || 0,
+        rate: roundCurrencyValue(Number(rate.rate) || 0),
       }))
       .filter((rate) => rate.active !== false && rate.label !== '');
 
@@ -315,8 +320,8 @@ export function EmployeeForm() {
       const employeePayload = {
         ...form,
         pay_rate: supportsMultipleHourlyRates
-          ? (primaryRate ? Number(primaryRate.rate) || 0 : form.pay_rate)
-          : form.pay_rate,
+          ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
+          : roundCurrencyValue(form.pay_rate),
       };
 
       let savedEmployeeId: number;
@@ -351,7 +356,7 @@ export function EmployeeForm() {
         for (const rate of normalizedWageRates) {
           const payload = {
             label: rate.label,
-            rate: Number(rate.rate) || 0,
+            rate: roundCurrencyValue(Number(rate.rate) || 0),
             is_primary: rate.is_primary,
             active: rate.active !== false,
           };

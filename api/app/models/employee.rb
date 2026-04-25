@@ -15,6 +15,8 @@ class Employee < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_many :employee_wage_rates, dependent: :destroy
 
+  before_validation :normalize_pay_rate_precision
+
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
   encrypts :bank_routing_number_encrypted
@@ -161,5 +163,17 @@ class Employee < ApplicationRecord
 
   def valid_filing_ssn?
     ssn_digits&.length == 9
+  end
+
+  private
+
+  def normalize_pay_rate_precision
+    self.pay_rate = round_currency_value(pay_rate)
+  end
+
+  def round_currency_value(value)
+    return value if value.nil?
+
+    BigDecimal(value.to_s).round(2)
   end
 end

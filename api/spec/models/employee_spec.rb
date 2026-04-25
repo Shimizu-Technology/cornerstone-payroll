@@ -106,4 +106,14 @@ RSpec.describe Employee, type: :model do
       expect(preloaded_employee.primary_wage_rate).to eq(primary_rate)
     end
   end
+
+  describe "pay rate normalization" do
+    it "rounds pay_rate to cents before validation" do
+      employee = build(:employee, pay_rate: 9.987654)
+
+      employee.validate
+
+      expect(employee.pay_rate.to_f).to eq(9.99)
+    end
+  end
 end

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, Fragment } from 'react';
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -170,7 +170,7 @@ export function PayPeriodDetail() {
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
-  const [tipsLoansVisibilityMode, setTipsLoansVisibilityMode] = useState<'auto' | 'manual'>('auto');
+  const tipsLoansVisibilityModeRef = useRef<'auto' | 'manual'>('auto');
 
   const syncDerivedPayrollState = useCallback((items: PayrollItem[]) => {
     const derivedState = derivePayrollUiState(items);
@@ -178,9 +178,9 @@ export function PayPeriodDetail() {
     setTipsMap(derivedState.tips);
     setLoansMap(derivedState.loans);
     setShowTipsLoans((previous) => (
-      tipsLoansVisibilityMode === 'manual' ? previous : derivedState.showTipsLoans
+      tipsLoansVisibilityModeRef.current === 'manual' ? previous : derivedState.showTipsLoans
     ));
-  }, [tipsLoansVisibilityMode]);
+  }, []);
 
   const loadAllActiveEmployees = useCallback(async () => {
     const allEmployees: Employee[] = [];
@@ -231,7 +231,7 @@ export function PayPeriodDetail() {
       // new panel loads.
       setNonEmployeeChecks([]);
       setSupplementals([]);
-      setTipsLoansVisibilityMode('auto');
+      tipsLoansVisibilityModeRef.current = 'auto';
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
@@ -771,8 +771,10 @@ export function PayPeriodDetail() {
                   <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
-                      onClick={() => {
-                        setTipsLoansVisibilityMode('manual');
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        tipsLoansVisibilityModeRef.current = 'manual';
                         setShowTipsLoans(prev => !prev);
                       }}
                       className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
