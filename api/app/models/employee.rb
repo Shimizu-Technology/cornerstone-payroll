@@ -5,6 +5,18 @@ class Employee < ApplicationRecord
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
+  YTD_AGGREGATE_SOURCE_COLUMNS = {
+    gross_pay: :gross_pay,
+    net_pay: :net_pay,
+    withholding_tax: :withholding_tax,
+    social_security_tax: :social_security_tax,
+    medicare_tax: :medicare_tax,
+    additional_withholding: :additional_withholding,
+    retirement: :retirement_payment,
+    roth_retirement: :roth_retirement_payment,
+    insurance: :insurance_payment,
+    loans: :loan_payment
+  }.freeze
   YTD_AGGREGATE_COLUMNS = {
     gross_pay: "COALESCE(SUM(gross_pay), 0)",
     net_pay: "COALESCE(SUM(net_pay), 0)",
@@ -131,7 +143,7 @@ class Employee < ApplicationRecord
   end
 
   def cache_ytd_values!(year:, as_of_pay_date:, before_pay_period_id:, totals:)
-    normalized_totals = YTD_AGGREGATE_COLUMNS.keys.each_with_object({}) do |key, acc|
+    normalized_totals = YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, acc|
       acc[key] = totals[key].to_f
     end
 
@@ -205,7 +217,7 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
       .sum(:gross_pay)
@@ -227,7 +239,7 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
       .sum(:social_security_tax)
@@ -276,7 +288,7 @@ class Employee < ApplicationRecord
       .joins(:pay_period)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
-          .where(company_id: company_id, pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+          .where(company_id: company_id, pay_date: pay_date_range_for_year(year))
           .select(:id)
       })
 
@@ -286,8 +298,16 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    values = scope.pluck(*YTD_AGGREGATE_COLUMNS.values.map { |sql| Arel.sql(sql) }).first || Array.new(YTD_AGGREGATE_COLUMNS.length, 0)
-    YTD_AGGREGATE_COLUMNS.keys.zip(values).to_h.transform_values(&:to_f)
+    select_list = YTD_AGGREGATE_COLUMNS.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
+    row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
+
+    YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, totals|
+      totals[key] = row[key.to_s].to_f
+    end
+  end
+
+  def pay_date_range_for_year(year)
+    Date.new(year, 1, 1)..Date.new(year, 12, 31)
   end
 
   def normalize_pay_rate_precision

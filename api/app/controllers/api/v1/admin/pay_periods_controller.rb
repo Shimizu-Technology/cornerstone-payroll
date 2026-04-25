@@ -955,7 +955,7 @@ module Api
 
           committed_period_ids = PayPeriod.reportable_committed
                                           .where(company_id: current_company_id)
-                                          .for_year(year)
+                                          .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
                                           .where("(pay_date < ?) OR (pay_date = ? AND id < ?)",
                                                  pay_period.pay_date, pay_period.pay_date, pay_period.id)
                                           .pluck(:id)
