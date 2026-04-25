@@ -18,6 +18,7 @@ class EmployeeYtdTotal < ApplicationRecord
       roth_retirement: 0,
       insurance: 0,
       loans: 0,
+      tips_paid_out: 0,
       tips: 0,
       bonus: 0,
       overtime_pay: 0
@@ -36,6 +37,7 @@ class EmployeeYtdTotal < ApplicationRecord
       self.roth_retirement += payroll_item.roth_retirement_payment.to_f
       self.insurance += payroll_item.insurance_payment.to_f
       self.loans += payroll_item.loan_payment.to_f
+      self.tips_paid_out += payroll_item.tips_paid_out.to_f
       self.tips += payroll_item.reported_tips.to_f
       self.bonus += payroll_item.bonus.to_f
       self.overtime_pay += (payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5)
@@ -56,6 +58,7 @@ class EmployeeYtdTotal < ApplicationRecord
       self.roth_retirement    = [ roth_retirement - payroll_item.roth_retirement_payment.to_f, 0 ].max
       self.insurance          = [ insurance - payroll_item.insurance_payment.to_f, 0 ].max
       self.loans              = [ loans - payroll_item.loan_payment.to_f, 0 ].max
+      self.tips_paid_out      = [ tips_paid_out - payroll_item.tips_paid_out.to_f, 0 ].max
       self.tips               = [ tips - payroll_item.reported_tips.to_f, 0 ].max
       self.bonus              = [ bonus - payroll_item.bonus.to_f, 0 ].max
       self.overtime_pay       = [ overtime_pay - (payroll_item.overtime_hours.to_f * payroll_item.pay_rate * 1.5), 0 ].max

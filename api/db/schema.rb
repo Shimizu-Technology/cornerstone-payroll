@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_25_183000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -235,6 +235,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_183000) do
     t.decimal "roth_retirement", precision: 14, scale: 2, default: "0.0"
     t.decimal "social_security_tax", precision: 14, scale: 2, default: "0.0"
     t.decimal "tips", precision: 14, scale: 2, default: "0.0"
+    t.decimal "tips_paid_out", precision: 14, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
     t.decimal "withholding_tax", precision: 14, scale: 2, default: "0.0"
     t.integer "year", null: false
@@ -508,6 +509,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_183000) do
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
     t.string "tip_pool"
     t.decimal "tips", precision: 10, scale: 2, default: "0.0"
+    t.decimal "tips_paid_out", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "total_additions", precision: 12, scale: 2, default: "0.0"
     t.decimal "total_deductions", precision: 12, scale: 2, default: "0.0"
     t.datetime "updated_at", null: false

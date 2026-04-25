@@ -62,6 +62,7 @@ class ReplaceCheckService
     pto_hours
     bonus
     reported_tips
+    tips_paid_out
     additional_withholding
     additional_withholding_override
     withholding_tax_adjustment
@@ -78,6 +79,7 @@ class ReplaceCheckService
     overtime_hours
     pay_rate
     bonus
+    tips_paid_out
     gross_pay
     withholding_tax
     social_security_tax

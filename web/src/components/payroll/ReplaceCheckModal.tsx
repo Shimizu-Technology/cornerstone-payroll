@@ -406,18 +406,16 @@ export function ReplaceCheckModal({
                 </div>
                 <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
                   <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={form.bonus}
                     onChange={(e) => setForm((f) => ({ ...f, bonus: e.target.value }))}
                   />
                 </FieldRow>
                 <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
                   <Input
-                    type="number"
-                    step="0.01"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     value={form.reported_tips}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, reported_tips: e.target.value }))
@@ -428,37 +426,37 @@ export function ReplaceCheckModal({
             ) : (
               <>
                 <FieldRow label="Regular hours" original={payrollItem.hours_worked}>
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.hours_worked}
                     onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="Overtime hours" original={payrollItem.overtime_hours}>
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.overtime_hours}
                     onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="Holiday hours" original={payrollItem.holiday_hours}>
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.holiday_hours}
                     onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="PTO hours" original={payrollItem.pto_hours}>
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.pto_hours}
                     onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="Pay rate" original={payrollItem.pay_rate} prefix="$">
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.pay_rate}
                     onChange={e => setForm(f => ({ ...f, pay_rate: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.bonus}
                     onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))} />
                 </FieldRow>
                 <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
-                  <Input type="number" step="0.01" min={0}
+                  <Input type="text" inputMode="decimal"
                     value={form.reported_tips}
                     onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))} />
                 </FieldRow>
@@ -593,9 +591,8 @@ function BucketInput({ label, value, onChange }: BucketInputProps) {
     <div className="flex flex-col gap-1">
       <Label className="text-xs text-gray-600">{label}</Label>
       <Input
-        type="number"
-        step="0.01"
-        min={0}
+        type="text"
+        inputMode="decimal"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />

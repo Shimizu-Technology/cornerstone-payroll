@@ -229,6 +229,7 @@ class PayPeriodCorrectionService
         pto_hours:                source_item.pto_hours,
         bonus:                    source_item.bonus,
         reported_tips:            source_item.reported_tips,
+        tips_paid_out:            source_item.tips_paid_out,
         tip_pool:                 source_item.tip_pool,
         loan_deduction:           source_item.loan_deduction,
         additional_withholding:   source_item.additional_withholding,

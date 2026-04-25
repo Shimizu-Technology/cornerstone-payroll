@@ -255,6 +255,7 @@ export interface PayrollItem {
   total_hours?: number;
   // Additional earnings
   reported_tips?: number;
+  tips_paid_out?: number;
   bonus?: number;
   salary_override?: number | null;
   non_taxable_pay?: number;
@@ -328,6 +329,7 @@ export interface CorrectivePaycheckInputs {
   pto_hours?: number;
   bonus?: number;
   reported_tips?: number;
+  tips_paid_out?: number;
   tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;

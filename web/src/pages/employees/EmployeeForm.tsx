@@ -5,6 +5,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, employeeWageRatesApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -690,14 +691,14 @@ export function EmployeeForm() {
                       ? (form.contractor_pay_type === 'hourly' ? 'Hourly Rate' : 'Flat Fee per Period')
                       : 'Pay Rate'} <span className="text-danger-600">*</span>
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <NumericInput
                     value={form.pay_rate}
-                    onChange={(e) => handleChange('pay_rate', parseFloat(e.target.value) || 0)}
-                    error={getFieldError('pay_rate')}
+                    onValueChange={(value) => handleChange('pay_rate', value ?? 0)}
+                    min={0}
+                    fixedDecimalsOnBlur={2}
+                    className={getFieldError('pay_rate') ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200' : undefined}
                   />
+                  {getFieldError('pay_rate') && <p className="mt-1 text-sm text-red-600">{getFieldError('pay_rate')}</p>}
                   <p className="mt-1 text-xs text-gray-500">
                     {form.employment_type === 'salary'
                       ? form.salary_type === 'per_period' ? 'Amount paid each pay period' : 'Annual salary'
@@ -766,12 +767,11 @@ export function EmployeeForm() {
                         <label className="block text-xs font-medium text-gray-600 mb-1">
                           Hourly Rate
                         </label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0"
+                        <NumericInput
                           value={rate.rate}
-                          onChange={(e) => updateWageRate(rate.temp_id, { rate: parseFloat(e.target.value) || 0 })}
+                          onValueChange={(value) => updateWageRate(rate.temp_id, { rate: value ?? 0 })}
+                          min={0}
+                          fixedDecimalsOnBlur={2}
                         />
                       </div>
                       <label className="flex items-center gap-2 text-sm text-gray-700 h-10">
@@ -1002,26 +1002,24 @@ export function EmployeeForm() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Pre-Tax 401(k) (%)
                     </label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={(form.retirement_rate * 100).toFixed(2)}
-                      onChange={(e) => handleChange('retirement_rate', (parseFloat(e.target.value) || 0) / 100)}
+                    <NumericInput
+                      value={form.retirement_rate * 100}
+                      onValueChange={(value) => handleChange('retirement_rate', (value ?? 0) / 100)}
+                      min={0}
+                      max={100}
+                      fixedDecimalsOnBlur={2}
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Roth 401(k) (%)
                     </label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max="100"
-                      value={(form.roth_retirement_rate * 100).toFixed(2)}
-                      onChange={(e) => handleChange('roth_retirement_rate', (parseFloat(e.target.value) || 0) / 100)}
+                    <NumericInput
+                      value={form.roth_retirement_rate * 100}
+                      onValueChange={(value) => handleChange('roth_retirement_rate', (value ?? 0) / 100)}
+                      min={0}
+                      max={100}
+                      fixedDecimalsOnBlur={2}
                     />
                   </div>
                 </div>

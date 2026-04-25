@@ -4,6 +4,8 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { NumericInput } from '@/components/ui/numeric-input';
+import { Select } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -31,6 +33,8 @@ interface HoursEntry {
   overtime: number;
   wage_rates?: PayrollItemWageRateHours[];
 }
+
+const TABLE_STICKY_TOP_CLASS = 'top-0';
 
 const MAX_HOURS_PER_PERIOD = 200;
 const toNumber = (value: unknown): number => {
@@ -137,6 +141,7 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
 function derivePayrollUiState(payrollItems: PayrollItem[]) {
   const salaryOverrides: Record<string, number> = {};
   const tips: Record<string, { amount: number; pool: string }> = {};
+  const tipsPaidOut: Record<string, number> = {};
   const loans: Record<string, number> = {};
 
   payrollItems.forEach((item) => {
@@ -149,6 +154,11 @@ function derivePayrollUiState(payrollItems: PayrollItem[]) {
       tips[String(item.employee_id)] = { amount: tipAmount, pool: item.tip_pool || '' };
     }
 
+    const tipsPaidOutAmount = toNumber(item.tips_paid_out);
+    if (tipsPaidOutAmount > 0) {
+      tipsPaidOut[String(item.employee_id)] = tipsPaidOutAmount;
+    }
+
     const loanAmount = toNumber(item.loan_deduction);
     if (loanAmount > 0) {
       loans[String(item.employee_id)] = loanAmount;
@@ -158,8 +168,9 @@ function derivePayrollUiState(payrollItems: PayrollItem[]) {
   return {
     salaryOverrides,
     tips,
+    tipsPaidOut,
     loans,
-    showTipsLoans: Object.keys(tips).length > 0 || Object.keys(loans).length > 0,
+    showTipsLoans: Object.keys(tips).length > 0 || Object.keys(tipsPaidOut).length > 0 || Object.keys(loans).length > 0,
   };
 }
 
@@ -194,8 +205,14 @@ export function PayPeriodDetail() {
   const [supplementalsLoading, setSupplementalsLoading] = useState(false);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [employeeTypeFilter, setEmployeeTypeFilter] = useState<'all' | 'salary' | 'hourly' | 'contractor'>('all');
+  const [hoursSortBy, setHoursSortBy] = useState<'name' | 'rate' | 'hours' | 'gross'>('name');
+  const [hoursSortDirection, setHoursSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [resultsSortBy, setResultsSortBy] = useState<'name' | 'rate' | 'hours' | 'gross' | 'net' | 'fit'>('name');
+  const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
   const [hoursTableOpen, setHoursTableOpen] = useState(true);
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
+  const [tipsPaidOutMap, setTipsPaidOutMap] = useState<Record<string, number>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
   const tipsLoansVisibilityModeRef = useRef<'auto' | 'manual'>('auto');
@@ -204,6 +221,7 @@ export function PayPeriodDetail() {
     const derivedState = derivePayrollUiState(items);
     setSalaryOverrideMap(derivedState.salaryOverrides);
     setTipsMap(derivedState.tips);
+    setTipsPaidOutMap(derivedState.tipsPaidOut);
     setLoansMap(derivedState.loans);
     setShowTipsLoans((previous) => (
       tipsLoansVisibilityModeRef.current === 'manual' ? previous : derivedState.showTipsLoans
@@ -340,6 +358,10 @@ export function PayPeriodDetail() {
     setLoansMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, amount) }));
   };
 
+  const updateTipsPaidOut = (employeeId: number, amount: number) => {
+    setTipsPaidOutMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, amount) }));
+  };
+
   const handleRunPayroll = async () => {
     if (!payPeriod) return;
     try {
@@ -388,13 +410,18 @@ export function PayPeriodDetail() {
       // Build tips payload
       const tips: Record<string, { amount: number; pool: string }> = {};
       Object.entries(tipsMap).forEach(([empId, data]) => {
-        if (data.amount > 0) tips[empId] = data;
+        tips[empId] = { amount: Math.max(0, toNumber(data.amount)), pool: data.pool || '' };
+      });
+
+      const tips_paid_out: Record<string, number> = {};
+      Object.entries(tipsPaidOutMap).forEach(([empId, amount]) => {
+        tips_paid_out[empId] = Math.max(0, toNumber(amount));
       });
 
       // Build loan deductions payload
       const loan_deductions: Record<string, number> = {};
       Object.entries(loansMap).forEach(([empId, amount]) => {
-        if (amount > 0) loan_deductions[empId] = amount;
+        loan_deductions[empId] = Math.max(0, toNumber(amount));
       });
 
       // Include any manually-added employees who were missing from the import
@@ -406,6 +433,7 @@ export function PayPeriodDetail() {
         hours,
         ...(Object.keys(salary_overrides).length > 0 ? { salary_overrides } : {}),
         ...(Object.keys(tips).length > 0 ? { tips } : {}),
+        ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out } : {}),
         ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions } : {}),
         ...(employee_ids ? { employee_ids } : {}),
       });
@@ -557,12 +585,50 @@ export function PayPeriodDetail() {
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
   const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
-  const sortedPayrollItems = [...payrollItems].sort((a, b) => {
-    const orderA = typeOrder[a.employment_type] ?? 1;
-    const orderB = typeOrder[b.employment_type] ?? 1;
-    if (orderA !== orderB) return orderA - orderB;
-    return (a.employee_name || '').localeCompare(b.employee_name || '');
-  });
+  const matchesEmployeeFilters = (employmentType: string, searchableValues: string[]) => {
+    if (employeeTypeFilter !== 'all' && employmentType !== employeeTypeFilter) return false;
+    if (!searchTerm.trim()) return true;
+
+    const term = searchTerm.trim().toLowerCase();
+    return searchableValues.some((value) => value.toLowerCase().includes(term));
+  };
+
+  const compareDirectional = (left: number | string, right: number | string, direction: 'asc' | 'desc') => {
+    const multiplier = direction === 'asc' ? 1 : -1;
+    if (typeof left === 'string' && typeof right === 'string') {
+      return left.localeCompare(right) * multiplier;
+    }
+
+    return ((Number(left) || 0) - (Number(right) || 0)) * multiplier;
+  };
+
+  const sortPayrollItems = [...payrollItems]
+    .filter((item) => matchesEmployeeFilters(
+      item.employment_type,
+      [item.employee_name || '', item.check_number || '']
+    ))
+    .sort((left, right) => {
+      const typeDiff = employeeTypeFilter === 'all'
+        ? (typeOrder[left.employment_type] ?? 9) - (typeOrder[right.employment_type] ?? 9)
+        : 0;
+      if (typeDiff !== 0) return typeDiff;
+
+      switch (resultsSortBy) {
+      case 'rate':
+        return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection);
+      case 'hours':
+        return compareDirectional(toNumber(left.hours_worked), toNumber(right.hours_worked), resultsSortDirection);
+      case 'gross':
+        return compareDirectional(toNumber(left.gross_pay), toNumber(right.gross_pay), resultsSortDirection);
+      case 'net':
+        return compareDirectional(toNumber(left.net_pay), toNumber(right.net_pay), resultsSortDirection);
+      case 'fit':
+        return compareDirectional(toNumber(left.withholding_tax), toNumber(right.withholding_tax), resultsSortDirection);
+      case 'name':
+      default:
+        return compareDirectional(left.employee_name || '', right.employee_name || '', resultsSortDirection);
+      }
+    });
 
   return (
     <div>
@@ -797,6 +863,34 @@ export function PayPeriodDetail() {
                 </div>
                 {hoursTableOpen && (
                   <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Select
+                      value={employeeTypeFilter}
+                      onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
+                      className="w-36"
+                    >
+                      <option value="all">All Types</option>
+                      <option value="salary">Salary</option>
+                      <option value="hourly">Hourly</option>
+                      <option value="contractor">1099</option>
+                    </Select>
+                    <Select
+                      value={`${hoursSortBy}:${hoursSortDirection}`}
+                      onChange={(event) => {
+                        const [sortBy, direction] = event.target.value.split(':') as [typeof hoursSortBy, typeof hoursSortDirection];
+                        setHoursSortBy(sortBy);
+                        setHoursSortDirection(direction);
+                      }}
+                      className="w-44"
+                    >
+                      <option value="name:asc">Name A-Z</option>
+                      <option value="name:desc">Name Z-A</option>
+                      <option value="rate:desc">Rate High-Low</option>
+                      <option value="rate:asc">Rate Low-High</option>
+                      <option value="hours:desc">Hours High-Low</option>
+                      <option value="hours:asc">Hours Low-High</option>
+                      <option value="gross:desc">Est. Gross High-Low</option>
+                      <option value="gross:asc">Est. Gross Low-High</option>
+                    </Select>
                     <button
                       type="button"
                       onClick={(event) => {
@@ -811,7 +905,7 @@ export function PayPeriodDetail() {
                           : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
                       }`}
                     >
-                      {showTipsLoans ? 'Tips & Loans ✓' : '+ Tips & Loans'}
+                      {showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'}
                     </button>
                         <div className="relative">
                           <input
@@ -831,80 +925,130 @@ export function PayPeriodDetail() {
             </div>
             {hoursTableOpen && (
             <div className="overflow-x-auto">
-              <Table style={{ minWidth: 1380 + (showTipsLoans ? 280 : 0) }}>
+              <Table
+                stickyHeader
+                containerClassName="max-h-[32rem]"
+                style={{ minWidth: 1380 + (showTipsLoans ? 420 : 0) }}
+              >
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[220px]">Employee</TableHead>
-                    <TableHead className="w-[300px]">Rate</TableHead>
-                    <TableHead className="w-[300px] text-center">Regular Hours</TableHead>
-                    <TableHead className="w-[300px] text-center">Overtime Hours</TableHead>
-                    {showTipsLoans && <TableHead className="w-[140px] text-center">Tips</TableHead>}
-                    {showTipsLoans && <TableHead className="w-[110px] text-center">Loan Ded.</TableHead>}
-                    <TableHead className="w-[160px] text-right">Est. Gross</TableHead>
+                    <TableHead stickyLeft className={`w-[260px] min-w-[260px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Employee</TableHead>
+                    <TableHead className={`w-[300px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
+                    <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Regular Hours</TableHead>
+                    <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Overtime Hours</TableHead>
+                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[110px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(() => {
                     const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-                    const draftDividerCols = 5 + (showTipsLoans ? 2 : 0);
+                    const draftDividerCols = 5 + (showTipsLoans ? 3 : 0);
                     const filtered = isCalculated
                       ? employees.filter((emp) => payrollEmployeeIds.has(emp.id) || additionalEmployeeIds.has(emp.id))
                       : employees;
-                    const searchFiltered = searchTerm.trim()
-                      ? filtered.filter((emp) => {
-                          const term = searchTerm.toLowerCase();
-                          return `${emp.first_name} ${emp.last_name}`.toLowerCase().includes(term)
-                            || `${emp.last_name}, ${emp.first_name}`.toLowerCase().includes(term);
-                        })
-                      : filtered;
-                    const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
-                    const displayEmployees = [...searchFiltered].sort((a, b) => {
-                      const orderDiff = (typeOrder[a.employment_type] ?? 9) - (typeOrder[b.employment_type] ?? 9);
-                      if (orderDiff !== 0) return orderDiff;
-                      return `${a.last_name} ${a.first_name}`.localeCompare(`${b.last_name} ${b.first_name}`);
-                    });
+                    const displayEmployees = [...filtered]
+                      .filter((emp) => matchesEmployeeFilters(
+                        emp.employment_type,
+                        [`${emp.first_name} ${emp.last_name}`, `${emp.last_name}, ${emp.first_name}`]
+                      ))
+                      .sort((a, b) => {
+                        const orderDiff = employeeTypeFilter === 'all'
+                          ? (typeOrder[a.employment_type] ?? 9) - (typeOrder[b.employment_type] ?? 9)
+                          : 0;
+                        if (orderDiff !== 0) return orderDiff;
+
+                        if (hoursSortBy === 'rate') {
+                          return compareDirectional(toNumber(a.pay_rate), toNumber(b.pay_rate), hoursSortDirection);
+                        }
+
+                        if (hoursSortBy === 'hours') {
+                          const aHours = toNumber(hoursMap[String(a.id)]?.regular) + toNumber(hoursMap[String(a.id)]?.overtime);
+                          const bHours = toNumber(hoursMap[String(b.id)]?.regular) + toNumber(hoursMap[String(b.id)]?.overtime);
+                          return compareDirectional(aHours, bHours, hoursSortDirection);
+                        }
+
+                        if (hoursSortBy === 'gross') {
+                          const estimateGross = (employee: Employee) => {
+                            const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
+                            const rate = toNumber(employee.pay_rate);
+                            const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
+                            const isFlatContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type !== 'hourly';
+                            const activeRates = (entry.wage_rates || []).filter((row) => row.active !== false);
+                            const usesMultipleRates = (employee.employment_type === 'hourly' || isHourlyContractor) && activeRates.length > 1;
+                            const variableSalary = employee.employment_type === 'salary' && employee.salary_type === 'variable';
+                            const perPeriodSalary = employee.employment_type === 'salary' && employee.salary_type === 'per_period';
+                            const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[employee.pay_frequency] || 26;
+                            const override = salaryOverrideMap[String(employee.id)] || 0;
+
+                            if (variableSalary) return override;
+                            if (perPeriodSalary) return rate;
+                            if (employee.employment_type === 'salary') return rate / periodsPerYear;
+                            if (isFlatContractor) return rate;
+                            if (usesMultipleRates) {
+                              return activeRates.reduce(
+                                (sum, row) => sum + (toNumber(row.regular_hours) * toNumber(row.rate)) + (toNumber(row.overtime_hours) * toNumber(row.rate) * 1.5),
+                                0
+                              );
+                            }
+
+                            return (toNumber(entry.regular) * rate) + (toNumber(entry.overtime) * rate * 1.5);
+                          };
+
+                          return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection);
+                        }
+
+                        return compareDirectional(
+                          `${a.last_name} ${a.first_name}`,
+                          `${b.last_name} ${b.first_name}`,
+                          hoursSortDirection
+                        );
+                      });
                     let prevType: string | null = null;
-                    return displayEmployees.map((emp) => {
-                    const showDivider = emp.employment_type !== prevType;
-                    prevType = emp.employment_type;
-                    const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
-                    const payRate = toNumber(emp.pay_rate);
-                    const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
-                    const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
-                    const activeWageRates = (hours.wage_rates || []).filter((rate) => rate.active !== false);
-                    const hasMultiRate = (emp.employment_type === 'hourly' || isContractorHourly) && activeWageRates.length > 1;
-                    const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
-                    const isPerPeriodSalary = emp.employment_type === 'salary' && emp.salary_type === 'per_period';
-                    const noHoursType = emp.employment_type === 'salary' || isContractorFlat;
-                    const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
-                    const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
-                    const estGross = isVariableSalary
-                      ? salaryOverride
-                      : isPerPeriodSalary
-                      ? payRate
-                      : emp.employment_type === 'salary'
-                      ? payRate / periodsPerYear
-                      : isContractorFlat
-                      ? payRate
-                      : hasMultiRate
-                      ? activeWageRates.reduce(
-                          (sum, rate) => sum + (toNumber(rate.regular_hours) * toNumber(rate.rate)) + (toNumber(rate.overtime_hours) * toNumber(rate.rate) * 1.5),
-                          0
-                        )
-                      : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
-                    return (
+                    return displayEmployees.map((emp, rowIndex) => {
+                      const showDivider = emp.employment_type !== prevType;
+                      prevType = emp.employment_type;
+                      const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
+                      const payRate = toNumber(emp.pay_rate);
+                      const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
+                      const isContractorFlat = emp.employment_type === 'contractor' && emp.contractor_pay_type !== 'hourly';
+                      const activeWageRates = (hours.wage_rates || []).filter((rate) => rate.active !== false);
+                      const hasMultiRate = (emp.employment_type === 'hourly' || isContractorHourly) && activeWageRates.length > 1;
+                      const isVariableSalary = emp.employment_type === 'salary' && emp.salary_type === 'variable';
+                      const isPerPeriodSalary = emp.employment_type === 'salary' && emp.salary_type === 'per_period';
+                      const noHoursType = emp.employment_type === 'salary' || isContractorFlat;
+                      const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
+                      const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
+                      const rowTone = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                      const estGross = isVariableSalary
+                        ? salaryOverride
+                        : isPerPeriodSalary
+                        ? payRate
+                        : emp.employment_type === 'salary'
+                        ? payRate / periodsPerYear
+                        : isContractorFlat
+                        ? payRate
+                        : hasMultiRate
+                        ? activeWageRates.reduce(
+                            (sum, rate) => sum + (toNumber(rate.regular_hours) * toNumber(rate.rate)) + (toNumber(rate.overtime_hours) * toNumber(rate.rate) * 1.5),
+                            0
+                          )
+                        : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
+                      return (
                       <Fragment key={emp.id}>
                       {showDivider && (
                         <TableRow className={emp.employment_type === 'contractor' ? 'bg-emerald-50' : emp.employment_type === 'hourly' ? 'bg-gray-100' : 'bg-indigo-50'}>
-                          <TableCell colSpan={draftDividerCols} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${
+                          <TableCell stickyLeft colSpan={draftDividerCols} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${
                             emp.employment_type === 'contractor' ? 'text-emerald-700' : emp.employment_type === 'hourly' ? 'text-gray-600' : 'text-indigo-700'
-                          }`}>
+                          } ${emp.employment_type === 'contractor' ? 'bg-emerald-50' : emp.employment_type === 'hourly' ? 'bg-gray-100' : 'bg-indigo-50'}`}>
                             {emp.employment_type === 'contractor' ? '1099 Contractors' : emp.employment_type === 'hourly' ? 'Hourly Employees' : 'Salary Employees'}
                           </TableCell>
                         </TableRow>
                       )}
-                      <TableRow className={emp.employment_type === 'contractor' ? 'bg-emerald-50/30' : undefined}>
-                        <TableCell>
+                      <TableRow className={rowTone}>
+                          <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                           <div>
                             <div className="flex items-center gap-1.5">
                               <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
@@ -917,7 +1061,7 @@ export function PayPeriodDetail() {
                             </p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-gray-700">
+                        <TableCell className={`text-gray-700 ${rowTone}`}>
                           {isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
                           ) : isPerPeriodSalary ? (
@@ -939,18 +1083,17 @@ export function PayPeriodDetail() {
                             `$${payRate.toFixed(2)}/hr`
                           )}
                         </TableCell>
-                        <TableCell className="text-center align-top" colSpan={isVariableSalary ? 2 : 1}>
+                        <TableCell className={`text-center align-top ${rowTone}`} colSpan={isVariableSalary ? 2 : 1}>
                           {isVariableSalary ? (
                             <div className="flex items-center justify-center gap-2">
                               <span className="text-xs text-gray-500">Pay this period: $</span>
-                              <input
-                                type="number"
-                                value={salaryOverride || ''}
-                                onChange={(e) => updateSalaryOverride(emp.id, parseFloat(e.target.value) || 0)}
+                              <NumericInput
+                                value={salaryOverride || null}
+                                onValueChange={(value) => updateSalaryOverride(emp.id, value ?? 0)}
                                 placeholder="0.00"
                                 className="w-28 text-center border border-indigo-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-indigo-50/50"
                                 min={0}
-                                step={0.01}
+                                fixedDecimalsOnBlur={2}
                               />
                             </div>
                           ) : hasMultiRate ? (
@@ -963,31 +1106,29 @@ export function PayPeriodDetail() {
                                   >
                                     {rate.label}
                                   </span>
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     value={toNumber(rate.regular_hours)}
-                                    onChange={(e) => updateWageRateHours(emp.id, index, 'regular_hours', parseFloat(e.target.value) || 0)}
+                                    onValueChange={(value) => updateWageRateHours(emp.id, index, 'regular_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     min={0}
-                                    step={0.5}
+                                    max={MAX_HOURS_PER_PERIOD}
                                   />
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <input
-                              type="number"
+                            <NumericInput
                               value={hours.regular}
-                              onChange={(e) => updateHours(emp.id, 'regular', parseFloat(e.target.value) || 0)}
+                              onValueChange={(value) => updateHours(emp.id, 'regular', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
-                              step={0.5}
+                              max={MAX_HOURS_PER_PERIOD}
                               disabled={noHoursType}
                             />
                           )}
                         </TableCell>
                         {!isVariableSalary && (
-                        <TableCell className="text-center align-top">
+                        <TableCell className={`text-center align-top ${rowTone}`}>
                           {hasMultiRate ? (
                             <div className="space-y-2">
                               {activeWageRates.map((rate, index) => (
@@ -998,42 +1139,39 @@ export function PayPeriodDetail() {
                                   >
                                     {rate.label}
                                   </span>
-                                  <input
-                                    type="number"
+                                  <NumericInput
                                     value={toNumber(rate.overtime_hours)}
-                                    onChange={(e) => updateWageRateHours(emp.id, index, 'overtime_hours', parseFloat(e.target.value) || 0)}
+                                    onValueChange={(value) => updateWageRateHours(emp.id, index, 'overtime_hours', value ?? 0)}
                                     className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                                     min={0}
-                                    step={0.5}
+                                    max={MAX_HOURS_PER_PERIOD}
                                   />
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            <input
-                              type="number"
+                            <NumericInput
                               value={hours.overtime}
-                              onChange={(e) => updateHours(emp.id, 'overtime', parseFloat(e.target.value) || 0)}
+                              onValueChange={(value) => updateHours(emp.id, 'overtime', value ?? 0)}
                               className="w-20 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                               min={0}
-                              step={0.5}
+                              max={MAX_HOURS_PER_PERIOD}
                               disabled={noHoursType}
                             />
                           )}
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className="text-center align-top">
+                        <TableCell className={`text-center align-top ${rowTone}`}>
                           <div className="flex items-center gap-1 justify-center">
                             <span className="text-xs text-gray-400">$</span>
-                            <input
-                              type="number"
-                              value={tipsMap[String(emp.id)]?.amount || ''}
-                              onChange={(e) => updateTip(emp.id, parseFloat(e.target.value) || 0)}
+                            <NumericInput
+                              value={tipsMap[String(emp.id)]?.amount ?? null}
+                              onValueChange={(value) => updateTip(emp.id, value ?? 0)}
                               placeholder="0"
                               className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
-                              step={0.01}
+                              fixedDecimalsOnBlur={2}
                             />
                             <select
                               value={tipsMap[String(emp.id)]?.pool || ''}
@@ -1049,27 +1187,41 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className="text-center align-top">
+                        <TableCell className={`text-center align-top ${rowTone}`}>
                           <div className="flex items-center gap-1 justify-center">
                             <span className="text-xs text-gray-400">$</span>
-                            <input
-                              type="number"
-                              value={loansMap[String(emp.id)] || ''}
-                              onChange={(e) => updateLoan(emp.id, parseFloat(e.target.value) || 0)}
+                            <NumericInput
+                              value={tipsPaidOutMap[String(emp.id)] ?? null}
+                              onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)}
                               placeholder="0"
                               className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
-                              step={0.01}
+                              fixedDecimalsOnBlur={2}
                             />
                           </div>
                         </TableCell>
                         )}
-                        <TableCell className="text-right font-medium text-gray-700">
+                        {showTipsLoans && (
+                        <TableCell className={`text-center align-top ${rowTone}`}>
+                          <div className="flex items-center gap-1 justify-center">
+                            <span className="text-xs text-gray-400">$</span>
+                            <NumericInput
+                              value={loansMap[String(emp.id)] ?? null}
+                              onValueChange={(value) => updateLoan(emp.id, value ?? 0)}
+                              placeholder="0"
+                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              min={0}
+                              fixedDecimalsOnBlur={2}
+                            />
+                          </div>
+                        </TableCell>
+                        )}
+                        <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
                         </TableCell>
                       </TableRow>
                       </Fragment>
-                    );
+                      );
                     });
                   })()}
                 </TableBody>
@@ -1082,8 +1234,9 @@ export function PayPeriodDetail() {
         {/* Payroll Results Table (Calculated/Approved/Committed) */}
         {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
+          const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
           const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
-          const extraColCount = (hasTips ? 1 : 0) + (hasLoans ? 1 : 0);
+          const extraColCount = (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
@@ -1095,50 +1248,77 @@ export function PayPeriodDetail() {
                     Salary employees listed first, then hourly alphabetically.
                   </p>
                 </div>
-                <div className="relative shrink-0">
-                  <input
-                    type="text"
-                    placeholder="Search employees and checks..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
-                  <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                <div className="flex shrink-0 flex-wrap items-center gap-3">
+                  <Select
+                    value={employeeTypeFilter}
+                    onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
+                    className="w-36"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="salary">Salary</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="contractor">1099</option>
+                  </Select>
+                  <Select
+                    value={`${resultsSortBy}:${resultsSortDirection}`}
+                    onChange={(event) => {
+                      const [sortBy, direction] = event.target.value.split(':') as [typeof resultsSortBy, typeof resultsSortDirection];
+                      setResultsSortBy(sortBy);
+                      setResultsSortDirection(direction);
+                    }}
+                    className="w-44"
+                  >
+                    <option value="name:asc">Name A-Z</option>
+                    <option value="name:desc">Name Z-A</option>
+                    <option value="rate:desc">Rate High-Low</option>
+                    <option value="rate:asc">Rate Low-High</option>
+                    <option value="hours:desc">Hours High-Low</option>
+                    <option value="hours:asc">Hours Low-High</option>
+                    <option value="gross:desc">Gross High-Low</option>
+                    <option value="gross:asc">Gross Low-High</option>
+                    <option value="net:desc">Net High-Low</option>
+                    <option value="net:asc">Net Low-High</option>
+                    <option value="fit:desc">FIT High-Low</option>
+                    <option value="fit:asc">FIT Low-High</option>
+                  </Select>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Search employees and checks..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             </div>
             <div className="overflow-x-auto">
-              <Table>
+              <Table stickyHeader containerClassName="max-h-[34rem]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead className="text-right">Hours</TableHead>
-                    <TableHead className="text-right">Rate</TableHead>
-                    <TableHead className="text-right">Gross</TableHead>
-                    {hasTips && <TableHead className="text-right">Tips</TableHead>}
-                    {hasLoans && <TableHead className="text-right">Loan Ded.</TableHead>}
-                    <TableHead className="text-right">FIT</TableHead>
-                    <TableHead className="text-right">Addtl W/H</TableHead>
-                    <TableHead className="text-right">SS (6.2%)</TableHead>
-                    <TableHead className="text-right">Medicare</TableHead>
-                    <TableHead className="text-right">Total Ded.</TableHead>
-                    <TableHead className="text-right">Net Pay</TableHead>
+                    <TableHead stickyLeft className={`w-[260px] min-w-[260px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Employee</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Hours</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
+                    {hasTips && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {hasTipsPaidOut && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {hasLoans && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Medicare</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
+                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Net Pay</TableHead>
                     {(isCalculated || isCommitted) && <TableHead className="text-center w-20"></TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(() => {
-                    const displayItems = searchTerm.trim()
-                      ? sortedPayrollItems.filter((item) => {
-                          const term = searchTerm.toLowerCase();
-                          return (
-                            item.employee_name?.toLowerCase().includes(term) ||
-                            item.check_number?.toLowerCase().includes(term)
-                          );
-                        })
-                      : sortedPayrollItems;
+                    const displayItems = sortPayrollItems;
                     return displayItems.map((item, idx) => {
                     const isManual = !item.import_source;
                     const isSalary = item.employment_type === 'salary';
@@ -1152,32 +1332,33 @@ export function PayPeriodDetail() {
                     const showSalaryDivider = isSalary && idx === 0;
                     const showHourlyDivider = item.employment_type === 'hourly' && prevType !== 'hourly';
                     const showContractorDivider = isContractor && prevType !== 'contractor';
+                    const rowTone = idx % 2 === 0 ? 'bg-white' : 'bg-slate-100';
 
                     return (
                       <Fragment key={item.id}>
                         {showSalaryDivider && (
                           <TableRow className="bg-indigo-50">
-                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
+                            <TableCell stickyLeft colSpan={totalCols} className="bg-indigo-50 py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
                               Salary Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showHourlyDivider && (
                           <TableRow className="bg-gray-100">
-                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                            <TableCell stickyLeft colSpan={totalCols} className="bg-gray-100 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
                               Hourly Employees
                             </TableCell>
                           </TableRow>
                         )}
                         {showContractorDivider && (
                           <TableRow className="bg-emerald-50">
-                            <TableCell colSpan={totalCols} className="py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
+                            <TableCell stickyLeft colSpan={totalCols} className="bg-emerald-50 py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
                               1099 Contractors
                             </TableCell>
                           </TableRow>
                         )}
-                        <TableRow key={item.id} className={isContractor ? 'bg-emerald-50/30' : (isManual || (isSalary && item.salary_override)) ? 'bg-amber-50/50' : undefined}>
-                          <TableCell>
+                        <TableRow key={item.id} className={rowTone}>
+                          <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                             <div className="flex items-center gap-2">
                               <div>
                                 <p className="font-medium text-gray-900">{item.employee_name}</p>
@@ -1226,7 +1407,7 @@ export function PayPeriodDetail() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className={`text-right ${rowTone}`}>
                             {isSalary || isContractorFlat ? (
                               <span className="text-gray-400">—</span>
                             ) : hasMultiRateResults ? (
@@ -1253,7 +1434,7 @@ export function PayPeriodDetail() {
                               </>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className={`text-right ${rowTone}`}>
                             {(() => {
                               if (isSalary) {
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
@@ -1287,9 +1468,9 @@ export function PayPeriodDetail() {
                               return `$${toNumber(item.pay_rate).toFixed(2)}/hr`;
                             })()}
                           </TableCell>
-                          <TableCell className="text-right font-medium">{formatCurrency(toNumber(item.gross_pay))}</TableCell>
+                          <TableCell className={`text-right font-medium ${rowTone}`}>{formatCurrency(toNumber(item.gross_pay))}</TableCell>
                           {hasTips && (
-                          <TableCell className="text-right">
+                          <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.reported_tips) > 0 ? (
                               <span>
                                 {formatCurrency(toNumber(item.reported_tips))}
@@ -1310,8 +1491,17 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           )}
+                          {hasTipsPaidOut && (
+                          <TableCell className={`text-right ${rowTone}`}>
+                            {toNumber(item.tips_paid_out) > 0 ? (
+                              formatCurrency(toNumber(item.tips_paid_out))
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
+                          )}
                           {hasLoans && (
-                          <TableCell className="text-right">
+                          <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.loan_payment) > 0 ? (
                               formatCurrency(toNumber(item.loan_payment))
                             ) : (
@@ -1319,7 +1509,7 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           )}
-                          <TableCell className="text-right text-red-600">
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>
                             {formatCurrency(toNumber(item.withholding_tax))}
                             {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
                               <span className="ml-0.5 text-[10px] text-orange-600" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
@@ -1328,15 +1518,15 @@ export function PayPeriodDetail() {
                               <span className="ml-0.5 text-[10px] text-amber-600" title="Final FIT manually overridden">*</span>
                             )}
                           </TableCell>
-                          <TableCell className="text-right text-red-600">
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>
                             {toNumber(item.additional_withholding) > 0 ? formatCurrency(toNumber(item.additional_withholding)) : '—'}
                           </TableCell>
-                          <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
-                          <TableCell className="text-right text-red-600">{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
-                          <TableCell className="text-right text-red-600 font-medium">{formatCurrency(toNumber(item.total_deductions))}</TableCell>
-                          <TableCell className="text-right font-bold text-green-600">{formatCurrency(toNumber(item.net_pay))}</TableCell>
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
+                          <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>
+                          <TableCell className={`text-right font-bold text-green-600 ${rowTone}`}>{formatCurrency(toNumber(item.net_pay))}</TableCell>
                           {isCalculated && (
-                            <TableCell className="text-center">
+                            <TableCell className={`text-center ${rowTone}`}>
                               <button
                                 onClick={() => setEditingItem(item)}
                                 className="text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium"
@@ -1358,7 +1548,7 @@ export function PayPeriodDetail() {
                               !!item.check_number;
                             if (!canCorrect && !canReplace) return <TableCell />;
                             return (
-                              <TableCell className="text-center">
+                              <TableCell className={`text-center ${rowTone}`}>
                                 <div className="flex flex-col items-center gap-0.5">
                                   {canCorrect && (
                                     <button
@@ -1383,7 +1573,7 @@ export function PayPeriodDetail() {
                             );
                           })()}
                           {isCommitted && isContractor && (
-                            <TableCell />
+                            <TableCell className={rowTone} />
                           )}
                         </TableRow>
                       </Fragment>
@@ -1393,12 +1583,14 @@ export function PayPeriodDetail() {
                   {/* Totals */}
                   {(() => {
                     const totalTips = payrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
+                    const totalTipsPaidOut = payrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
                     const totalLoans = payrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
                     return (
                       <TableRow className="bg-gray-50 font-bold border-t-2">
-                        <TableCell colSpan={3}>Totals ({payrollItems.length} employees)</TableCell>
+                        <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({payrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                         {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
+                        {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
                         {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
                         <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
                         <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>

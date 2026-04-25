@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -338,10 +339,11 @@ export function Clients() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
-                  <Input
-                    type="number"
+                  <NumericInput
                     value={form.next_check_number ?? 1001}
-                    onChange={(e) => updateField('next_check_number', parseInt(e.target.value) || 1001)}
+                    onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
+                    min={1}
+                    fixedDecimalsOnBlur={0}
                   />
                 </div>
               </div>
