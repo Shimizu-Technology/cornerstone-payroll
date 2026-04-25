@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { nonEmployeeChecksApi } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 
@@ -225,11 +226,10 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             </Field>
 
             <Field label="Amount" required>
-              <input
-                type="number"
-                step="0.01"
-                min="0.01"
-                className="w-full rounded border px-3 py-2 text-sm"
+              <Input
+                type="text"
+                inputMode="decimal"
+                className="w-full px-3 py-2 text-sm"
                 value={form.amount}
                 onChange={e => setForm(p => p && { ...p, amount: e.target.value })}
               />

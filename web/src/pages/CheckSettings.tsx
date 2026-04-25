@@ -485,8 +485,8 @@ export function CheckSettingsPage() {
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
                 <Input
                   id="offset-x"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={offsetX}
                   onChange={(e) => setOffsetX(e.target.value)}
                   className="w-32 font-mono"
@@ -497,8 +497,8 @@ export function CheckSettingsPage() {
                 <Label htmlFor="offset-y">Y Offset (inches)</Label>
                 <Input
                   id="offset-y"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={offsetY}
                   onChange={(e) => setOffsetY(e.target.value)}
                   className="w-32 font-mono"
@@ -664,8 +664,8 @@ export function CheckSettingsPage() {
                 <Label htmlFor="next-check-number">Next Check Number</Label>
                 <Input
                   id="next-check-number"
-                  type="number"
-                  min="1"
+                  type="text"
+                  inputMode="numeric"
                   value={nextCheckNumber}
                   onChange={(e) => setNextCheckNumber(e.target.value)}
                   className="w-32 font-mono"

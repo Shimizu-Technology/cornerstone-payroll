@@ -222,54 +222,48 @@ export function CorrectivePaycheckModal({
 
             <FieldRow label="Regular hours" original={originalItem.hours_worked}>
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.hours_worked}
                 onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))}
               />
             </FieldRow>
             <FieldRow label="Overtime hours" original={originalItem.overtime_hours}>
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.overtime_hours}
                 onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))}
               />
             </FieldRow>
             <FieldRow label="Holiday hours" original={originalItem.holiday_hours}>
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.holiday_hours}
                 onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))}
               />
             </FieldRow>
             <FieldRow label="PTO hours" original={originalItem.pto_hours}>
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.pto_hours}
                 onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))}
               />
             </FieldRow>
             <FieldRow label="Bonus" original={originalItem.bonus} prefix="$">
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.bonus}
                 onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))}
               />
             </FieldRow>
             <FieldRow label="Tips" original={originalItem.reported_tips} prefix="$">
               <Input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form.reported_tips}
                 onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))}
               />

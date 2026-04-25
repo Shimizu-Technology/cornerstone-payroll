@@ -303,6 +303,14 @@ class PayStubGenerator
       ]
     end
 
+    if payroll_item.tips_paid_out.to_f > 0
+      deductions_data << [
+        "Tips Paid Out",
+        format_currency(payroll_item.tips_paid_out),
+        format_currency(employee_ytd_tips_paid_out)
+      ]
+    end
+
     # Total deductions
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
@@ -387,6 +395,15 @@ class PayStubGenerator
       pay_date: payroll_item.pay_period.pay_date,
       pay_period_id: payroll_item.pay_period_id
     )[:additional_withholding].to_f
+  end
+
+  def employee_ytd_tips_paid_out
+    year = payroll_item.pay_period.pay_date&.year || Date.current.year
+    payroll_item.employee.ytd_totals_through(
+      year: year,
+      pay_date: payroll_item.pay_period.pay_date,
+      pay_period_id: payroll_item.pay_period_id
+    )[:tips_paid_out].to_f
   end
 
   def format_currency(amount)

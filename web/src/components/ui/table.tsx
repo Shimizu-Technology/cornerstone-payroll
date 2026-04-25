@@ -1,12 +1,29 @@
 import { forwardRef, type HTMLAttributes, type TdHTMLAttributes, type ThHTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
-const Table = forwardRef<HTMLTableElement, HTMLAttributes<HTMLTableElement>>(
-  ({ className, ...props }, ref) => (
-    <div className="w-full overflow-auto">
+interface TableProps extends HTMLAttributes<HTMLTableElement> {
+  containerClassName?: string;
+  stickyHeader?: boolean;
+}
+
+interface TableBodyProps extends HTMLAttributes<HTMLTableSectionElement> {
+  striped?: boolean;
+}
+
+interface StickyCellProps {
+  stickyLeft?: boolean;
+}
+
+const Table = forwardRef<HTMLTableElement, TableProps>(
+  ({ className, containerClassName, stickyHeader = false, ...props }, ref) => (
+    <div className={cn('w-full overflow-auto', containerClassName)}>
       <table
         ref={ref}
-        className={cn('w-full caption-bottom text-sm', className)}
+        className={cn(
+          'w-full caption-bottom text-sm',
+          stickyHeader && '[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-20',
+          className
+        )}
         {...props}
       />
     </div>
@@ -21,11 +38,15 @@ const TableHeader = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTable
 );
 TableHeader.displayName = 'TableHeader';
 
-const TableBody = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTableSectionElement>>(
-  ({ className, ...props }, ref) => (
+const TableBody = forwardRef<HTMLTableSectionElement, TableBodyProps>(
+  ({ className, striped = false, ...props }, ref) => (
     <tbody
       ref={ref}
-      className={cn('divide-y divide-gray-200', className)}
+      className={cn(
+        'divide-y divide-gray-200',
+        striped && '[&_tr:nth-child(odd)]:bg-white [&_tr:nth-child(even)]:bg-slate-100',
+        className
+      )}
       {...props}
     />
   )
@@ -54,12 +75,13 @@ const TableRow = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTableRowElem
 );
 TableRow.displayName = 'TableRow';
 
-const TableHead = forwardRef<HTMLTableCellElement, ThHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => (
+const TableHead = forwardRef<HTMLTableCellElement, ThHTMLAttributes<HTMLTableCellElement> & StickyCellProps>(
+  ({ className, stickyLeft = false, ...props }, ref) => (
     <th
       ref={ref}
       className={cn(
         'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
+        stickyLeft && 'sticky left-0 z-40 border-r border-slate-200 bg-inherit shadow-[10px_0_16px_-14px_rgba(15,23,42,0.5)]',
         className
       )}
       {...props}
@@ -68,11 +90,15 @@ const TableHead = forwardRef<HTMLTableCellElement, ThHTMLAttributes<HTMLTableCel
 );
 TableHead.displayName = 'TableHead';
 
-const TableCell = forwardRef<HTMLTableCellElement, TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => (
+const TableCell = forwardRef<HTMLTableCellElement, TdHTMLAttributes<HTMLTableCellElement> & StickyCellProps>(
+  ({ className, stickyLeft = false, ...props }, ref) => (
     <td
       ref={ref}
-      className={cn('px-6 py-4 whitespace-nowrap', className)}
+      className={cn(
+        'px-6 py-4 whitespace-nowrap',
+        stickyLeft && 'sticky left-0 z-20 border-r border-slate-200 bg-inherit shadow-[10px_0_16px_-14px_rgba(15,23,42,0.45)]',
+        className
+      )}
       {...props}
     />
   )

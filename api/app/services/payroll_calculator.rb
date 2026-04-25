@@ -257,7 +257,8 @@ class PayrollCalculator
       payroll_item.retirement_payment.to_f +
       payroll_item.roth_retirement_payment.to_f +
       itemized_pre_tax +
-      post_tax_deductions
+      post_tax_deductions +
+      payroll_item.tips_paid_out.to_f
     ).round(2)
   end
 

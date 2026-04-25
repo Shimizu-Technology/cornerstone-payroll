@@ -259,6 +259,11 @@ module Api
                 payroll_item.tip_pool = tip_pool
               end
 
+              if params[:tips_paid_out] && params[:tips_paid_out][employee_id.to_s]
+                tips_paid_out_val = params[:tips_paid_out][employee_id.to_s].to_f
+                payroll_item.tips_paid_out = tips_paid_out_val > 0 ? tips_paid_out_val : 0
+              end
+
               # Apply loan deductions from the Adjust Hours table
               if params[:loan_deductions] && params[:loan_deductions][employee_id.to_s]
                 loan_val = params[:loan_deductions][employee_id.to_s].to_f
@@ -798,6 +803,7 @@ module Api
             pto_hours: item.pto_hours,
             bonus: item.bonus,
             reported_tips: item.reported_tips,
+            tips_paid_out: item.tips_paid_out,
             additional_withholding: item.additional_withholding,
             additional_withholding_override: item.additional_withholding_override,
             withholding_tax_adjustment: item.withholding_tax_adjustment,
