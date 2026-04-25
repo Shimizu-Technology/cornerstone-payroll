@@ -69,6 +69,7 @@ class IssueCorrectivePaycheckService
     reported_tips
     tip_pool
     additional_withholding
+    additional_withholding_override
     withholding_tax_adjustment
     custom_earnings
     custom_columns_data
@@ -307,6 +308,7 @@ class IssueCorrectivePaycheckService
       tip_pool:                 corrected_input(:tip_pool, original_item.tip_pool),
       non_taxable_pay:          corrected_input(:non_taxable_pay, original_item.non_taxable_pay),
       additional_withholding:   corrected_input(:additional_withholding, original_item.additional_withholding),
+      additional_withholding_override: corrected_input(:additional_withholding_override, original_item.additional_withholding_override),
       withholding_tax_adjustment: corrected_input(:withholding_tax_adjustment, original_item.withholding_tax_adjustment),
       withholding_tax_override: original_item.withholding_tax_override, # not currently overridable
       custom_earnings:          corrected_input(:custom_earnings, original_item.custom_earnings),

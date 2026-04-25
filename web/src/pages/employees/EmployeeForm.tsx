@@ -64,6 +64,15 @@ const roundCurrencyValue = (value: number): number => {
   return Math.round(value * 100) / 100;
 };
 
+const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormData => ({
+  ...form,
+  pay_rate: roundCurrencyValue(form.pay_rate),
+  additional_withholding: roundCurrencyValue(form.additional_withholding),
+  w4_dependent_credit: roundCurrencyValue(form.w4_dependent_credit),
+  w4_step4a_other_income: roundCurrencyValue(form.w4_step4a_other_income),
+  w4_step4b_deductions: roundCurrencyValue(form.w4_step4b_deductions),
+});
+
 export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -332,7 +341,7 @@ export function EmployeeForm() {
       const normalizedWageRates = supportsMultipleHourlyRates ? normalizeWageRates() : [];
       const primaryRate = normalizedWageRates.find((rate) => rate.is_primary) || normalizedWageRates[0];
       const employeePayload = {
-        ...form,
+        ...normalizeEmployeeMonetaryFields(form),
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
           : roundCurrencyValue(form.pay_rate),
@@ -886,7 +895,7 @@ export function EmployeeForm() {
                       step="0.01"
                       min="0"
                       value={form.w4_dependent_credit}
-                      onChange={(e) => handleChange('w4_dependent_credit', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => handleChange('w4_dependent_credit', roundCurrencyValue(parseFloat(e.target.value) || 0))}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       $2,000 per qualifying child under 17 + $500 per other dependent
@@ -908,7 +917,7 @@ export function EmployeeForm() {
                       step="0.01"
                       min="0"
                       value={form.w4_step4a_other_income}
-                      onChange={(e) => handleChange('w4_step4a_other_income', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => handleChange('w4_step4a_other_income', roundCurrencyValue(parseFloat(e.target.value) || 0))}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual estimate of non-job income (interest, dividends, etc.)
@@ -923,7 +932,7 @@ export function EmployeeForm() {
                       step="0.01"
                       min="0"
                       value={form.w4_step4b_deductions}
-                      onChange={(e) => handleChange('w4_step4b_deductions', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => handleChange('w4_step4b_deductions', roundCurrencyValue(parseFloat(e.target.value) || 0))}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Annual amount if deductions exceed the standard deduction
@@ -938,7 +947,7 @@ export function EmployeeForm() {
                       step="0.01"
                       min="0"
                       value={form.additional_withholding}
-                      onChange={(e) => handleChange('additional_withholding', parseFloat(e.target.value) || 0)}
+                      onChange={(e) => handleChange('additional_withholding', roundCurrencyValue(parseFloat(e.target.value) || 0))}
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Extra amount to withhold each pay period

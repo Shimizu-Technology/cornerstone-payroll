@@ -33,9 +33,10 @@ class CheckGenerator
   DEFAULT_LAYOUT = {
     check_face: {
       date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
-      payee:        { x: 64.0,  y: 180.0, width: 320.0, font_size: 10.0 },
+      payee:        { x: 64.0,  y: 168.0, width: 320.0, font_size: 10.0 },
+      payee_address:{ x: 64.0,  y: 102.0, width: 240.0, font_size: 9.0 },
       amount:       { x: 467.0, y: 182.0, width: 120.0, font_size: 10.0 },
-      amount_words: { x: 52.0,  y: 156.0, width: 492.0, font_size: 9.0 },
+      amount_words: { x: 52.0,  y: 136.0, width: 492.0, font_size: 9.0 },
       memo:         { x: 22.0,  y: 64.0,  width: 260.0, font_size: 7.5 },
       signature:    { x: 322.0, y: 10.0,  width: 246.0 }
     },
@@ -175,6 +176,7 @@ class CheckGenerator
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
     date_cfg = layout_field(:check_face, :date)
     payee_cfg = layout_field(:check_face, :payee)
+    payee_address_cfg = layout_field(:check_face, :payee_address)
     amount_cfg = layout_field(:check_face, :amount)
     words_cfg = layout_field(:check_face, :amount_words)
     memo_cfg = layout_field(:check_face, :memo)
@@ -186,9 +188,16 @@ class CheckGenerator
     end
 
     # ---- Payee name (left) + amount (right) ----
-    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f) do
-      payee_lines = [ employee.full_name, employee.full_address.presence ].compact
-      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text payee_lines.join("\n"), leading: 1.5 }
+    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f, height: 18) do
+      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.full_name }
+    end
+    pdf.bounding_box([payee_address_cfg["x"].to_f + ox, sect_bot + payee_address_cfg["y"].to_f + oy], width: payee_address_cfg["width"].to_f, height: 32) do
+      address_lines = employee.full_address.to_s.split("\n").map(&:strip).reject(&:blank?).first(3)
+      if address_lines.any?
+        pdf.font_size(payee_address_cfg["font_size"].to_f) do
+          pdf.text address_lines.join("\n"), leading: 0.5
+        end
+      end
     end
     pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
       pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(payroll_item.net_pay), align: :right }
