@@ -325,21 +325,22 @@ class IssueCorrectivePaycheckService
     temp
   end
 
-  # Set the employee's @cached_ytd_gross / @cached_ytd_social_security to
-  # the YTD figures excluding the original payroll item (so the
-  # calculator's `ytd_gross_before` / `ytd_ss_before` use them instead of
-  # querying). Restores the previous cache values afterwards.
+  # Override the employee's cached pre-period YTD totals with figures that
+  # exclude the original payroll item, so PayrollCalculator uses the
+  # corrected baseline while recomputing the supplemental delta.
   def with_ytd_excluding_original
-    prev_gross = @employee.instance_variable_get(:@cached_ytd_gross)
-    prev_ss    = @employee.instance_variable_get(:@cached_ytd_social_security)
+    previous_snapshot = @employee.cached_ytd_snapshot
 
-    @employee.instance_variable_set(:@cached_ytd_gross, ytd_gross_excluding_original)
-    @employee.instance_variable_set(:@cached_ytd_social_security, ytd_ss_excluding_original)
+    @employee.cache_ytd_values!(
+      year: @original_pay_period.pay_date.year,
+      as_of_pay_date: @original_pay_period.pay_date,
+      before_pay_period_id: @original_pay_period.id,
+      totals: cached_ytd_totals_excluding_original
+    )
 
     yield
   ensure
-    @employee.instance_variable_set(:@cached_ytd_gross, prev_gross)
-    @employee.instance_variable_set(:@cached_ytd_social_security, prev_ss)
+    @employee.restore_cached_ytd_snapshot!(previous_snapshot)
   end
 
   # YTD across all reportable_committed periods *prior to* the original
@@ -352,6 +353,21 @@ class IssueCorrectivePaycheckService
 
   def ytd_ss_excluding_original
     ytd_sum_excluding_original(:social_security_tax)
+  end
+
+  def cached_ytd_totals_excluding_original
+    pay_date = @original_pay_period.pay_date
+    year = pay_date.year
+    scope = @employee.payroll_items
+      .joins(:pay_period)
+      .where(pay_periods: { id: PayPeriod.reportable_committed
+                                          .where(company_id: @original_pay_period.company_id,
+                                                 pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                          .select(:id) })
+      .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
+             pay_date, pay_date, @original_pay_period.id)
+
+    @employee.ytd_totals_for_scope(scope)
   end
 
   def ytd_sum_excluding_original(column)

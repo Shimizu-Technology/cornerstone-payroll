@@ -376,15 +376,11 @@ class PayStubGenerator
 
   def employee_ytd_additional_withholding
     year = payroll_item.pay_period.pay_date&.year || Date.current.year
-    reportable_ids = PayPeriod.reportable_committed
-      .where(company_id: payroll_item.company_id)
-      .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", year)
-      .select(:id)
-
-    PayrollItem.joins(:pay_period)
-      .where(employee_id: payroll_item.employee_id)
-      .where(pay_periods: { id: reportable_ids })
-      .sum(:additional_withholding).to_f
+    payroll_item.employee.ytd_totals_through(
+      year: year,
+      pay_date: payroll_item.pay_period.pay_date,
+      pay_period_id: payroll_item.pay_period_id
+    )[:additional_withholding].to_f
   end
 
   def format_currency(amount)

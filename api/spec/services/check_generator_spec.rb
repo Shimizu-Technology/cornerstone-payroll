@@ -113,6 +113,41 @@ RSpec.describe CheckGenerator do
     end
   end
 
+  describe "year-to-date totals" do
+    it "exclude committed payroll from later pay dates" do
+      later_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 19))
+
+      create(:payroll_item,
+        pay_period: later_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.24,
+        gross_pay: 500.00,
+        net_pay: 420.00,
+        withholding_tax: 40.00,
+        social_security_tax: 31.00,
+        medicare_tax: 7.25,
+        additional_withholding: 5.00,
+        retirement_payment: 10.00,
+        roth_retirement_payment: 6.00,
+        insurance_payment: 4.00,
+        loan_payment: 3.00)
+
+      ytd = generator.send(:ytd)
+
+      expect(ytd[:gross]).to eq(1219.20)
+      expect(ytd[:fit]).to eq(120.00)
+      expect(ytd[:ss]).to eq(75.59)
+      expect(ytd[:med]).to eq(17.68)
+      expect(ytd[:net]).to eq(1008.14)
+    end
+  end
+
   describe "with top_check stock type" do
     before { company.update!(check_stock_type: "top_check") }
 

@@ -14,7 +14,7 @@ interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
-  payPeriodEndDate?: string;
+  payDate?: string;
   /**
    * Fired whenever the set of checks is (re)loaded or a single check is
    * updated locally. Lets parent pages observe non-employee-check state
@@ -81,7 +81,7 @@ const STATUS_COLORS: Record<string, string> = {
   voided: 'bg-red-100 text-red-700',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payPeriodEndDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -302,7 +302,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     c =>
       !c.voided &&
       (c.auto_generated_type === 'fit_deposit' ||
-        (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+        (c.check_type === 'tax_deposit' &&
+          (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
   );
   const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
 
@@ -383,12 +384,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
       {/* Form 500 callout — anchored to auto_generated_type so renaming the
           auto-FIT check or changing its check_type via the Edit modal doesn't
-          silently hide the quick-fill helper. Falls back to the legacy
-          (tax_deposit, EFTPS) shape for pre-marker rows. */}
+          silently hide the quick-fill helper. Falls back to legacy payee
+          matching for pre-marker rows. */}
       {!loading && checks.some(c =>
         !c.voided &&
         (c.auto_generated_type === 'fit_deposit' ||
-          (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+          (c.check_type === 'tax_deposit' &&
+            (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
       ) && (
         <div className="mx-4 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
           <svg className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -408,13 +410,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             </p>
             {(() => {
               // Same lookup shape as the outer guard — match the auto-FIT
-              // marker first, fall back to the legacy EFTPS-tax_deposit row.
+              // marker first, then fall back to known FIT payee strings.
               const taxDeposit = checks.find(c =>
                 !c.voided &&
                 (c.auto_generated_type === 'fit_deposit' ||
-                  (c.check_type === 'tax_deposit' && c.payable_to === 'EFTPS - Federal Income Tax'))
+                  (c.check_type === 'tax_deposit' &&
+                    (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
               );
-              const taxQ = getTaxQuarter(payPeriodEndDate);
+              const taxQ = getTaxQuarter(payDate);
               const fullAddress = company?.address_line1
                 ? [
                     company.address_line1,
