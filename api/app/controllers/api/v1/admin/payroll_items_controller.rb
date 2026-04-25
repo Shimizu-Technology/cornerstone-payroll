@@ -52,7 +52,7 @@ module Api
           @payroll_item = @pay_period.payroll_items.build(attrs)
           @payroll_item.employee = employee
           @payroll_item.employment_type ||= employee.employment_type
-          @payroll_item.pay_rate ||= employee.primary_wage_rate&.rate || employee.pay_rate
+          sync_pay_rate_from_employee(@payroll_item, employee)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if @payroll_item.save
@@ -72,6 +72,7 @@ module Api
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
+          sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
 
           if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
@@ -97,6 +98,7 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
 
+          sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.calculate!
           render json: { payroll_item: payroll_item_json(@payroll_item) }
         end
@@ -202,6 +204,12 @@ module Api
 
           primary_entry = entries.find { |entry| entry["is_primary"] } || entries.first
           payroll_item.pay_rate = primary_entry ? primary_entry["rate"].to_f : employee.pay_rate
+        end
+
+        def sync_pay_rate_from_employee(payroll_item, employee)
+          return if payroll_item.wage_rate_hours.present?
+
+          payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
         end
       end
     end
