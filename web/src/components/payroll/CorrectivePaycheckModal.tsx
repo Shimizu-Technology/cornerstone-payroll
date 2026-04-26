@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { payPeriodsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
@@ -38,6 +39,7 @@ interface FormState {
   pto_hours: string;
   bonus: string;
   reported_tips: string;
+  tips_paid_out: string;
   pay_date: string;
   reason: string;
   notes: string;
@@ -75,6 +77,7 @@ export function CorrectivePaycheckModal({
     pto_hours: toStr(originalItem.pto_hours),
     bonus: toStr(originalItem.bonus),
     reported_tips: toStr(originalItem.reported_tips),
+    tips_paid_out: toStr(originalItem.tips_paid_out),
     pay_date: todayIsoDate(),
     reason: '',
     notes: '',
@@ -95,6 +98,7 @@ export function CorrectivePaycheckModal({
       pto_hours: toStr(originalItem.pto_hours),
       bonus: toStr(originalItem.bonus),
       reported_tips: toStr(originalItem.reported_tips),
+      tips_paid_out: toStr(originalItem.tips_paid_out),
       pay_date: todayIsoDate(),
       reason: '',
       notes: '',
@@ -112,8 +116,9 @@ export function CorrectivePaycheckModal({
       pto_hours: num(form.pto_hours),
       bonus: num(form.bonus),
       reported_tips: num(form.reported_tips),
+      tips_paid_out: num(form.tips_paid_out),
     }),
-    [form.hours_worked, form.overtime_hours, form.holiday_hours, form.pto_hours, form.bonus, form.reported_tips],
+    [form.hours_worked, form.overtime_hours, form.holiday_hours, form.pto_hours, form.bonus, form.reported_tips, form.tips_paid_out],
   );
 
   // Did the operator actually change anything? (Cheap local diff so we
@@ -126,7 +131,8 @@ export function CorrectivePaycheckModal({
       Math.abs(num(form.holiday_hours) - (o.holiday_hours ?? 0)) > 0.001 ||
       Math.abs(num(form.pto_hours) - (o.pto_hours ?? 0)) > 0.001 ||
       Math.abs(num(form.bonus) - (o.bonus ?? 0)) > 0.005 ||
-      Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005
+      Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005 ||
+      Math.abs(num(form.tips_paid_out) - (o.tips_paid_out ?? 0)) > 0.005
     );
   }, [form, originalItem]);
 
@@ -221,51 +227,59 @@ export function CorrectivePaycheckModal({
             </p>
 
             <FieldRow label="Regular hours" original={originalItem.hours_worked}>
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.hours_worked}
-                onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))}
+                value={form.hours_worked === '' ? null : Number(form.hours_worked)}
+                onValueChange={value => setForm(f => ({ ...f, hours_worked: value == null ? '' : String(value) }))}
               />
             </FieldRow>
             <FieldRow label="Overtime hours" original={originalItem.overtime_hours}>
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.overtime_hours}
-                onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))}
+                value={form.overtime_hours === '' ? null : Number(form.overtime_hours)}
+                onValueChange={value => setForm(f => ({ ...f, overtime_hours: value == null ? '' : String(value) }))}
               />
             </FieldRow>
             <FieldRow label="Holiday hours" original={originalItem.holiday_hours}>
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.holiday_hours}
-                onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))}
+                value={form.holiday_hours === '' ? null : Number(form.holiday_hours)}
+                onValueChange={value => setForm(f => ({ ...f, holiday_hours: value == null ? '' : String(value) }))}
               />
             </FieldRow>
             <FieldRow label="PTO hours" original={originalItem.pto_hours}>
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.pto_hours}
-                onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))}
+                value={form.pto_hours === '' ? null : Number(form.pto_hours)}
+                onValueChange={value => setForm(f => ({ ...f, pto_hours: value == null ? '' : String(value) }))}
               />
             </FieldRow>
             <FieldRow label="Bonus" original={originalItem.bonus} prefix="$">
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.bonus}
-                onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))}
+                value={form.bonus === '' ? null : Number(form.bonus)}
+                onValueChange={value => setForm(f => ({ ...f, bonus: value == null ? '' : String(value) }))}
               />
             </FieldRow>
             <FieldRow label="Tips" original={originalItem.reported_tips} prefix="$">
-              <Input
-                type="text"
+              <NumericInput
+                min={0}
                 inputMode="decimal"
-                value={form.reported_tips}
-                onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))}
+                value={form.reported_tips === '' ? null : Number(form.reported_tips)}
+                onValueChange={value => setForm(f => ({ ...f, reported_tips: value == null ? '' : String(value) }))}
+              />
+            </FieldRow>
+            <FieldRow label="Tips paid out" original={originalItem.tips_paid_out} prefix="$">
+              <NumericInput
+                min={0}
+                inputMode="decimal"
+                value={form.tips_paid_out === '' ? null : Number(form.tips_paid_out)}
+                onValueChange={value => setForm(f => ({ ...f, tips_paid_out: value == null ? '' : String(value) }))}
               />
             </FieldRow>
           </div>
@@ -301,6 +315,7 @@ export function CorrectivePaycheckModal({
                 <DeltaLine label="Federal income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
                 <DeltaLine label="Social Security" original={original.social_security_tax} corrected={corrected.social_security_tax} delta={deltas.social_security_tax} />
                 <DeltaLine label="Medicare" original={original.medicare_tax} corrected={corrected.medicare_tax} delta={deltas.medicare_tax} />
+                <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} delta={deltas.tips_paid_out} />
                 <hr />
                 <DeltaLine label="Net pay" original={original.net_pay} corrected={corrected.net_pay} delta={deltas.net_pay} bold />
                 <div className="mt-2 rounded border-l-4 border-blue-400 bg-blue-50 p-3 text-xs text-blue-900">
