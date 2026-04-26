@@ -81,7 +81,7 @@ const TableHead = forwardRef<HTMLTableCellElement, ThHTMLAttributes<HTMLTableCel
       ref={ref}
       className={cn(
         'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider',
-        stickyLeft && 'sticky left-0 z-40 border-r border-slate-200 bg-inherit shadow-[10px_0_16px_-14px_rgba(15,23,42,0.5)]',
+        stickyLeft && 'sticky left-0 z-50 border-r border-slate-200 bg-gray-50 shadow-[12px_0_18px_-14px_rgba(15,23,42,0.55)]',
         className
       )}
       {...props}
@@ -96,7 +96,7 @@ const TableCell = forwardRef<HTMLTableCellElement, TdHTMLAttributes<HTMLTableCel
       ref={ref}
       className={cn(
         'px-6 py-4 whitespace-nowrap',
-        stickyLeft && 'sticky left-0 z-20 border-r border-slate-200 bg-inherit shadow-[10px_0_16px_-14px_rgba(15,23,42,0.45)]',
+        stickyLeft && 'sticky left-0 z-10 border-r border-slate-200 bg-inherit shadow-[12px_0_18px_-14px_rgba(15,23,42,0.45)]',
         className
       )}
       {...props}
