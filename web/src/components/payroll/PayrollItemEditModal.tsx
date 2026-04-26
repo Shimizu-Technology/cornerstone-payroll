@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours } from '@/types';
@@ -36,6 +37,7 @@ interface EditableFields {
   pto_hours: number;
   bonus: number;
   reported_tips: number;
+  tips_paid_out: number;
   salary_override: string;
   non_taxable_pay: number;
   additional_withholding_override: string;
@@ -64,6 +66,7 @@ export function PayrollItemEditModal({
     pto_hours: 0,
     bonus: 0,
     reported_tips: 0,
+    tips_paid_out: 0,
     salary_override: '',
     non_taxable_pay: 0,
     additional_withholding_override: '',
@@ -102,6 +105,7 @@ export function PayrollItemEditModal({
         pto_hours: item.pto_hours || 0,
         bonus: item.bonus || 0,
         reported_tips: item.reported_tips || 0,
+        tips_paid_out: item.tips_paid_out || 0,
         salary_override: item.salary_override != null ? String(item.salary_override) : '',
         non_taxable_pay: item.non_taxable_pay || 0,
         additional_withholding_override: item.additional_withholding_override != null ? String(item.additional_withholding_override) : '',
@@ -132,6 +136,16 @@ export function PayrollItemEditModal({
     setFields((prev) => ({
       ...prev,
       [field]: value,
+    }));
+  };
+
+  const handleNumberFieldChange = (
+    field: 'hours_worked' | 'overtime_hours' | 'holiday_hours' | 'pto_hours' | 'bonus' | 'reported_tips' | 'tips_paid_out' | 'non_taxable_pay',
+    value: number | null
+  ) => {
+    setFields((prev) => ({
+      ...prev,
+      [field]: value ?? 0,
     }));
   };
 
@@ -192,6 +206,7 @@ export function PayrollItemEditModal({
         pto_hours: parseFloat(String(fields.pto_hours)) || 0,
         bonus: parseFloat(String(fields.bonus)) || 0,
         reported_tips: parseFloat(String(fields.reported_tips)) || 0,
+        tips_paid_out: parseFloat(String(fields.tips_paid_out)) || 0,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding_override: fields.additional_withholding_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.additional_withholding_override)) ? parseFloat(fields.additional_withholding_override) : null),
         withholding_tax_adjustment: fields.withholding_tax_adjustment.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_adjustment)) ? parseFloat(fields.withholding_tax_adjustment) : null),
@@ -285,13 +300,12 @@ export function PayrollItemEditModal({
                   <label className="block text-xs text-gray-500 mb-1">
                     Payment Amount Override
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <NumericInput
                     placeholder={`Default: ${formatCurrency(Number(item.pay_rate))}/period`}
-                    value={fields.salary_override}
-                    onChange={(e) => handleChange('salary_override', e.target.value)}
+                    value={fields.salary_override === '' ? null : Number(fields.salary_override)}
+                    onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
+                    min={0}
+                    fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-1">Leave blank to use default rate. Set to 0 to skip payment this period.</p>
                 </div>
@@ -317,42 +331,34 @@ export function PayrollItemEditModal({
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Regular</label>
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min="0"
+                          <NumericInput
                             value={rateEntry.regular_hours}
-                            onChange={(e) => handleWageRateHourChange(index, 'regular_hours', e.target.value)}
+                            onValueChange={(value) => handleWageRateHourChange(index, 'regular_hours', String(value ?? 0))}
+                            min={0}
                           />
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Overtime</label>
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min="0"
+                          <NumericInput
                             value={rateEntry.overtime_hours}
-                            onChange={(e) => handleWageRateHourChange(index, 'overtime_hours', e.target.value)}
+                            onValueChange={(value) => handleWageRateHourChange(index, 'overtime_hours', String(value ?? 0))}
+                            min={0}
                           />
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">Holiday</label>
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min="0"
+                          <NumericInput
                             value={rateEntry.holiday_hours}
-                            onChange={(e) => handleWageRateHourChange(index, 'holiday_hours', e.target.value)}
+                            onValueChange={(value) => handleWageRateHourChange(index, 'holiday_hours', String(value ?? 0))}
+                            min={0}
                           />
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">PTO</label>
-                          <Input
-                            type="number"
-                            step="0.5"
-                            min="0"
+                          <NumericInput
                             value={rateEntry.pto_hours}
-                            onChange={(e) => handleWageRateHourChange(index, 'pto_hours', e.target.value)}
+                            onValueChange={(value) => handleWageRateHourChange(index, 'pto_hours', String(value ?? 0))}
+                            min={0}
                           />
                         </div>
                       </div>
@@ -363,42 +369,34 @@ export function PayrollItemEditModal({
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Regular</label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0"
+                    <NumericInput
                       value={fields.hours_worked}
-                      onChange={(e) => handleChange('hours_worked', e.target.value)}
+                      onValueChange={(value) => handleNumberFieldChange('hours_worked', value)}
+                      min={0}
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Overtime</label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0"
+                    <NumericInput
                       value={fields.overtime_hours}
-                      onChange={(e) => handleChange('overtime_hours', e.target.value)}
+                      onValueChange={(value) => handleNumberFieldChange('overtime_hours', value)}
+                      min={0}
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">Holiday</label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0"
+                    <NumericInput
                       value={fields.holiday_hours}
-                      onChange={(e) => handleChange('holiday_hours', e.target.value)}
+                      onValueChange={(value) => handleNumberFieldChange('holiday_hours', value)}
+                      min={0}
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-gray-500 mb-1">PTO</label>
-                    <Input
-                      type="number"
-                      step="0.5"
-                      min="0"
+                    <NumericInput
                       value={fields.pto_hours}
-                      onChange={(e) => handleChange('pto_hours', e.target.value)}
+                      onValueChange={(value) => handleNumberFieldChange('pto_hours', value)}
+                      min={0}
                     />
                   </div>
                 </div>
@@ -415,13 +413,12 @@ export function PayrollItemEditModal({
                   <label className="block text-xs text-gray-500 mb-1">
                     Salary Override (per period)
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <NumericInput
                     placeholder="Leave blank for default"
-                    value={fields.salary_override}
-                    onChange={(e) => handleChange('salary_override', e.target.value)}
+                    value={fields.salary_override === '' ? null : Number(fields.salary_override)}
+                    onValueChange={(value) => handleChange('salary_override', value == null ? '' : String(value))}
+                    min={0}
+                    fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
                     Override the per-period salary amount for this pay period only
@@ -429,12 +426,10 @@ export function PayrollItemEditModal({
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">PTO Hours</label>
-                  <Input
-                    type="number"
-                    step="0.5"
-                    min="0"
+                  <NumericInput
                     value={fields.pto_hours}
-                    onChange={(e) => handleChange('pto_hours', e.target.value)}
+                    onValueChange={(value) => handleNumberFieldChange('pto_hours', value)}
+                    min={0}
                   />
                 </div>
               </div>
@@ -447,35 +442,44 @@ export function PayrollItemEditModal({
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Bonus</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <NumericInput
                   value={fields.bonus}
-                  onChange={(e) => handleChange('bonus', e.target.value)}
+                  onValueChange={(value) => handleNumberFieldChange('bonus', value)}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
                 />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Reported Tips</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <NumericInput
                   value={fields.reported_tips}
-                  onChange={(e) => handleChange('reported_tips', e.target.value)}
+                  onValueChange={(value) => handleNumberFieldChange('reported_tips', value)}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
                 />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Non-Taxable Pay</label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <NumericInput
                   value={fields.non_taxable_pay}
-                  onChange={(e) => handleChange('non_taxable_pay', e.target.value)}
+                  onValueChange={(value) => handleNumberFieldChange('non_taxable_pay', value)}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
                 />
                 <p className="text-xs text-gray-400 mt-0.5">
                   Reimbursements, allotments (not taxed)
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Tips Paid Out</label>
+                <NumericInput
+                  value={fields.tips_paid_out}
+                  onValueChange={(value) => handleNumberFieldChange('tips_paid_out', value)}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
+                />
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Reduces this check only. Does not reduce taxable wages or reported tips.
                 </p>
               </div>
             </div>
@@ -507,13 +511,12 @@ export function PayrollItemEditModal({
                   onChange={(e) => handleCustomEarningChange(idx, 'label', e.target.value)}
                   className="flex-1"
                 />
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
+                <NumericInput
                   placeholder="Amount"
-                  value={ce.amount}
-                  onChange={(e) => handleCustomEarningChange(idx, 'amount', e.target.value)}
+                  value={ce.amount === '' ? null : Number(ce.amount)}
+                  onValueChange={(value) => handleCustomEarningChange(idx, 'amount', value == null ? '' : String(value))}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
                   className="w-28"
                 />
                 <button
@@ -537,13 +540,12 @@ export function PayrollItemEditModal({
                   <label className="block text-xs text-gray-500 mb-1">
                     W-4 4(c) Extra Withholding This Pay Period
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <NumericInput
                     placeholder={employeeAdditionalWithholding > 0 ? employeeAdditionalWithholding.toFixed(2) : 'Use employee default'}
-                    value={fields.additional_withholding_override}
-                    onChange={(e) => handleChange('additional_withholding_override', e.target.value)}
+                    value={fields.additional_withholding_override === '' ? null : Number(fields.additional_withholding_override)}
+                    onValueChange={(value) => handleChange('additional_withholding_override', value == null ? '' : String(value))}
+                    min={0}
+                    fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
                     Blank uses the employee's W-4 default of {formatCurrency(employeeAdditionalWithholding)}. Set to 0.00 here to skip the normal extra withholding for just this pay period.
@@ -553,12 +555,11 @@ export function PayrollItemEditModal({
                   <label className="block text-xs text-gray-500 mb-1">
                     FIT Adjustment
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
+                  <NumericInput
                     placeholder="0.00"
-                    value={fields.withholding_tax_adjustment}
-                    onChange={(e) => handleChange('withholding_tax_adjustment', e.target.value)}
+                    value={fields.withholding_tax_adjustment === '' ? null : Number(fields.withholding_tax_adjustment)}
+                    onValueChange={(value) => handleChange('withholding_tax_adjustment', value == null ? '' : String(value))}
+                    fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
                     One-time adjustment to the calculated FIT tax only. This does not change the W-4 4(c) amount shown to the left.
@@ -568,13 +569,12 @@ export function PayrollItemEditModal({
                   <label className="block text-xs text-gray-500 mb-1">
                     Final FIT Override
                   </label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                  <NumericInput
                     placeholder="Auto-calculated"
-                    value={fields.withholding_tax_override}
-                    onChange={(e) => handleChange('withholding_tax_override', e.target.value)}
+                    value={fields.withholding_tax_override === '' ? null : Number(fields.withholding_tax_override)}
+                    onValueChange={(value) => handleChange('withholding_tax_override', value == null ? '' : String(value))}
+                    min={0}
+                    fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
                     Advanced: leave blank for normal calculation; set to force the final FIT tax amount for this pay period.

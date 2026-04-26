@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
@@ -355,16 +357,24 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         <div className="p-4 border-b bg-blue-50/30">
           {formError && <p className="text-sm text-red-600 mb-2">{formError}</p>}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input className="border rounded px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
-            <input className="border rounded px-3 py-2 text-sm" placeholder="Amount *" type="number" step="0.01" value={formData.amount} onChange={e => setFormData(p => ({ ...p, amount: e.target.value }))} />
+            <Input className="px-3 py-2 text-sm" placeholder="Payable To *" value={formData.payable_to} onChange={e => setFormData(p => ({ ...p, payable_to: e.target.value }))} />
+            <NumericInput
+              className="px-3 py-2 text-sm"
+              placeholder="Amount *"
+              min={0.01}
+              fixedDecimalsOnBlur={2}
+              inputMode="decimal"
+              value={formData.amount === '' ? null : Number(formData.amount)}
+              onValueChange={(value) => setFormData(p => ({ ...p, amount: value == null ? '' : String(value) }))}
+            />
             <select className="border rounded px-3 py-2 text-sm" value={formData.check_type} onChange={e => setFormData(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
               {Object.entries(CHECK_TYPE_LABELS).map(([val, label]) => (
                 <option key={val} value={val}>{label}</option>
               ))}
             </select>
-            <input className="border rounded px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
-            <input className="border rounded px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
-            <input className="border rounded px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
+            <Input className="px-3 py-2 text-sm" placeholder="Check #" value={formData.check_number} onChange={e => setFormData(p => ({ ...p, check_number: e.target.value }))} />
+            <Input className="px-3 py-2 text-sm" placeholder="Memo" value={formData.memo} onChange={e => setFormData(p => ({ ...p, memo: e.target.value }))} />
+            <Input className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
           </div>
           <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
           <div className="mt-3 flex gap-2">

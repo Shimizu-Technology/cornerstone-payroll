@@ -88,6 +88,15 @@ RSpec.describe CheckGenerator do
       expect(text).to include("123 Test St")
       expect(text).to include("Barrigada, GU 96913")
     end
+
+    it "prints tips paid out as a deduction when present" do
+      payroll_item.update!(tips_paid_out: 45.0, total_deductions: payroll_item.total_deductions + 45.0)
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Tips Paid Out")
+      expect(text).to include("45.00")
+    end
   end
 
   describe "#generate_voided" do

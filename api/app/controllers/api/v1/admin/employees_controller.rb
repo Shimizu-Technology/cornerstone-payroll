@@ -12,12 +12,8 @@ module Api
         def index
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
+          employees = apply_sort(employees)
           employees = employees.includes(:department, :employee_wage_rates)
-          if params[:group_by] == "employment_type"
-            employees = employees.order(:employment_type, :last_name, :first_name)
-          else
-            employees = employees.order(:last_name, :first_name)
-          end
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -149,6 +145,38 @@ module Api
             end
           end
           scope
+        end
+
+        def apply_sort(scope)
+          sort_by = params[:sort_by].presence_in(%w[name department rate status]) || "name"
+          sort_direction = params[:sort_direction].to_s.downcase == "desc" ? :desc : :asc
+
+          if params[:group_by] == "employment_type"
+            scope = scope.order(employment_type: :asc)
+          end
+
+          case sort_by
+          when "department"
+            scope.left_joins(:department).order(
+              Arel.sql("departments.name IS NULL ASC"),
+              department_sort_clause(sort_direction),
+              employee_name_sort_clauses(:asc)
+            )
+          when "rate"
+            scope.order(pay_rate: sort_direction, last_name: :asc, first_name: :asc)
+          when "status"
+            scope.order(status: sort_direction, last_name: :asc, first_name: :asc)
+          else
+            scope.order(employee_name_sort_clauses(sort_direction))
+          end
+        end
+
+        def employee_name_sort_clauses(direction)
+          { last_name: direction, first_name: direction }
+        end
+
+        def department_sort_clause(direction)
+          direction == :desc ? Arel.sql("departments.name DESC") : Arel.sql("departments.name ASC")
         end
 
         def pagination_meta(collection)

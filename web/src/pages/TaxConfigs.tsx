@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
+import { NumericInput } from '@/components/ui/numeric-input';
 import {
   taxConfigsApi,
   type TaxConfig,
@@ -428,11 +429,11 @@ export default function TaxConfigs() {
                   SS Wage Base
                 </label>
                 {isEditingGlobal && editableConfig ? (
-                  <input
-                    type="number"
+                  <NumericInput
                     value={editableConfig.ss_wage_base}
-                    onChange={(e) => setEditableConfig({ ...editableConfig, ss_wage_base: parseFloat(e.target.value) })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_wage_base: value ?? 0 })}
+                    fixedDecimalsOnBlur={2}
+                    className="mt-1"
                   />
                 ) : (
                   <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -445,12 +446,11 @@ export default function TaxConfigs() {
                   SS Rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
-                  <input
-                    type="number"
-                    step="0.001"
+                  <NumericInput
                     value={editableConfig.ss_rate}
-                    onChange={(e) => setEditableConfig({ ...editableConfig, ss_rate: parseFloat(e.target.value) })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    onValueChange={(value) => setEditableConfig({ ...editableConfig, ss_rate: value ?? 0 })}
+                    fixedDecimalsOnBlur={3}
+                    className="mt-1"
                   />
                 ) : (
                   <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -463,12 +463,11 @@ export default function TaxConfigs() {
                   Medicare Rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
-                  <input
-                    type="number"
-                    step="0.001"
+                  <NumericInput
                     value={editableConfig.medicare_rate}
-                    onChange={(e) => setEditableConfig({ ...editableConfig, medicare_rate: parseFloat(e.target.value) })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    onValueChange={(value) => setEditableConfig({ ...editableConfig, medicare_rate: value ?? 0 })}
+                    fixedDecimalsOnBlur={3}
+                    className="mt-1"
                   />
                 ) : (
                   <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -481,12 +480,11 @@ export default function TaxConfigs() {
                   Add'l Medicare Rate
                 </label>
                 {isEditingGlobal && editableConfig ? (
-                  <input
-                    type="number"
-                    step="0.001"
+                  <NumericInput
                     value={editableConfig.additional_medicare_rate}
-                    onChange={(e) => setEditableConfig({ ...editableConfig, additional_medicare_rate: parseFloat(e.target.value) })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_rate: value ?? 0 })}
+                    fixedDecimalsOnBlur={3}
+                    className="mt-1"
                   />
                 ) : (
                   <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -499,11 +497,11 @@ export default function TaxConfigs() {
                   Add'l Medicare Threshold
                 </label>
                 {isEditingGlobal && editableConfig ? (
-                  <input
-                    type="number"
+                  <NumericInput
                     value={editableConfig.additional_medicare_threshold}
-                    onChange={(e) => setEditableConfig({ ...editableConfig, additional_medicare_threshold: parseFloat(e.target.value) })}
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                    onValueChange={(value) => setEditableConfig({ ...editableConfig, additional_medicare_threshold: value ?? 0 })}
+                    fixedDecimalsOnBlur={2}
+                    className="mt-1"
                   />
                 ) : (
                   <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -526,11 +524,11 @@ export default function TaxConfigs() {
                     {editingFilingStatus === fs.filing_status ? (
                       <div className="flex items-center space-x-2">
                         <span className="text-sm text-gray-500">Standard Deduction: $</span>
-                        <input
-                          type="number"
+                        <NumericInput
                           value={editableStandardDeduction}
-                          onChange={(e) => setEditableStandardDeduction(parseFloat(e.target.value))}
-                          className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                          onValueChange={(value) => setEditableStandardDeduction(value ?? 0)}
+                          fixedDecimalsOnBlur={2}
+                          className="w-32"
                         />
                         <button
                           onClick={() => setEditingFilingStatus(null)}
@@ -647,30 +645,30 @@ export default function TaxConfigs() {
                         {editableBrackets.map((bracket) => (
                           <tr key={bracket.bracket_order} className="text-sm">
                             <td className="py-2">
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={(bracket.rate * 100).toFixed(1)}
-                                onChange={(e) => updateBracket(bracket.bracket_order, 'rate', parseFloat(e.target.value) / 100)}
-                                className="w-20 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                              <NumericInput
+                                value={bracket.rate * 100}
+                                onValueChange={(value) => updateBracket(bracket.bracket_order, 'rate', (value ?? 0) / 100)}
+                                fixedDecimalsOnBlur={1}
+                                className="w-20"
                               />
                               <span className="ml-1 text-gray-500">%</span>
                             </td>
                             <td className="py-2 text-right">
-                              <input
-                                type="number"
+                              <NumericInput
                                 value={bracket.min_income}
-                                onChange={(e) => updateBracket(bracket.bracket_order, 'min_income', parseFloat(e.target.value))}
-                                className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-right"
+                                onValueChange={(value) => updateBracket(bracket.bracket_order, 'min_income', value ?? 0)}
+                                fixedDecimalsOnBlur={2}
+                                className="w-32 text-right"
                               />
                             </td>
                             <td className="py-2 text-right">
-                              <input
-                                type="number"
-                                value={bracket.max_income ?? ''}
+                              <NumericInput
+                                value={bracket.max_income}
+                                emptyValue={null}
                                 placeholder="∞"
-                                onChange={(e) => updateBracket(bracket.bracket_order, 'max_income', e.target.value ? parseFloat(e.target.value) : null)}
-                                className="w-32 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm text-right"
+                                onValueChange={(value) => updateBracket(bracket.bracket_order, 'max_income', value)}
+                                fixedDecimalsOnBlur={2}
+                                className="w-32 text-right"
                               />
                             </td>
                           </tr>
@@ -703,11 +701,12 @@ export default function TaxConfigs() {
                 <label className="block text-sm font-medium text-gray-700">
                   Tax Year
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   value={newYear}
-                  onChange={(e) => setNewYear(parseInt(e.target.value))}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+                  onValueChange={(value) => setNewYear(Math.round(value ?? new Date().getFullYear() + 1))}
+                  fixedDecimalsOnBlur={0}
+                  inputMode="numeric"
+                  className="mt-1"
                 />
               </div>
 

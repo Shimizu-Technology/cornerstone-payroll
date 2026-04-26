@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
@@ -485,8 +486,8 @@ export function CheckSettingsPage() {
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
                 <Input
                   id="offset-x"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={offsetX}
                   onChange={(e) => setOffsetX(e.target.value)}
                   className="w-32 font-mono"
@@ -497,8 +498,8 @@ export function CheckSettingsPage() {
                 <Label htmlFor="offset-y">Y Offset (inches)</Label>
                 <Input
                   id="offset-y"
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={offsetY}
                   onChange={(e) => setOffsetY(e.target.value)}
                   className="w-32 font-mono"
@@ -662,12 +663,15 @@ export function CheckSettingsPage() {
             <div className="flex items-end gap-3">
               <div className="space-y-1">
                 <Label htmlFor="next-check-number">Next Check Number</Label>
-                <Input
+                <NumericInput
                   id="next-check-number"
-                  type="number"
-                  min="1"
-                  value={nextCheckNumber}
-                  onChange={(e) => setNextCheckNumber(e.target.value)}
+                  min={1}
+                  fixedDecimalsOnBlur={0}
+                  inputMode="numeric"
+                  value={nextCheckNumber === '' ? null : Number(nextCheckNumber)}
+                  onValueChange={(value) =>
+                    setNextCheckNumber(value == null ? '' : String(Math.max(1, Math.round(value))))
+                  }
                   className="w-32 font-mono"
                 />
               </div>
