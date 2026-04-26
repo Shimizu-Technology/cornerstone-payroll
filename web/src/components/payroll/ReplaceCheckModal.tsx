@@ -8,8 +8,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { checksApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
@@ -52,6 +52,7 @@ interface FormState {
   pay_rate: string;
   bonus: string;
   reported_tips: string;
+  tips_paid_out: string;
   reason: string;
   // Per-bucket hours for multi-rate employees. Empty array for single-rate.
   // Each bucket carries its label + rate (immutable in this UI) plus the
@@ -167,6 +168,7 @@ export function ReplaceCheckModal({
         wage_rate_hours: bucketsToPayload(form.wage_rate_hours),
         bonus: num(form.bonus),
         reported_tips: num(form.reported_tips),
+        tips_paid_out: num(form.tips_paid_out),
       };
     }
     return {
@@ -177,6 +179,7 @@ export function ReplaceCheckModal({
       pay_rate: num(form.pay_rate),
       bonus: num(form.bonus),
       reported_tips: num(form.reported_tips),
+      tips_paid_out: num(form.tips_paid_out),
     };
   }, [
     isMultiRate,
@@ -188,6 +191,7 @@ export function ReplaceCheckModal({
     form.pay_rate,
     form.bonus,
     form.reported_tips,
+    form.tips_paid_out,
   ]);
 
   const inputsChanged = useMemo(() => {
@@ -209,7 +213,8 @@ export function ReplaceCheckModal({
       return (
         bucketDiff ||
         Math.abs(num(form.bonus) - (o.bonus ?? 0)) > 0.005 ||
-        Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005
+        Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005 ||
+        Math.abs(num(form.tips_paid_out) - (o.tips_paid_out ?? 0)) > 0.005
       );
     }
     return (
@@ -219,7 +224,8 @@ export function ReplaceCheckModal({
       Math.abs(num(form.pto_hours) - (o.pto_hours ?? 0)) > 0.001 ||
       Math.abs(num(form.pay_rate) - (o.pay_rate ?? 0)) > 0.005 ||
       Math.abs(num(form.bonus) - (o.bonus ?? 0)) > 0.005 ||
-      Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005
+      Math.abs(num(form.reported_tips) - (o.reported_tips ?? 0)) > 0.005 ||
+      Math.abs(num(form.tips_paid_out) - (o.tips_paid_out ?? 0)) > 0.005
     );
   }, [form, payrollItem, isMultiRate]);
 
@@ -405,20 +411,30 @@ export function ReplaceCheckModal({
                   — final taxes & net come from the server preview on the right.
                 </div>
                 <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
-                  <Input
-                    type="text"
+                  <NumericInput
+                    min={0}
                     inputMode="decimal"
-                    value={form.bonus}
-                    onChange={(e) => setForm((f) => ({ ...f, bonus: e.target.value }))}
+                    value={form.bonus === '' ? null : Number(form.bonus)}
+                    onValueChange={(value) => setForm((f) => ({ ...f, bonus: value == null ? '' : String(value) }))}
                   />
                 </FieldRow>
                 <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
-                  <Input
-                    type="text"
+                  <NumericInput
+                    min={0}
                     inputMode="decimal"
-                    value={form.reported_tips}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, reported_tips: e.target.value }))
+                    value={form.reported_tips === '' ? null : Number(form.reported_tips)}
+                    onValueChange={(value) =>
+                      setForm((f) => ({ ...f, reported_tips: value == null ? '' : String(value) }))
+                    }
+                  />
+                </FieldRow>
+                <FieldRow label="Tips paid out" original={payrollItem.tips_paid_out} prefix="$">
+                  <NumericInput
+                    min={0}
+                    inputMode="decimal"
+                    value={form.tips_paid_out === '' ? null : Number(form.tips_paid_out)}
+                    onValueChange={(value) =>
+                      setForm((f) => ({ ...f, tips_paid_out: value == null ? '' : String(value) }))
                     }
                   />
                 </FieldRow>
@@ -426,39 +442,44 @@ export function ReplaceCheckModal({
             ) : (
               <>
                 <FieldRow label="Regular hours" original={payrollItem.hours_worked}>
-                  <Input type="text" inputMode="decimal"
-                    value={form.hours_worked}
-                    onChange={e => setForm(f => ({ ...f, hours_worked: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.hours_worked === '' ? null : Number(form.hours_worked)}
+                    onValueChange={value => setForm(f => ({ ...f, hours_worked: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="Overtime hours" original={payrollItem.overtime_hours}>
-                  <Input type="text" inputMode="decimal"
-                    value={form.overtime_hours}
-                    onChange={e => setForm(f => ({ ...f, overtime_hours: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.overtime_hours === '' ? null : Number(form.overtime_hours)}
+                    onValueChange={value => setForm(f => ({ ...f, overtime_hours: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="Holiday hours" original={payrollItem.holiday_hours}>
-                  <Input type="text" inputMode="decimal"
-                    value={form.holiday_hours}
-                    onChange={e => setForm(f => ({ ...f, holiday_hours: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.holiday_hours === '' ? null : Number(form.holiday_hours)}
+                    onValueChange={value => setForm(f => ({ ...f, holiday_hours: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="PTO hours" original={payrollItem.pto_hours}>
-                  <Input type="text" inputMode="decimal"
-                    value={form.pto_hours}
-                    onChange={e => setForm(f => ({ ...f, pto_hours: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.pto_hours === '' ? null : Number(form.pto_hours)}
+                    onValueChange={value => setForm(f => ({ ...f, pto_hours: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="Pay rate" original={payrollItem.pay_rate} prefix="$">
-                  <Input type="text" inputMode="decimal"
-                    value={form.pay_rate}
-                    onChange={e => setForm(f => ({ ...f, pay_rate: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.pay_rate === '' ? null : Number(form.pay_rate)}
+                    onValueChange={value => setForm(f => ({ ...f, pay_rate: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="Bonus" original={payrollItem.bonus} prefix="$">
-                  <Input type="text" inputMode="decimal"
-                    value={form.bonus}
-                    onChange={e => setForm(f => ({ ...f, bonus: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.bonus === '' ? null : Number(form.bonus)}
+                    onValueChange={value => setForm(f => ({ ...f, bonus: value == null ? '' : String(value) }))} />
                 </FieldRow>
                 <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
-                  <Input type="text" inputMode="decimal"
-                    value={form.reported_tips}
-                    onChange={e => setForm(f => ({ ...f, reported_tips: e.target.value }))} />
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.reported_tips === '' ? null : Number(form.reported_tips)}
+                    onValueChange={value => setForm(f => ({ ...f, reported_tips: value == null ? '' : String(value) }))} />
+                </FieldRow>
+                <FieldRow label="Tips paid out" original={payrollItem.tips_paid_out} prefix="$">
+                  <NumericInput min={0} inputMode="decimal"
+                    value={form.tips_paid_out === '' ? null : Number(form.tips_paid_out)}
+                    onValueChange={value => setForm(f => ({ ...f, tips_paid_out: value == null ? '' : String(value) }))} />
                 </FieldRow>
               </>
             )}
@@ -493,6 +514,7 @@ export function ReplaceCheckModal({
                 <DeltaLine label="Federal income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} />
                 <DeltaLine label="Social Security" original={original.social_security_tax} corrected={corrected.social_security_tax} />
                 <DeltaLine label="Medicare" original={original.medicare_tax} corrected={corrected.medicare_tax} />
+                <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} />
                 <hr />
                 <DeltaLine label="Net (the new check)" original={original.net_pay} corrected={corrected.net_pay} bold />
 
@@ -575,6 +597,7 @@ function initialForm(item: PayrollItem): FormState {
     pay_rate: toStr(item.pay_rate),
     bonus: toStr(item.bonus),
     reported_tips: toStr(item.reported_tips),
+    tips_paid_out: toStr(item.tips_paid_out),
     reason: '',
     wage_rate_hours: bucketsToForm(item.wage_rate_hours),
   };
@@ -590,11 +613,11 @@ function BucketInput({ label, value, onChange }: BucketInputProps) {
   return (
     <div className="flex flex-col gap-1">
       <Label className="text-xs text-gray-600">{label}</Label>
-      <Input
-        type="text"
+      <NumericInput
+        min={0}
         inputMode="decimal"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={value === '' ? null : Number(value)}
+        onValueChange={(next) => onChange(next == null ? '' : String(next))}
       />
     </div>
   );
