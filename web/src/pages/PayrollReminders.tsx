@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { NumericInput } from '@/components/ui/numeric-input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -279,14 +280,15 @@ export default function PayrollReminders() {
                 Send reminder
               </Label>
               <div className="flex items-center gap-2">
-                <Input
+                <NumericInput
                   id="days-before"
-                  type="number"
+                  value={daysBefore}
+                  onValueChange={(value) => setDaysBefore(Math.max(1, Math.min(14, Math.round(value ?? 1))))}
                   min={1}
                   max={14}
-                  value={daysBefore}
-                  onChange={(e) => setDaysBefore(Math.max(1, Math.min(14, parseInt(e.target.value) || 1)))}
+                  fixedDecimalsOnBlur={0}
                   className="w-20"
+                  inputMode="numeric"
                 />
                 <span className="text-sm text-neutral-600">day(s) before the pay date</span>
               </div>

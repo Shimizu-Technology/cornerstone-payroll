@@ -138,5 +138,21 @@ RSpec.describe PayrollCalculator do
 
       expect(payroll_item.additional_withholding).to eq(0)
     end
+
+    it "treats tips paid out as a deduction that reduces net pay only" do
+      payroll_item.tips_paid_out = 50.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(1000.0)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax +
+        payroll_item.additional_withholding +
+        payroll_item.social_security_tax +
+        payroll_item.medicare_tax +
+        50.0
+      )
+      expect(payroll_item.net_pay).to eq(payroll_item.gross_pay - payroll_item.total_deductions)
+    end
   end
 end

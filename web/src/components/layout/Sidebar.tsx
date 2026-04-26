@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   UserCog,
@@ -61,40 +63,98 @@ const adminNavigation: NavItem[] = [
   { name: 'Audit Logs', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
+function FloatingTooltip({ anchorRef, label, visible }: { anchorRef: React.RefObject<HTMLElement | null>; label: string; visible: boolean }) {
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    const updatePosition = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      setPosition({
+        top: rect.top + rect.height / 2,
+        left: rect.right + 18,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef, visible]);
+
+  if (!visible || !position || typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="pointer-events-none fixed z-[120] flex -translate-y-1/2 items-center"
+      style={{ top: position.top, left: position.left }}
+    >
+      <span className="h-3 w-3 translate-x-[7px] rotate-45 rounded-[3px] bg-neutral-950 shadow-lg shadow-neutral-900/25" />
+      <span className="whitespace-nowrap rounded-xl bg-neutral-950 px-3.5 py-2 text-sm font-semibold text-white shadow-2xl shadow-neutral-900/30">
+        {label}
+      </span>
+    </div>,
+    document.body
+  );
+}
+
+function CollapsedNavLink({
+  item,
+  collapsed,
+  onNavigate,
+}: {
+  item: NavItem;
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  const anchorRef = useRef<HTMLAnchorElement | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+
+  return (
+    <>
+      <NavLink
+        ref={anchorRef}
+        to={item.href}
+        onClick={onNavigate}
+        aria-label={item.name}
+        onMouseEnter={() => setTooltipVisible(true)}
+        onMouseLeave={() => setTooltipVisible(false)}
+        onFocus={() => setTooltipVisible(true)}
+        onBlur={() => setTooltipVisible(false)}
+        className={({ isActive }) =>
+          cn(
+            'group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
+            collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
+            isActive
+              ? collapsed
+                ? 'bg-primary-100 text-primary-800 shadow-sm ring-1 ring-primary-300'
+                : 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-200'
+              : collapsed
+                ? 'text-neutral-600 hover:bg-primary-50 hover:text-primary-700 hover:ring-1 hover:ring-primary-200'
+                : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+          )
+        }
+      >
+        {item.icon}
+        {!collapsed && <span>{item.name}</span>}
+      </NavLink>
+      {collapsed && <FloatingTooltip anchorRef={anchorRef} label={item.name} visible={tooltipVisible} />}
+    </>
+  );
+}
+
 function NavSection({ items, collapsed, onNavigate }: { items: NavItem[]; collapsed?: boolean; onNavigate?: () => void }) {
   return (
     <>
       {items.map((item) => (
-        <NavLink
-          key={item.name}
-          to={item.href}
-          onClick={onNavigate}
-          aria-label={item.name}
-          className={({ isActive }) =>
-            cn(
-              'group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
-              collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
-              isActive
-                ? collapsed
-                  ? 'bg-primary-100 text-primary-800 shadow-sm ring-1 ring-primary-300'
-                  : 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-200'
-                : collapsed
-                  ? 'text-neutral-600 hover:bg-primary-50 hover:text-primary-700 hover:ring-1 hover:ring-primary-200'
-                  : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
-            )
-          }
-        >
-          {item.icon}
-          {!collapsed && <span>{item.name}</span>}
-          {collapsed && (
-            <div className="pointer-events-none absolute left-[calc(100%+0.75rem)] top-1/2 z-50 flex -translate-y-1/2 translate-x-1 items-center opacity-0 transition-all duration-100 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100">
-              <span className="h-3 w-3 -translate-x-[6px] rotate-45 rounded-[3px] border border-neutral-200 bg-white shadow-sm" />
-              <span className="-ml-1 whitespace-nowrap rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-900 shadow-xl shadow-neutral-900/10">
-                {item.name}
-              </span>
-            </div>
-          )}
-        </NavLink>
+        <CollapsedNavLink key={item.name} item={item} collapsed={collapsed} onNavigate={onNavigate} />
       ))}
     </>
   );
@@ -121,10 +181,12 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse }: SidebarProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
 
   return (
     <aside className={cn(
-      'flex flex-col border-r border-neutral-200/80 bg-white/90 backdrop-blur-sm transition-[width] duration-150 ease-in-out overflow-x-visible overflow-y-hidden',
+      'relative z-30 flex flex-col border-r border-neutral-200/80 bg-white/90 backdrop-blur-sm transition-[width] duration-150 ease-in-out overflow-visible',
       collapsed ? 'w-16' : 'w-72',
       className
     )}>
@@ -176,7 +238,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       <div className="border-t border-neutral-200/70 p-3 space-y-2">
         {onToggleCollapse && (
           <button
+            ref={collapseButtonRef}
             onClick={onToggleCollapse}
+            onMouseEnter={() => setCollapseTooltipVisible(true)}
+            onMouseLeave={() => setCollapseTooltipVisible(false)}
+            onFocus={() => setCollapseTooltipVisible(true)}
+            onBlur={() => setCollapseTooltipVisible(false)}
             className={cn(
               'group relative flex w-full items-center rounded-lg px-2 py-2 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 transition-colors',
               collapsed ? 'justify-center' : 'gap-2'
@@ -187,16 +254,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               ? <PanelLeftOpen className="h-4 w-4" />
               : <><PanelLeftClose className="h-4 w-4" /><span className="text-xs">Collapse</span></>
             }
-            {collapsed && (
-              <div className="pointer-events-none absolute left-[calc(100%+0.75rem)] top-1/2 z-50 flex -translate-y-1/2 translate-x-1 items-center opacity-0 transition-all duration-100 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100">
-                <span className="h-3 w-3 -translate-x-[6px] rotate-45 rounded-[3px] border border-neutral-200 bg-white shadow-sm" />
-                <span className="-ml-1 whitespace-nowrap rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-900 shadow-xl shadow-neutral-900/10">
-                  Expand sidebar
-                </span>
-              </div>
-            )}
           </button>
         )}
+        {collapsed && <FloatingTooltip anchorRef={collapseButtonRef} label="Expand sidebar" visible={collapseTooltipVisible} />}
         <div className={cn(
           'flex items-center rounded-xl border border-neutral-200/80 bg-neutral-50/70',
           collapsed ? 'justify-center px-1.5 py-2' : 'gap-3 px-3 py-2.5'

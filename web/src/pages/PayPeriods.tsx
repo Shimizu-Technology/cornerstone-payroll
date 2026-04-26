@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
@@ -39,6 +41,9 @@ export function PayPeriods() {
   });
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<'pay_period' | 'pay_date' | 'employees' | 'gross' | 'net' | 'status'>('pay_date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -238,6 +243,56 @@ export function PayPeriods() {
     });
   };
 
+  const visiblePayPeriods = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    const filtered = normalizedSearch
+      ? payPeriods.filter((period) => {
+          const haystack = [
+            formatDateRange(period.start_date, period.end_date),
+            new Date(period.pay_date).toLocaleDateString('en-US'),
+            period.status,
+            payPeriodStatusConfig[period.status]?.label,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+
+          return haystack.includes(normalizedSearch);
+        })
+      : payPeriods;
+
+    const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
+    return [...filtered].sort((left, right) => {
+      const compareStrings = (a: string, b: string) => a.localeCompare(b) * directionMultiplier;
+      const compareNumbers = (a: number, b: number) => (a - b) * directionMultiplier;
+
+      switch (sortBy) {
+      case 'pay_period':
+        return compareStrings(
+          formatDateRange(left.start_date, left.end_date),
+          formatDateRange(right.start_date, right.end_date)
+        );
+      case 'employees':
+        return compareNumbers(left.employee_count || 0, right.employee_count || 0);
+      case 'gross':
+        return compareNumbers(left.total_gross || 0, right.total_gross || 0);
+      case 'net':
+        return compareNumbers(left.total_net || 0, right.total_net || 0);
+      case 'status':
+        return compareStrings(
+          payPeriodStatusConfig[left.status]?.label || left.status,
+          payPeriodStatusConfig[right.status]?.label || right.status
+        );
+      case 'pay_date':
+      default:
+        return compareNumbers(
+          new Date(left.pay_date).getTime(),
+          new Date(right.pay_date).getTime()
+        );
+      }
+    });
+  }, [payPeriods, searchTerm, sortBy, sortDirection]);
+
   return (
     <div>
       <Header
@@ -295,19 +350,53 @@ export function PayPeriods() {
           ))}
         </div>
 
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full max-w-md">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Input
+              placeholder="Search pay periods..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="w-44"
+            >
+              <option value="pay_date">Sort: Pay Date</option>
+              <option value="pay_period">Sort: Pay Period</option>
+              <option value="employees">Sort: Employees</option>
+              <option value="gross">Sort: Gross Pay</option>
+              <option value="net">Sort: Net Pay</option>
+              <option value="status">Sort: Status</option>
+            </Select>
+            <Select
+              value={sortDirection}
+              onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
+              className="w-32"
+            >
+              <option value="desc">Newest / High</option>
+              <option value="asc">Oldest / Low</option>
+            </Select>
+          </div>
+        </div>
+
         {/* Pay Period Table */}
         <Card>
           {loading ? (
             <div className="p-8 text-center text-gray-500">Loading...</div>
-          ) : payPeriods.length === 0 ? (
+          ) : visiblePayPeriods.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              No pay periods found. Create your first pay period to get started.
+              {searchTerm ? 'No pay periods match the current filters.' : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
-            <Table>
+            <Table stickyHeader containerClassName="max-h-[32rem]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pay Period</TableHead>
+                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-gray-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
                   <TableHead>Employees</TableHead>
                   <TableHead>Gross Pay</TableHead>
@@ -317,16 +406,17 @@ export function PayPeriods() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payPeriods.map((period) => {
+                {visiblePayPeriods.map((period, index) => {
                   const statusConfig = payPeriodStatusConfig[period.status];
+                  const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
                   return (
-                    <TableRow key={period.id}>
-                      <TableCell>
+                    <TableRow key={period.id} className={rowTone}>
+                      <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
                         <span className="font-medium text-gray-900">
                           {formatDateRange(period.start_date, period.end_date)}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={rowTone}>
                         <span className="text-sm text-gray-700">
                           {new Date(period.pay_date).toLocaleDateString('en-US', {
                             weekday: 'short',
@@ -335,22 +425,22 @@ export function PayPeriods() {
                           })}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={rowTone}>
                         <span className="text-sm text-gray-700">
                           {period.employee_count || 0}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={rowTone}>
                         <span className="font-medium text-gray-900">
                           {period.total_gross ? formatCurrency(period.total_gross) : '—'}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={rowTone}>
                         <span className="font-medium text-gray-900">
                           {period.total_net ? formatCurrency(period.total_net) : '—'}
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className={rowTone}>
                         <div className="flex flex-col gap-1 items-start">
                           <Badge
                             variant={
@@ -368,7 +458,7 @@ export function PayPeriods() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={`text-right ${rowTone}`}>
                         <div className="flex items-center justify-end gap-3">
                           <div className="flex items-center gap-1 text-sm">
                             <button

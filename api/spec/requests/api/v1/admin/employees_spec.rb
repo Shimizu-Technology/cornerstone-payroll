@@ -108,6 +108,42 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(json["meta"]["total_pages"]).to eq(2)
         expect(json["meta"]["total_count"]).to eq(4)
       end
+
+      it "sorts by pay rate descending" do
+        create(:employee, company: company, department: department, first_name: "Low", last_name: "Rate", pay_rate: 10)
+        create(:employee, company: company, department: department, first_name: "High", last_name: "Rate", pay_rate: 25)
+
+        get "/api/v1/admin/employees", params: {
+          company_id: company.id,
+          sort_by: "rate",
+          sort_direction: "desc"
+        }
+
+        expect(response).to have_http_status(:ok)
+        json = response.parsed_body
+        expect(json["data"].first["pay_rate"].to_f).to eq(25.0)
+      end
+
+      it "sorts by department name ascending" do
+        alpha_department = create(:department, company: company, name: "Alpha")
+        beta_department = create(:department, company: company, name: "Beta")
+        create(:employee, company: company, department: beta_department, first_name: "Beta", last_name: "Employee")
+        create(:employee, company: company, department: alpha_department, first_name: "Alpha", last_name: "Employee")
+
+        get "/api/v1/admin/employees", params: {
+          company_id: company.id,
+          sort_by: "department",
+          sort_direction: "asc"
+        }
+
+        expect(response).to have_http_status(:ok)
+        json = response.parsed_body
+        sorted_names = json["data"]
+          .select { |employee| employee["last_name"] == "Employee" }
+          .map { |employee| employee["first_name"] }
+
+        expect(sorted_names).to eq(%w[Alpha Beta])
+      end
     end
 
     context "with no employees" do
@@ -182,7 +218,11 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           filing_status: "single",
           allowances: 1,
           department_id: department.id,
-          company_id: company.id
+          company_id: company.id,
+          address_line1: "123 Test St",
+          city: "Barrigada",
+          state: "GU",
+          zip: "96913"
         }
       }
     end

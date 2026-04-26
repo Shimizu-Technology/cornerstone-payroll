@@ -122,7 +122,7 @@ module Api
             :employee_id, :employment_type, :pay_rate,
             :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
             :bonus, :additional_withholding, :additional_withholding_override, :withholding_tax_adjustment, :withholding_tax_override, :check_number,
-            :salary_override, :non_taxable_pay, :reported_tips,
+            :salary_override, :non_taxable_pay, :reported_tips, :tips_paid_out,
             :check_date, :check_memo,
             wage_rate_hours: [
               :employee_wage_rate_id, :label, :rate, :regular_hours,
@@ -153,6 +153,7 @@ module Api
             total_hours: item.total_hours,
             bonus: item.bonus,
             reported_tips: item.reported_tips,
+            tips_paid_out: item.tips_paid_out,
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,

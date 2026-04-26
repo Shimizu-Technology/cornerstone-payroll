@@ -67,6 +67,7 @@ class IssueCorrectivePaycheckService
     pto_hours
     bonus
     reported_tips
+    tips_paid_out
     tip_pool
     additional_withholding
     additional_withholding_override
@@ -305,6 +306,7 @@ class IssueCorrectivePaycheckService
       pto_hours:                corrected_input(:pto_hours, original_item.pto_hours),
       bonus:                    corrected_input(:bonus, original_item.bonus),
       reported_tips:            corrected_input(:reported_tips, original_item.reported_tips),
+      tips_paid_out:            corrected_input(:tips_paid_out, original_item.tips_paid_out),
       tip_pool:                 corrected_input(:tip_pool, original_item.tip_pool),
       non_taxable_pay:          corrected_input(:non_taxable_pay, original_item.non_taxable_pay),
       additional_withholding:   corrected_input(:additional_withholding, original_item.additional_withholding),
@@ -405,6 +407,7 @@ class IssueCorrectivePaycheckService
       pto_hours:      item.pto_hours.to_f,
       bonus:          item.bonus.to_f,
       reported_tips:  item.reported_tips.to_f,
+      tips_paid_out:  item.tips_paid_out.to_f,
       pay_rate:       item.pay_rate.to_f,
       custom_earnings: Array(item.custom_earnings),
       custom_columns_data: item.custom_columns_data || {}

@@ -126,12 +126,13 @@ class CheckGenerator
       roth    = totals[:roth_retirement].to_f
       ins     = totals[:insurance].to_f
       loan    = totals[:loans].to_f
+      tips_paid_out = totals[:tips_paid_out].to_f
 
       taxes = fit + ss + med + addl_wh
-      deds  = retire + roth + ins + loan
+      deds  = retire + roth + ins + loan + tips_paid_out
 
       { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
-        retire: retire, roth: roth, ins: ins, loan: loan,
+        retire: retire, roth: roth, ins: ins, loan: loan, tips_paid_out: tips_paid_out,
         taxes: taxes, deds: deds, net: totals[:net_pay].to_f }
     end
   end
@@ -143,7 +144,8 @@ class CheckGenerator
 
   def cur_deds
     payroll_item.retirement_payment.to_f + payroll_item.roth_retirement_payment.to_f +
-      payroll_item.insurance_payment.to_f + payroll_item.loan_payment.to_f
+      payroll_item.insurance_payment.to_f + payroll_item.loan_payment.to_f +
+      payroll_item.tips_paid_out.to_f
   end
 
   # -----------------------------------------------------------------------
@@ -476,6 +478,7 @@ class CheckGenerator
     rows << ["Roth 401(k)", fn(payroll_item.roth_retirement_payment), fn(ytd[:roth])] if payroll_item.roth_retirement_payment.to_f > 0
     rows << ["Health Insurance", fn(payroll_item.insurance_payment), fn(ytd[:ins])] if payroll_item.insurance_payment.to_f > 0
     rows << ["Loan", fn(payroll_item.loan_payment), fn(ytd[:loan])] if payroll_item.loan_payment.to_f > 0
+    rows << ["Tips Paid Out", fn(payroll_item.tips_paid_out), fn(ytd[:tips_paid_out])] if payroll_item.tips_paid_out.to_f > 0
 
     if rows.any?
       rows << [

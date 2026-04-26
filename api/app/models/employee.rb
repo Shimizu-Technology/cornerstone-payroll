@@ -15,7 +15,8 @@ class Employee < ApplicationRecord
     retirement: :retirement_payment,
     roth_retirement: :roth_retirement_payment,
     insurance: :insurance_payment,
-    loans: :loan_payment
+    loans: :loan_payment,
+    tips_paid_out: :tips_paid_out
   }.freeze
   YTD_AGGREGATE_COLUMNS = {
     gross_pay: "COALESCE(SUM(gross_pay), 0)",
@@ -27,7 +28,8 @@ class Employee < ApplicationRecord
     retirement: "COALESCE(SUM(retirement_payment), 0)",
     roth_retirement: "COALESCE(SUM(roth_retirement_payment), 0)",
     insurance: "COALESCE(SUM(insurance_payment), 0)",
-    loans: "COALESCE(SUM(loan_payment), 0)"
+    loans: "COALESCE(SUM(loan_payment), 0)",
+    tips_paid_out: "COALESCE(SUM(tips_paid_out), 0)"
   }.freeze
 
   belongs_to :company

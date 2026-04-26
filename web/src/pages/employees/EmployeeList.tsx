@@ -6,6 +6,9 @@ import {
   ChevronLeft, 
   ChevronRight,
   ChevronDown,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
   Users,
   Upload
 } from 'lucide-react';
@@ -66,6 +69,8 @@ export function EmployeeList() {
   const status = searchParams.get('status') ?? 'active';
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
+  const sortBy = (searchParams.get('sort_by') as 'name' | 'department' | 'rate' | 'status' | null) ?? 'name';
+  const sortDirection = (searchParams.get('sort_direction') as 'asc' | 'desc' | null) ?? 'asc';
   const page = parseInt(searchParams.get('page') || '1', 10);
 
   const fetchEmployees = useCallback(async () => {
@@ -81,6 +86,8 @@ export function EmployeeList() {
         page,
         per_page: 500,
         group_by: 'employment_type',
+        sort_by: sortBy,
+        sort_direction: sortDirection,
       });
       setEmployees(response.data);
       setMeta(response.meta);
@@ -89,7 +96,7 @@ export function EmployeeList() {
     } finally {
       setIsLoading(false);
     }
-  }, [companyId, search, status, departmentId, employmentType, page]);
+  }, [companyId, search, status, departmentId, employmentType, page, sortBy, sortDirection]);
 
   const fetchDepartments = useCallback(async () => {
     try {
@@ -138,6 +145,15 @@ export function EmployeeList() {
 
   const handleSearch = (value: string): void => {
     updateFilter('search', value);
+  };
+
+  const toggleSort = (column: 'name' | 'department' | 'rate' | 'status') => {
+    const nextDirection = sortBy === column && sortDirection === 'asc' ? 'desc' : 'asc';
+    const newParams = new URLSearchParams(searchParams);
+    newParams.set('sort_by', column);
+    newParams.set('sort_direction', nextDirection);
+    newParams.delete('page');
+    setSearchParams(newParams);
   };
 
   const toggleGroup = (type: string) => {
@@ -301,22 +317,52 @@ export function EmployeeList() {
                     </button>
                     {!isCollapsed && (
                       <Card>
-                        <Table>
+                        <Table stickyHeader containerClassName="max-h-[32rem]">
                           <TableHeader>
                             <TableRow>
-                              <TableHead>Employee</TableHead>
-                              <TableHead>Department</TableHead>
-                              <TableHead>Pay Rate</TableHead>
-                              <TableHead>Status</TableHead>
+                              <SortableHead
+                                label="Employee"
+                                column="name"
+                                activeColumn={sortBy}
+                                direction={sortDirection}
+                                onToggle={toggleSort}
+                                stickyLeft
+                                className="bg-gray-50"
+                              />
+                              <SortableHead
+                                label="Department"
+                                column="department"
+                                activeColumn={sortBy}
+                                direction={sortDirection}
+                                onToggle={toggleSort}
+                                className="bg-gray-50"
+                              />
+                              <SortableHead
+                                label="Pay Rate"
+                                column="rate"
+                                activeColumn={sortBy}
+                                direction={sortDirection}
+                                onToggle={toggleSort}
+                                className="bg-gray-50"
+                              />
+                              <SortableHead
+                                label="Status"
+                                column="status"
+                                activeColumn={sortBy}
+                                direction={sortDirection}
+                                onToggle={toggleSort}
+                                className="bg-gray-50"
+                              />
                               <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {groupEmployees.map((employee) => (
+                            {groupEmployees.map((employee, index) => (
                               <EmployeeTableRow
                                 key={employee.id}
                                 employee={employee}
                                 departments={departments}
+                                rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
                                 onEdit={() => navigate(`/employees/${employee.id}`)}
                               />
                             ))}
@@ -372,10 +418,12 @@ export function EmployeeList() {
 function EmployeeTableRow({
   employee,
   departments,
+  rowTone,
   onEdit,
 }: {
   employee: Employee;
   departments: (Department & { employee_count: number })[];
+  rowTone: string;
   onEdit: () => void;
 }) {
   const statusConfig = employeeStatusConfig[employee.status];
@@ -387,8 +435,8 @@ function EmployeeTableRow({
   const hasMultipleRates = supportsHourlyMultiRate && activeWageRates.length > 1;
 
   return (
-    <TableRow>
-      <TableCell>
+    <TableRow className={rowTone}>
+      <TableCell stickyLeft className={rowTone}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
             <span className="text-primary-700 font-medium text-sm">
@@ -464,5 +512,38 @@ function EmployeeTableRow({
         </Button>
       </TableCell>
     </TableRow>
+  );
+}
+
+function SortableHead({
+  label,
+  column,
+  activeColumn,
+  direction,
+  onToggle,
+  className,
+  stickyLeft = false,
+}: {
+  label: string;
+  column: 'name' | 'department' | 'rate' | 'status';
+  activeColumn: 'name' | 'department' | 'rate' | 'status';
+  direction: 'asc' | 'desc';
+  onToggle: (column: 'name' | 'department' | 'rate' | 'status') => void;
+  className?: string;
+  stickyLeft?: boolean;
+}) {
+  const Icon = activeColumn !== column ? ArrowUpDown : direction === 'asc' ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead stickyLeft={stickyLeft} className={className}>
+      <button
+        type="button"
+        onClick={() => onToggle(column)}
+        className="inline-flex items-center gap-1.5 rounded text-left text-xs font-medium uppercase tracking-wider text-gray-500 transition-colors hover:text-gray-700"
+      >
+        <span>{label}</span>
+        <Icon className="h-3.5 w-3.5" />
+      </button>
+    </TableHead>
   );
 }
