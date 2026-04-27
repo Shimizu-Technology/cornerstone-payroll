@@ -61,6 +61,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     get "/api/v1/client/reports/payroll_register", params: { pay_period_id: pay_period.id }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("report", "summary", "employee_count")).to eq(1)
+    expect(response.parsed_body.dig("report", "employees", 0)).not_to have_key("check_number")
 
     get "/api/v1/client/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
     expect(response).to have_http_status(:ok)

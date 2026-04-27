@@ -122,9 +122,13 @@ module Api
               contractor_total_gross: contractor_items.sum(&:gross_pay),
               contractor_total_net: contractor_items.sum(&:net_pay)
             },
-            employees: w2_items.map { |item| payroll_item_detail(item) },
-            contractors: contractor_items.map { |item| payroll_item_detail(item) }
+            employees: w2_items.map { |item| client_payroll_item_detail(item) },
+            contractors: contractor_items.map { |item| client_payroll_item_detail(item) }
           }
+        end
+
+        def client_payroll_item_detail(item)
+          payroll_item_detail(item).except(:check_number)
         end
 
         def client_employee_ytd_row(employee, year)
