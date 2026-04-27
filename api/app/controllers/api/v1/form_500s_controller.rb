@@ -20,6 +20,10 @@ module Api
           data: filing.fields.deep_symbolize_keys,
           saved_at: filing.updated_at
         }
+      rescue ActiveRecord::RecordInvalid => e
+        render json: {
+          error: e.record.errors.full_messages.join(", ")
+        }, status: :unprocessable_entity
       end
 
       def preview
