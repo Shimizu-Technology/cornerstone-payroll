@@ -16,6 +16,7 @@ class ClientEmployeeUpdateService
     ActiveRecord::Base.transaction do
       employee.assign_attributes(attrs.except(WAGE_RATES_KEY))
       employee.company = company
+      validate_department_scope!(employee.attributes.symbolize_keys.slice(:department_id))
       employee.save!
       sync_wage_rates!(attrs[WAGE_RATES_KEY]) if attrs[WAGE_RATES_KEY].present?
 
@@ -38,6 +39,7 @@ class ClientEmployeeUpdateService
     ActiveRecord::Base.transaction do
       changed_attrs = changed_attributes_subset(attrs.except(WAGE_RATES_KEY))
       if changed_attrs.present?
+        validate_department_scope!(changed_attrs)
         before_values.merge!(serialize_payload(original_values_for(changed_attrs.keys)))
         employee.update!(changed_attrs)
         changed_fields.concat(changed_attrs.keys)
@@ -137,6 +139,15 @@ class ClientEmployeeUpdateService
 
   def sync_wage_rates!(rates)
     EmployeeWageRateSyncService.new(employee: employee, wage_rates: rates, replace_missing: true).sync!
+  end
+
+  def validate_department_scope!(attrs_to_apply)
+    return unless attrs_to_apply.key?(:department_id)
+    return if attrs_to_apply[:department_id].blank?
+    return if Department.exists?(id: attrs_to_apply[:department_id], company_id: company.id)
+
+    employee.errors.add(:department_id, "does not belong to this company")
+    raise ActiveRecord::RecordInvalid, employee
   end
 
   def normalize_attrs(raw_attrs)

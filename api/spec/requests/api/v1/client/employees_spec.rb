@@ -6,6 +6,7 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
   let!(:company) { create(:company, name: "Client Portal Co") }
   let!(:department) { create(:department, company: company, name: "Front Desk") }
   let!(:other_company) { create(:company, name: "Other Co") }
+  let!(:other_department) { create(:department, company: other_company, name: "Other Dept") }
   let!(:client_user) { create(:user, company: company, role: "client", email: "client@example.com") }
   let!(:employee) do
     create(:employee,
@@ -73,6 +74,25 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(EmployeeChangeRequest.count).to eq(0)
       expect(response.parsed_body.dig("data", "ssn")).to be_nil
     end
+
+    it "rejects department ids outside the client company" do
+      expect do
+        post "/api/v1/client/employees",
+          params: {
+            employee: {
+              first_name: "Taylor",
+              last_name: "Cruz",
+              employment_type: "hourly",
+              salary_type: "hourly",
+              pay_rate: 16.25,
+              department_id: other_department.id
+            }
+          }
+      end.not_to change(Employee, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
+    end
   end
 
   describe "PATCH /api/v1/client/employees/:id" do
@@ -104,6 +124,19 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
 
       log = AuditLog.order(:id).last
       expect(log.metadata.dig("after_values", "ssn_encrypted")).to eq("***-**-6789")
+    end
+
+    it "rejects updates that assign a department from another company" do
+      patch "/api/v1/client/employees/#{employee.id}",
+        params: {
+          employee: {
+            department_id: other_department.id
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
+      expect(employee.reload.department_id).to eq(department.id)
     end
   end
 
