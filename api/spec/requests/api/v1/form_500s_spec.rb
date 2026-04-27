@@ -122,6 +122,60 @@ RSpec.describe "Api::V1::Form500s", type: :request do
     )
   end
 
+  it "does not overwrite the saved filing when previewing unsaved edits" do
+    pay_period.create_form500_filing!(
+      company: company,
+      created_by: user,
+      updated_by: user,
+      fields: {
+        company_name: company.name,
+        company_address_line1: "123 Marine Dr",
+        company_address_line2: "",
+        company_city: "Tamuning",
+        company_state: "GU",
+        company_zip: "96913",
+        employer_identification_number: "66-1234567",
+        tax_year: "2026",
+        tax_period_quarter: 2,
+        total_taxes_dollars: "125",
+        total_taxes_cents: "40",
+        notes: "Saved filing"
+      }
+    )
+
+    post "/api/v1/form_500s/preview", params: {
+      form_500: {
+        pay_period_id: pay_period.id,
+        notes: "Preview-only edit",
+        total_taxes_dollars: "999"
+      }
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Content-Type"]).to include("application/pdf")
+
+    expect(pay_period.form500_filing.reload.fields).to include(
+      "notes" => "Saved filing",
+      "total_taxes_dollars" => "125"
+    )
+  end
+
+  it "returns a user-facing error when the official template is unavailable" do
+    allow_any_instance_of(Form500Generator).to receive(:generate)
+      .and_raise(Form500Generator::TemplateUnavailableError, "Form 500 template is unavailable")
+
+    post "/api/v1/form_500s/preview", params: {
+      form_500: {
+        pay_period_id: pay_period.id
+      }
+    }
+
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body).to eq(
+      "error" => "Form 500 template is unavailable. Please try again or contact support."
+    )
+  end
+
   it "returns 404 instead of double-rendering for a missing pay period" do
     get "/api/v1/form_500s/defaults", params: { pay_period_id: pay_period.id + 9999 }
 

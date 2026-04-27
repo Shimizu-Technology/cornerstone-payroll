@@ -33,8 +33,7 @@ module Api
       private
 
       def send_form500_pdf(disposition:, filename_prefix:)
-        filing = persist_form500_filing!
-        payload = filing.fields.deep_symbolize_keys
+        payload = render_payload
         pdf = Form500Generator.new(fields: payload).generate
         suffix = if @pay_period.pay_date
           quarter = ((@pay_period.pay_date.month - 1) / 3) + 1
@@ -45,6 +44,8 @@ module Api
           filename: [ filename_prefix, current_company.name.parameterize.presence, suffix ].compact.join("_") + ".pdf",
           type: "application/pdf",
           disposition: disposition
+      rescue Form500Generator::TemplateUnavailableError
+        render json: { error: "Form 500 template is unavailable. Please try again or contact support." }, status: :service_unavailable
       end
 
       def defaults_payload
@@ -57,6 +58,14 @@ module Api
 
       def saved_fields_payload
         @form500_filing&.fields&.deep_symbolize_keys || {}
+      end
+
+      def render_payload
+        merge_with_defaults(
+          form500_payload,
+          form500_params.to_h.deep_symbolize_keys.except(:pay_period_id),
+          preserve_blank_strings: true
+        )
       end
 
       def set_pay_period!
