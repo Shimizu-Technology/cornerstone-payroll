@@ -183,6 +183,25 @@ RSpec.describe "Api::V1::Form500s", type: :request do
     expect(response.parsed_body).to eq("error" => "Pay period not found")
   end
 
+  it "returns a validation error instead of a raw 500 when a concurrent save hits the uniqueness constraint" do
+    invalid_filing = pay_period.build_form500_filing(company: company)
+    invalid_filing.validate
+    invalid_filing.errors.add(:pay_period_id, :taken)
+
+    allow_any_instance_of(Api::V1::Form500sController).to receive(:persist_form500_filing!)
+      .and_raise(ActiveRecord::RecordInvalid.new(invalid_filing))
+
+    post "/api/v1/form_500s/save", params: {
+      form_500: {
+        pay_period_id: pay_period.id,
+        company_name: company.name
+      }
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("Pay period has already been taken")
+  end
+
   it "forbids client users from accessing Form 500 endpoints" do
     allow_any_instance_of(Api::V1::Form500sController).to receive(:current_user).and_return(client_user)
 
