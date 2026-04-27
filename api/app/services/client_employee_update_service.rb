@@ -136,7 +136,7 @@ class ClientEmployeeUpdateService
   end
 
   def sync_wage_rates!(rates)
-    EmployeeWageRateSyncService.new(employee: employee, wage_rates: rates).sync!
+    EmployeeWageRateSyncService.new(employee: employee, wage_rates: rates, replace_missing: true).sync!
   end
 
   def normalize_attrs(raw_attrs)
