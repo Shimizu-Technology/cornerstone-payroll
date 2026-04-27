@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 type BaseProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'>;
 
 export interface NumericInputProps extends BaseProps {
-  value: number | null | undefined;
+  value: number | string | null | undefined;
   onValueChange: (value: number | null) => void;
   emptyValue?: number | null;
   min?: number;
@@ -14,10 +14,18 @@ export interface NumericInputProps extends BaseProps {
 
 const PARTIAL_NUMBER_PATTERN = /^-?\d*(?:\.\d*)?$/;
 
-function formatDraftValue(value: number | null | undefined, fixedDecimalsOnBlur?: number) {
-  if (value == null || Number.isNaN(value)) return '';
-  if (typeof fixedDecimalsOnBlur === 'number') return value.toFixed(fixedDecimalsOnBlur);
-  return `${value}`;
+function normalizeNumericValue(value: number | string | null | undefined) {
+  if (value == null || value === '') return null;
+
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDraftValue(value: number | string | null | undefined, fixedDecimalsOnBlur?: number) {
+  const normalized = normalizeNumericValue(value);
+  if (normalized == null) return '';
+  if (typeof fixedDecimalsOnBlur === 'number') return normalized.toFixed(fixedDecimalsOnBlur);
+  return `${normalized}`;
 }
 
 function clampValue(value: number, min?: number, max?: number) {

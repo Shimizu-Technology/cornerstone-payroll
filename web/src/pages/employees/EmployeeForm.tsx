@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
-import { employeesApi, departmentsApi, employeeWageRatesApi, ApiError } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate } from '@/types';
 
@@ -71,6 +71,13 @@ const roundCurrencyValue = (value: number): number => {
   return Math.round(value * 100) / 100;
 };
 
+const toNumberOrZero = (value: unknown): number => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const toBoolean = (value: unknown): boolean => value === true || value === 1 || value === '1';
+
 const toCurrencyDraft = (value: number | null | undefined): string =>
   String(roundCurrencyValue(Number(value) || 0));
 
@@ -87,7 +94,7 @@ export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
-  const { user } = useAuth();
+  const { user, isClient } = useAuth();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
@@ -101,7 +108,6 @@ export function EmployeeForm() {
     w4_step4a_other_income: toCurrencyDraft(initialFormData.w4_step4a_other_income),
     w4_step4b_deductions: toCurrencyDraft(initialFormData.w4_step4b_deductions),
   });
-  const [ssnLastFour, setSsnLastFour] = useState<string | null>(null);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   const [terminationDate, setTerminationDate] = useState<string | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -120,41 +126,44 @@ export function EmployeeForm() {
     
     setIsLoading(true);
     try {
-      const response = await employeesApi.get(parseInt(id, 10));
+      const response = isClient
+        ? await clientEmployeesApi.get(parseInt(id, 10))
+        : await employeesApi.get(parseInt(id, 10));
       const employee = response.data;
       
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
+        ssn: employee.ssn || '',
         date_of_birth: employee.date_of_birth || '',
         hire_date: employee.hire_date,
         employment_type: employee.employment_type,
         salary_type: employee.salary_type || 'annual',
-        pay_rate: employee.pay_rate,
+        pay_rate: toNumberOrZero(employee.pay_rate),
         pay_frequency: employee.pay_frequency,
         filing_status: employee.filing_status,
-        allowances: employee.allowances,
-        additional_withholding: employee.additional_withholding,
-        w4_dependent_credit: employee.w4_dependent_credit || 0,
-        w4_step2_multiple_jobs: employee.w4_step2_multiple_jobs || false,
-        w4_step4a_other_income: employee.w4_step4a_other_income || 0,
-        w4_step4b_deductions: employee.w4_step4b_deductions || 0,
-        retirement_rate: employee.retirement_rate,
-        roth_retirement_rate: employee.roth_retirement_rate,
-        department_id: employee.department_id,
+        allowances: toNumberOrZero(employee.allowances),
+        additional_withholding: toNumberOrZero(employee.additional_withholding),
+        w4_dependent_credit: toNumberOrZero(employee.w4_dependent_credit),
+        w4_step2_multiple_jobs: toBoolean(employee.w4_step2_multiple_jobs),
+        w4_step4a_other_income: toNumberOrZero(employee.w4_step4a_other_income),
+        w4_step4b_deductions: toNumberOrZero(employee.w4_step4b_deductions),
+        retirement_rate: toNumberOrZero(employee.retirement_rate),
+        roth_retirement_rate: toNumberOrZero(employee.roth_retirement_rate),
+        department_id: employee.department_id ?? undefined,
         business_name: employee.business_name || '',
         contractor_ein: employee.contractor_ein || '',
         contractor_type: employee.contractor_type || 'individual',
         contractor_pay_type: employee.contractor_pay_type || 'flat_fee',
-        w9_on_file: employee.w9_on_file || false,
+        w9_on_file: toBoolean(employee.w9_on_file),
         address_line1: employee.address_line1 || '',
         address_line2: employee.address_line2 || '',
         city: employee.city || '',
         state: employee.state || '',
         zip: employee.zip || '',
       };
-      setForm(nextForm);
+      setForm(normalizeEmployeeMonetaryFields(nextForm));
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -180,25 +189,23 @@ export function EmployeeForm() {
       
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
-
-      if (employee.ssn_last_four) {
-        setSsnLastFour(employee.ssn_last_four);
-      }
     } catch (err) {
       setGeneralError(err instanceof Error ? err.message : 'Failed to load employee');
     } finally {
       setIsLoading(false);
     }
-  }, [id]);
+  }, [id, isClient]);
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const response = await departmentsApi.list({ company_id: companyId, active: true });
+      const response = isClient
+        ? await clientDepartmentsApi.list({ active: true })
+        : await departmentsApi.list({ company_id: companyId, active: true });
       setDepartments(response.data);
     } catch (err) {
       console.error('Failed to load departments:', err);
     }
-  }, [companyId]);
+  }, [companyId, isClient]);
 
   useEffect(() => {
     fetchDepartments();
@@ -384,23 +391,45 @@ export function EmployeeForm() {
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
           : roundCurrencyValue(form.pay_rate),
+        wage_rates: supportsMultipleHourlyRates
+          ? normalizedWageRates.map((rate) => ({
+              id: rate.id,
+              label: rate.label,
+              rate: roundCurrencyValue(Number(rate.rate) || 0),
+              is_primary: rate.is_primary,
+              active: rate.active !== false,
+            }))
+          : undefined,
       };
 
       let savedEmployeeId: number;
+      let portalNotice: string | null = null;
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
         const updateData = { ...employeePayload };
         if (!updateData.ssn) {
           delete updateData.ssn;
         }
-        const response = await employeesApi.update(parseInt(id, 10), updateData);
-        savedEmployeeId = response.data.id;
+        if (isClient) {
+          const response = await clientEmployeesApi.update(parseInt(id, 10), updateData);
+          savedEmployeeId = response.data.id;
+          portalNotice = response.message || null;
+        } else {
+          const response = await employeesApi.update(parseInt(id, 10), updateData);
+          savedEmployeeId = response.data.id;
+        }
       } else {
-        const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
-        savedEmployeeId = response.data.id;
+        if (isClient) {
+          const response = await clientEmployeesApi.create(employeePayload);
+          savedEmployeeId = response.data.id;
+          portalNotice = response.message || null;
+        } else {
+          const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
+          savedEmployeeId = response.data.id;
+        }
       }
 
-      if (supportsMultipleHourlyRates) {
+      if (!isClient && supportsMultipleHourlyRates) {
         const existingRatesResponse = await employeeWageRatesApi.list(savedEmployeeId);
         const existingRates = existingRatesResponse.wage_rates;
         const normalizedById = new Map(
@@ -434,7 +463,9 @@ export function EmployeeForm() {
         }
       }
 
-      navigate('/employees');
+      navigate('/employees', {
+        state: portalNotice ? { portalNotice } : null,
+      });
     } catch (err) {
       if (err instanceof ApiError && err.details) {
         setErrors(err.details);
@@ -505,7 +536,7 @@ export function EmployeeForm() {
         }
       />
 
-      {isEditing && employeeStatus === 'terminated' && (
+      {isEditing && employeeStatus === 'terminated' && !isClient && (
         <div className="mx-6 lg:mx-8 mt-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
@@ -585,7 +616,7 @@ export function EmployeeForm() {
                   {form.employment_type === 'contractor' ? 'SSN / TIN' : 'Social Security Number'}
                 </label>
                 <Input
-                  placeholder={isEditing && ssnLastFour ? 'Enter new SSN to update' : 'XXX-XX-XXXX'}
+                  placeholder="XXX-XX-XXXX"
                   value={form.ssn || ''}
                   onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
                   error={getFieldError('ssn')}
@@ -908,7 +939,7 @@ export function EmployeeForm() {
                   <input
                     type="checkbox"
                     checked={form.w4_step2_multiple_jobs}
-                    onChange={(e) => handleChange('w4_step2_multiple_jobs', e.target.checked ? 1 : 0)}
+                    onChange={(e) => handleChange('w4_step2_multiple_jobs', e.target.checked)}
                     className="h-4 w-4 text-primary-600 rounded border-gray-300 focus:ring-primary-500"
                   />
                   <span className="text-sm text-gray-700">
@@ -1105,7 +1136,7 @@ export function EmployeeForm() {
         {/* Actions */}
         <div className="flex items-center justify-between">
           <div>
-            {isEditing && employeeStatus !== 'terminated' && (
+            {isEditing && employeeStatus !== 'terminated' && !isClient && (
               <Button
                 type="button"
                 variant="danger"

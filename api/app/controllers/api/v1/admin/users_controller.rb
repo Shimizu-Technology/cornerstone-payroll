@@ -226,7 +226,7 @@ module Api
         end
 
         def role_requires_client_assignment?(role)
-          role == "manager" || role == "accountant"
+          role == "manager" || role == "accountant" || role == "client"
         end
 
         def create_clerk_invitation(user, ignore_existing: false)

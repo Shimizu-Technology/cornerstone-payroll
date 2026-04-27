@@ -197,80 +197,79 @@ These decisions should be made before implementation starts.
 
 ### A. What "client portal" actually means
 
-We need to choose between:
+Decision made:
 
-1. A true client portal
-- separate client-facing navigation and permissions
-- client-safe language and UI
-- likely a new role or role family
-- separate route guards and page states
+- build a true client portal
+- do not repurpose the staff workspace as the client-facing product
 
-2. A scoped staff-style portal for clients
-- reuse current app
-- invite client contacts as `manager` or `accountant`
-- assign only their company
-- cheaper and faster, but lower product polish and more permission risk
+Implications:
 
-Recommended direction:
-
-- If clients will touch pay rates, tax setup, or reports directly, build a true client portal rather than repurposing the staff workspace.
+- separate client-facing navigation and route guards
+- client-safe language and UI states
+- a real `client` role or equivalent permission family
+- company isolation based on assigned client companies
+- a portal-specific API surface rather than exposing the full admin namespace
 
 ### B. What clients are allowed to do directly
 
-We need to define whether clients can:
+Decision made:
 
-- create employees
-- edit employees
-- set pay rates
-- set W-4 or W-4-like withholding fields
-- upload employee documents
-- view payroll reports
-- download pay stubs
-- approve changes
+- clients should be able to use the portal to maintain employees and upload documents directly
+- reports in the client portal should be read-only
+- payroll- and tax-sensitive edits should use an approval workflow in the first version rather than becoming live immediately
 
-Recommended direction:
+Working model:
 
-- Separate "submit" from "approve" for sensitive fields if Cornerstone wants review before payroll impact.
+Direct edit:
+
+- employee contact info
+- employee address
+- department and job title
+- basic onboarding/profile data
+- secure document uploads
+
+Submit for approval:
+
+- pay rate changes
+- W-4 / withholding changes
+- other fields that directly affect payroll math or tax output
+
+Reason:
+
+- this protects live payroll while still letting clients do real work inside the portal
+- it gives Cornerstone a clean audit history and approval trail
+- it can be relaxed later if operations prove direct edits are safe
 
 ### C. Whether employee self-service is part of the same project
 
-The current `employee` role suggests a future self-service portal, but that is distinct from a client portal.
+Decision made:
 
-We need to decide whether:
+- employee self-service is not part of this portal phase
+- this phase is for client users, not individual employees
 
-- client portal comes first and employee self-service is separate later, or
-- both are part of one broader external-access initiative
-
-Recommended direction:
-
-- Treat employee self-service as a separate phase after client portal fundamentals are stable.
+The current `employee` role can remain a future project and should not be mixed into the client portal MVP.
 
 ### D. Guam post-payroll scope
 
-We need to choose the target product level:
+Decision made:
 
-1. Checklist and reporting only
-- reports
-- links
-- manual confirmations
+- build native Form 500 support now
+- defer the broader Guam compliance operations workspace until the real workflow is better understood
 
-2. Operations workspace
-- payment tasks
-- filing tasks
-- confirmations
-- receipt uploads
-- statuses
-- audit trail
+What is in scope now:
 
-3. Full integration
-- export files
-- API integrations
-- external filing/payment sync
+- Cornerstone-generated Form 500
+- prefilled values from payroll data
+- editable values before export
+- printable / downloadable PDF
+- filled-form overlay using the official layout
 
-Recommended direction:
+What is explicitly deferred:
 
-- Build an operations workspace first.
-- Do not jump directly to external integration until the workflow and data model are stable.
+- broader obligations dashboard
+- payment / filing task workflow
+- confirmations, evidence, and reconciliation workspace
+- integrations beyond the current reporting and export surface
 
 ---
 
@@ -307,6 +306,8 @@ Why second:
 
 ### Phase 3 - Client-facing onboarding and maintenance
 
+Status: Implemented on 2026-04-26
+
 Deliverables:
 
 - invite flow for client-facing users
@@ -315,14 +316,36 @@ Deliverables:
 - create/edit employee workflow
 - withholding and pay data workflow
 - audit trail for client-submitted changes
+- secure document upload center
+- read-only client report access
+- approval workflow for payroll- and tax-sensitive employee changes
 
 Suggested scope split:
 
-- Phase 3A: client can create and edit employee records
-- Phase 3B: client can submit pay and withholding changes
-- Phase 3C: client can view approved reports
+- Phase 3A: client portal foundation
+- Phase 3B: secure document uploads and read-only reports
+- Phase 3C: approval workflow for payroll- and tax-sensitive employee changes
 
-### Phase 4 - Guam compliance operations workspace
+### Phase 4 - Native Form 500
+
+Status: Implemented on 2026-04-26
+
+Deliverables:
+
+- prefilled Form 500 values based on payroll data
+- editable values before export
+- generated PDF based on the official layout
+- print/download workflow
+- filled-form overlay against the official government form
+
+Why next:
+
+- this is well-defined enough to build now
+- it delivers immediate operational value without forcing us to guess at the broader Guam workflow
+
+### Phase 5 - Guam compliance operations workspace
+
+Status: Deferred
 
 Deliverables:
 
@@ -338,6 +361,12 @@ Deliverables:
 - due dates and statuses
 - reconciliation against payroll totals
 
+Deferral reason:
+
+- We now know enough to ship the client portal, secure uploads, read-only reports, approval workflow, and native Form 500.
+- We do not yet know enough about the tax firm's real Guam operational workflow to safely design the broader obligations / filings / evidence workspace without risking rework.
+- This workspace should start only after the tax firm confirms the actual filing/payment steps, due dates, exception handling, and evidence requirements.
+
 Suggested data concepts:
 
 - `tax_obligations`
@@ -346,7 +375,7 @@ Suggested data concepts:
 - `filing_evidence` or attachments
 - per-jurisdiction workflow config
 
-### Phase 5 - Exports and integrations
+### Phase 6 - Exports and integrations
 
 Deliverables:
 
@@ -373,6 +402,9 @@ Minimum requirements:
 - separate nav and UX copy from internal staff
 - audit trail for all external edits
 - read-only and approval states where applicable
+- secure document upload center
+- read-only report access
+- approval workflow for payroll- and tax-sensitive employee changes
 
 Nice-to-have:
 
@@ -417,13 +449,12 @@ Engineering note:
 
 Minimum requirements:
 
-- define which payment types are inside scope
-- define which filing artifacts are generated by the app
-- record what was paid, when, how, and with which confirmation/reference
-- reconcile recorded payments to payroll-derived liabilities
-- preserve operator notes and evidence
+- define which filing artifacts are generated by the app now
+- generate and prefill Form 500
+- allow review/edit before print/download
+- defer the broader payment / filing workspace until the workflow is documented in more detail
 
-Likely workflow buckets:
+Deferred workflow buckets:
 
 - FIT wage withholding
 - Social Security / Medicare related payments
@@ -437,11 +468,12 @@ Likely workflow buckets:
 
 If we wanted to move in the safest order:
 
-1. Finalize the permission model and decide portal strategy
-2. Enforce employee address requirements and clean up existing records
-3. Decide whether payroll checks must print the employee address
-4. Build a Guam compliance operations data model before any external integrations
-5. Only then decide which GuamTax / PayGuam / external filing integrations are worth implementing
+1. Finalize the client portal permission model
+2. Build the true client portal foundation
+3. Add secure uploads and read-only reports
+4. Add approval workflow for payroll- and tax-sensitive client edits
+5. Build native Form 500 generation
+6. Document the broader Guam operations workflow before building that workspace
 
 ---
 
@@ -453,8 +485,24 @@ These are good candidates for upcoming planning, not yet implementation.
 
 - Define client portal role model
 - Define client-editable fields
-- Define employee self-service separation
+- Keep employee self-service as a later separate project
 - Create role/route/page permission matrix
+
+### Ticket Group 1A - Client portal MVP
+
+- portal-safe navigation
+- client auth / invites
+- client dashboard
+- employee management flow
+- read-only reports
+- secure uploads
+
+### Ticket Group 1B - Approval workflow
+
+- payroll-sensitive change request model
+- approval queue
+- diff/history view
+- audit trail and statuses
 
 ### Ticket Group 2 - Address enforcement
 
@@ -470,7 +518,14 @@ These are good candidates for upcoming planning, not yet implementation.
 - Validate against live stock
 - Confirm no overlap with amount/payee/memo fields
 
-### Ticket Group 4 - Guam compliance operations
+### Ticket Group 4 - Native Form 500
+
+- import official Form 500 layout
+- map payroll values to prefilled fields
+- build editable overlay/export flow
+- add print/download workflow
+
+### Ticket Group 5 - Guam compliance operations
 
 - Define tax obligation entities and statuses
 - Define payment recording model
@@ -478,7 +533,7 @@ These are good candidates for upcoming planning, not yet implementation.
 - Add confirmation/reference capture
 - Add receipt/evidence attachment strategy
 
-### Ticket Group 5 - Integration strategy
+### Ticket Group 6 - Integration strategy
 
 - Decide whether to support W-2GU EFW2 export
 - Decide whether GuamTax / PayGuam integration is desired or whether operator-assisted workflow is enough
@@ -490,12 +545,10 @@ These are good candidates for upcoming planning, not yet implementation.
 
 These remain unresolved after discovery:
 
-- Do we want a true client portal or just scoped access into the current app?
-- Should clients be able to directly edit pay rates?
-- Should clients directly edit withholding values, or submit them for approval?
-- Does "checks use employee address" mean print the address on the paper check face?
+- Should any payroll-sensitive client changes bypass approval in the first release?
+- Should document requests from staff be in the first upload-center release or a follow-up?
 - Which post-payroll payments are actually done through Guam systems versus external federal systems?
-- Do we want the app to track completed payments only, or initiate/support them directly?
+- Do we want the future Guam workspace to track completed payments only, or initiate/support them directly?
 - Do we want to support file export for GuamTax / SSA workflows before any API integration?
 
 ---
@@ -505,8 +558,9 @@ These remain unresolved after discovery:
 The most defensible direction is:
 
 - treat client access as a real product surface, not just a role toggle
+- use a hybrid portal model where low-risk fields edit directly and payroll-sensitive fields go through approval
 - require employee addresses and align daily setup with W-2GU compliance
-- treat Guam post-payroll work as an operations workflow first
-- add integrations only after the workflow, vocabulary, and records are stable
+- build native Form 500 now because it is well-defined
+- defer the broader Guam post-payroll operations workspace until the workflow, vocabulary, and records are stable
 
 This sequence reduces rework and keeps the codebase aligned with actual payroll operations instead of mixing legacy assumptions with partial automation.

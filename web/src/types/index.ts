@@ -33,7 +33,7 @@ export interface Department {
 // User & Auth
 // ----------------
 
-export type UserRole = 'admin' | 'manager' | 'employee' | 'accountant';
+export type UserRole = 'admin' | 'manager' | 'employee' | 'accountant' | 'client';
 
 export interface AssignedCompanySummary {
   id: number;
@@ -89,6 +89,7 @@ export interface Employee {
   middle_name?: string;
   last_name: string;
   email?: string;
+  ssn?: string | null;
   date_of_birth?: string;
   hire_date: string;
   termination_date?: string;

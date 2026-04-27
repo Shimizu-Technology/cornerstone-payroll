@@ -11,6 +11,9 @@ class Company < ApplicationRecord
   has_many :user_invitations, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
+  has_many :client_documents, dependent: :destroy
+  has_many :employee_change_requests, dependent: :destroy
+  has_many :form500_filings, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
   # NOTE: printer_profiles used to be company-scoped but moved to per-user

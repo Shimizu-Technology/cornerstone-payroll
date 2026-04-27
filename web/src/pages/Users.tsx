@@ -22,10 +22,11 @@ const roleOptions: { value: UserRole; label: string; description: string }[] = [
   { value: 'admin', label: 'Admin', description: 'Full access to all payroll clients, user management, tax config, and audit logs' },
   { value: 'manager', label: 'Manager', description: 'Can run payroll and manage employees for assigned clients' },
   { value: 'accountant', label: 'Accountant', description: 'Can manage employees and payroll operations for assigned clients' },
+  { value: 'client', label: 'Client Portal User', description: 'Can access the client portal for assigned clients, manage employee records, upload documents, and review reports' },
   { value: 'employee', label: 'Employee', description: 'View-only access (future: self-service portal)' },
 ];
 
-const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant';
+const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant' || role === 'client';
 
 export function Users() {
   const { user: currentUser } = useAuth();
