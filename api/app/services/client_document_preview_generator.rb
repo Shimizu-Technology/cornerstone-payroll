@@ -69,7 +69,7 @@ class ClientDocumentPreviewGenerator
   attr_reader :document, :storage
 
   def prepare_source_file(dir)
-    source_path = File.join(dir, document.file_name)
+    source_path = File.join(dir, safe_source_filename)
     File.binwrite(source_path, storage.download(document.file_key))
     optimize_spreadsheet_layout!(source_path) if spreadsheet_extension?
     source_path
@@ -77,6 +77,15 @@ class ClientDocumentPreviewGenerator
 
   def spreadsheet_extension?
     %w[csv xlsx].include?(document.file_extension)
+  end
+
+  def safe_source_filename
+    original_name = document.file_name.to_s
+    basename = File.basename(original_name).presence
+    return basename if basename.present?
+
+    extension = File.extname(original_name)
+    "source#{extension}"
   end
 
   def optimize_spreadsheet_layout!(source_path)
