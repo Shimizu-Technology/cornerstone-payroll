@@ -45,4 +45,32 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     expect(storage.download(document.file_key)).to be_present
     expect(storage.download(document.preview_file_key)).to be_present
   end
+
+  it "writes an audit log only after a successful delete" do
+    destroy_audit_count = AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
+
+    expect do
+      delete "/api/v1/admin/client_documents/#{document.id}"
+    end.to change(ClientDocument, :count).by(-1)
+
+    expect(response).to have_http_status(:no_content)
+    expect(
+      AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
+    ).to eq(destroy_audit_count + 1)
+  end
+
+  it "does not write a destroy audit log if the database delete fails" do
+    destroy_audit_count = AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
+
+    allow_any_instance_of(ClientDocument).to receive(:destroy!)
+      .and_raise(ActiveRecord::RecordNotDestroyed.new("fail destroy", document))
+
+    expect do
+      delete "/api/v1/admin/client_documents/#{document.id}"
+    end.to raise_error(ActiveRecord::RecordNotDestroyed)
+
+    expect(
+      AuditLog.where(action: "admin_client_documents#destroy", record_id: document.id).count
+    ).to eq(destroy_audit_count)
+  end
 end
