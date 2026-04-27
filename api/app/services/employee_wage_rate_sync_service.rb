@@ -5,9 +5,10 @@ class EmployeeWageRateSyncService
     new(employee: Employee.new, wage_rates: wage_rates).send(:normalize_rates)
   end
 
-  def initialize(employee:, wage_rates:)
+  def initialize(employee:, wage_rates:, replace_missing: false)
     @employee = employee
     @wage_rates = Array(wage_rates)
+    @replace_missing = replace_missing
   end
 
   def sync!
@@ -16,7 +17,9 @@ class EmployeeWageRateSyncService
     existing_by_id = employee.employee_wage_rates.index_by(&:id)
     incoming_ids = normalized.filter_map { |rate| rate[:id] }
 
-    employee.employee_wage_rates.where.not(id: incoming_ids).destroy_all if existing_by_id.any?
+    if replace_missing? && existing_by_id.any?
+      employee.employee_wage_rates.where.not(id: incoming_ids).destroy_all
+    end
 
     normalized.each do |rate_attrs|
       rate_id = rate_attrs.delete(:id)
@@ -33,6 +36,10 @@ class EmployeeWageRateSyncService
   private
 
   attr_reader :employee, :wage_rates
+
+  def replace_missing?
+    @replace_missing
+  end
 
   def normalize_rates
     cleaned = wage_rates.filter_map do |rate|
