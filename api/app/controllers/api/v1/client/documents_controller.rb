@@ -4,7 +4,8 @@ module Api
   module V1
     module Client
       class DocumentsController < BaseController
-        before_action :set_document, only: [ :download, :preview, :destroy ]
+        before_action :set_document, only: [ :download, :preview ]
+        before_action :set_owned_document, only: [ :destroy ]
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
@@ -130,6 +131,17 @@ module Api
 
         def set_document
           @document = ClientDocument.find_by(id: params[:id], company_id: current_company_id)
+          return if @document
+
+          render json: { error: "Document not found" }, status: :not_found
+        end
+
+        def set_owned_document
+          @document = ClientDocument.find_by(
+            id: params[:id],
+            company_id: current_company_id,
+            uploaded_by_id: current_user.id
+          )
           return if @document
 
           render json: { error: "Document not found" }, status: :not_found

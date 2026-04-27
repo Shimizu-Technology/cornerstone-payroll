@@ -6,12 +6,14 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
   let!(:company) { create(:company, name: "Docs Co") }
   let!(:department) { create(:department, company: company) }
   let!(:client_user) { create(:user, company: company, role: "client", email: "docs-client@example.com") }
+  let!(:other_client_user) { create(:user, company: company, role: "client", email: "other-docs-client@example.com") }
   let!(:employee) { create(:employee, company: company, department: department, first_name: "Ava", last_name: "Cruz") }
   let(:fixture_path) { Rails.root.join("spec/fixtures/files/client_portal_upload.txt") }
   let(:upload) { Rack::Test::UploadedFile.new(fixture_path, "text/plain") }
 
   before do
     CompanyAssignment.create!(user: client_user, company: company)
+    CompanyAssignment.create!(user: other_client_user, company: company)
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user).and_return(client_user)
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_user_id).and_return(client_user.id)
     allow_any_instance_of(Api::V1::Client::DocumentsController).to receive(:current_company_id).and_return(company.id)
@@ -57,6 +59,28 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       end.to change(ClientDocument, :count).by(-1)
 
       expect(response).to have_http_status(:no_content)
+    end
+
+    it "does not allow one client user to delete another uploader's document" do
+      document = ClientDocument.create!(
+        company: company,
+        employee: employee,
+        uploaded_by: other_client_user,
+        title: "Other uploader doc",
+        category: "misc",
+        file_name: "client_portal_upload.txt",
+        file_key: "client_documents/company_#{company.id}/#{SecureRandom.uuid}_client_portal_upload.txt",
+        content_type: "text/plain",
+        file_size: 32,
+        preview_status: "not_required"
+      )
+
+      expect do
+        delete "/api/v1/client/documents/#{document.id}"
+      end.not_to change(ClientDocument, :count)
+
+      expect(response).to have_http_status(:not_found)
+      expect(ClientDocument.exists?(document.id)).to be(true)
     end
 
     it "keeps storage intact if the database destroy fails" do
