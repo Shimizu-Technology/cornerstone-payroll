@@ -100,7 +100,7 @@ module Api
         def preview
           ensure_generated_preview!(@document)
           data, content_type, filename = preview_payload_for(@document)
-          return render json: { error: @document.preview_error.presence || "Preview is unavailable for this file" }, status: :unprocessable_entity unless data
+          return render json: { error: public_preview_error(@document) }, status: :unprocessable_entity unless data
 
           send_data data,
             filename: filename,
@@ -153,7 +153,7 @@ module Api
             preview_available: document.preview_available?,
             preview_generated_at: document.preview_generated_at,
             preview_content_type: document.preview_content_type,
-            preview_error: document.preview_error
+            preview_error: public_preview_error(document)
           }
         end
 
@@ -217,6 +217,12 @@ module Api
           rescue R2StorageService::UploadError => e
             Rails.logger.error("Client document storage cleanup failed for #{key}: #{e.message}")
           end
+        end
+
+        def public_preview_error(document)
+          return nil unless document.preview_status == "failed"
+
+          "Preview is unavailable for this file."
         end
       end
     end
