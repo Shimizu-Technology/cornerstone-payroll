@@ -71,6 +71,7 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(created.pay_rate.to_f).to eq(16.25)
       expect(created.additional_withholding.to_f).to eq(15.0)
       expect(EmployeeChangeRequest.count).to eq(0)
+      expect(response.parsed_body.dig("data", "ssn")).to be_nil
     end
   end
 
@@ -98,9 +99,23 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       body = response.parsed_body
       expect(body.fetch("applied_direct_fields")).to include("address_line1", "city", "pay_rate", "additional_withholding", "ssn_encrypted")
       expect(body.fetch("message")).to eq("Employee updated successfully")
+      expect(body.dig("data", "ssn")).to be_nil
+      expect(body.dig("data", "ssn_last_four")).to eq("6789")
 
       log = AuditLog.order(:id).last
       expect(log.metadata.dig("after_values", "ssn_encrypted")).to eq("***-**-6789")
+    end
+  end
+
+  describe "GET /api/v1/client/employees/:id" do
+    it "still returns the full ssn for the explicit edit/load path" do
+      employee.update!(ssn_encrypted: "123-45-6789")
+
+      get "/api/v1/client/employees/#{employee.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "ssn")).to eq("123-45-6789")
+      expect(response.parsed_body.dig("data", "ssn_last_four")).to eq("6789")
     end
   end
 end

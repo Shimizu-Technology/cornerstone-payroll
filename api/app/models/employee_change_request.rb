@@ -14,6 +14,8 @@ class EmployeeChangeRequest < ApplicationRecord
   scope :for_company, ->(company_id) { where(company_id: company_id) }
 
   def apply!(actor:, review_notes: nil)
+    ensure_pending!
+
     ActiveRecord::Base.transaction do
       apply_proposed_changes!
       update!(
@@ -26,6 +28,8 @@ class EmployeeChangeRequest < ApplicationRecord
   end
 
   def reject!(actor:, review_notes:)
+    ensure_pending!
+
     update!(
       status: :rejected,
       reviewed_by: actor,
@@ -35,6 +39,13 @@ class EmployeeChangeRequest < ApplicationRecord
   end
 
   private
+
+  def ensure_pending!
+    return if pending?
+
+    errors.add(:status, "must be pending before review actions can be applied")
+    raise ActiveRecord::RecordInvalid, self
+  end
 
   def apply_proposed_changes!
     attrs = proposed_changes.deep_symbolize_keys

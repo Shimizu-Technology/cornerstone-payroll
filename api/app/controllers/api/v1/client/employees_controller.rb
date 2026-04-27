@@ -41,7 +41,7 @@ module Api
           )
 
           render json: {
-            data: serialize_employee(result.employee, include_sensitive: true),
+            data: serialize_employee(result.employee),
             message: "Employee created successfully"
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
@@ -66,7 +66,7 @@ module Api
           )
 
           render json: {
-            data: serialize_employee(result.employee, include_sensitive: true),
+            data: serialize_employee(result.employee),
             applied_direct_fields: result.applied_direct_fields,
             message: "Employee updated successfully"
           }

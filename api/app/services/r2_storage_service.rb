@@ -30,6 +30,7 @@ class R2StorageService
   class ConfigurationError < StandardError; end
   class UploadError < StandardError; end
   class DownloadError < StandardError; end
+  class InvalidKeyError < StandardError; end
   LOCAL_STORAGE_ROOT = Rails.root.join("tmp", "local_r2_storage")
 
   def initialize
@@ -207,7 +208,11 @@ class R2StorageService
   end
 
   def local_path_for(key)
-    local_storage_root.join(key)
+    root = File.expand_path(local_storage_root.to_s)
+    candidate = File.expand_path(key.to_s, root)
+    return Pathname(candidate) if candidate == root || candidate.start_with?("#{root}#{File::SEPARATOR}")
+
+    raise InvalidKeyError, "Invalid storage key"
   end
 
   def upload_locally(key, data)
@@ -220,6 +225,8 @@ class R2StorageService
       File.binwrite(path, data)
     end
     "local-r2://#{key}"
+  rescue InvalidKeyError => e
+    raise UploadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 upload failed: #{e.message}")
     raise UploadError, "Failed to upload locally: #{e.message}"
@@ -230,6 +237,8 @@ class R2StorageService
     return nil unless File.exist?(path)
 
     File.binread(path)
+  rescue InvalidKeyError => e
+    raise DownloadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 download failed: #{e.message}")
     raise DownloadError, "Failed to download locally: #{e.message}"
@@ -238,6 +247,8 @@ class R2StorageService
   def delete_locally(key)
     path = local_path_for(key)
     File.delete(path) if File.exist?(path)
+  rescue InvalidKeyError => e
+    raise UploadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 delete failed: #{e.message}")
     raise UploadError, "Failed to delete locally: #{e.message}"
