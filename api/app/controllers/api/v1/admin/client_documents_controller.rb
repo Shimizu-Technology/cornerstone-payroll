@@ -42,9 +42,9 @@ module Api
         end
 
         def destroy
-          R2StorageService.new.delete(@document.preview_file_key) if @document.preview_file_key.present?
-          R2StorageService.new.delete(@document.file_key) if @document.file_key.present?
+          file_keys = [ @document.preview_file_key, @document.file_key ].compact
           @document.destroy!
+          cleanup_storage_keys(file_keys)
           head :no_content
         end
 
@@ -101,6 +101,15 @@ module Api
           end
 
           [ nil, nil, nil ]
+        end
+
+        def cleanup_storage_keys(file_keys)
+          storage = R2StorageService.new
+          file_keys.each do |key|
+            storage.delete(key)
+          rescue R2StorageService::UploadError => e
+            Rails.logger.error("Admin client document storage cleanup failed for #{key}: #{e.message}")
+          end
         end
       end
     end
