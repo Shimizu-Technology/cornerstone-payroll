@@ -45,6 +45,24 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       expect(change_request.reviewed_by_id).to eq(admin_user.id)
       expect(change_request.review_notes).to eq("Looks good")
     end
+
+    it "does not re-apply a request that has already been reviewed" do
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "First review" }
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload.pay_rate.to_f).to eq(23.5)
+
+      employee.update!(pay_rate: 31.25)
+
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "Second review" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("must be pending")
+      expect(employee.reload.pay_rate.to_f).to eq(31.25)
+      expect(change_request.reload.review_notes).to eq("First review")
+    end
   end
 
   describe "PATCH /api/v1/admin/employee_change_requests/:id/reject" do
@@ -58,6 +76,18 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       change_request.reload
       expect(change_request.status).to eq("rejected")
       expect(change_request.review_notes).to eq("Hold for clarification")
+    end
+
+    it "does not reject a request that has already been approved" do
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "Approved already" }
+
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/reject",
+        params: { review_notes: "Changing my mind" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("must be pending")
+      expect(change_request.reload.status).to eq("approved")
     end
   end
 end
