@@ -8,6 +8,20 @@ module Api
         before_action :require_client_portal_access!
         before_action :ensure_client_reportable_pay_period!, only: [ :payroll_register, :payroll_register_pdf ]
 
+        def ytd_summary
+          year = params[:year]&.to_i || Date.current.year
+          employees = Employee.where(company_id: current_company_id).order(:last_name, :first_name)
+
+          render json: {
+            report: {
+              type: "ytd_summary",
+              year: year,
+              employees: employees.map { |employee| client_employee_ytd_row(employee, year) },
+              company_totals: ytd_company_totals(year)
+            }
+          }
+        end
+
         private
 
         def require_client_portal_access!
@@ -110,6 +124,29 @@ module Api
             },
             employees: w2_items.map { |item| payroll_item_detail(item) },
             contractors: contractor_items.map { |item| payroll_item_detail(item) }
+          }
+        end
+
+        def client_employee_ytd_row(employee, year)
+          reportable_period_ids = PayPeriod.reportable_committed
+                                           .where(company_id: current_company_id)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+          items = employee.payroll_items
+                          .joins(:pay_period)
+                          .where(pay_periods: { id: reportable_period_ids })
+
+          {
+            employee_id: employee.id,
+            name: employee.full_name,
+            employment_type: employee.employment_type,
+            status: employee.status,
+            gross_pay: items.sum(:gross_pay),
+            withholding_tax: items.sum(:withholding_tax),
+            social_security_tax: items.sum(:social_security_tax),
+            medicare_tax: items.sum(:medicare_tax),
+            retirement: items.sum(:retirement_payment),
+            net_pay: items.sum(:net_pay)
           }
         end
       end

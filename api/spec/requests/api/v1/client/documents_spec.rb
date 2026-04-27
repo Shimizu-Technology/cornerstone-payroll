@@ -194,5 +194,44 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       expect(response.headers["Content-Type"]).to include("application/pdf")
       expect(response.body).to start_with("%PDF")
     end
+
+    it "hides internal preview generator details from client responses" do
+      docx = Tempfile.new([ "client-portal-upload", ".docx" ])
+      docx.write("pretend docx payload")
+      docx.rewind
+      docx_upload = Rack::Test::UploadedFile.new(
+        docx.path,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        original_filename: "payroll-notes.docx"
+      )
+
+      post "/api/v1/client/documents",
+        params: {
+          title: "Text upload",
+          category: "misc",
+          file: docx_upload
+        }
+
+      expect(response).to have_http_status(:created)
+      created_id = response.parsed_body.fetch("data").first.fetch("id")
+      document = ClientDocument.find(created_id)
+      document.update!(
+        preview_status: "failed",
+        preview_error: "LibreOffice is not installed on this server"
+      )
+      allow_any_instance_of(ClientDocumentPreviewGenerator)
+        .to receive(:generate!)
+        .and_raise(ClientDocumentPreviewGenerator::GenerationUnavailable, "LibreOffice is not installed on this server")
+
+      get "/api/v1/client/documents"
+      listed_document = response.parsed_body.fetch("data").find { |item| item["id"] == created_id }
+      expect(listed_document.fetch("preview_error")).to eq("Preview is unavailable for this file.")
+
+      get "/api/v1/client/documents/#{created_id}/preview"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Preview is unavailable for this file.")
+    ensure
+      docx.close!
+    end
   end
 end
