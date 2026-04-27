@@ -111,6 +111,7 @@ module Api
         def destroy
           file_keys = [ @document.preview_file_key, @document.file_key ].compact
 
+          @document.destroy!
           AuditLog.record!(
             user: current_user,
             company_id: current_company_id,
@@ -121,8 +122,6 @@ module Api
             ip_address: request.remote_ip,
             user_agent: request.user_agent
           )
-
-          @document.destroy!
           cleanup_storage_keys(file_keys)
           head :no_content
         end

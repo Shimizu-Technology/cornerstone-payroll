@@ -86,6 +86,33 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       expect(storage.download(document.file_key)).to be_present
     end
 
+    it "does not write a destroy audit log if the database delete fails" do
+      post "/api/v1/client/documents",
+        params: {
+          title: "I-9 Packet",
+          category: "employee_onboarding",
+          employee_id: employee.id,
+          notes: "Signed onboarding docs",
+          file: upload
+        }
+
+      expect(response).to have_http_status(:created)
+      created_id = response.parsed_body.fetch("data").first.fetch("id")
+      document = ClientDocument.find(created_id)
+      destroy_audit_count = AuditLog.where(action: "client_documents#destroy", record_id: document.id).count
+
+      allow_any_instance_of(ClientDocument).to receive(:destroy!)
+        .and_raise(ActiveRecord::RecordNotDestroyed.new("fail destroy", document))
+
+      expect do
+        delete "/api/v1/client/documents/#{created_id}"
+      end.to raise_error(ActiveRecord::RecordNotDestroyed)
+
+      expect(
+        AuditLog.where(action: "client_documents#destroy", record_id: document.id).count
+      ).to eq(destroy_audit_count)
+    end
+
     it "rejects unsupported upload types before storing them" do
       file = Tempfile.new([ "malware", ".exe" ])
       file.binmode
