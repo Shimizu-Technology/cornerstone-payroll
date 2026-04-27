@@ -25,7 +25,7 @@ module Api
         # GET /api/v1/admin/employees/:id
         def show
           render json: {
-            data: serialize_employee(@employee, include_department: true)
+            data: serialize_employee(@employee, include_department: true, include_sensitive: true)
           }
         end
 
@@ -34,7 +34,7 @@ module Api
           employee = Employee.new(employee_params.merge(company_id: current_company_id))
 
           if employee.save
-            render json: { data: serialize_employee(employee) }, status: :created
+            render json: { data: serialize_employee(employee, include_sensitive: true) }, status: :created
           else
             render json: {
               error: "Validation failed",
@@ -46,7 +46,7 @@ module Api
         # PATCH /api/v1/admin/employees/:id
         def update
           if @employee.update(employee_params)
-            render json: { data: serialize_employee(@employee) }
+            render json: { data: serialize_employee(@employee, include_sensitive: true) }
           else
             render json: {
               error: "Validation failed",
@@ -188,11 +188,12 @@ module Api
           }
         end
 
-        def serialize_employee(employee, include_department: false)
+        def serialize_employee(employee, include_department: false, include_sensitive: false)
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
+          data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {
               id: rate.id,

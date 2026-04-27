@@ -5,6 +5,7 @@ import { reportsApi, transmittalApi } from '@/services/api';
 import type { BlobDownload, TransmittalOptions, TransmittalPreview, SavedTransmittal, TransmittalCustomEntry } from '@/services/api';
 import { Loader2 } from 'lucide-react';
 import { DRT } from '@/lib/constants';
+import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
@@ -361,12 +362,14 @@ function TransmittalEditorModal({
   onGenerate,
   targetLabel,
   payPeriodId,
+  onOpenForm500,
 }: {
   open: boolean;
   onClose: () => void;
   onGenerate: (options: TransmittalOptions) => void;
   targetLabel: string;
   payPeriodId: number;
+  onOpenForm500: () => void;
 }) {
   const [preparerName, setPreparerName] = useState('Cornerstone Tax Services');
   const [notes, setNotes] = useState<string[]>([]);
@@ -747,9 +750,13 @@ function TransmittalEditorModal({
                   <div className="text-sm">
                     <p className="font-medium text-blue-800">FIT deposit requires Form 500</p>
                     <p className="text-blue-700 mt-0.5">
-                      <a href={DRT.FORM_500_PDF} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900 font-medium">
-                        Open Form 500 (Depository Receipt)
-                      </a>
+                      <button
+                        type="button"
+                        onClick={onOpenForm500}
+                        className="font-medium underline hover:text-blue-900"
+                      >
+                        Open saved Form 500
+                      </button>
                       {' · '}
                       <a href={DRT.FORMS_PAGE} target="_blank" rel="noopener noreferrer" className="underline hover:text-blue-900">
                         All DRT Forms
@@ -1015,6 +1022,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     label: string;
     mode: 'preview' | 'download';
   }>({ open: false, key: null, label: '', mode: 'preview' });
+  const [form500Open, setForm500Open] = useState(false);
   const [savedTransmittal, setSavedTransmittal] = useState<SavedTransmittal | null>(null);
   const [signoffEditor, setSignoffEditor] = useState<{
     open: boolean;
@@ -1393,6 +1401,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         onGenerate={handleTransmittalGenerate}
         targetLabel={transmittalEditor.label}
         payPeriodId={payPeriodId}
+        onOpenForm500={() => setForm500Open(true)}
       />
 
       <SignoffEditorModal
@@ -1401,6 +1410,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
         onGenerate={handleSignoffGenerate}
         payPeriodId={payPeriodId}
       />
+
+      <Form500EditorModal open={form500Open} onClose={() => setForm500Open(false)} payPeriodId={payPeriodId} />
 
       <PdfPreviewModal
         open={signoffPdfPreview.open}

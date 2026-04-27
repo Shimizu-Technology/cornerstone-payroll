@@ -13,8 +13,11 @@ class User < ApplicationRecord
   # Printer profiles are tied to the user (their physical printer) so the
   # same calibration follows them across every client they switch into.
   has_many :printer_profiles, dependent: :destroy
+  has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
+  has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
+  has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify
 
-  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3 }
+  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4 }
 
   validates :email, presence: true, uniqueness: true, format: { with: URI::MailTo::EMAIL_REGEXP }
   validates :name, presence: true
@@ -50,8 +53,9 @@ class User < ApplicationRecord
           company_assignments.pluck(:company_id)
         end
 
-        if accountant? || manager?
-          # Accountants/managers only see companies explicitly assigned to them
+        if accountant? || manager? || client?
+          # Client-facing users and scoped staff only see explicitly assigned
+          # companies (falling back to their home company when none exist yet).
           assigned_ids.presence || [company_id]
         else
           ([company_id] + assigned_ids).uniq

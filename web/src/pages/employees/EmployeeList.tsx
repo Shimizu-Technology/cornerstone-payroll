@@ -32,7 +32,7 @@ import {
   employmentTypeLabels,
   getInitials,
 } from '@/lib/utils';
-import { employeesApi, departmentsApi } from '@/services/api';
+import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import type { Employee, Department, PaginationMeta } from '@/types';
@@ -50,7 +50,7 @@ export function EmployeeList() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, isClient } = useAuth();
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
   
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -61,6 +61,10 @@ export function EmployeeList() {
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
+  });
+  const [saveNotice, setSaveNotice] = useState<string | null>(() => {
+    const state = location.state as { portalNotice?: string } | null;
+    return state?.portalNotice ?? null;
   });
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -77,35 +81,49 @@ export function EmployeeList() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await employeesApi.list({
-        company_id: companyId,
-        search: search || undefined,
-        status: status === 'all' ? undefined : (status || undefined),
-        department_id: departmentId ? parseInt(departmentId, 10) : undefined,
-        employment_type: employmentType || undefined,
-        page,
-        per_page: 500,
-        group_by: 'employment_type',
-        sort_by: sortBy,
-        sort_direction: sortDirection,
-      });
-      setEmployees(response.data);
-      setMeta(response.meta);
+      const payload = isClient
+        ? await clientEmployeesApi.list({
+            search: search || undefined,
+            status: status === 'all' ? undefined : (status || undefined),
+            department_id: departmentId ? parseInt(departmentId, 10) : undefined,
+            employment_type: employmentType || undefined,
+            page,
+            per_page: 500,
+            group_by: 'employment_type',
+            sort_by: sortBy,
+            sort_direction: sortDirection,
+          })
+        : await employeesApi.list({
+            company_id: companyId,
+            search: search || undefined,
+            status: status === 'all' ? undefined : (status || undefined),
+            department_id: departmentId ? parseInt(departmentId, 10) : undefined,
+            employment_type: employmentType || undefined,
+            page,
+            per_page: 500,
+            group_by: 'employment_type',
+            sort_by: sortBy,
+            sort_direction: sortDirection,
+          });
+      setEmployees(payload.data);
+      setMeta(payload.meta);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
       setIsLoading(false);
     }
-  }, [companyId, search, status, departmentId, employmentType, page, sortBy, sortDirection]);
+  }, [companyId, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async () => {
     try {
-      const response = await departmentsApi.list({ company_id: companyId, active: true });
+      const response = isClient
+        ? await clientDepartmentsApi.list({ active: true })
+        : await departmentsApi.list({ company_id: companyId, active: true });
       setDepartments(response.data);
     } catch (err) {
       console.error('Failed to load departments:', err);
     }
-  }, [companyId]);
+  }, [companyId, isClient]);
 
   useEffect(() => {
     fetchEmployees();
@@ -121,6 +139,14 @@ export function EmployeeList() {
   }, [location.state, navigate]);
 
   useEffect(() => {
+    const state = location.state as { portalNotice?: string } | null;
+    if (!state?.portalNotice) return;
+
+    setSaveNotice(state.portalNotice);
+    navigate('.', { replace: true, state: null });
+  }, [location.state, navigate]);
+
+  useEffect(() => {
     if (!switchNotice) return;
 
     const timer = window.setTimeout(() => {
@@ -129,6 +155,16 @@ export function EmployeeList() {
 
     return () => window.clearTimeout(timer);
   }, [switchNotice]);
+
+  useEffect(() => {
+    if (!saveNotice) return;
+
+    const timer = window.setTimeout(() => {
+      setSaveNotice(null);
+    }, 6000);
+
+    return () => window.clearTimeout(timer);
+  }, [saveNotice]);
 
   const updateFilter = (key: string, value: string): void => {
     const newParams = new URLSearchParams(searchParams);
@@ -186,10 +222,12 @@ export function EmployeeList() {
         description="Manage your company's employees"
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setShowBulkImport(true)}>
-              <Upload className="w-4 h-4 mr-2" />
-              Bulk Import
-            </Button>
+            {!isClient && (
+              <Button variant="outline" onClick={() => setShowBulkImport(true)}>
+                <Upload className="w-4 h-4 mr-2" />
+                Bulk Import
+              </Button>
+            )}
             <Button onClick={() => navigate('/employees/new')}>
               <Plus className="w-4 h-4 mr-2" />
               Add Employee
@@ -267,6 +305,22 @@ export function EmployeeList() {
               onClick={() => setSwitchNotice(null)}
               className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 hover:text-primary-900"
               aria-label="Dismiss company switch notice"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {saveNotice && (
+          <div
+            role="status"
+            className="mb-6 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-emerald-800"
+          >
+            <span>{saveNotice}</span>
+            <button
+              type="button"
+              onClick={() => setSaveNotice(null)}
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 hover:text-emerald-900"
+              aria-label="Dismiss update notice"
             >
               Dismiss
             </button>
@@ -407,7 +461,7 @@ export function EmployeeList() {
       </div>
 
       <EmployeeBulkImportModal
-        open={showBulkImport}
+        open={!isClient && showBulkImport}
         onClose={() => setShowBulkImport(false)}
         onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}
       />

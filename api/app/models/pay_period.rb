@@ -23,6 +23,7 @@ class PayPeriod < ApplicationRecord
   has_many :loan_transactions, dependent: :nullify
   has_one :transmittal, dependent: :destroy
   has_one :check_signoff_sheet, dependent: :destroy
+  has_one :form500_filing, dependent: :destroy
 
   # Corrective paycheck linkage — original ←──── supplemental
   # A regular period may have many supplementals (one per correction).

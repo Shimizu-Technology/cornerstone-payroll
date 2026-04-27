@@ -11,6 +11,7 @@ import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
 import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
+import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
@@ -111,6 +112,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [fitError, setFitError] = useState<string | null>(null);
   const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
+  const [form500Open, setForm500Open] = useState(false);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -410,9 +412,13 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             <p className="font-medium text-amber-800">DRT Form 500 Required</p>
             <p className="text-amber-700 mt-0.5">
               Tax deposit checks require a Guam DRT Form 500 (Depository Receipt for Income Tax Withheld).{' '}
-              <a href={DRT.FORM_500_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline font-medium">
-                Open Form 500
-              </a>
+              <button
+                type="button"
+                onClick={() => setForm500Open(true)}
+                className="text-blue-600 hover:text-blue-800 underline font-medium"
+              >
+                Open saved Form 500
+              </button>
               {' · '}
               <a href={DRT.FORMS_PAGE} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">
                 All DRT Forms
@@ -516,17 +522,16 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         {check.memo && <span>{check.memo}</span>}
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
                         {check.check_type === 'tax_deposit' && (
-                          <a
-                            href={DRT.FORM_500_PDF}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => setForm500Open(true)}
                             className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium"
                           >
                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                             </svg>
                             Form 500
-                          </a>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -615,6 +620,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         onClose={() => setEditingCheck(null)}
         onSaved={handleSavedCheck}
       />
+
+      <Form500EditorModal open={form500Open} onClose={() => setForm500Open(false)} payPeriodId={payPeriodId} />
 
       {/* Full-page PDF Preview modal — rendered as portal for proper z-index */}
       {previewUrl && previewCheck && createPortal(

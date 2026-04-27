@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { departmentsApi, ApiError } from '@/services/api';
+import { departmentsApi, clientDepartmentsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department } from '@/types';
 
@@ -25,7 +25,7 @@ interface DepartmentWithCount extends Department {
 }
 
 export function Departments() {
-  const { user } = useAuth();
+  const { user, isClient } = useAuth();
   // Use company_id from auth context, fall back to env var for dev mode
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
@@ -50,14 +50,16 @@ export function Departments() {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await departmentsApi.list({ company_id: companyId });
+      const response = isClient
+        ? await clientDepartmentsApi.list()
+        : await departmentsApi.list({ company_id: companyId });
       setDepartments(response.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load departments');
     } finally {
       setIsLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, isClient]);
 
   useEffect(() => {
     fetchDepartments();
@@ -73,7 +75,11 @@ export function Departments() {
     setNewDeptError(null);
 
     try {
-      await departmentsApi.create({ name: newDeptName.trim(), company_id: companyId });
+      if (isClient) {
+        await clientDepartmentsApi.create({ name: newDeptName.trim() });
+      } else {
+        await departmentsApi.create({ name: newDeptName.trim(), company_id: companyId });
+      }
       setNewDeptName('');
       setIsAddingNew(false);
       fetchDepartments();
@@ -110,7 +116,11 @@ export function Departments() {
     setEditError(null);
 
     try {
-      await departmentsApi.update(editingId, { name: editName.trim() });
+      if (isClient) {
+        await clientDepartmentsApi.update(editingId, { name: editName.trim() });
+      } else {
+        await departmentsApi.update(editingId, { name: editName.trim() });
+      }
       setEditingId(null);
       setEditName('');
       fetchDepartments();
@@ -134,7 +144,11 @@ export function Departments() {
   const handleToggleActive = async (dept: DepartmentWithCount): Promise<void> => {
     setTogglingId(dept.id);
     try {
-      await departmentsApi.update(dept.id, { active: !dept.active });
+      if (isClient) {
+        await clientDepartmentsApi.update(dept.id, { active: !dept.active });
+      } else {
+        await departmentsApi.update(dept.id, { active: !dept.active });
+      }
       fetchDepartments();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update department');

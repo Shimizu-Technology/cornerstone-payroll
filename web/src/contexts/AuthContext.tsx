@@ -20,6 +20,7 @@ interface AuthContextType {
   isAdmin: boolean;
   isManager: boolean;
   isAccountant: boolean;
+  isClient: boolean;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -76,6 +77,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isAdmin: user?.role === 'admin',
         isManager: user?.role === 'manager' || user?.role === 'admin',
         isAccountant: user?.role === 'accountant',
+        isClient: user?.role === 'client',
         signOut: async () => setUser(null),
         refreshUser: async () => {
           const res = await authApi.me();
@@ -173,6 +175,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         isAdmin: user?.role === 'admin',
         isManager: user?.role === 'manager' || user?.role === 'admin',
         isAccountant: user?.role === 'accountant',
+        isClient: user?.role === 'client',
         signOut: async () => {
           setUser(null);
           await clerkSignOut();

@@ -505,12 +505,16 @@ Decision needed:
 
 ### Phase 1: Payroll correctness and operational clarity
 
+Status: Implemented
+
 - fix historical YTD logic on checks and pay stubs
 - update DRT totals and labels so DRT means FIT only
 - switch Form 500 quarter logic to pay date
 - align wording that still references legacy EFTPS handling
 
 ### Phase 2: Data integrity and payroll setup
+
+Status: Implemented
 
 - require employee addresses where needed
 - print employee address on checks
@@ -519,18 +523,51 @@ Decision needed:
 
 ### Phase 3: Day-to-day payroll UX
 
+Status: Implemented
+
 - add sortable employee list
 - add zebra striping
 - add reusable numeric input behavior that allows blank editing
 - add sticky headers and sticky first column support
 - add a separate tips-paid-out deduction field
 
-### Phase 4: Product expansion
+### Phase 4A: Client portal foundation
 
-- client portal
-- configurable reporting
-- native Form 500 output
-- broader post-payroll Guam operations workspace
+Status: Implemented on 2026-04-26
+
+- true client portal
+- read-only portal reports
+- secure document uploads
+- audit logging for client actions
+- client-safe navigation and routing
+- client-facing employee and department maintenance for low-risk fields
+
+### Phase 4B: Approval workflow for payroll- and tax-sensitive changes
+
+Status: Implemented on 2026-04-26
+
+- pay-rate change requests
+- W-4 / withholding change requests
+- approval queue
+- request history and diffs
+- admin/manager review surface
+- direct application of approved changes with audit trail
+
+### Phase 4C: Native Form 500 output
+
+Status: Implemented on 2026-04-26
+
+- prefilled values
+- editable values before export
+- printable/downloadable generated PDF
+- filled-form overlay using the official Form 500 layout
+
+### Phase 4D: Broader Guam compliance workspace
+
+Status: Deferred
+
+- defer until the real Guam operations workflow is documented in more detail
+- do not build this until the tax firm confirms the actual Guam filing/payment workflow, statuses, and evidence requirements
 
 ## Recommended Implementation Order
 
@@ -568,12 +605,45 @@ Reason:
 
 - these are high-value workflow improvements but lower risk than payroll correctness work
 
-### Phase 4: Product expansion
+### Phase 4A: Client portal foundation
 
-- client portal
-- configurable reporting
-- native Form 500 output
-- broader post-payroll Guam operations workspace
+- true client portal
+- read-only portal reports
+- secure document uploads
+- audit logging for client actions
+
+Reason:
+
+- this is the first externally facing product slice
+
+### Phase 4B: Approval workflow for sensitive changes
+
+- pay-rate change requests
+- W-4 / withholding change requests
+- approval queue
+- request history and diffs
+
+Reason:
+
+- this lets clients work directly without making payroll-sensitive changes live immediately
+
+### Phase 4C: Native Form 500 output
+
+- prefilled values
+- editable values before export
+- printable/downloadable generated PDF
+
+Reason:
+
+- this is concrete enough to build now and gives immediate operational value
+
+### Phase 4D: Broader Guam compliance workspace
+
+- later obligations / payments / filings workspace
+
+Reason:
+
+- defer until the real tax-firm workflow is documented in enough detail
 
 Reason:
 
@@ -581,13 +651,13 @@ Reason:
 
 ## Open Decisions To Resolve Before Coding
 
-- What exactly should a client portal allow clients to do without staff approval
-- Should client portal and employee self-service be separate projects
+- Whether any payroll-sensitive portal edits should bypass approval in the first release
+- Whether staff-requested document checklists should be in the first upload-center release or a follow-up
 - Should FIT override replace, add to, or floor the W-4-based withholding amount
 - Should DRT-related screens show FIT only, while separate federal tax sections show FICA obligations
 - Should the tips-paid-out field reduce net pay only or also appear as a separate check/stub presentation item
 - Should native Form 500 output be a printable report, a generated PDF, or a filled-form overlay
-- How broad should configurable reporting be in the first version
+- How broad configurable reporting should be after the first read-only portal report release
 
 ## Suggested Acceptance Tests
 
@@ -606,6 +676,21 @@ Reason:
 
 - verify an accountant's client assignments can be changed from the intended admin context
 - verify client-scoped users cannot see unassigned companies
+- verify client users cannot reach staff-only routes or APIs
+- verify payroll-sensitive portal edits create approval requests instead of updating live values immediately
+
+### Client portal
+
+- verify a client user can sign in and see only portal-safe navigation
+- verify a client user can create employees and edit low-risk employee fields directly
+- verify a client user can upload documents securely
+- verify portal reports are view/download only
+
+### Native Form 500
+
+- verify payroll values prefill the form
+- verify users can edit prefilled values before export
+- verify the generated PDF is printable and closely matches the official layout
 
 ### UX
 
@@ -623,4 +708,5 @@ Reason:
 
 - The pay rate rounding issue should be considered resolved unless it reappears with new evidence.
 - The client portal and broader Guam post-payroll workflow are larger product projects and should not be treated as quick UI fixes.
+- The broader Guam compliance workspace is intentionally deferred until the actual Guam workflow is better documented.
 - Historical YTD accuracy is the highest-priority payroll correctness issue remaining from this testing batch.
