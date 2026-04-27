@@ -4,10 +4,13 @@ module Api
   module V1
     module Client
       class EmployeeChangeRequestsController < BaseController
+        SENSITIVE_PAYLOAD_KEYS = %w[ssn ssn_encrypted contractor_ein].freeze
+
         before_action :set_change_request, only: [ :show ]
 
         def index
           requests = EmployeeChangeRequest.for_company(current_company_id)
+                                          .where(requested_by_id: current_user.id)
                                           .includes(:employee, :requested_by, :reviewed_by)
                                           .recent_first
 
@@ -30,7 +33,11 @@ module Api
         private
 
         def set_change_request
-          @change_request = EmployeeChangeRequest.find_by(id: params[:id], company_id: current_company_id)
+          @change_request = EmployeeChangeRequest.find_by(
+            id: params[:id],
+            company_id: current_company_id,
+            requested_by_id: current_user.id
+          )
           return if @change_request
 
           render json: { error: "Change request not found" }, status: :not_found
@@ -53,12 +60,29 @@ module Api
           }
 
           if include_payloads
-            payload[:proposed_changes] = change_request.proposed_changes
-            payload[:original_values] = change_request.original_values
-            payload[:direct_changes_applied] = change_request.direct_changes_applied
+            payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
+            payload[:original_values] = sanitize_payload(change_request.original_values)
+            payload[:direct_changes_applied] = sanitize_payload(change_request.direct_changes_applied)
           end
 
           payload
+        end
+
+        def sanitize_payload(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, nested_value), sanitized|
+              sanitized[key] = if SENSITIVE_PAYLOAD_KEYS.include?(key.to_s)
+                "[REDACTED]"
+              else
+                sanitize_payload(nested_value)
+              end
+            end
+          when Array
+            value.map { |nested_value| sanitize_payload(nested_value) }
+          else
+            value
+          end
         end
       end
     end
