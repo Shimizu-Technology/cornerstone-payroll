@@ -5,6 +5,8 @@ require "combine_pdf"
 require "prawn"
 
 class Form500Generator
+  class TemplateUnavailableError < StandardError; end
+
   TEMPLATE_PATH = Rails.root.join("lib/assets/form500_template.pdf")
 
   QUARTER_LABELS = {
@@ -157,8 +159,10 @@ class Form500Generator
   end
 
   def generate
-    template = CombinePDF.load(TEMPLATE_PATH.to_s)
+    template = load_template!
     overlay = CombinePDF.parse(build_overlay_pdf)
+    raise TemplateUnavailableError, "Form 500 overlay could not be generated" if overlay.pages.blank?
+
     template.pages[0] << overlay.pages[0]
     template.to_pdf
   end
@@ -166,6 +170,24 @@ class Form500Generator
   private
 
   attr_reader :fields
+
+  def load_template!
+    template = CombinePDF.load(TEMPLATE_PATH.to_s)
+    raise TemplateUnavailableError, "Form 500 template is unavailable" if template.pages.blank?
+
+    template
+  rescue StandardError => e
+    raise TemplateUnavailableError, "Form 500 template is unavailable" if template_load_error?(e)
+
+    raise
+  end
+
+  def template_load_error?(error)
+    return true if error.is_a?(Errno::ENOENT)
+    return true if error.class.name.start_with?("CombinePDF::")
+
+    false
+  end
 
   def build_overlay_pdf
     pdf = Prawn::Document.new(page_size: "LETTER", margin: 0)
