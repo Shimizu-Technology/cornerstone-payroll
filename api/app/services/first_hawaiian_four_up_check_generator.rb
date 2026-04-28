@@ -184,11 +184,20 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def layout_field(section, field)
-    layout_config.fetch(section.to_s).fetch(field.to_s)
+    default = default_layout_config.fetch(section.to_s).fetch(field.to_s)
+    section_config = layout_config[section.to_s]
+    configured = section_config[field.to_s] if section_config.is_a?(Hash)
+    return default unless configured.is_a?(Hash)
+
+    default.merge(configured)
   end
 
   def layout_config
-    @layout_config ||= deep_merge(stringify_layout(DEFAULT_LAYOUT), stringify_layout(company.check_layout_config || {}))
+    @layout_config ||= deep_merge(default_layout_config, stringify_layout(company.check_layout_config || {}))
+  end
+
+  def default_layout_config
+    @default_layout_config ||= stringify_layout(DEFAULT_LAYOUT)
   end
 
   def stringify_layout(value)

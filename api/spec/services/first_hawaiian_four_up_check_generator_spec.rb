@@ -76,6 +76,25 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     expect(text).to include("FHB CHECK SLOT 4")
   end
 
+  it "falls back to default layout fields when custom config is malformed" do
+    company.update!(
+      check_layout_config: {
+        "check_face" => {
+          "date" => nil,
+          "payee" => "bad override"
+        },
+        "register" => nil
+      }
+    )
+
+    item = payroll_item_for("Ana", "Taylor", "2466", 100.25)
+    pdf = described_class.new(company: company, payroll_items: [item]).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+    expect(pdf).to start_with("%PDF")
+    expect(text).to include("Ana Taylor")
+  end
+
   it "rejects empty check batches" do
     generator = described_class.new(company: company)
 
