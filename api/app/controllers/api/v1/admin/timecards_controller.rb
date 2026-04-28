@@ -322,7 +322,12 @@ module Api
               is_primary: rate.is_primary,
               active: rate.active
             }
-            entry[:regular_hours] = rounded_hours if rate.id == selected_rate.id
+            if rate.id == selected_rate.id
+              entry[:regular_hours] = rounded_hours
+              entry[:overtime_hours] = 0
+              entry[:holiday_hours] = 0
+              entry[:pto_hours] = 0
+            end
             entry
           end
 

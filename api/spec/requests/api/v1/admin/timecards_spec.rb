@@ -107,6 +107,33 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(item.reload.hours_worked).to eq(11.0)
     end
 
+    it "clears stale non-regular hours from the selected wage rate when re-applying OCR hours" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, employment_type: "hourly")
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: flight_rate.id, label: "Flight Hours", rate: 30, regular_hours: 40, overtime_hours: 5, holiday_hours: 2, pto_hours: 1, active: true, is_primary: true },
+        { employee_wage_rate_id: admin_rate.id, label: "Admin Duties", rate: 10, regular_hours: 3, overtime_hours: 4, holiday_hours: 0, pto_hours: 0, active: true, is_primary: false }
+      ]
+      item.save!
+
+      post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
+
+      expect(response).to have_http_status(:ok)
+      wage_rates = item.reload.wage_rate_hours
+      flight_entry = wage_rates.find { |rate| rate["label"] == "Flight Hours" }
+      admin_entry = wage_rates.find { |rate| rate["label"] == "Admin Duties" }
+
+      expect(flight_entry["regular_hours"]).to eq(5.0)
+      expect(flight_entry["overtime_hours"]).to eq(0.0)
+      expect(flight_entry["holiday_hours"]).to eq(0.0)
+      expect(flight_entry["pto_hours"]).to eq(0.0)
+      expect(admin_entry["overtime_hours"]).to eq(4.0)
+      expect(item.hours_worked).to eq(8.0)
+      expect(item.overtime_hours).to eq(4.0)
+      expect(item.holiday_hours).to eq(0.0)
+      expect(item.pto_hours).to eq(0.0)
+    end
+
     it "does not double-count wage-rate hours when entries contain string and symbol keys" do
       controller = Api::V1::Admin::TimecardsController.new
 
