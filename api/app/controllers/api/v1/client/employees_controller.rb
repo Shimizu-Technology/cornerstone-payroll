@@ -233,7 +233,7 @@ module Api
             amount = BigDecimal(entry[:amount].to_s)
             next if label.blank? || amount <= 0 || !amount.finite?
 
-            { label: label, amount: amount.round(2).to_f }
+            { "label" => label, "amount" => amount.round(2).to_f }
           rescue ArgumentError, FloatDomainError
             nil
           end

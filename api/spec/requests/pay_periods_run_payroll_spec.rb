@@ -129,6 +129,12 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
     end
 
     it "includes submitted hourly employees when imported payroll items already exist" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) do |item|
+        custom_total = Array(item.custom_earnings).sum { |earning| earning["amount"].to_f }
+        item.gross_pay = (item.hours_worked.to_f * item.pay_rate.to_f) + custom_total
+        item.save!
+      end
+
       imported_employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20.00)
       create(
         :payroll_item,
@@ -170,6 +176,7 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(submitted_item.custom_earnings).to eq([
         { "label" => "Safe Bonus", "amount" => 12.35 }
       ])
+      expect(submitted_item.gross_pay.to_f).to eq(72.35)
     end
   end
 end
