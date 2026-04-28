@@ -43,7 +43,7 @@ class EmployeeChangeRequest < ApplicationRecord
 
   belongs_to :company
   belongs_to :employee
-  belongs_to :requested_by, class_name: "User"
+  belongs_to :requested_by, class_name: "User", optional: true
   belongs_to :reviewed_by, class_name: "User", optional: true
 
   enum :status, { pending: 0, approved: 1, rejected: 2 }

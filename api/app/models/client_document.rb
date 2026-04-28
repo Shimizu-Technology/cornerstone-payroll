@@ -30,7 +30,7 @@ class ClientDocument < ApplicationRecord
 
   belongs_to :company
   belongs_to :employee, optional: true
-  belongs_to :uploaded_by, class_name: "User"
+  belongs_to :uploaded_by, class_name: "User", optional: true
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :category, inclusion: { in: CATEGORIES }
