@@ -117,6 +117,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [draftCheckNumber, setDraftCheckNumber] = useState('');
   const [checkNumberError, setCheckNumberError] = useState<string | null>(null);
   const [savingCheckNumberId, setSavingCheckNumberId] = useState<number | null>(null);
+  const [startingSlot, setStartingSlot] = useState(1);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -175,6 +176,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       companiesApi.get(companyId).then(data => setCompany(data.company)).catch(() => {});
     }
   }, [companyId]);
+
+  const isFirstHawaiian4Up = company?.check_stock_type === 'first_hawaiian_4up';
 
   const handleCreate = async () => {
     setFormError(null);
@@ -247,7 +250,10 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const handlePreviewPdf = async (check: NonEmployeeCheck) => {
     setPdfLoading(check.id);
     try {
-      const blob = await nonEmployeeChecksApi.checkPdf(check.id);
+      const blob = await nonEmployeeChecksApi.checkPdf(
+        check.id,
+        isFirstHawaiian4Up ? { startingSlot } : undefined
+      );
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       const url = URL.createObjectURL(blob);
       setPreviewUrl(url);
@@ -286,7 +292,10 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const handlePrintSingle = async (check: NonEmployeeCheck) => {
     setPdfLoading(check.id);
     try {
-      const blob = await nonEmployeeChecksApi.checkPdf(check.id);
+      const blob = await nonEmployeeChecksApi.checkPdf(
+        check.id,
+        isFirstHawaiian4Up ? { startingSlot } : undefined
+      );
       const url = URL.createObjectURL(blob);
       const printWindow = window.open(url);
       if (printWindow) {
@@ -382,7 +391,23 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
               Tax deposits, garnishments, vendor payments, etc.
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {isFirstHawaiian4Up && (
+              <label className="flex items-center gap-2 text-sm text-blue-900">
+                Start slot
+                <select
+                  className="rounded border border-blue-200 bg-white px-2 py-1 text-sm text-gray-900"
+                  value={startingSlot}
+                  onChange={(e) => setStartingSlot(Number(e.target.value))}
+                  disabled={pdfLoading !== null}
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={4}>4</option>
+                </select>
+              </label>
+            )}
             {showGenerateFit && (
               <Button
                 size="sm"

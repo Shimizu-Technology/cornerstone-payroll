@@ -1876,8 +1876,10 @@ export const nonEmployeeChecksApi = {
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/mark_printed`),
   voidCheck: (id: number, reason: string) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}/void_check`, { reason }),
-  checkPdf: (id: number) =>
-    api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`),
+  checkPdf: (id: number, options?: { startingSlot?: number }) =>
+    api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`, {
+      starting_slot: options?.startingSlot,
+    }),
 };
 
 // ============================================================
