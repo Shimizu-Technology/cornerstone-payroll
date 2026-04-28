@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class Company < ApplicationRecord
+  CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
+
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :pay_periods, dependent: :destroy
@@ -25,7 +27,7 @@ class Company < ApplicationRecord
   validates :name, presence: true
   validates :ein, uniqueness: true, allow_blank: true
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
-  validates :check_stock_type, inclusion: { in: %w[bottom_check top_check] }
+  validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validate :check_layout_config_must_be_hash
@@ -84,6 +86,10 @@ class Company < ApplicationRecord
 
   def full_address
     [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
+  end
+
+  def first_hawaiian_4up_checks?
+    check_stock_type == "first_hawaiian_4up"
   end
 
   private

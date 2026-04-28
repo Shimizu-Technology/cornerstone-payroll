@@ -1,11 +1,14 @@
+require "shellwords"
+
 module TimecardOcr
   class CardSegmentationService
     TARGET_CARD_RATIO = 0.43
     MULTI_CARD_RATIO_THRESHOLD = 1.0
     MAX_CARD_COUNT = 4
     HORIZONTAL_TRIM_RATIO = 0.02
-    PDF_RENDER_DPI = 400
+    PDF_RENDER_DPI = 300
     PDF_RENDER_QUALITY = 95
+    MIN_SEGMENT_STD_DEV = 0.08
 
     def self.segment(file_path)
       new(file_path).segment
@@ -59,6 +62,16 @@ module TimecardOcr
     end
 
     def pdf_page_count
+      image_magick_binary = magick_binary
+      output = if image_magick_binary == "magick"
+        `#{Shellwords.join([image_magick_binary, "identify", @file_path])}`
+      else
+        `#{Shellwords.join(["identify", @file_path])}`
+      end
+
+      count = output.lines.count { |line| line.include?(File.basename(@file_path)) || line.match?(/\A#{Regexp.escape(@file_path)}/) }
+      return count if count.positive?
+
       image = MiniMagick::Image.open(@file_path)
       [image["%n"].to_i, 1].max
     end
@@ -68,7 +81,7 @@ module TimecardOcr
       output.binmode
       output.close
 
-      image_magick_binary = system("which magick > /dev/null 2>&1") ? "magick" : "convert"
+      image_magick_binary = magick_binary
       success = system(
         image_magick_binary,
         "-density", PDF_RENDER_DPI.to_s,
@@ -86,6 +99,10 @@ module TimecardOcr
       output.open
       output.binmode
       output
+    end
+
+    def magick_binary
+      @magick_binary ||= system("which magick > /dev/null 2>&1") ? "magick" : "convert"
     end
 
     def estimated_card_count(width, height)
@@ -126,8 +143,10 @@ module TimecardOcr
     def segment_has_content?(tempfile)
       path = tempfile.respond_to?(:path) ? tempfile.path : tempfile
       image = MiniMagick::Image.open(path)
+      image.resize "240x240>"
+      image.colorspace "Gray"
       std_dev = image["%[fx:standard_deviation]"].to_f
-      std_dev > 0.08
+      std_dev > MIN_SEGMENT_STD_DEV
     rescue => e
       Rails.logger.warn("CardSegmentation: content check failed (#{e.message}), keeping segment")
       true

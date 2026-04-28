@@ -136,6 +136,7 @@ Rails.application.routes.draw do
         # CPR-66: Per-item check actions (payroll_item_id param)
         get  "payroll_items/:payroll_item_id/check",             to: "checks#show",           as: :payroll_item_check
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
+        patch "payroll_items/:payroll_item_id/check_number",      to: "checks#update_check_number", as: :payroll_item_check_number
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint
         # Replace (uncashed) — void + cut a corrected check on the same item.
