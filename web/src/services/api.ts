@@ -453,6 +453,35 @@ export const departmentsApi = {
     api.patch<{ data: Department }>(`/admin/departments/${id}`, { department: data }),
 };
 
+export const clientEmployeesApi = {
+  list: (params?: {
+    status?: string;
+    department_id?: number;
+    employment_type?: string;
+    search?: string;
+    sort_by?: 'name' | 'department' | 'rate' | 'status';
+    sort_direction?: 'asc' | 'desc';
+    page?: number;
+    per_page?: number;
+    group_by?: string;
+  }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
+  get: (id: number) =>
+    api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
+  create: (data: EmployeeFormData) =>
+    api.post<ClientEmployeeUpdateResponse>('/client/employees', { employee: data }),
+  update: (id: number, data: Partial<EmployeeFormData>) =>
+    api.patch<ClientEmployeeUpdateResponse>(`/client/employees/${id}`, { employee: data }),
+};
+
+export const clientDepartmentsApi = {
+  list: (params?: { active?: boolean }) =>
+    api.get<{ data: (Department & { employee_count: number })[] }>('/client/departments', params),
+  create: (data: { name: string }) =>
+    api.post<{ data: Department }>('/client/departments', { department: data }),
+  update: (id: number, data: { name?: string; active?: boolean }) =>
+    api.patch<{ data: Department }>(`/client/departments/${id}`, { department: data }),
+};
+
 // Users (Admin API)
 interface UserCreateResponse {
   data: User;
@@ -713,6 +742,13 @@ export const payPeriodsApi = {
   },
   applyTimecardImport: (id: number, mappings: TimecardImportMapping[]) =>
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
+};
+
+export const clientPayPeriodsApi = {
+  list: (params?: { status?: string; year?: number }) =>
+    api.get<PayPeriodListResponse>('/client/pay_periods', params),
+  get: (id: number) =>
+    api.get<PayPeriodResponse>(`/client/pay_periods/${id}`),
 };
 
 // Timecard OCR import types
@@ -1271,6 +1307,17 @@ export const reportsApi = {
     }>(`/admin/reports/check_signoff_preview?pay_period_id=${payPeriodId}`),
 };
 
+export const clientReportsApi = {
+  dashboard: () =>
+    api.get<DashboardResponse>('/client/reports/dashboard'),
+  payrollRegister: (payPeriodId: number) =>
+    api.get<PayrollRegisterReport>('/client/reports/payroll_register', { pay_period_id: payPeriodId }),
+  payrollRegisterPdf: (payPeriodId: number) =>
+    api.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
+  ytdSummary: (year?: number) =>
+    api.get<YtdSummaryReport>('/client/reports/ytd_summary', { year }),
+};
+
 export interface TransmittalCustomEntry {
   title: string;
   details: string[];
@@ -1530,7 +1577,7 @@ interface AuthApiUser {
 export const companiesApi = {
   list: (params?: { active?: boolean }) => {
     const query = params?.active !== undefined ? `?active=${params.active}` : '';
-    return api.get<CompanyListResponse>(`/admin/companies${query}`);
+    return api.get<CompanyListResponse>(`/companies${query}`);
   },
   get: (id: number) =>
     api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`),
@@ -1560,6 +1607,78 @@ export const companiesApi = {
 
 // Initialize from localStorage on module load
 companiesApi.initFromStorage();
+
+export interface ClientEmployeeUpdateResponse {
+  data: Employee;
+  change_request?: EmployeeChangeRequest | null;
+  applied_direct_fields?: string[];
+  message?: string;
+}
+
+export interface ClientDocument {
+  id: number;
+  title: string;
+  category: string;
+  file_name: string;
+  content_type: string;
+  file_size: number;
+  notes?: string | null;
+  employee_id?: number | null;
+  employee_name?: string | null;
+  uploaded_by_id: number;
+  uploaded_by_name?: string | null;
+  created_at: string;
+  preview_status: 'pending' | 'processing' | 'ready' | 'failed' | 'not_required';
+  preview_available: boolean;
+  preview_generated_at?: string | null;
+  preview_content_type?: string | null;
+  preview_error?: string | null;
+}
+
+export interface ClientDocumentsUploadResponse {
+  data: ClientDocument[];
+  message?: string;
+}
+
+export interface EmployeeChangeRequest {
+  id: number;
+  status: 'pending' | 'approved' | 'rejected';
+  employee_id: number;
+  employee_name: string;
+  requested_by_id: number;
+  requested_by_name?: string | null;
+  reviewed_by_id?: number | null;
+  reviewed_by_name?: string | null;
+  request_notes?: string | null;
+  review_notes?: string | null;
+  proposed_changes?: Record<string, unknown>;
+  original_values?: Record<string, unknown>;
+  direct_changes_applied?: Record<string, unknown>;
+  created_at: string;
+  reviewed_at?: string | null;
+}
+
+export interface Form500Fields {
+  pay_period_id?: number | null;
+  company_name: string;
+  company_address_line1: string;
+  company_address_line2: string;
+  company_city: string;
+  company_state: string;
+  company_zip: string;
+  employer_identification_number: string;
+  total_taxes_dollars: string;
+  total_taxes_cents: string;
+  tax_year: string;
+  tax_period_quarter: number;
+  notes?: string;
+  pay_date?: string | null;
+  period_label?: string | null;
+  income_tax_withholding_on_wages: boolean;
+  tax_withholding_30_percent: boolean;
+  corporate_estimated_tax: boolean;
+  income_tax_withholding_1099: boolean;
+}
 
 // ============================================================
 // Company Assignments (RBAC)
@@ -1649,6 +1768,59 @@ export const employeeLoansApi = {
     api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date }),
   recordAddition: (id: number, amount: number, date?: string, notes?: string) =>
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/record_addition`, { amount, date, notes }),
+};
+
+export const clientDocumentsApi = {
+  list: (params?: { category?: string; employee_id?: number }) =>
+    api.get<{ data: ClientDocument[] }>('/client/documents', params),
+  upload: (formData: FormData) =>
+    api.postForm<ClientDocumentsUploadResponse>('/client/documents', formData),
+  preview: (id: number) =>
+    api.getBlobWithParams(`/client/documents/${id}/preview`),
+  download: (id: number) =>
+    api.getBlobWithParams(`/client/documents/${id}/download`),
+  delete: (id: number) =>
+    api.delete<void>(`/client/documents/${id}`),
+};
+
+export const adminClientDocumentsApi = {
+  list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
+    api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
+  preview: (id: number) =>
+    api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
+  download: (id: number) =>
+    api.getBlobWithParams(`/admin/client_documents/${id}/download`),
+  delete: (id: number) =>
+    api.delete<void>(`/admin/client_documents/${id}`),
+};
+
+export const clientEmployeeChangeRequestsApi = {
+  list: (params?: { status?: string; search?: string }) =>
+    api.get<{ data: EmployeeChangeRequest[] }>('/client/employee_change_requests', params),
+  get: (id: number) =>
+    api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
+};
+
+export const adminEmployeeChangeRequestsApi = {
+  list: (params?: { status?: string }) =>
+    api.get<{ data: EmployeeChangeRequest[] }>('/admin/employee_change_requests', params),
+  get: (id: number) =>
+    api.get<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}`),
+  approve: (id: number, reviewNotes?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/approve`, { review_notes: reviewNotes }),
+  reject: (id: number, reviewNotes?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/admin/employee_change_requests/${id}/reject`, { review_notes: reviewNotes }),
+};
+
+export const form500Api = {
+  defaults: (payPeriodId?: number) =>
+    api.get<{ data: Form500Fields; saved_at?: string | null }>('/form_500s/defaults', { pay_period_id: payPeriodId }),
+  save: (form: Form500Fields) =>
+    api.post<{ data: Form500Fields; saved_at?: string | null }>('/form_500s/save', { form_500: form }),
+  preview: (form: Form500Fields) =>
+    api.postBlob('/form_500s/preview', { form_500: form }),
+  download: (form: Form500Fields) =>
+    api.postBlob('/form_500s/download', { form_500: form }),
 };
 
 // ============================================================
