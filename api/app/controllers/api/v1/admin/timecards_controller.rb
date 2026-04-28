@@ -167,27 +167,37 @@ module Api
           end
 
           total_hours = timecard.punch_entries.where.not(hours_worked: nil).sum(:hours_worked)
+          item = nil
+          multi_rate_error = nil
 
-          item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
-          if item.new_record?
-            item.company_id = current_company_id
-            item.employment_type = employee.employment_type
-            item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          ApplicationRecord.transaction do
+            item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
+            if item.new_record?
+              item.company_id = current_company_id
+              item.employment_type = employee.employment_type
+              item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+            end
+
+            multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)
+            raise ActiveRecord::Rollback if multi_rate_error
+
+            item.import_source = "timecard_ocr"
+            item.custom_earnings = employee.default_custom_earnings if item.new_record? && item.custom_earnings.blank?
+            item.calculate!
+
+            timecard.update!(
+              pay_period: pay_period,
+              applied_employee: employee,
+              applied_payroll_item: item,
+              applied_to_payroll_at: Time.current
+            )
           end
 
-          multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)
           return render json: { error: multi_rate_error }, status: :unprocessable_entity if multi_rate_error
 
-          item.import_source = "timecard_ocr"
-          item.custom_earnings = employee.default_custom_earnings if item.new_record? && item.custom_earnings.blank?
-          item.calculate!
-
-          timecard.update!(
-            pay_period: pay_period,
-            applied_employee: employee,
-            applied_payroll_item: item,
-            applied_to_payroll_at: Time.current
-          )
+          unless item&.persisted? && timecard.reload.applied_payroll_item_id == item.id
+            return render json: { error: "Could not apply timecard to payroll" }, status: :unprocessable_entity
+          end
 
           render json: {
             employee_id: employee.id,

@@ -786,7 +786,7 @@ module Api
           }
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.includes(:employee).map do |item|
+            json[:payroll_items] = pay_period.payroll_items.includes(employee: :department).map do |item|
               payroll_item_json(item)
             end
           end
