@@ -400,6 +400,7 @@ module Api
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
+            state_withheld: payroll_item_state_withheld(item),
             retirement_payment: item.retirement_payment,
             roth_retirement_payment: item.roth_retirement_payment,
             loan_payment: item.loan_payment,
@@ -435,6 +436,12 @@ module Api
             updated_at: item.updated_at,
             wage_rate_hours: item.wage_rate_hours
           }
+        end
+
+        def payroll_item_state_withheld(item)
+          return item.state_withheld if item.respond_to?(:state_withheld)
+
+          item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data["state_withheld"] : nil
         end
       end
     end

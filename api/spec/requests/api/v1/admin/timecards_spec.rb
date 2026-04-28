@@ -83,6 +83,7 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(wage_rates.map { |rate| rate["label"] }).to contain_exactly("Flight Hours", "Admin Duties")
       expect(wage_rates.find { |rate| rate["label"] == "Flight Hours" }["regular_hours"]).to eq(5.0)
       expect(wage_rates.find { |rate| rate["label"] == "Admin Duties" }["regular_hours"]).to eq(3.0)
+      expect(response.parsed_body.dig("payroll_item", "state_withheld")).to be_nil
     end
 
     it "preserves hours from inactive wage rates when re-applying OCR hours" do

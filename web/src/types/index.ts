@@ -277,6 +277,7 @@ export interface PayrollItem {
   withholding_tax?: number; // Guam Territorial Income Tax (same as federal)
   social_security_tax?: number;
   medicare_tax?: number;
+  state_withheld?: number | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;
   withholding_tax_adjustment?: number | null;
