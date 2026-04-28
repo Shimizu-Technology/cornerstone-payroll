@@ -22,6 +22,8 @@ type ReportKey =
   | 'installmentLoans'
   | 'fullPrintPackage';
 
+type ReportAction = 'preview' | 'download';
+
 const REPORTS: { key: ReportKey; label: string; description: string }[] = [
   { key: 'payrollRegister', label: 'Payroll Register', description: 'Full payroll register with all employee details' },
   { key: 'payrollSummaryByEmployee', label: 'Payroll Summary by Employee', description: 'Detailed breakdown of earnings, deductions, and taxes per employee' },
@@ -1037,6 +1039,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
   const [signoffLoading, setSignoffLoading] = useState(false);
 
   const isReady = payPeriodStatus !== 'draft';
+  const loadingKey = (reportKey: ReportKey, action: ReportAction) => `${reportKey}:${action}`;
+  const isReportLoading = (reportKey: ReportKey, action: ReportAction) => Boolean(loading[loadingKey(reportKey, action)]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -1060,7 +1064,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       return;
     }
 
-    setLoading(prev => ({ ...prev, [reportKey]: true }));
+    const key = loadingKey(reportKey, 'preview');
+    setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
@@ -1072,7 +1077,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       setPreviewState(prev => ({ ...prev, open: false }));
       setError(err instanceof Error ? err.message : 'Failed to generate report');
     } finally {
-      setLoading(prev => ({ ...prev, [reportKey]: false }));
+      setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1082,7 +1087,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       return;
     }
 
-    setLoading(prev => ({ ...prev, [reportKey]: true }));
+    const key = loadingKey(reportKey, 'download');
+    setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
 
     try {
@@ -1091,7 +1097,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download report');
     } finally {
-      setLoading(prev => ({ ...prev, [reportKey]: false }));
+      setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1265,6 +1271,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {REPORTS.map(report => {
               const hasSaved = savedTransmittal && needsTransmittalEditor(report.key);
+              const previewLoading = isReportLoading(report.key, 'preview');
+              const downloadLoading = isReportLoading(report.key, 'download');
               return (
                 <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="mr-3 min-w-0">
@@ -1284,7 +1292,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                         variant="outline"
                         size="sm"
                         onClick={() => handlePreview(report.key, report.label)}
-                        disabled={loading[report.key]}
+                        disabled={previewLoading}
                         className="text-xs"
                         title="Edit transmittal settings before generating"
                       >
@@ -1298,10 +1306,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                       variant="outline"
                       size="sm"
                       onClick={() => hasSaved ? handleReprint(report.key, report.label) : handlePreview(report.key, report.label)}
-                      disabled={loading[report.key]}
+                      disabled={previewLoading}
                       className="text-xs"
                     >
-                      {loading[report.key] ? (
+                      {previewLoading ? (
                         <span className="flex items-center gap-1">
                           <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -1323,13 +1331,17 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                       variant="outline"
                       size="sm"
                       onClick={() => handleDownload(report.key)}
-                      disabled={loading[report.key]}
+                      disabled={downloadLoading}
                       className="text-xs"
                       title="Download PDF"
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
+                      {downloadLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      )}
                     </Button>
                   </div>
                 </div>

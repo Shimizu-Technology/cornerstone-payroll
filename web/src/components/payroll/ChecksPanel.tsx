@@ -16,6 +16,8 @@ interface ChecksPanelProps {
   searchTerm?: string;
 }
 
+type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted';
+
 function checkStatusBadge(item: CheckItem) {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
   if (item.check_printed_at)
@@ -37,7 +39,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ id: number; action: CheckAction } | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchAction, setBatchAction] = useState<string | null>(null);
   const [startingSlot, setStartingSlot] = useState(1);
@@ -66,6 +68,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   }, [payPeriod.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  const isActionLoading = (id: number, action: CheckAction) =>
+    actionLoading?.id === id && actionLoading.action === action;
 
   // ---- Batch PDF download ----
   const handleBatchDownload = async () => {
@@ -109,7 +114,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
 
   // ---- Preview single check PDF ----
   const handlePreviewPdf = async (item: CheckItem) => {
-    setActionLoading(item.id);
+    setActionLoading({ id: item.id, action: 'preview' });
     try {
       const blob = await checksApi.checkPdf(item.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
       if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -201,7 +206,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       return;
     }
 
-    setActionLoading(item.id);
+    setActionLoading({ id: item.id, action: 'saveCheckNumber' });
     setCheckNumberError(null);
     try {
       const result = await checksApi.updateCheckNumber(
@@ -225,7 +230,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
 
   // ---- Mark single printed ----
   const handleMarkPrinted = async (item: CheckItem) => {
-    setActionLoading(item.id);
+    setActionLoading({ id: item.id, action: 'markPrinted' });
     try {
       const result = await checksApi.markPrinted(item.id);
       if (result.already_printed) {
@@ -416,7 +421,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           <Button
                             size="sm"
                             onClick={() => handleSaveCheckNumber(item)}
-                            disabled={actionLoading === item.id}
+                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
                             className="h-8 px-2 text-xs"
                           >
                             Save
@@ -425,7 +430,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                             size="sm"
                             variant="outline"
                             onClick={cancelCheckNumberEdit}
-                            disabled={actionLoading === item.id}
+                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
                             className="h-8 px-2 text-xs"
                           >
                             Cancel
@@ -470,10 +475,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => handlePreviewPdf(item)}
-                          disabled={actionLoading === item.id}
+                          disabled={isActionLoading(item.id, 'preview')}
                           className={`text-xs px-2 py-1 ${item.voided ? 'text-gray-500' : ''}`}
                         >
-                          {actionLoading === item.id ? '…' : item.voided ? 'VOID PDF' : 'Preview'}
+                          {isActionLoading(item.id, 'preview') ? '…' : item.voided ? 'VOID PDF' : 'Preview'}
                         </Button>
                       )}
 
@@ -483,10 +488,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => handleMarkPrinted(item)}
-                          disabled={actionLoading === item.id}
+                          disabled={isActionLoading(item.id, 'markPrinted')}
                           className="text-xs px-2 py-1"
                         >
-                          {actionLoading === item.id ? '…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
+                          {isActionLoading(item.id, 'markPrinted') ? '…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
                         </Button>
                       )}
 
@@ -496,7 +501,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => setReprintTarget(item)}
-                          disabled={actionLoading === item.id}
+                          disabled={actionLoading?.id === item.id}
                           className="text-xs px-2 py-1 text-orange-700 border-orange-300 hover:bg-orange-50"
                         >
                           Reprint
@@ -509,7 +514,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => setVoidTarget(item)}
-                          disabled={actionLoading === item.id}
+                          disabled={actionLoading?.id === item.id}
                           className="text-xs px-2 py-1 text-red-700 border-red-300 hover:bg-red-50"
                         >
                           Void
