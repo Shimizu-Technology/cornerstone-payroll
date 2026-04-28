@@ -271,6 +271,9 @@ module Api
           unless uses_rate_selection
             item.clear_wage_rate_hours!
             item.hours_worked = rounded_hours
+            item.overtime_hours = 0
+            item.holiday_hours = 0
+            item.pto_hours = 0
             return nil
           end
 

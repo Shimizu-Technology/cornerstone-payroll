@@ -464,6 +464,12 @@ module Api
             return render json: { error: "Check number cannot exceed 9,999,999" }, status: :unprocessable_entity
           end
 
+          if new_number < @company.next_check_number.to_i
+            return render json: {
+              error: "Next check number cannot move backward. Current next check number is #{@company.next_check_number}."
+            }, status: :unprocessable_entity
+          end
+
           issued_numbers = issued_check_numbers_for_company(@company)
           highest_issued_number = issued_numbers.max
           if highest_issued_number && new_number <= highest_issued_number

@@ -1237,16 +1237,18 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     });
     const all = [...first.timecards];
 
-    for (let nextPage = 2; nextPage <= first.meta.total_pages; nextPage += 1) {
-      const next = await timecardsApi.listPaginated({
-        page: nextPage,
-        perPage: embeddedPerPage,
-        payPeriodId,
-        search: activeSearch || undefined,
-        status: statusFilter || undefined,
-      });
-      all.push(...next.timecards);
-    }
+    const remainingPages = Array.from(
+      { length: Math.max(first.meta.total_pages - 1, 0) },
+      (_, index) => index + 2
+    );
+    const remainingResponses = await Promise.all(remainingPages.map((nextPage) => timecardsApi.listPaginated({
+      page: nextPage,
+      perPage: embeddedPerPage,
+      payPeriodId,
+      search: activeSearch || undefined,
+      status: statusFilter || undefined,
+    })));
+    remainingResponses.forEach((next) => all.push(...next.timecards));
 
     return { timecards: all, totalCount: first.meta.total_count };
   }, [activeSearch, payPeriodId, statusFilter]);
