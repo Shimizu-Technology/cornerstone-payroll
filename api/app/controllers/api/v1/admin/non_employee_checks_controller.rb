@@ -325,6 +325,8 @@ module Api
         end
 
         def sync_transmittal_check_number!(check)
+          return unless check.pay_period
+
           transmittal = check.pay_period.transmittal
           return unless transmittal
 

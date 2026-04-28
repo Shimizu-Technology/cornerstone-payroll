@@ -195,6 +195,15 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(pay_period.transmittal.reload.non_employee_check_numbers[check.id.to_s]).to eq("2469")
     end
 
+    it "does not try to sync a transmittal when a check has no pay period" do
+      controller = Api::V1::Admin::NonEmployeeChecksController.new
+      check_without_period = instance_double(NonEmployeeCheck, pay_period: nil)
+
+      expect {
+        controller.send(:sync_transmittal_check_number!, check_without_period)
+      }.not_to raise_error
+    end
+
     it "advances next_check_number when assigning a higher non-employee check number" do
       company.update!(next_check_number: 2000)
 
