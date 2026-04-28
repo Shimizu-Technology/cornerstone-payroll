@@ -22,6 +22,8 @@ type ReportKey =
   | 'installmentLoans'
   | 'fullPrintPackage';
 
+type ReportAction = 'preview' | 'download';
+
 const REPORTS: { key: ReportKey; label: string; description: string }[] = [
   { key: 'payrollRegister', label: 'Payroll Register', description: 'Full payroll register with all employee details' },
   { key: 'payrollSummaryByEmployee', label: 'Payroll Summary by Employee', description: 'Detailed breakdown of earnings, deductions, and taxes per employee' },
@@ -415,12 +417,12 @@ function TransmittalEditorModal({
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
           setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
-          setCheckFirst(saved.check_number_first || data.payroll_checks.first || '');
-          setCheckLast(saved.check_number_last || data.payroll_checks.last || '');
+          setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
+          setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
-            neNums[c.id] = savedNum || c.check_number || '';
+            neNums[c.id] = c.check_number || savedNum || '';
           });
           setNeCheckNumbers(neNums);
           setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
@@ -1037,6 +1039,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
   const [signoffLoading, setSignoffLoading] = useState(false);
 
   const isReady = payPeriodStatus !== 'draft';
+  const loadingKey = (reportKey: ReportKey, action: ReportAction) => `${reportKey}:${action}`;
+  const isReportLoading = (reportKey: ReportKey, action: ReportAction) => Boolean(loading[loadingKey(reportKey, action)]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -1060,7 +1064,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       return;
     }
 
-    setLoading(prev => ({ ...prev, [reportKey]: true }));
+    const key = loadingKey(reportKey, 'preview');
+    setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
@@ -1072,7 +1077,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       setPreviewState(prev => ({ ...prev, open: false }));
       setError(err instanceof Error ? err.message : 'Failed to generate report');
     } finally {
-      setLoading(prev => ({ ...prev, [reportKey]: false }));
+      setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1082,7 +1087,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
       return;
     }
 
-    setLoading(prev => ({ ...prev, [reportKey]: true }));
+    const key = loadingKey(reportKey, 'download');
+    setLoading(prev => ({ ...prev, [key]: true }));
     setError(null);
 
     try {
@@ -1091,25 +1097,43 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download report');
     } finally {
-      setLoading(prev => ({ ...prev, [reportKey]: false }));
+      setLoading(prev => ({ ...prev, [key]: false }));
     }
   };
 
-  const savedToOptions = (saved: SavedTransmittal): TransmittalOptions => ({
-    preparerName: saved.preparer_name || undefined,
-    notes: saved.notes?.length ? saved.notes : undefined,
-    reportList: saved.report_list || [],
-    checkNumberFirst: saved.check_number_first || undefined,
-    checkNumberLast: saved.check_number_last || undefined,
-    nonEmployeeCheckNumbers: saved.non_employee_check_numbers
-      ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
-      : undefined,
-  });
+  const savedToOptions = (saved: SavedTransmittal, preview?: TransmittalPreview): TransmittalOptions => {
+    const liveNonEmployeeNumbers = preview?.non_employee_checks.reduce<Record<number, string>>((acc, check) => {
+      const savedNum = saved.non_employee_check_numbers?.[String(check.id)];
+      const number = check.check_number || savedNum;
+      if (number) acc[check.id] = number;
+      return acc;
+    }, {});
+
+    return {
+      preparerName: saved.preparer_name || undefined,
+      notes: saved.notes?.length ? saved.notes : undefined,
+      reportList: saved.report_list || [],
+      checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
+      checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
+      nonEmployeeCheckNumbers: liveNonEmployeeNumbers && Object.keys(liveNonEmployeeNumbers).length > 0
+        ? liveNonEmployeeNumbers
+        : saved.non_employee_check_numbers
+        ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
+        : undefined,
+    };
+  };
 
   const handleReprint = async (reportKey: ReportKey, label: string) => {
     if (!savedTransmittal) return;
-    await handlePreview(reportKey, label, savedToOptions(savedTransmittal));
-    refreshSavedState();
+    try {
+      const preview = await transmittalApi.preview(payPeriodId);
+      setSavedTransmittal(preview.saved_transmittal);
+      const saved = preview.saved_transmittal || savedTransmittal;
+      await handlePreview(reportKey, label, savedToOptions(saved, preview));
+      refreshSavedState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh transmittal data');
+    }
   };
 
   const refreshSavedState = () => {
@@ -1247,6 +1271,8 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {REPORTS.map(report => {
               const hasSaved = savedTransmittal && needsTransmittalEditor(report.key);
+              const previewLoading = isReportLoading(report.key, 'preview');
+              const downloadLoading = isReportLoading(report.key, 'download');
               return (
                 <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="mr-3 min-w-0">
@@ -1266,7 +1292,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                         variant="outline"
                         size="sm"
                         onClick={() => handlePreview(report.key, report.label)}
-                        disabled={loading[report.key]}
+                        disabled={previewLoading}
                         className="text-xs"
                         title="Edit transmittal settings before generating"
                       >
@@ -1280,10 +1306,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                       variant="outline"
                       size="sm"
                       onClick={() => hasSaved ? handleReprint(report.key, report.label) : handlePreview(report.key, report.label)}
-                      disabled={loading[report.key]}
+                      disabled={previewLoading}
                       className="text-xs"
                     >
-                      {loading[report.key] ? (
+                      {previewLoading ? (
                         <span className="flex items-center gap-1">
                           <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -1305,13 +1331,17 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
                       variant="outline"
                       size="sm"
                       onClick={() => handleDownload(report.key)}
-                      disabled={loading[report.key]}
+                      disabled={downloadLoading}
                       className="text-xs"
                       title="Download PDF"
                     >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
+                      {downloadLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      )}
                     </Button>
                   </div>
                 </div>

@@ -25,6 +25,7 @@ const payFrequencyOptions = [
 const checkStockOptions = [
   { value: 'top_check', label: 'Top Check' },
   { value: 'bottom_check', label: 'Bottom Check' },
+  { value: 'first_hawaiian_4up', label: 'First Hawaiian 4-Up' },
 ];
 
 const emptyForm: CompanyFormData = {

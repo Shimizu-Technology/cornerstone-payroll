@@ -297,7 +297,7 @@ export interface PayrollItem {
   custom_earnings?: { label: string; amount: number }[];
   // Check info
   // CPR-66: Check printing lifecycle
-  check_number?: string;
+  check_number?: string | null;
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -606,6 +606,7 @@ export interface CheckListMeta {
   printed: number;
   unprinted: number;
   voided: number;
+  check_stock_type: CheckStockType;
 }
 
 export interface CheckListResponse {
@@ -613,9 +614,11 @@ export interface CheckListResponse {
   meta: CheckListMeta;
 }
 
+export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
+
 export interface CheckSettings {
   next_check_number: number;
-  check_stock_type: 'bottom_check' | 'top_check';
+  check_stock_type: CheckStockType;
   check_offset_x: number;
   check_offset_y: number;
   bank_name: string | null;
@@ -782,7 +785,7 @@ export interface NonEmployeeCheck {
   id: number;
   pay_period_id: number;
   company_id: number;
-  check_number?: string;
+  check_number?: string | null;
   payable_to: string;
   amount: number;
   check_type: NonEmployeeCheckType;
