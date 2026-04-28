@@ -297,7 +297,7 @@ export interface PayrollItem {
   custom_earnings?: { label: string; amount: number }[];
   // Check info
   // CPR-66: Check printing lifecycle
-  check_number?: string;
+  check_number?: string | null;
   check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
@@ -785,7 +785,7 @@ export interface NonEmployeeCheck {
   id: number;
   pay_period_id: number;
   company_id: number;
-  check_number?: string;
+  check_number?: string | null;
   payable_to: string;
   amount: number;
   check_type: NonEmployeeCheckType;

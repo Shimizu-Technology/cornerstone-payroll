@@ -1860,6 +1860,14 @@ export const nonEmployeeChecksApi = {
       `/admin/non_employee_checks/${id}`,
       { non_employee_check: data, ...(reason ? { reason } : {}) }
     ),
+  updateCheckNumber: (id: number, checkNumber: string | null, reason?: string) =>
+    api.patch<{ non_employee_check: NonEmployeeCheck }>(
+      `/admin/non_employee_checks/${id}`,
+      {
+        non_employee_check: { check_number: checkNumber },
+        ...(reason ? { reason } : {}),
+      }
+    ),
   history: (id: number) =>
     api.get<{ history: import('@/types').NonEmployeeCheckEdit[] }>(`/admin/non_employee_checks/${id}/history`),
   delete: (id: number) =>

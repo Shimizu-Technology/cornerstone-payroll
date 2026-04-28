@@ -60,11 +60,24 @@ module Api
           check.created_by = current_user
           check.pay_period = pay_period if pay_period
 
-          if check.save
+          created = false
+          ActiveRecord::Base.transaction do
+            check.company.lock!
+            validate_check_number_assignment!(check_number_value(attrs), excluding_non_employee_check_id: nil)
+            created = check.save
+            advance_next_check_number!(check.company, check.check_number) if created
+            raise ActiveRecord::Rollback unless created
+          end
+
+          if created
             render json: { non_employee_check: check_payload(check) }, status: :created
           else
             render json: { errors: check.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { error: "Check number is already in use for this company" }, status: :unprocessable_entity
         end
 
         # PATCH /api/v1/admin/non_employee_checks/:id
@@ -94,6 +107,15 @@ module Api
           # render based on the outcome once we're back at the controller scope.
           updated = false
           ActiveRecord::Base.transaction do
+            if attrs.key?("check_number")
+              @check.company.lock!
+              @check.lock!
+              validate_check_number_assignment!(
+                check_number_value(attrs),
+                excluding_non_employee_check_id: @check.id
+              )
+            end
+
             if @check.update(attrs)
               after_snapshot = audit_snapshot(@check)
               changed = changed_fields(before_snapshot, after_snapshot)
@@ -106,6 +128,11 @@ module Api
                   changed_fields: changed,
                   reason: reason
                 )
+              end
+
+              if changed.include?("check_number")
+                advance_next_check_number!(@check.company, @check.check_number)
+                sync_transmittal_check_number!(@check)
               end
 
               updated = true
@@ -122,6 +149,10 @@ module Api
           # is reflected in `edit_count` without issuing a second COUNT query.
           @check.edits.reset
           render json: { non_employee_check: check_payload(@check) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { error: "Check number is already in use for this company" }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/non_employee_checks/:id/history
@@ -261,6 +292,50 @@ module Api
             created_at: check.created_at,
             updated_at: check.updated_at
           }
+        end
+
+        def check_number_value(attrs)
+          attrs["check_number"] || attrs[:check_number]
+        end
+
+        def validate_check_number_assignment!(check_number, excluding_non_employee_check_id:)
+          return if check_number.blank?
+
+          normalized = check_number.to_s
+          raise ArgumentError, "Check number must be numeric" unless normalized.match?(/\A\d+\z/)
+          raise ArgumentError, "Check number must be greater than 0" if normalized.to_i < 1
+          raise ArgumentError, "Check number cannot exceed 9,999,999" if normalized.to_i > 9_999_999
+
+          if PayrollItem.where(company_id: current_company_id, check_number: normalized).exists?
+            raise ArgumentError, "Check number #{normalized} is already used by a payroll check"
+          end
+
+          duplicate_scope = NonEmployeeCheck.where(company_id: current_company_id, check_number: normalized)
+          duplicate_scope = duplicate_scope.where.not(id: excluding_non_employee_check_id) if excluding_non_employee_check_id
+          return unless duplicate_scope.exists?
+
+          raise ArgumentError, "Check number #{normalized} is already used by another non-employee check"
+        end
+
+        def advance_next_check_number!(company, check_number)
+          return if check_number.blank?
+
+          next_number = check_number.to_i + 1
+          company.update!(next_check_number: next_number) if next_number > company.next_check_number
+        end
+
+        def sync_transmittal_check_number!(check)
+          transmittal = check.pay_period.transmittal
+          return unless transmittal
+
+          numbers = (transmittal.non_employee_check_numbers || {}).stringify_keys
+          if check.check_number.present?
+            numbers[check.id.to_s] = check.check_number
+          else
+            numbers.delete(check.id.to_s)
+          end
+
+          transmittal.update!(non_employee_check_numbers: numbers)
         end
 
         # Resolves `edit_count` without re-querying when callers can do

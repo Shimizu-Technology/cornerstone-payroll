@@ -113,6 +113,10 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
   const [form500Open, setForm500Open] = useState(false);
+  const [editingCheckNumberId, setEditingCheckNumberId] = useState<number | null>(null);
+  const [draftCheckNumber, setDraftCheckNumber] = useState('');
+  const [checkNumberError, setCheckNumberError] = useState<string | null>(null);
+  const [savingCheckNumberId, setSavingCheckNumberId] = useState<number | null>(null);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -134,6 +138,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     // and remounts the history component, which re-runs its fetch effect —
     // no fragile setTimeout(0) remount trick needed.
     setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
   // Keep the parent's onChecksLoaded callback in a ref so loadChecks doesn't
@@ -297,6 +302,47 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
       alert(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
       setPdfLoading(null);
+    }
+  };
+
+  const startCheckNumberEdit = (check: NonEmployeeCheck) => {
+    setEditingCheckNumberId(check.id);
+    setDraftCheckNumber(check.check_number || '');
+    setCheckNumberError(null);
+  };
+
+  const cancelCheckNumberEdit = () => {
+    setEditingCheckNumberId(null);
+    setDraftCheckNumber('');
+    setCheckNumberError(null);
+  };
+
+  const handleSaveCheckNumber = async (check: NonEmployeeCheck) => {
+    const nextNumber = draftCheckNumber.trim();
+    const normalized = nextNumber === '' ? null : nextNumber;
+    if (normalized && !/^\d+$/.test(normalized)) {
+      setCheckNumberError('Check number must be numeric.');
+      return;
+    }
+    if ((check.check_number || null) === normalized) {
+      cancelCheckNumberEdit();
+      return;
+    }
+
+    setSavingCheckNumberId(check.id);
+    setCheckNumberError(null);
+    try {
+      const result = await nonEmployeeChecksApi.updateCheckNumber(
+        check.id,
+        normalized,
+        'Corrected from the non-employee Checks section'
+      );
+      handleSavedCheck(result.non_employee_check);
+      cancelCheckNumberEdit();
+    } catch (err) {
+      setCheckNumberError(err instanceof Error ? err.message : 'Failed to update check number');
+    } finally {
+      setSavingCheckNumberId(null);
     }
   };
 
@@ -518,7 +564,57 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
                         <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
-                        {check.check_number && <span>Check #{check.check_number}</span>}
+                        <span className="inline-flex items-center gap-1.5">
+                          {editingCheckNumberId === check.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <span>Check #</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={draftCheckNumber}
+                                onChange={(e) => setDraftCheckNumber(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveCheckNumber(check);
+                                  if (e.key === 'Escape') cancelCheckNumberEdit();
+                                }}
+                                className="h-7 w-20 rounded border border-blue-300 px-2 font-mono text-xs text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveCheckNumber(check)}
+                                disabled={savingCheckNumberId === check.id}
+                                className="font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-300"
+                              >
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelCheckNumberEdit}
+                                disabled={savingCheckNumberId === check.id}
+                                className="text-gray-500 hover:text-gray-700 disabled:text-gray-300"
+                              >
+                                Cancel
+                              </button>
+                            </span>
+                          ) : (
+                            <>
+                              <span>Check #{check.check_number || '—'}</span>
+                              {!check.voided && (
+                                <button
+                                  type="button"
+                                  onClick={() => startCheckNumberEdit(check)}
+                                  className="font-medium text-blue-600 hover:text-blue-800"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </span>
+                        {editingCheckNumberId === check.id && checkNumberError && (
+                          <span className="basis-full text-xs text-red-600">{checkNumberError}</span>
+                        )}
                         {check.memo && <span>{check.memo}</span>}
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
                         {check.check_type === 'tax_deposit' && (

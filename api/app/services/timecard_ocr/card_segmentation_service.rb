@@ -150,6 +150,8 @@ module TimecardOcr
     rescue => e
       Rails.logger.warn("CardSegmentation: content check failed (#{e.message}), keeping segment")
       true
+    ensure
+      image&.destroy!
     end
 
     def copy_as_jpeg(image)
