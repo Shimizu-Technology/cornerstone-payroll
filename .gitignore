@@ -2,4 +2,5 @@
 data/mosa-2025/raw/
 data/mosa-2025/manifest.json
 *.pdf
+!api/lib/assets/form500_template.pdf
 *.xlsx
