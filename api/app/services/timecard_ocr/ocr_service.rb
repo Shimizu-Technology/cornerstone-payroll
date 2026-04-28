@@ -27,13 +27,13 @@ module TimecardOcr
       raw = extract_raw(images)
       raw = verify_and_correct(images, raw)
       raw = OcrDigitConsistencyService.correct(raw)
-      result = OcrResponseNormalizer.normalize(raw, reference_date: @timecard.created_at.to_date)
+      result = normalize_ocr_payload(raw)
 
       if OcrResultEvaluator.needs_stronger_review?(result) && strong_model != primary_model
         fallback_raw = extract_raw(images, model: strong_model)
         fallback_raw = verify_and_correct(images, fallback_raw, model: strong_model)
         fallback_raw = OcrDigitConsistencyService.correct(fallback_raw)
-        fallback = OcrResponseNormalizer.normalize(fallback_raw, reference_date: @timecard.created_at.to_date)
+        fallback = normalize_ocr_payload(fallback_raw)
         result = fallback if OcrResultEvaluator.score(fallback) > OcrResultEvaluator.score(result)
       end
 
@@ -41,6 +41,15 @@ module TimecardOcr
     end
 
     private
+
+    def normalize_ocr_payload(raw)
+      OcrResponseNormalizer.normalize(
+        raw,
+        reference_date: @timecard.created_at.to_date,
+        period_start_hint: @timecard.pay_period&.start_date,
+        period_end_hint: @timecard.pay_period&.end_date
+      )
+    end
 
     def prepare_images
       original_tmp = StorageService.download_to_tempfile(@timecard.image_url)

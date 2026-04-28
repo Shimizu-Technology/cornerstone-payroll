@@ -127,5 +127,43 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(refreshed_item&.pay_rate.to_f).to eq(10.0)
       expect(refreshed_item&.wage_rate_hours&.first&.dig("rate")).to eq(10.0)
     end
+
+    it "includes submitted hourly employees when imported payroll items already exist" do
+      imported_employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20.00)
+      create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: imported_employee,
+        company: company,
+        import_source: "manual_import",
+        employment_type: "hourly",
+        hours_worked: 8
+      )
+
+      employee.update!(
+        default_custom_earnings: [
+          { "label" => "Training Stipend", "amount" => 25.0 }
+        ]
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll",
+           params: {
+             hours: {
+               employee.id.to_s => {
+                 regular: 6,
+                 overtime: 0
+               }
+             }
+           },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      submitted_item = pay_period.payroll_items.find_by(employee_id: employee.id)&.reload
+      expect(submitted_item).to be_present
+      expect(submitted_item.hours_worked.to_f).to eq(6.0)
+      expect(submitted_item.custom_earnings).to eq([
+        { "label" => "Training Stipend", "amount" => 25.0 }
+      ])
+    end
   end
 end

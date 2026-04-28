@@ -118,8 +118,13 @@ module Api
             :state,
             :zip,
             :phone,
-            :status
+            :status,
+            default_custom_earnings: [ :label, :amount ]
           ).tap do |permitted|
+            if permitted.key?(:default_custom_earnings)
+              permitted[:default_custom_earnings] = normalize_custom_earnings(permitted[:default_custom_earnings])
+            end
+
             if permitted[:ssn].present?
               permitted[:ssn_encrypted] = permitted.delete(:ssn)
             else
@@ -213,6 +218,18 @@ module Api
           end
 
           data
+        end
+
+        def normalize_custom_earnings(entries)
+          Array(entries).filter_map do |entry|
+            label = entry[:label].to_s.strip
+            amount = BigDecimal(entry[:amount].to_s)
+            next if label.blank? || amount <= 0
+
+            { label: label, amount: amount.round(2).to_f }
+          rescue ArgumentError
+            nil
+          end
         end
       end
     end

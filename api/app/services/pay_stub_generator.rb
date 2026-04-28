@@ -119,7 +119,19 @@ class PayStubGenerator
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
 
-    if payroll_item.hourly?
+    item_earnings = payroll_item.payroll_item_earnings.to_a
+
+    if item_earnings.any?
+      item_earnings.each do |earning|
+        earnings_data << [
+          earning.label.presence || earning.category.to_s.titleize,
+          earning.hours.present? ? format_hours(earning.hours) : "—",
+          earning.rate.present? ? format_currency(earning.rate) : "—",
+          format_currency(earning.amount),
+          "—"
+        ]
+      end
+    elsif payroll_item.hourly?
       # Regular pay
       if payroll_item.hours_worked.to_f > 0
         earnings_data << [
@@ -175,21 +187,23 @@ class PayStubGenerator
       ]
     end
 
-    # Bonus
-    if payroll_item.bonus.to_f > 0
-      earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
-    end
+    if item_earnings.empty?
+      # Bonus
+      if payroll_item.bonus.to_f > 0
+        earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
+      end
 
-    # Tips
-    if payroll_item.reported_tips.to_f > 0
-      earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
-    end
+      # Tips
+      if payroll_item.reported_tips.to_f > 0
+        earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
+      end
 
-    # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
-    Array(payroll_item.custom_earnings).each do |ce|
-      amt = ce["amount"].to_f
-      if amt > 0
-        earnings_data << [ ce["label"].presence || "Other Earning", "—", "—", format_currency(amt), "—" ]
+      # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
+      Array(payroll_item.custom_earnings).each do |ce|
+        amt = ce["amount"].to_f
+        if amt > 0
+          earnings_data << [ ce["label"].presence || "Other Earning", "—", "—", format_currency(amt), "—" ]
+        end
       end
     end
 

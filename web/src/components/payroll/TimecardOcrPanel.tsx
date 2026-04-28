@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { timecardsApi, punchEntriesApi, employeesApi } from '@/services/api';
 import type { TimecardData, PunchEntryData } from '@/services/api';
-import type { Employee } from '@/types';
+import type { Employee, PayrollItem } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -162,7 +162,7 @@ function findBestEmployeeMatch(ocrName: string | null, employees: Employee[]): n
 }
 
 // ──── Timecard List Item (Inline Review) ──────────────────
-function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, employees, payPeriodId, onRefresh, onPayrollUpdated }: {
+function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, employees, payPeriodId, onTimecardUpdated, onPayrollUpdated }: {
   tc: TimecardData;
   onSelect: () => void;
   onReprocess: () => void;
@@ -170,8 +170,8 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
   isDeleting: boolean;
   employees: Employee[];
   payPeriodId?: number;
-  onRefresh: () => void;
-  onPayrollUpdated?: () => void;
+  onTimecardUpdated: (timecard: TimecardData) => void;
+  onPayrollUpdated?: (payrollItem?: PayrollItem) => void;
 }) {
   const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
   const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
@@ -204,11 +204,11 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
           await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' } as Partial<PunchEntryData>);
         }
       }
+      onTimecardUpdated(await timecardsApi.show(tc.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approve failed');
     } finally {
       setApproving(false);
-      onRefresh();
     }
   };
 
@@ -216,8 +216,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
     setReviewing(true);
     setError('');
     try {
-      await timecardsApi.review(tc.id, 'Admin');
-      onRefresh();
+      onTimecardUpdated(await timecardsApi.review(tc.id, 'Admin'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Review failed');
     } finally {
@@ -231,9 +230,9 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
     setError('');
     try {
       const empId = selectedEmployeeId || undefined;
-      await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
-      onRefresh();
-      onPayrollUpdated?.();
+      const response = await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
+      if (response.timecard) onTimecardUpdated(response.timecard);
+      onPayrollUpdated?.(response.payroll_item);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Apply failed');
     } finally {
@@ -360,9 +359,16 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
             )}
 
             {isReviewed && (
+              <>
               <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApply} disabled={busy}>
-                {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply to Payroll'}
+                {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply to Payroll'}
               </Button>
+              {tc.applied_to_payroll_at && (
+                <Badge className="bg-green-100 text-green-800">
+                  Applied{tc.applied_employee_name ? ` to ${tc.applied_employee_name}` : ''}
+                </Badge>
+              )}
+              </>
             )}
 
             <Button size="sm" variant="outline" onClick={onSelect}>
@@ -716,7 +722,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   onBack: () => void;
   payPeriodId?: number;
   employees: Employee[];
-  onApplied?: () => void;
+  onApplied?: (timecard?: TimecardData, payrollItem?: PayrollItem) => void;
 }) {
   const [tc, setTc] = useState(initialTc);
   const [editable, setEditable] = useState<EditableEntry[]>(() =>
@@ -852,8 +858,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     setError('');
     try {
       const empId = selectedEmployeeId || undefined;
-      await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
-      onApplied();
+      const response = await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
+      if (response.timecard) setTc(response.timecard);
+      onApplied(response.timecard, response.payroll_item);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply to payroll');
     } finally {
@@ -1044,8 +1051,13 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         {tc.ocr_status === 'reviewed' && payPeriodId && (
           <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
             <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying}>
-              {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply Hours to Payroll'}
+              {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply Hours to Payroll'}
             </Button>
+            {tc.applied_to_payroll_at && (
+              <Badge className="bg-green-100 text-green-800">
+                Applied{tc.applied_employee_name ? ` to ${tc.applied_employee_name}` : ''}
+              </Badge>
+            )}
             <span className="text-xs text-gray-500">
               {selectedEmployeeId
                 ? `Assigning to: ${employees.find(e => e.id === selectedEmployeeId)?.first_name} ${employees.find(e => e.id === selectedEmployeeId)?.last_name}`
@@ -1087,7 +1099,7 @@ function Pagination({ page, totalPages, totalCount, onPageChange }: {
 // ──── Main Panel ───────────────────────────────────────
 export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   payPeriodId?: number;
-  onPayrollUpdated?: () => void;
+  onPayrollUpdated?: (payrollItem?: PayrollItem) => void;
 }) {
   const isStandalone = !payPeriodId;
   const [timecards, setTimecards] = useState<TimecardData[]>([]);
@@ -1116,8 +1128,15 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
         setTotalPages(resp.meta.total_pages);
         setTotalCount(resp.meta.total_count);
       } else {
-        const data = await timecardsApi.list(payPeriodId);
-        setTimecards(data);
+        const resp = await timecardsApi.listPaginated({
+          page: 1,
+          perPage: 100,
+          payPeriodId,
+          search: activeSearch || undefined,
+          status: statusFilter || undefined,
+        });
+        setTimecards(resp.timecards);
+        setTotalCount(resp.meta.total_count);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
@@ -1183,7 +1202,14 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
             setProcessingIds(new Set(stillProcessing));
           }
         } else {
-          const data = await timecardsApi.list(payPeriodId);
+          const resp = await timecardsApi.listPaginated({
+            page: 1,
+            perPage: 100,
+            payPeriodId,
+            search: activeSearch || undefined,
+            status: statusFilter || undefined,
+          });
+          const data = resp.timecards;
           setTimecards(data);
           const stillProcessing = data
             .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
@@ -1221,6 +1247,10 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     } catch { /* ignore */ }
   };
 
+  const updateTimecard = useCallback((updated: TimecardData) => {
+    setTimecards((prev) => prev.map((tc) => (tc.id === updated.id ? updated : tc)));
+  }, []);
+
   const selectedTc = timecards.find((tc) => tc.id === selectedId);
 
   if (selectedTc) {
@@ -1228,10 +1258,14 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
       <Card className="p-4">
         <TimecardDetail
           timecard={selectedTc}
-          onBack={() => { setSelectedId(null); loadTimecards(); }}
+          onBack={() => { setSelectedId(null); }}
           payPeriodId={payPeriodId}
           employees={employees}
-          onApplied={() => { setSelectedId(null); loadTimecards(); onPayrollUpdated?.(); }}
+          onApplied={(updated, payrollItem) => {
+            if (updated) updateTimecard(updated);
+            setSelectedId(null);
+            onPayrollUpdated?.(payrollItem);
+          }}
         />
       </Card>
     );
@@ -1249,12 +1283,12 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
       <div className="p-4 space-y-4">
         <UploadSection payPeriodId={payPeriodId} onUploaded={() => { if (isStandalone) setPage(1); loadTimecards(); }} />
 
-        {/* Search & filter — standalone mode only */}
-        {isStandalone && (
+        {/* Search & filter */}
+        {(
           <div className="flex flex-wrap items-center gap-2">
             <input
               className="border rounded px-3 py-1.5 text-sm flex-1 min-w-[200px] max-w-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
-              placeholder="Search by employee name..."
+              placeholder="Search employee, card date, or pay period..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -1300,7 +1334,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
           </div>
         ) : timecards.length === 0 ? (
           <p className="text-sm text-gray-400 italic">
-            {isStandalone && (activeSearch || statusFilter)
+            {(activeSearch || statusFilter)
               ? 'No timecards match your filters.'
               : 'No timecards uploaded yet.'}
           </p>
@@ -1319,7 +1353,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
                 isDeleting={deletingId === tc.id}
                 employees={employees}
                 payPeriodId={payPeriodId}
-                onRefresh={loadTimecards}
+                onTimecardUpdated={updateTimecard}
                 onPayrollUpdated={onPayrollUpdated}
               />
             ))}

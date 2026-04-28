@@ -15,7 +15,18 @@ module Api
           timecards = timecards.where(ocr_status: params[:status]) if params[:status].present?
 
           if params[:search].present?
-            timecards = timecards.where("employee_name ILIKE ?", "%#{params[:search]}%")
+            term = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%"
+            timecards = timecards.left_joins(:pay_period).where(
+              <<~SQL.squish,
+                timecards.employee_name ILIKE :term
+                OR timecards.period_start::text ILIKE :term
+                OR timecards.period_end::text ILIKE :term
+                OR pay_periods.start_date::text ILIKE :term
+                OR pay_periods.end_date::text ILIKE :term
+                OR pay_periods.pay_date::text ILIKE :term
+              SQL
+              term: term
+            )
           end
 
           total_count = timecards.count
@@ -111,10 +122,6 @@ module Api
 
           reviewer_name = review_params[:reviewed_by_name].to_s.strip.presence
 
-          if @timecard.overall_confidence.to_f < 0.7
-            return render json: { error: "OCR confidence is too low. Re-run OCR or verify flagged rows first." }, status: :unprocessable_entity
-          end
-
           summary = TimecardOcr::ReviewSummary.build(@timecard)
           if summary["attention_count"].positive?
             return render json: { error: "Resolve or approve all flagged rows before marking reviewed" }, status: :unprocessable_entity
@@ -170,14 +177,24 @@ module Api
 
           item.hours_worked = total_hours.round(2)
           item.import_source = "timecard_ocr"
+          item.custom_earnings = employee.default_custom_earnings if item.new_record? && item.custom_earnings.blank?
           item.save!
+
+          timecard.update!(
+            pay_period: pay_period,
+            applied_employee: employee,
+            applied_payroll_item: item,
+            applied_to_payroll_at: Time.current
+          )
 
           render json: {
             employee_id: employee.id,
             employee_name: employee.full_name,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
-            timecard_id: timecard.id
+            timecard_id: timecard.id,
+            payroll_item: payroll_item_json(item),
+            timecard: timecard_json(timecard.reload)
           }
         end
 
@@ -249,6 +266,10 @@ module Api
             ocr_error: timecard.raw_ocr_response.is_a?(Hash) ? timecard.raw_ocr_response["error"] : nil,
             reviewed_by_name: timecard.reviewed_by_name,
             reviewed_at: timecard.reviewed_at,
+            applied_employee_id: timecard.applied_employee_id,
+            applied_employee_name: timecard.applied_employee&.full_name,
+            applied_payroll_item_id: timecard.applied_payroll_item_id,
+            applied_to_payroll_at: timecard.applied_to_payroll_at,
             review_summary: TimecardOcr::ReviewSummary.build(timecard),
             created_at: timecard.created_at,
             punch_entries: timecard.punch_entries.map do |pe|
@@ -274,6 +295,25 @@ module Api
                 blank_day: pe.blank_day?
               }
             end
+          }
+        end
+
+        def payroll_item_json(item)
+          {
+            id: item.id,
+            employee_id: item.employee_id,
+            employee_name: item.employee_full_name,
+            employment_type: item.employment_type,
+            pay_rate: item.pay_rate,
+            hours_worked: item.hours_worked,
+            overtime_hours: item.overtime_hours,
+            holiday_hours: item.holiday_hours,
+            pto_hours: item.pto_hours,
+            custom_earnings: item.custom_earnings || [],
+            gross_pay: item.gross_pay,
+            net_pay: item.net_pay,
+            import_source: item.import_source,
+            wage_rate_hours: item.wage_rate_hours
           }
         end
       end

@@ -1,6 +1,8 @@
 class Timecard < ApplicationRecord
   belongs_to :company
   belongs_to :pay_period, optional: true
+  belongs_to :applied_employee, class_name: "Employee", optional: true
+  belongs_to :applied_payroll_item, class_name: "PayrollItem", optional: true
   has_many :punch_entries, -> { order(:card_day) }, dependent: :destroy
 
   enum :ocr_status, { pending: 0, processing: 1, complete: 2, failed: 3, reviewed: 4 }

@@ -471,8 +471,14 @@ module Api
             .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", current_year)
             .where.not(check_number: nil)
             .exists?
+          non_employee_checks_this_year = NonEmployeeCheck
+            .joins(:pay_period)
+            .where(pay_periods: { company_id: @company.id })
+            .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", current_year)
+            .where.not(check_number: nil)
+            .exists?
 
-          if checks_this_year
+          if checks_this_year || non_employee_checks_this_year
             return render json: {
               error: "Cannot change starting check number — checks have already been issued this year. " \
                      "To reset, void all issued checks first or contact Cornerstone support."
