@@ -1,12 +1,11 @@
 import type { ClientDocument } from '@/services/api';
 
-export type DocumentPreviewKind = 'pdf' | 'image' | 'text' | 'html' | 'unsupported';
+export type DocumentPreviewKind = 'pdf' | 'image' | 'text' | 'unsupported';
 
 export interface DocumentPreviewPayload {
   kind: DocumentPreviewKind;
   objectUrl?: string;
   textContent?: string;
-  htmlContent?: string;
   message?: string;
 }
 
