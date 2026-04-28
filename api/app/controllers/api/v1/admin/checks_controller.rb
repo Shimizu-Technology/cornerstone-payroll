@@ -516,20 +516,20 @@ module Api
         private
 
         def issued_check_numbers_for_company(company)
-          payroll_numbers = PayrollItem
+          payroll_max = PayrollItem
             .joins(:pay_period)
             .where(pay_periods: { company_id: company.id })
             .where.not(check_number: nil)
-            .pluck(:check_number)
+            .where("payroll_items.check_number ~ ?", "^[0-9]+$")
+            .maximum(Arel.sql("CAST(payroll_items.check_number AS integer)"))
 
-          non_employee_numbers = NonEmployeeCheck
+          non_employee_max = NonEmployeeCheck
             .where(company_id: company.id)
             .where.not(check_number: nil)
-            .pluck(:check_number)
+            .where("non_employee_checks.check_number ~ ?", "^[0-9]+$")
+            .maximum(Arel.sql("CAST(non_employee_checks.check_number AS integer)"))
 
-          (payroll_numbers + non_employee_numbers).filter_map do |number|
-            Integer(number.to_s, exception: false)
-          end
+          [ payroll_max, non_employee_max ].compact
         end
 
         # -----------------------------------------------------------------------
