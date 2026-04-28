@@ -78,7 +78,7 @@ class CheckNumberCorrectionService
     transmittal = pay_period.transmittal
     return unless transmittal
 
-    numbers = payroll_check_numbers
+    numbers = transmittal_check_numbers
     transmittal.update!(
       check_number_first: numbers.first,
       check_number_last: numbers.last,
@@ -105,12 +105,23 @@ class CheckNumberCorrectionService
     sheet.update!(entries: entries) if updated
   end
 
+  def transmittal_check_numbers
+    (payroll_check_numbers + non_employee_check_numbers)
+      .sort_by { |number| [number.to_s.to_i, number.to_s] }
+  end
+
   def payroll_check_numbers
     pay_period.payroll_items
       .where(voided: false)
       .where.not(check_number: nil)
       .pluck(:check_number)
-      .sort_by { |number| [number.to_s.to_i, number.to_s] }
+  end
+
+  def non_employee_check_numbers
+    pay_period.non_employee_checks
+      .active
+      .where.not(check_number: nil)
+      .pluck(:check_number)
   end
 
   def synced_non_employee_check_numbers(transmittal)
