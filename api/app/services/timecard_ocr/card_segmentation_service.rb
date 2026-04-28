@@ -1,4 +1,4 @@
-require "shellwords"
+require "open3"
 
 module TimecardOcr
   class CardSegmentationService
@@ -41,6 +41,8 @@ module TimecardOcr
       return [copy_as_jpeg(image)] if count == 1
 
       split_into_columns(image, count)
+    ensure
+      image&.destroy!
     end
 
     def source_image_paths
@@ -62,12 +64,7 @@ module TimecardOcr
     end
 
     def pdf_page_count
-      binary = magick_binary
-      output = if binary == "magick"
-        `#{Shellwords.join([binary, "identify", @file_path])}`
-      else
-        `#{Shellwords.join(["identify", @file_path])}`
-      end
+      output = identify_pdf_pages_output
 
       count = output.lines.count { |line| line.include?(File.basename(@file_path)) || line.match?(/\A#{Regexp.escape(@file_path)}/) }
       return count if count.positive?
@@ -102,7 +99,19 @@ module TimecardOcr
     end
 
     def magick_binary
-      @magick_binary ||= system("which magick > /dev/null 2>&1") ? "magick" : "convert"
+      @magick_binary ||= system("command", "-v", "magick", out: File::NULL, err: File::NULL) ? "magick" : "convert"
+    end
+
+    def identify_command(path)
+      magick_binary == "magick" ? ["magick", "identify", path] : ["identify", path]
+    end
+
+    def identify_pdf_pages_output
+      output, _stderr, _status = Open3.capture3(*identify_command(@file_path))
+      output
+    rescue Errno::ENOENT => e
+      Rails.logger.warn("CardSegmentation: identify command unavailable (#{e.message}), falling back to MiniMagick page count")
+      ""
     end
 
     def estimated_card_count(width, height)
@@ -164,6 +173,8 @@ module TimecardOcr
       output.binmode
       image.write(output.path)
       output
+    ensure
+      image&.destroy!
     end
   end
 end
