@@ -62,9 +62,9 @@ module TimecardOcr
     end
 
     def pdf_page_count
-      image_magick_binary = magick_binary
-      output = if image_magick_binary == "magick"
-        `#{Shellwords.join([image_magick_binary, "identify", @file_path])}`
+      binary = magick_binary
+      output = if binary == "magick"
+        `#{Shellwords.join([binary, "identify", @file_path])}`
       else
         `#{Shellwords.join(["identify", @file_path])}`
       end
