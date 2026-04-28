@@ -612,11 +612,18 @@ export function PayPeriodDetail() {
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
-  const departmentOptions = [...new Map(
-    employees
-      .filter((emp) => emp.department_id && emp.department?.name)
-      .map((emp) => [String(emp.department_id), emp.department?.name || ''])
-  ).entries()];
+  const departmentOptions = Array.from(
+    new Map(
+      [
+        ...employees
+          .filter((emp) => emp.department_id && emp.department?.name)
+          .map((emp) => [String(emp.department_id), emp.department?.name || ''] as const),
+        ...payrollItems
+          .filter((item) => item.department_id && item.department_name)
+          .map((item) => [String(item.department_id), item.department_name || ''] as const),
+      ].sort((left, right) => left[1].localeCompare(right[1]))
+    ).entries()
+  );
   const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
   const matchesEmployeeFilters = (employmentType: string, searchableValues: string[], departmentId?: number | null) => {
     if (employeeTypeFilter !== 'all' && employmentType !== employeeTypeFilter) return false;

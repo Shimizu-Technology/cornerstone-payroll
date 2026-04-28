@@ -901,6 +901,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' });
       }
       await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Approve failed');
+      try { await reload(); } catch { /* best-effort refresh */ }
     } finally {
       setSaving(false);
     }

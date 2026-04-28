@@ -195,6 +195,8 @@ module Api
 
           return render json: { error: multi_rate_error }, status: :unprocessable_entity if multi_rate_error
 
+          item = PayrollItem.includes(employee: :department).find(item.id)
+
           unless item&.persisted? && timecard.reload.applied_payroll_item_id == item.id
             return render json: { error: "Could not apply timecard to payroll" }, status: :unprocessable_entity
           end
@@ -205,7 +207,7 @@ module Api
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             timecard_id: timecard.id,
-            payroll_item: payroll_item_json(item.reload),
+            payroll_item: payroll_item_json(item),
             timecard: timecard_json(timecard.reload)
           }
         end
