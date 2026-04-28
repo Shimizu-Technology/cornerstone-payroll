@@ -153,6 +153,12 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
                  regular: 6,
                  overtime: 0
                }
+             },
+             custom_earnings: {
+               employee.id.to_s => [
+                 { label: "Training Stipend", amount: "Infinity" },
+                 { label: "Safe Bonus", amount: "12.345" }
+               ]
              }
            },
            headers: { "X-Company-Id" => company.id.to_s }
@@ -162,7 +168,7 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(submitted_item).to be_present
       expect(submitted_item.hours_worked.to_f).to eq(6.0)
       expect(submitted_item.custom_earnings).to eq([
-        { "label" => "Training Stipend", "amount" => 25.0 }
+        { "label" => "Safe Bonus", "amount" => 12.35 }
       ])
     end
   end

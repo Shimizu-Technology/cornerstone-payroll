@@ -534,17 +534,21 @@ export function PayPeriodDetail() {
     setPayrollItems((prev) => {
       const exists = prev.some((item) => item.id === updated.id);
       return exists
-        ? prev.map((item) => (item.id === updated.id ? updated : item))
+        ? prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
         : [...prev, updated];
     });
-    setHoursMap((prev) => ({
-      ...prev,
-      [String(updated.employee_id)]: {
+    setHoursMap((prev) => {
+      const updatedHours = buildHoursMap([updated], employees)[String(updated.employee_id)] || {
         regular: toNumber(updated.hours_worked),
         overtime: toNumber(updated.overtime_hours),
         wage_rates: updated.wage_rate_hours,
-      },
-    }));
+      };
+
+      return {
+        ...prev,
+        [String(updated.employee_id)]: updatedHours,
+      };
+    });
   };
 
   if (loading) {

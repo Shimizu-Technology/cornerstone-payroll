@@ -895,10 +895,11 @@ export const timecardsApi = {
     api.patch<TimecardData>(`/admin/timecards/${id}/review`, { review: { reviewed_by_name: reviewedByName } }),
   reprocess: (id: number) => api.patch<TimecardData>(`/admin/timecards/${id}/reprocess`),
   delete: (id: number) => api.delete(`/admin/timecards/${id}`),
-  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number) =>
+  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number, wageRateId?: number) =>
     api.post<ApplyToPayrollResponse>(`/admin/timecards/${id}/apply_to_payroll`, {
       pay_period_id: payPeriodId,
       ...(employeeId ? { employee_id: employeeId } : {}),
+      ...(wageRateId ? { wage_rate_id: wageRateId } : {}),
     }),
 };
 

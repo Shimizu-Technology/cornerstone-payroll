@@ -17,7 +17,7 @@ module Api
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
-            data: employees.map { |e| serialize_employee(e) },
+            data: employees.map { |e| serialize_employee(e, include_department: true) },
             meta: pagination_meta(employees)
           }
         end
@@ -224,10 +224,10 @@ module Api
           Array(entries).filter_map do |entry|
             label = entry[:label].to_s.strip
             amount = BigDecimal(entry[:amount].to_s)
-            next if label.blank? || amount <= 0
+            next if label.blank? || amount <= 0 || !amount.finite?
 
             { label: label, amount: amount.round(2).to_f }
-          rescue ArgumentError
+          rescue ArgumentError, FloatDomainError
             nil
           end
         end
