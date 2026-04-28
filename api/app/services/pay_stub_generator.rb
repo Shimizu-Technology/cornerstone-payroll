@@ -187,23 +187,27 @@ class PayStubGenerator
       ]
     end
 
-    if item_earnings.empty?
-      # Bonus
-      if payroll_item.bonus.to_f > 0
-        earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
-      end
+    existing_earning_categories = item_earnings.map { |earning| earning.category.to_s }
+    existing_other_labels = item_earnings
+      .select { |earning| earning.category.to_s == "other" }
+      .map { |earning| earning.label.to_s.strip.downcase }
 
-      # Tips
-      if payroll_item.reported_tips.to_f > 0
-        earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
-      end
+    # Bonus
+    if payroll_item.bonus.to_f > 0 && !existing_earning_categories.include?("bonus")
+      earnings_data << [ "Bonus", "—", "—", format_currency(payroll_item.bonus), "—" ]
+    end
 
-      # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
-      Array(payroll_item.custom_earnings).each do |ce|
-        amt = ce["amount"].to_f
-        if amt > 0
-          earnings_data << [ ce["label"].presence || "Other Earning", "—", "—", format_currency(amt), "—" ]
-        end
+    # Tips
+    if payroll_item.reported_tips.to_f > 0 && !existing_earning_categories.include?("tips")
+      earnings_data << [ "Reported Tips", "—", "—", format_currency(payroll_item.reported_tips), "—" ]
+    end
+
+    # Custom earnings (e.g. Chief Stipend, Asst Chief Stipend)
+    Array(payroll_item.custom_earnings).each do |ce|
+      label = ce["label"].presence || "Other Earning"
+      amt = ce["amount"].to_f
+      if amt > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
+        earnings_data << [ label, "—", "—", format_currency(amt), "—" ]
       end
     end
 

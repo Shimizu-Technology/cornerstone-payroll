@@ -23,6 +23,9 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
   let!(:admin_rate) do
     EmployeeWageRate.create!(employee: employee, label: "Admin Duties", rate: 10, is_primary: false, active: true)
   end
+  let!(:legacy_rate) do
+    EmployeeWageRate.create!(employee: employee, label: "Legacy Training", rate: 20, is_primary: false, active: false)
+  end
   let!(:timecard) do
     Timecard.create!(
       company: company,
@@ -80,6 +83,27 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(wage_rates.map { |rate| rate["label"] }).to contain_exactly("Flight Hours", "Admin Duties")
       expect(wage_rates.find { |rate| rate["label"] == "Flight Hours" }["regular_hours"]).to eq(5.0)
       expect(wage_rates.find { |rate| rate["label"] == "Admin Duties" }["regular_hours"]).to eq(3.0)
+    end
+
+    it "preserves hours from inactive wage rates when re-applying OCR hours" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, employment_type: "hourly")
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: flight_rate.id, label: "Flight Hours", rate: 30, regular_hours: 2, overtime_hours: 0, active: true, is_primary: true },
+        { employee_wage_rate_id: admin_rate.id, label: "Admin Duties", rate: 10, regular_hours: 3, overtime_hours: 0, active: true, is_primary: false },
+        { employee_wage_rate_id: legacy_rate.id, label: "Legacy Training", rate: 20, regular_hours: 4, overtime_hours: 0, active: false, is_primary: false }
+      ]
+      item.save!
+
+      post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: admin_rate.id }
+
+      expect(response).to have_http_status(:ok)
+      wage_rates = item.reload.wage_rate_hours
+      expect(wage_rates.map { |rate| rate["label"] }).to contain_exactly("Flight Hours", "Admin Duties", "Legacy Training")
+      expect(wage_rates.find { |rate| rate["label"] == "Admin Duties" }["regular_hours"]).to eq(5.0)
+      expect(wage_rates.find { |rate| rate["label"] == "Flight Hours" }["regular_hours"]).to eq(2.0)
+      expect(wage_rates.find { |rate| rate["label"] == "Legacy Training" }["regular_hours"]).to eq(4.0)
+      expect(item.reload.hours_worked).to eq(11.0)
     end
   end
 end

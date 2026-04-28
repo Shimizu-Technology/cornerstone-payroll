@@ -271,10 +271,18 @@ module Api
           return "Selected earning type does not belong to this employee." unless selected_rate
 
           current_entries = item.wage_rate_hours
+          active_rate_ids = active_rates.map(&:id)
+          active_rate_labels = active_rates.map { |rate| rate.label.to_s.strip.downcase }
+          inactive_entries = current_entries.reject do |entry|
+            entry_rate_id = entry["employee_wage_rate_id"].presence&.to_i
+            entry_label = entry["label"].to_s.strip.downcase
+            (entry_rate_id.present? && active_rate_ids.include?(entry_rate_id)) ||
+              (entry_rate_id.blank? && active_rate_labels.include?(entry_label))
+          end
           entries_by_id = current_entries.index_by { |entry| entry["employee_wage_rate_id"].to_i if entry["employee_wage_rate_id"].present? }
           entries_by_label = current_entries.index_by { |entry| entry["label"].to_s.strip.downcase }
 
-          entries = active_rates.map do |rate|
+          active_entries = active_rates.map do |rate|
             existing = entries_by_id[rate.id] || entries_by_label[rate.label.to_s.strip.downcase] || {}
             entry = {
               employee_wage_rate_id: rate.id,
@@ -291,12 +299,17 @@ module Api
             entry
           end
 
+          entries = inactive_entries + active_entries
           item.wage_rate_hours = entries
-          item.hours_worked = entries.sum { |entry| entry[:regular_hours].to_f }
-          item.overtime_hours = entries.sum { |entry| entry[:overtime_hours].to_f }
-          item.holiday_hours = entries.sum { |entry| entry[:holiday_hours].to_f }
-          item.pto_hours = entries.sum { |entry| entry[:pto_hours].to_f }
+          item.hours_worked = entries.sum { |entry| entry_hours(entry, :regular_hours) }
+          item.overtime_hours = entries.sum { |entry| entry_hours(entry, :overtime_hours) }
+          item.holiday_hours = entries.sum { |entry| entry_hours(entry, :holiday_hours) }
+          item.pto_hours = entries.sum { |entry| entry_hours(entry, :pto_hours) }
           nil
+        end
+
+        def entry_hours(entry, key)
+          entry[key].to_f + entry[key.to_s].to_f
         end
 
         def timecard_json(timecard)

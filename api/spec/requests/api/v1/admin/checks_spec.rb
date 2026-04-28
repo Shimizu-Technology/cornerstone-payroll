@@ -513,6 +513,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(company.reload.next_check_number).to eq(4000)
     end
 
+    it "ignores non-numeric historical check numbers when finding the highest issued number" do
+      item_a.update!(check_number: "VOID-3000")
+
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 4000 }
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.next_check_number).to eq(4000)
+    end
+
     it "rejects a value less than 1" do
       patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 0 }
       expect(response).to have_http_status(:unprocessable_entity)
