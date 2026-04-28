@@ -606,6 +606,7 @@ export interface CheckListMeta {
   printed: number;
   unprinted: number;
   voided: number;
+  check_stock_type: CheckStockType;
 }
 
 export interface CheckListResponse {
@@ -613,9 +614,11 @@ export interface CheckListResponse {
   meta: CheckListMeta;
 }
 
+export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
+
 export interface CheckSettings {
   next_check_number: number;
-  check_stock_type: 'bottom_check' | 'top_check';
+  check_stock_type: CheckStockType;
   check_offset_x: number;
   check_offset_y: number;
   bank_name: string | null;

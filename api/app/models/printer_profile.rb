@@ -8,7 +8,7 @@ class PrinterProfile < ApplicationRecord
   belongs_to :user
 
   validates :name, presence: true, uniqueness: { scope: :user_id }
-  validates :check_stock_type, inclusion: { in: %w[bottom_check top_check] }
+  validates :check_stock_type, inclusion: { in: Company::CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
 

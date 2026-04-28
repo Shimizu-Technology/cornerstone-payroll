@@ -161,13 +161,24 @@ module Api
 
         # GET /api/v1/admin/non_employee_checks/:id/check_pdf
         def check_pdf
-          generator = NonEmployeeCheckGenerator.new(@check)
-          pdf_data  = @check.voided? ? generator.generate_voided : generator.generate
+          if @check.company.first_hawaiian_4up_checks?
+            generator = FirstHawaiianFourUpCheckGenerator.new(
+              company: @check.company,
+              non_employee_checks: [@check],
+              starting_slot: params[:starting_slot]
+            )
+            pdf_data = generator.generate
+            filename = "fhb_ne_check_#{@check.check_number || @check.id}.pdf"
+          else
+            generator = NonEmployeeCheckGenerator.new(@check)
+            pdf_data  = @check.voided? ? generator.generate_voided : generator.generate
+            filename = generator.filename
+          end
 
           send_data pdf_data,
             type: "application/pdf",
             disposition: "inline",
-            filename: generator.filename
+            filename: filename
         end
 
         private

@@ -86,6 +86,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(meta["printed"]).to eq(0)
     end
 
+    it "keeps a stable employee order instead of re-sorting by edited check number" do
+      item_a.update!(check_number: "9999")
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/checks"
+
+      names = response.parsed_body["checks"].map { |check| check["employee_name"] }
+      expect(names).to eq([ "Alice Reyes", "Bob Santos" ])
+    end
+
     it "returns 422 for a draft pay period" do
       get "/api/v1/admin/pay_periods/#{draft_period.id}/checks"
       expect(response).to have_http_status(:unprocessable_entity)
@@ -303,6 +312,108 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       item_a.update!(voided: true, voided_at: Time.current, void_reason: "Was already voided before test")
       post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
+  # -----------------------------------------------------------------------
+  # PATCH /payroll_items/:id/check_number
+  # Corrects an already-assigned check number and syncs report drafts.
+  # -----------------------------------------------------------------------
+  describe "PATCH /api/v1/admin/payroll_items/:payroll_item_id/check_number" do
+    it "updates the payroll item check number" do
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Actual physical check stock used" }
+
+      expect(response).to have_http_status(:ok)
+      expect(item_a.reload.check_number).to eq("3010")
+    end
+
+    it "records a renumbered audit event" do
+      expect {
+        patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+          params: { check_number: "3010", reason: "Actual physical check stock used" }
+      }.to change { CheckEvent.where(event_type: "renumbered").count }.by(1)
+
+      event = CheckEvent.where(event_type: "renumbered").last
+      expect(event.check_number).to eq("3010")
+      expect(event.reason).to include("3000")
+    end
+
+    it "advances next_check_number when the corrected number is ahead of the sequence" do
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "4000", reason: "Loaded a higher-numbered check sheet" }
+
+      expect(company.reload.next_check_number).to eq(4001)
+    end
+
+    it "rejects duplicate payroll check numbers" do
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: item_b.check_number }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("already used")
+      expect(item_a.reload.check_number).to eq("3000")
+    end
+
+    it "rejects numbers already used by non-employee checks" do
+      NonEmployeeCheck.create!(
+        company: company,
+        pay_period: pay_period,
+        payable_to: "Treasurer of Guam",
+        check_type: "tax_deposit",
+        amount: 50.52,
+        check_number: "3500"
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3500" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("non-employee check")
+    end
+
+    it "syncs saved transmittal and check sign-off sheet entries" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        check_number_first: "2019",
+        check_number_last: "2026"
+      )
+      CheckSignoffSheet.create!(
+        pay_period: pay_period,
+        company: company,
+        entries: [
+          { name: "Reyes, Alice", check_number: "3000" },
+          { name: "Santos, Bob", check_number: "3001" }
+        ]
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Corrected after print test" }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.check_number_first).to eq("3001")
+      expect(pay_period.transmittal.check_number_last).to eq("3010")
+      synced_entry = pay_period.check_signoff_sheet.reload.entries.find { |entry| entry["name"] == "Reyes, Alice" }
+      expect(synced_entry["check_number"]).to eq("3010")
+    end
+
+    it "returns 422 for non-numeric check numbers" do
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "ABC123" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("numeric")
+    end
+
+    it "returns 422 for voided checks" do
+      item_a.update!(voided: true, voided_at: Time.current, void_reason: "Already voided before correction")
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("voided")
     end
   end
 

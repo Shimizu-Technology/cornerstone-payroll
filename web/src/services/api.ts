@@ -162,13 +162,13 @@ class ApiClient {
   }
 
   // CPR-66: GET raw Blob (for authenticated PDF download)
-  async getBlob(endpoint: string): Promise<Blob> {
+  async getBlob(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<Blob> {
     const token = await this.resolveAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (this.activeCompanyId) headers['X-Company-Id'] = String(this.activeCompanyId);
 
-    const response = await fetch(this.buildUrl(endpoint), {
+    const response = await fetch(this.buildUrl(endpoint, params), {
       method: 'GET',
       headers,
     });
@@ -1413,20 +1413,31 @@ export const checksApi = {
 
 
   // POST to generate batch PDF (returns blob)
-  batchPdf: (payPeriodId: number) =>
-    api.postBlob(`/admin/pay_periods/${payPeriodId}/checks/batch_pdf`),
+  batchPdf: (payPeriodId: number, options?: { startingSlot?: number }) =>
+    api.postBlob(`/admin/pay_periods/${payPeriodId}/checks/batch_pdf`, {
+      starting_slot: options?.startingSlot,
+    }),
 
   // Mark all unprinted checks in a period as printed
   markAllPrinted: (payPeriodId: number) =>
     api.post<{ marked_printed: number }>(`/admin/pay_periods/${payPeriodId}/checks/mark_all_printed`),
 
   // Download a single check PDF through authenticated API client
-  checkPdf: (payrollItemId: number) =>
-    api.getBlob(`/admin/payroll_items/${payrollItemId}/check`),
+  checkPdf: (payrollItemId: number, options?: { startingSlot?: number }) =>
+    api.getBlob(`/admin/payroll_items/${payrollItemId}/check`, {
+      starting_slot: options?.startingSlot,
+    }),
 
   // Mark a single check as printed
   markPrinted: (payrollItemId: number) =>
     api.post<{ payroll_item: CheckItem; already_printed: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_printed`),
+
+  // Correct an assigned check number without changing payroll values
+  updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>
+    api.patch<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/check_number`, {
+      check_number: checkNumber,
+      reason,
+    }),
 
   // Void a check
   void: (payrollItemId: number, reason: string) =>
@@ -1483,7 +1494,7 @@ export interface PrinterProfile {
   name: string;
   description: string | null;
   notes: string | null;
-  check_stock_type: 'bottom_check' | 'top_check';
+  check_stock_type: 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
   check_offset_x: number;
   check_offset_y: number;
   check_layout_config: Record<string, unknown>;

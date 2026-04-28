@@ -14,7 +14,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
-import type { CheckSettings as CheckSettingsType } from '@/types';
+import type { CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 
 export function CheckSettingsPage() {
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -24,7 +24,7 @@ export function CheckSettingsPage() {
   const [success, setSuccess] = useState<string | null>(null);
 
   // Editable form state
-  const [stockType, setStockType] = useState<'bottom_check' | 'top_check'>('top_check');
+  const [stockType, setStockType] = useState<CheckStockType>('top_check');
   const [offsetX, setOffsetX] = useState('0.000');
   const [offsetY, setOffsetY] = useState('0.000');
   const [bankName, setBankName] = useState('');
@@ -205,7 +205,7 @@ export function CheckSettingsPage() {
     try {
       const data = await printerProfilesApi.apply(profile.id);
       const s = data.check_settings;
-      setStockType(s.check_stock_type as 'bottom_check' | 'top_check');
+      setStockType(s.check_stock_type);
       setOffsetX(Number(s.check_offset_x || 0).toFixed(3));
       setOffsetY(Number(s.check_offset_y || 0).toFixed(3));
       setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
@@ -396,7 +396,7 @@ export function CheckSettingsPage() {
                         <p className="text-sm text-gray-500 mt-0.5">{profile.description}</p>
                       )}
                       <p className="text-xs text-gray-400 mt-1 font-mono">
-                        X: {Number(profile.check_offset_x).toFixed(3)} &nbsp; Y: {Number(profile.check_offset_y).toFixed(3)} &nbsp; Stock: {profile.check_stock_type === 'top_check' ? 'Top' : 'Bottom'}
+                        X: {Number(profile.check_offset_x).toFixed(3)} &nbsp; Y: {Number(profile.check_offset_y).toFixed(3)} &nbsp; Stock: {profile.check_stock_type === 'first_hawaiian_4up' ? 'FHB 4-Up' : profile.check_stock_type === 'top_check' ? 'Top' : 'Bottom'}
                       </p>
                       {profile.notes && (
                         <div className="mt-2 rounded bg-amber-50 border border-amber-200 px-2 py-1.5">
@@ -469,14 +469,15 @@ export function CheckSettingsPage() {
               <Select
                 id="stock-type"
                 value={stockType}
-                onChange={(e) => setStockType(e.target.value as 'bottom_check' | 'top_check')}
+                onChange={(e) => setStockType(e.target.value as CheckStockType)}
                 className="w-64"
               >
                 <option value="top_check">Top Check</option>
                 <option value="bottom_check">Bottom Check</option>
+                <option value="first_hawaiian_4up">First Hawaiian 4-Up</option>
               </Select>
               <p className="text-xs text-gray-500">
-                Top check: check face on top with stubs underneath. Bottom check: stubs on top, check face at bottom.
+                Top/bottom check: QuickBooks-style voucher stock with payroll stubs. First Hawaiian 4-Up: four checks per sheet with separate pay stubs.
               </p>
             </div>
 

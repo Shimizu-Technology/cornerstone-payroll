@@ -23,7 +23,7 @@ module Api
       #   PATCH  /companies/:company_id/next_check_number        → update_next_check_number
       class ChecksController < BaseController
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
-        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :replace_preview, :replace_check ]
+        before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
@@ -37,8 +37,9 @@ module Api
 
           items = @pay_period.payroll_items
                              .includes(:employee, :check_events)
+                             .joins(:employee)
                              .with_check_number
-                             .order(Arel.sql("check_number::integer ASC"))
+                             .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
           loaded_items = items.to_a
 
@@ -48,7 +49,8 @@ module Api
               total: loaded_items.size,
               printed: loaded_items.count { |i| i.check_printed_at.present? && !i.voided },
               unprinted: loaded_items.count { |i| i.check_printed_at.nil? && !i.voided },
-              voided: loaded_items.count(&:voided)
+              voided: loaded_items.count(&:voided),
+              check_stock_type: @pay_period.company.check_stock_type
             }
           }
         end
@@ -75,12 +77,21 @@ module Api
             return render json: { error: "No checks to print for this pay period (all items have $0 net pay)" }, status: :unprocessable_entity
           end
 
-          combined_pdf = combine_pdfs(
-            printable_items.map do |item|
-              generator = CheckGenerator.new(item)
-              item.voided? ? generator.generate_voided : generator.generate
+          combined_pdf =
+            if @pay_period.company.first_hawaiian_4up_checks?
+              FirstHawaiianFourUpCheckGenerator.new(
+                company: @pay_period.company,
+                payroll_items: printable_items,
+                starting_slot: params[:starting_slot]
+              ).generate
+            else
+              combine_pdfs(
+                printable_items.map do |item|
+                  generator = CheckGenerator.new(item)
+                  item.voided? ? generator.generate_voided : generator.generate
+                end
+              )
             end
-          )
 
           # Log batch download event for each printable item in a single INSERT
           user = User.find(current_user_id)
@@ -158,13 +169,24 @@ module Api
             return render json: { error: "No check number assigned to this payroll item" }, status: :unprocessable_entity
           end
 
-          generator = CheckGenerator.new(@payroll_item)
-          pdf_data  = @payroll_item.voided? ? generator.generate_voided : generator.generate
+          if @payroll_item.pay_period.company.first_hawaiian_4up_checks?
+            generator = FirstHawaiianFourUpCheckGenerator.new(
+              company: @payroll_item.pay_period.company,
+              payroll_items: [@payroll_item],
+              starting_slot: params[:starting_slot]
+            )
+            pdf_data = generator.generate
+            filename = "fhb_check_#{@payroll_item.check_number || 'UNASSIGNED'}_#{@payroll_item.employee_id}.pdf"
+          else
+            generator = CheckGenerator.new(@payroll_item)
+            pdf_data  = @payroll_item.voided? ? generator.generate_voided : generator.generate
+            filename = generator.filename
+          end
 
           send_data pdf_data,
             type: "application/pdf",
             disposition: "attachment",
-            filename: generator.filename
+            filename: filename
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
@@ -288,6 +310,30 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
+        # PATCH /api/v1/admin/payroll_items/:payroll_item_id/check_number
+        # Correct an assigned check number without changing payroll dollars.
+        # -----------------------------------------------------------------------
+        def update_check_number
+          unless current_user
+            return render json: { error: "User not found" }, status: :unprocessable_entity
+          end
+
+          updated_item = CheckNumberCorrectionService.new(
+            payroll_item: @payroll_item,
+            new_check_number: params[:check_number],
+            reason: params[:reason],
+            actor: current_user,
+            ip_address: request.remote_ip
+          ).call
+
+          render json: { payroll_item: check_item_json(updated_item) }
+        rescue CheckNumberCorrectionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
@@ -443,10 +489,14 @@ module Api
         # GET /api/v1/admin/companies/:company_id/alignment_test_pdf
         # -----------------------------------------------------------------------
         def alignment_test_pdf
-          # Build a dummy payroll item for the alignment generator
-          stub_item = build_alignment_stub_item(@company)
-          generator = CheckGenerator.new(stub_item)
-          pdf_data  = generator.alignment_test
+          pdf_data =
+            if @company.first_hawaiian_4up_checks?
+              FirstHawaiianFourUpCheckGenerator.new(company: @company).alignment_test
+            else
+              # Build a dummy payroll item for the alignment generator
+              stub_item = build_alignment_stub_item(@company)
+              CheckGenerator.new(stub_item).alignment_test
+            end
 
           # Log the alignment test event (uses system user — company-level action)
           # We log to audit_logs rather than check_events since there's no real payroll item
