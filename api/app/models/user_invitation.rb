@@ -8,6 +8,7 @@ class UserInvitation < ApplicationRecord
 
   validates :email, presence: true
   validates :token, presence: true, uniqueness: true
+  validates :invited_by, presence: true, on: :create
   validates :invited_at, presence: true
   validates :expires_at, presence: true
 
