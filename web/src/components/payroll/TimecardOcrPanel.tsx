@@ -1224,7 +1224,32 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   const [activeSearch, setActiveSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const perPage = 12;
+  const embeddedPerPage = 100;
   const listScrollYRef = useRef(0);
+
+  const loadEmbeddedTimecards = useCallback(async () => {
+    const first = await timecardsApi.listPaginated({
+      page: 1,
+      perPage: embeddedPerPage,
+      payPeriodId,
+      search: activeSearch || undefined,
+      status: statusFilter || undefined,
+    });
+    const all = [...first.timecards];
+
+    for (let nextPage = 2; nextPage <= first.meta.total_pages; nextPage += 1) {
+      const next = await timecardsApi.listPaginated({
+        page: nextPage,
+        perPage: embeddedPerPage,
+        payPeriodId,
+        search: activeSearch || undefined,
+        status: statusFilter || undefined,
+      });
+      all.push(...next.timecards);
+    }
+
+    return { timecards: all, totalCount: first.meta.total_count };
+  }, [activeSearch, payPeriodId, statusFilter]);
 
   const loadTimecards = useCallback(async () => {
     setLoading(true);
@@ -1237,19 +1262,13 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
         setTotalPages(resp.meta.total_pages);
         setTotalCount(resp.meta.total_count);
       } else {
-        const resp = await timecardsApi.listPaginated({
-          page: 1,
-          perPage: 100,
-          payPeriodId,
-          search: activeSearch || undefined,
-          status: statusFilter || undefined,
-        });
+        const resp = await loadEmbeddedTimecards();
         setTimecards(resp.timecards);
-        setTotalCount(resp.meta.total_count);
+        setTotalCount(resp.totalCount);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, [isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter]);
+  }, [isStandalone, page, perPage, activeSearch, statusFilter, loadEmbeddedTimecards]);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -1311,15 +1330,10 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
             setProcessingIds(new Set(stillProcessing));
           }
         } else {
-          const resp = await timecardsApi.listPaginated({
-            page: 1,
-            perPage: 100,
-            payPeriodId,
-            search: activeSearch || undefined,
-            status: statusFilter || undefined,
-          });
+          const resp = await loadEmbeddedTimecards();
           const data = resp.timecards;
           setTimecards(data);
+          setTotalCount(resp.totalCount);
           const stillProcessing = data
             .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
             .map(tc => tc.id);
@@ -1329,7 +1343,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     }, 5000);
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter, processingIds.size]);
+  }, [hasProcessing, isStandalone, page, perPage, activeSearch, statusFilter, processingIds.size, loadEmbeddedTimecards]);
 
   const handleSearch = () => {
     setPage(1);
