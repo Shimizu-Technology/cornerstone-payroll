@@ -45,7 +45,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const [startingSlot, setStartingSlot] = useState(1);
   const [editingCheckId, setEditingCheckId] = useState<number | null>(null);
   const [draftCheckNumber, setDraftCheckNumber] = useState('');
-  const [checkNumberError, setCheckNumberError] = useState<string | null>(null);
+  const [checkNumberError, setCheckNumberError] = useState<{ id: number; message: string } | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -194,11 +194,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const handleSaveCheckNumber = async (item: CheckItem) => {
     const nextNumber = draftCheckNumber.trim();
     if (!nextNumber) {
-      setCheckNumberError('Enter a check number.');
+      setCheckNumberError({ id: item.id, message: 'Enter a check number.' });
       return;
     }
     if (!/^\d+$/.test(nextNumber)) {
-      setCheckNumberError('Check number must be numeric.');
+      setCheckNumberError({ id: item.id, message: 'Check number must be numeric.' });
       return;
     }
     if (nextNumber === item.check_number) {
@@ -222,7 +222,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       );
       cancelCheckNumberEdit();
     } catch (err) {
-      setCheckNumberError(err instanceof Error ? err.message : 'Failed to update check number');
+      setCheckNumberError({
+        id: item.id,
+        message: err instanceof Error ? err.message : 'Failed to update check number',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -436,8 +439,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                             Cancel
                           </Button>
                         </div>
-                        {checkNumberError && (
-                          <p className="max-w-xs text-xs font-normal text-red-600">{checkNumberError}</p>
+                        {checkNumberError?.id === item.id && (
+                          <p className="max-w-xs text-xs font-normal text-red-600">{checkNumberError.message}</p>
                         )}
                       </div>
                     ) : (

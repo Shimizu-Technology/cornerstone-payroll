@@ -37,7 +37,7 @@ module Api
 
           items = @pay_period.payroll_items
                              .includes(:employee, :check_events)
-                             .joins(:employee)
+                             .left_outer_joins(:employee)
                              .with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
 
