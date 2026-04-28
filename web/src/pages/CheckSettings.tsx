@@ -686,7 +686,7 @@ export function CheckSettingsPage() {
             </div>
             <div className="text-xs text-gray-500 space-y-1">
               <p>This is the next blank check number the app will assign, not the last used check number.</p>
-              <p>This can only be changed if no checks have been issued this calendar year.</p>
+              <p>You can move this forward for the next pay period. It cannot be set to a number that has already been issued.</p>
               <p>Current next number: <span className="font-mono font-medium">{settings?.next_check_number}</span></p>
             </div>
           </CardContent>

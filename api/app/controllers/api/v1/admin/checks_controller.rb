@@ -450,8 +450,9 @@ module Api
 
         # -----------------------------------------------------------------------
         # PATCH /api/v1/admin/companies/:company_id/next_check_number
-        # Admin-only: manually set the starting check number.
-        # Allowed only if no checks have been issued for the current calendar year.
+        # Admin-only: manually set the next blank check number.
+        # If checks already exist, the next number can move forward but cannot
+        # move backward into an already-issued range.
         # -----------------------------------------------------------------------
         def update_next_check_number
           new_number = params[:next_check_number].to_i
@@ -463,25 +464,12 @@ module Api
             return render json: { error: "Check number cannot exceed 9,999,999" }, status: :unprocessable_entity
           end
 
-          # Safety guard: disallow if checks already issued this year
-          current_year = Date.current.year
-          checks_this_year = PayrollItem
-            .joins(:pay_period)
-            .where(pay_periods: { company_id: @company.id })
-            .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", current_year)
-            .where.not(check_number: nil)
-            .exists?
-          non_employee_checks_this_year = NonEmployeeCheck
-            .joins(:pay_period)
-            .where(pay_periods: { company_id: @company.id })
-            .where("EXTRACT(YEAR FROM pay_periods.pay_date) = ?", current_year)
-            .where.not(check_number: nil)
-            .exists?
-
-          if checks_this_year || non_employee_checks_this_year
+          issued_numbers = issued_check_numbers_for_company(@company)
+          highest_issued_number = issued_numbers.max
+          if highest_issued_number && new_number <= highest_issued_number
             return render json: {
-              error: "Cannot change starting check number — checks have already been issued this year. " \
-                     "To reset, void all issued checks first or contact Cornerstone support."
+              error: "Next check number must be higher than the highest issued check number " \
+                     "(#{highest_issued_number}). Enter #{highest_issued_number + 1} or higher."
             }, status: :unprocessable_entity
           end
 
@@ -526,6 +514,23 @@ module Api
         end
 
         private
+
+        def issued_check_numbers_for_company(company)
+          payroll_numbers = PayrollItem
+            .joins(:pay_period)
+            .where(pay_periods: { company_id: company.id })
+            .where.not(check_number: nil)
+            .pluck(:check_number)
+
+          non_employee_numbers = NonEmployeeCheck
+            .where(company_id: company.id)
+            .where.not(check_number: nil)
+            .pluck(:check_number)
+
+          (payroll_numbers + non_employee_numbers).filter_map do |number|
+            Integer(number.to_s, exception: false)
+          end
+        end
 
         # -----------------------------------------------------------------------
         # Strong-params extraction for the replace-check endpoints'

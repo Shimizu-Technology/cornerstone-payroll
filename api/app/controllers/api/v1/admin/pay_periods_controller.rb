@@ -883,10 +883,10 @@ module Api
             data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
             label = data["label"].to_s.strip
             amount = BigDecimal(data["amount"].to_s)
-            next if label.blank? || amount <= 0
+            next if label.blank? || amount <= 0 || !amount.finite?
 
             { label: label, amount: amount.round(2).to_f }
-          rescue ArgumentError
+          rescue ArgumentError, FloatDomainError
             nil
           end
         end

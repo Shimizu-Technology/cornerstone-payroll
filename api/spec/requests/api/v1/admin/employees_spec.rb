@@ -345,6 +345,8 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           employee: {
             default_custom_earnings: [
               { label: "Chief Stipend", amount: "125.555" },
+              { label: "Bad Infinity", amount: "Infinity" },
+              { label: "Bad NaN", amount: "NaN" },
               { label: "Ignored", amount: "0" },
               { label: "", amount: "50" }
             ]
