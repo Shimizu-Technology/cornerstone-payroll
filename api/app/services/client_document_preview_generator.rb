@@ -41,20 +41,26 @@ class ClientDocumentPreviewGenerator
       pdf_path = Dir[File.join(output_dir, "*.pdf")].first
       raise GenerationFailed, "LibreOffice did not produce a PDF preview" unless pdf_path.present? && File.exist?(pdf_path)
 
+      previous_preview_key = document.preview_file_key
       next_preview_key = build_preview_key(document.file_name)
       File.open(pdf_path, "rb") do |file|
         storage.upload(next_preview_key, file, content_type: "application/pdf")
       end
 
-      delete_previous_preview!(next_preview_key)
+      begin
+        document.update!(
+          preview_status: "ready",
+          preview_file_key: next_preview_key,
+          preview_content_type: "application/pdf",
+          preview_generated_at: Time.current,
+          preview_error: nil
+        )
+      rescue StandardError
+        cleanup_uploaded_preview!(next_preview_key)
+        raise
+      end
 
-      document.update!(
-        preview_status: "ready",
-        preview_file_key: next_preview_key,
-        preview_content_type: "application/pdf",
-        preview_generated_at: Time.current,
-        preview_error: nil
-      )
+      delete_previous_preview!(previous_preview_key, replacement_key: next_preview_key)
     end
   rescue R2StorageService::DownloadError, R2StorageService::UploadError => e
     mark_failed!(e.message)
@@ -99,13 +105,20 @@ class ClientDocumentPreviewGenerator
     Rails.logger.warn("Spreadsheet preview optimization errored for document #{document.id}: #{e.message}")
   end
 
-  def delete_previous_preview!(replacement_key)
-    previous_key = document.preview_file_key
+  def delete_previous_preview!(previous_key, replacement_key:)
     return if previous_key.blank? || previous_key == replacement_key
 
     storage.delete(previous_key)
   rescue R2StorageService::UploadError => e
     Rails.logger.warn("Failed to delete previous preview for document #{document.id}: #{e.message}")
+  end
+
+  def cleanup_uploaded_preview!(preview_key)
+    return if preview_key.blank?
+
+    storage.delete(preview_key)
+  rescue R2StorageService::UploadError => e
+    Rails.logger.warn("Failed to clean up uploaded preview for document #{document.id}: #{e.message}")
   end
 
   def build_preview_key(original_filename)
