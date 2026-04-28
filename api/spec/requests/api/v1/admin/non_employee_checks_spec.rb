@@ -91,7 +91,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       json = JSON.parse(response.body)
-      expect(json["errors"].join(", ")).to match(/check number/i)
+      expect((json["errors"] || [json["error"]]).join(", ")).to match(/check number/i)
     end
 
     # Regression test: editing two unrelated checks without a check number
@@ -156,6 +156,56 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(check.reload.check_number).to eq("2002")
+    end
+
+    it "rejects a check_number already used by a payroll check" do
+      employee = create(:employee, company: company)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        check_number: "2468"
+      )
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: { check_number: "2468" }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("payroll check")
+      expect(check.reload.check_number).to be_nil
+    end
+
+    it "syncs saved transmittal non-employee check numbers" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        non_employee_check_numbers: { check.id.to_s => "1001" }
+      )
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: { check_number: "2469" },
+          reason: "Actual non-employee check stock used"
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.non_employee_check_numbers[check.id.to_s]).to eq("2469")
+    end
+
+    it "advances next_check_number when assigning a higher non-employee check number" do
+      company.update!(next_check_number: 2000)
+
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: { check_number: "2469" }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.next_check_number).to eq(2470)
     end
 
     it "rejects changing the pay period to another company" do

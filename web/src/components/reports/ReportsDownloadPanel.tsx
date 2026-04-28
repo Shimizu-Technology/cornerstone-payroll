@@ -420,7 +420,7 @@ function TransmittalEditorModal({
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
-            neNums[c.id] = savedNum || c.check_number || '';
+            neNums[c.id] = c.check_number || savedNum || '';
           });
           setNeCheckNumbers(neNums);
           setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
@@ -1095,16 +1095,27 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
-  const savedToOptions = (saved: SavedTransmittal, preview?: TransmittalPreview): TransmittalOptions => ({
-    preparerName: saved.preparer_name || undefined,
-    notes: saved.notes?.length ? saved.notes : undefined,
-    reportList: saved.report_list || [],
-    checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
-    checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
-    nonEmployeeCheckNumbers: saved.non_employee_check_numbers
-      ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
-      : undefined,
-  });
+  const savedToOptions = (saved: SavedTransmittal, preview?: TransmittalPreview): TransmittalOptions => {
+    const liveNonEmployeeNumbers = preview?.non_employee_checks.reduce<Record<number, string>>((acc, check) => {
+      const savedNum = saved.non_employee_check_numbers?.[String(check.id)];
+      const number = check.check_number || savedNum;
+      if (number) acc[check.id] = number;
+      return acc;
+    }, {});
+
+    return {
+      preparerName: saved.preparer_name || undefined,
+      notes: saved.notes?.length ? saved.notes : undefined,
+      reportList: saved.report_list || [],
+      checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
+      checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
+      nonEmployeeCheckNumbers: liveNonEmployeeNumbers && Object.keys(liveNonEmployeeNumbers).length > 0
+        ? liveNonEmployeeNumbers
+        : saved.non_employee_check_numbers
+        ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
+        : undefined,
+    };
+  };
 
   const handleReprint = async (reportKey: ReportKey, label: string) => {
     if (!savedTransmittal) return;
