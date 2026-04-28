@@ -75,4 +75,10 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     expect(text).to include("FIRST HAWAIIAN 4-UP ALIGNMENT TEST")
     expect(text).to include("FHB CHECK SLOT 4")
   end
+
+  it "rejects empty check batches" do
+    generator = described_class.new(company: company)
+
+    expect { generator.generate }.to raise_error(ArgumentError, /No check entries/)
+  end
 end

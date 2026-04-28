@@ -52,6 +52,8 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def generate
+    raise ArgumentError, "No check entries to render" if entries.empty?
+
     Prawn::Document.new(page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN) do |pdf|
       draw_entries(pdf)
     end.render
@@ -223,8 +225,6 @@ class FirstHawaiianFourUpCheckGenerator
       pdf.stroke_line [x, y - 5], [x, y + 5]
       pdf.font_size(5.5) { pdf.draw_text label, at: [x + 7, y + 2] }
     end
-    pdf.fill_color "000000"
-    pdf.stroke_color "000000"
   end
 
   def draw_void_watermark(pdf, slot_bottom)
@@ -240,7 +240,6 @@ class FirstHawaiianFourUpCheckGenerator
         end
       end
     end
-    pdf.fill_color "000000"
   end
 
   def fn(value)
