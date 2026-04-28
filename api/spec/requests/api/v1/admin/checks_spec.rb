@@ -402,7 +402,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(pay_period.transmittal.reload.check_number_first).to eq("3001")
-      expect(pay_period.transmittal.check_number_last).to eq("3010")
+      expect(pay_period.transmittal.check_number_last).to eq("3011")
       expect(pay_period.transmittal.non_employee_check_numbers[non_employee_check.id.to_s]).to eq("3011")
       synced_entry = pay_period.check_signoff_sheet.reload.entries.find { |entry| entry["name"] == "Reyes, Alice" }
       expect(synced_entry["check_number"]).to eq("3010")

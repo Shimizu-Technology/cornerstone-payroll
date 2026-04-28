@@ -71,6 +71,8 @@ module TimecardOcr
 
       image = MiniMagick::Image.open(@file_path)
       [image["%n"].to_i, 1].max
+    ensure
+      image&.destroy!
     end
 
     def render_pdf_page(page_index)
