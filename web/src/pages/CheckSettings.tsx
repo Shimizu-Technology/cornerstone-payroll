@@ -681,12 +681,13 @@ export function CheckSettingsPage() {
                 onClick={handleUpdateNextCheckNumber}
                 disabled={nextCheckNumberSaving}
               >
-                {nextCheckNumberSaving ? 'Updating…' : 'Update Starting Number'}
+                {nextCheckNumberSaving ? 'Updating…' : 'Update Next Number'}
               </Button>
             </div>
             <div className="text-xs text-gray-500 space-y-1">
-              <p>⚠ This can only be changed if no checks have been issued this calendar year.</p>
-              <p>Current value: <span className="font-mono font-medium">{settings?.next_check_number}</span></p>
+              <p>This is the next blank check number the app will assign, not the last used check number.</p>
+              <p>This can only be changed if no checks have been issued this calendar year.</p>
+              <p>Current next number: <span className="font-mono font-medium">{settings?.next_check_number}</span></p>
             </div>
           </CardContent>
         </Card>

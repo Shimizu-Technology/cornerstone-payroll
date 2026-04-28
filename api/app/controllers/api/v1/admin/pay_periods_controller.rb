@@ -25,7 +25,7 @@ module Api
           @pay_periods = PayPeriod.where(company_id: current_company_id)
                                    .includes(:payroll_items, :voided_by, :correction_events,
                                              :supplemental_pay_periods)
-                                   .order(pay_date: :desc)
+                                   .order(end_date: :desc, start_date: :desc, pay_date: :desc, id: :desc)
 
           # Filter by status
           @pay_periods = @pay_periods.where(status: params[:status]) if params[:status].present?
@@ -189,13 +189,14 @@ module Api
           # 2. If imported payroll items exist, use imported employees + salary + contractors
           #    (don't auto-create hourly employees not present in the import)
           # 3. Otherwise, include all active employees for normal payroll runs/recalculations
+          submitted_employee_ids = submitted_payroll_employee_ids
           employee_ids = if params[:employee_ids].present?
-            Array(params[:employee_ids])
+            Array(params[:employee_ids]) | submitted_employee_ids
           elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
             imported_ids = @pay_period.payroll_items.pluck(:employee_id)
             salary_ids = Employee.active.where(company_id: current_company_id, employment_type: "salary").pluck(:id)
             contractor_ids = Employee.active.where(company_id: current_company_id, employment_type: "contractor").pluck(:id)
-            (imported_ids + salary_ids + contractor_ids).uniq
+            (imported_ids + salary_ids + contractor_ids + submitted_employee_ids).uniq
           else
             Employee.active.where(company_id: current_company_id).pluck(:id)
           end
@@ -223,6 +224,7 @@ module Api
                 payroll_item.employment_type = employee.employment_type
                 payroll_item.hours_worked = 0
                 payroll_item.additional_withholding = employee.additional_withholding.to_f
+                payroll_item.custom_earnings = employee.default_custom_earnings
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
@@ -268,6 +270,10 @@ module Api
               if params[:loan_deductions] && params[:loan_deductions][employee_id.to_s]
                 loan_val = params[:loan_deductions][employee_id.to_s].to_f
                 payroll_item.loan_deduction = loan_val > 0 ? loan_val : 0
+              end
+
+              if params[:custom_earnings] && params[:custom_earnings][employee_id.to_s]
+                payroll_item.custom_earnings = normalize_custom_earnings(params[:custom_earnings][employee_id.to_s])
               end
 
               # Calculate payroll
@@ -822,6 +828,9 @@ module Api
             employer_medicare_tax: item.employer_medicare_tax,
             employer_retirement_match: item.employer_retirement_match,
             employer_roth_retirement_match: item.employer_roth_retirement_match,
+            department_id: item.employee.department_id,
+            department_name: item.employee.department&.name,
+            custom_earnings: item.custom_earnings || [],
             check_number: item.check_number,
             check_printed_at: item.check_printed_at,
             check_print_count: item.check_print_count,
@@ -837,6 +846,49 @@ module Api
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
           }
+        end
+
+        def submitted_payroll_employee_ids
+          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings].flat_map do |key|
+            params[key].respond_to?(:keys) ? params[key].keys : []
+          end
+
+          hours_params = if params[:hours].respond_to?(:to_unsafe_h)
+            params[:hours].to_unsafe_h
+          elsif params[:hours].respond_to?(:to_h)
+            params[:hours].to_h
+          else
+            {}
+          end
+
+          hours_ids = if hours_params.respond_to?(:each)
+            hours_params.each_with_object([]) do |(employee_id, entry), ids|
+              data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+              wage_rates = data[:wage_rates] || data["wage_rates"]
+              has_wage_rate_hours = Array(wage_rates).any? do |rate|
+                %w[regular_hours overtime_hours holiday_hours pto_hours].any? { |field| rate[field].to_f.positive? }
+              end
+              has_basic_hours = %w[regular overtime holiday pto].any? { |field| data[field].to_f.positive? }
+              ids << employee_id if has_wage_rate_hours || has_basic_hours
+            end
+          else
+            []
+          end
+
+          (keyed_ids + hours_ids).map(&:to_i).select(&:positive?).uniq
+        end
+
+        def normalize_custom_earnings(entries)
+          Array(entries).filter_map do |entry|
+            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+            label = data["label"].to_s.strip
+            amount = BigDecimal(data["amount"].to_s)
+            next if label.blank? || amount <= 0
+
+            { label: label, amount: amount.round(2).to_f }
+          rescue ArgumentError
+            nil
+          end
         end
 
         def apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
