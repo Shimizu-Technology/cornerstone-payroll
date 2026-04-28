@@ -107,6 +107,30 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(item.reload.hours_worked).to eq(11.0)
     end
 
+    it "does not double-count wage-rate hours when entries contain string and symbol keys" do
+      controller = Api::V1::Admin::TimecardsController.new
+
+      hours = controller.send(
+        :entry_hours,
+        { regular_hours: 5, "regular_hours" => 5 },
+        :regular_hours
+      )
+
+      expect(hours).to eq(5.0)
+    end
+
+    it "returns a friendly error when payroll calculation fails" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!).and_raise(StandardError, "calculation exploded")
+
+      post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Failed to apply timecard to payroll")
+      expect(timecard.reload.applied_payroll_item_id).to be_nil
+      expect(timecard.applied_to_payroll_at).to be_nil
+    end
+
     it "resets non-regular hour fields when applying OCR hours to a single-rate employee" do
       single_rate_employee = create(:employee, company: company, first_name: "Single", last_name: "Rate", employment_type: "hourly", pay_rate: 22)
       single_rate_timecard = Timecard.create!(
