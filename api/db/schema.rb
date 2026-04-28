@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_27_093000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -74,6 +74,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
     t.index ["company_id"], name: "index_check_signoff_sheets_on_company_id"
     t.index ["pay_period_id"], name: "index_check_signoff_sheets_on_pay_period_id", unique: true
     t.index ["updated_by_id"], name: "index_check_signoff_sheets_on_updated_by_id"
+  end
+
+  create_table "client_documents", force: :cascade do |t|
+    t.string "category", null: false
+    t.bigint "company_id", null: false
+    t.string "content_type", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id"
+    t.string "file_key", null: false
+    t.string "file_name", null: false
+    t.bigint "file_size", default: 0, null: false
+    t.text "notes"
+    t.string "preview_content_type"
+    t.text "preview_error"
+    t.string "preview_file_key"
+    t.datetime "preview_generated_at"
+    t.string "preview_status", default: "pending", null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "uploaded_by_id", null: false
+    t.index ["company_id", "category"], name: "index_client_documents_on_company_id_and_category"
+    t.index ["company_id", "created_at"], name: "index_client_documents_on_company_id_and_created_at"
+    t.index ["company_id", "preview_status"], name: "index_client_documents_on_company_id_and_preview_status"
+    t.index ["company_id"], name: "index_client_documents_on_company_id"
+    t.index ["employee_id"], name: "index_client_documents_on_employee_id"
+    t.index ["file_key"], name: "index_client_documents_on_file_key", unique: true
+    t.index ["uploaded_by_id"], name: "index_client_documents_on_uploaded_by_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -173,6 +200,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
     t.datetime "updated_at", null: false
     t.index ["company_id", "name"], name: "index_departments_on_company_id_and_name", unique: true
     t.index ["company_id"], name: "index_departments_on_company_id"
+  end
+
+  create_table "employee_change_requests", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "direct_changes_applied", default: {}, null: false
+    t.bigint "employee_id", null: false
+    t.jsonb "original_values", default: {}, null: false
+    t.jsonb "proposed_changes", default: {}, null: false
+    t.text "request_notes"
+    t.bigint "requested_by_id", null: false
+    t.text "review_notes"
+    t.datetime "reviewed_at"
+    t.bigint "reviewed_by_id"
+    t.integer "status", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status"], name: "index_employee_change_requests_on_company_id_and_status"
+    t.index ["company_id"], name: "index_employee_change_requests_on_company_id"
+    t.index ["employee_id", "created_at"], name: "index_employee_change_requests_on_employee_id_and_created_at"
+    t.index ["employee_id"], name: "index_employee_change_requests_on_employee_id"
+    t.index ["requested_by_id"], name: "index_employee_change_requests_on_requested_by_id"
+    t.index ["reviewed_by_id"], name: "index_employee_change_requests_on_reviewed_by_id"
   end
 
   create_table "employee_deductions", force: :cascade do |t|
@@ -300,6 +349,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
     t.datetime "updated_at", null: false
     t.index ["annual_tax_config_id", "filing_status"], name: "idx_filing_status_configs_unique", unique: true
     t.index ["annual_tax_config_id"], name: "index_filing_status_configs_on_annual_tax_config_id"
+  end
+
+  create_table "form500_filings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.jsonb "fields", default: {}, null: false
+    t.bigint "pay_period_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["company_id"], name: "index_form500_filings_on_company_id"
+    t.index ["created_by_id"], name: "index_form500_filings_on_created_by_id"
+    t.index ["pay_period_id"], name: "index_form500_filings_on_pay_period_id", unique: true
+    t.index ["updated_by_id"], name: "index_form500_filings_on_updated_by_id"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -769,12 +832,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"
+  add_foreign_key "client_documents", "companies"
+  add_foreign_key "client_documents", "employees"
+  add_foreign_key "client_documents", "users", column: "uploaded_by_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "departments", "companies"
+  add_foreign_key "employee_change_requests", "companies"
+  add_foreign_key "employee_change_requests", "employees"
+  add_foreign_key "employee_change_requests", "users", column: "requested_by_id"
+  add_foreign_key "employee_change_requests", "users", column: "reviewed_by_id"
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
   add_foreign_key "employee_loans", "companies"
@@ -785,6 +855,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_25_200000) do
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
+  add_foreign_key "form500_filings", "companies"
+  add_foreign_key "form500_filings", "pay_periods"
+  add_foreign_key "form500_filings", "users", column: "created_by_id"
+  add_foreign_key "form500_filings", "users", column: "updated_by_id"
   add_foreign_key "loan_transactions", "employee_loans"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"

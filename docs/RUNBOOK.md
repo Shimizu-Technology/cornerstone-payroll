@@ -444,3 +444,64 @@ Expected: **105 examples, 0 failures**
 ---
 
 *Check Printing section added: CPR-66 (2026-03-10)*
+
+---
+
+## Office Document Preview Deployment Note
+
+Client document previews support two different paths today:
+
+- **PDF and image files** preview directly in the app and are expected to work in production as-is.
+- **Office-style files** such as `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, and `.txt` rely on backend preview generation that converts the source file into a PDF before the in-app preview is shown.
+
+### Current Production Limitation
+
+The office preview generator depends on the following backend tools:
+
+- `LibreOffice` / `soffice`
+- `python3`
+- Python package `openpyxl`
+
+The current production deployment uses:
+
+- **Frontend:** Netlify
+- **Backend:** Render native Ruby/Rails service
+
+Netlify does **not** need any special setup for this feature.
+
+The backend is the limiting factor. Render's native Ruby service is fine for the app overall, but office preview generation may not work in production unless the backend runtime has LibreOffice installed and available on `PATH` (or provided through `LIBREOFFICE_BIN`).
+
+### What This Means Right Now
+
+- Shipping this PR is still safe.
+- PDF/image previews should continue to work normally.
+- Word/Excel/CSV "real preview" generation may fail in production until the backend preview toolchain is installed in the runtime that executes `GenerateClientDocumentPreviewJob`.
+
+### Recommended Future Production Setup
+
+Preferred option:
+
+1. Keep the main Rails web service on Render native Ruby/Rails.
+2. Add a **separate Docker-based worker/service** dedicated to office preview generation.
+3. Install the required packages in that worker image:
+   - LibreOffice
+   - Python 3
+   - `openpyxl`
+4. Point preview jobs to that worker environment.
+
+Alternative option:
+
+1. Migrate the backend service itself to a Docker deployment later.
+2. Install the same preview dependencies in the backend image.
+
+The separate worker approach is preferred because it avoids changing the existing live Rails web service type just to support office-file previews.
+
+### Implementation Notes
+
+- The preview generator lives in `api/app/services/client_document_preview_generator.rb`.
+- If LibreOffice is installed in a non-standard location, set `LIBREOFFICE_BIN`.
+- Any Render worker or background job service that runs preview generation must have the same dependency set as the process handling the job.
+
+### OCR Model Default
+
+Timecard OCR now defaults to `google/gemini-3.1-pro-preview` through OpenRouter unless `OPENROUTER_MODEL` is explicitly set in the environment. This keeps the current OCR flow pointed at the strongest verified multimodal model we could confirm for the existing image-based extraction pipeline without changing the surrounding OpenRouter integration.

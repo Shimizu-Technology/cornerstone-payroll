@@ -4,7 +4,7 @@ class UserInvitation < ApplicationRecord
   belongs_to :company
   belongs_to :invited_by, class_name: "User"
 
-  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3 }
+  enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4 }
 
   validates :email, presence: true
   validates :token, presence: true, uniqueness: true

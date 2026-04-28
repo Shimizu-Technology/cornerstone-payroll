@@ -387,7 +387,10 @@ module TimecardOcr
     end
 
     def primary_model
-      ENV["OPENROUTER_MODEL"].presence || "openai/gpt-5.4"
+      # Gemini 3.1 Pro Preview is the current default for timecard OCR because it
+      # is the strongest verified multimodal model available through our
+      # OpenRouter-based pipeline for image-heavy extraction.
+      ENV["OPENROUTER_MODEL"].presence || "google/gemini-3.1-pro-preview"
     end
 
     def strong_model

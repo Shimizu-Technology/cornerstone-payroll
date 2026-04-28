@@ -11,6 +11,8 @@ import {
   Building,
   CalendarDays,
   FileBarChart2,
+  FileSpreadsheet,
+  FolderOpen,
   HandCoins,
   SlidersHorizontal,
   Printer,
@@ -20,6 +22,7 @@ import {
   ScanLine,
   PanelLeftClose,
   PanelLeftOpen,
+  Files,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,6 +50,15 @@ const clientNavigation: NavItem[] = [
   { name: 'Employee Loans', href: '/employee-loans', icon: <HandCoins className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
+const portalNavigation: NavItem[] = [
+  { name: 'Dashboard', href: '/', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Documents', href: '/documents', icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" /> },
+];
+
 const toolsNavigation: NavItem[] = [
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
 ];
@@ -61,6 +73,10 @@ const adminNavigation: NavItem[] = [
   { name: 'Tax Configuration', href: '/settings/tax-config', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'User Management', href: '/settings/users', icon: <UserCog className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Audit Logs', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
+];
+
+const portalAdminNavigation: NavItem[] = [
+  { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 function FloatingTooltip({ anchorRef, label, visible }: { anchorRef: React.RefObject<HTMLElement | null>; label: string; visible: boolean }) {
@@ -181,8 +197,10 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse }: SidebarProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
+  const primaryNavigation = isClient ? portalNavigation : clientNavigation;
 
   return (
     <aside className={cn(
@@ -211,18 +229,35 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       {/* Nav */}
       <nav className={cn('flex-1 overflow-y-auto py-4', collapsed ? 'px-2' : 'px-4')}>
         <div className="space-y-1.5">
-          <NavSection items={clientNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+          <NavSection items={primaryNavigation} collapsed={collapsed} onNavigate={onNavigate} />
         </div>
 
-        <SectionDivider icon={<Wrench className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Tools" collapsed={collapsed} />
-        <div className="space-y-1.5">
-          <NavSection items={toolsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
-        </div>
+        {!isClient && (
+          <>
+            <SectionDivider icon={<Wrench className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Tools" collapsed={collapsed} />
+            <div className="space-y-1.5">
+              <NavSection items={toolsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+            </div>
+          </>
+        )}
 
-        <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
-        <div className="space-y-1.5">
-          <NavSection items={clientSettingsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
-        </div>
+        {!isClient && (
+          <>
+            <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
+            <div className="space-y-1.5">
+              <NavSection items={clientSettingsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+            </div>
+          </>
+        )}
+
+        {!isClient && (
+          <>
+            <SectionDivider icon={<FileSpreadsheet className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Client Portal" collapsed={collapsed} />
+            <div className="space-y-1.5">
+              <NavSection items={portalAdminNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+            </div>
+          </>
+        )}
 
         {isAdmin && (
           <>

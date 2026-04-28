@@ -10,6 +10,36 @@ Rails.application.routes.draw do
     namespace :v1 do
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
+      get "companies", to: "companies#index"
+
+      resources :form_500s, only: [] do
+        collection do
+          get :defaults
+          post :save
+          post :preview
+          post :download
+        end
+      end
+
+      namespace :client do
+        resources :employees, only: [ :index, :show, :create, :update ]
+        resources :departments, only: [ :index, :create, :update ]
+        resources :documents, only: [ :index, :create, :destroy ] do
+          member do
+            get :download
+            get :preview
+          end
+        end
+        resources :employee_change_requests, only: [ :index, :show ]
+        resources :pay_periods, only: [ :index, :show ]
+
+        namespace :reports do
+          get :dashboard
+          get :payroll_register
+          get :payroll_register_pdf
+          get :ytd_summary
+        end
+      end
 
       namespace :admin do
         # CPR-66: Company check settings
@@ -41,6 +71,18 @@ Rails.application.routes.draw do
           end
         end
         resources :audit_logs, only: [ :index ]
+        resources :employee_change_requests, only: [ :index, :show ] do
+          member do
+            patch :approve
+            patch :reject
+          end
+        end
+        resources :client_documents, only: [ :index, :destroy ] do
+          member do
+            get :download
+            get :preview
+          end
+        end
         resources :user_invitations, only: [ :create ]
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
