@@ -81,7 +81,8 @@ class CheckNumberCorrectionService
     numbers = payroll_check_numbers
     transmittal.update!(
       check_number_first: numbers.first,
-      check_number_last: numbers.last
+      check_number_last: numbers.last,
+      non_employee_check_numbers: synced_non_employee_check_numbers(transmittal)
     )
   end
 
@@ -110,6 +111,18 @@ class CheckNumberCorrectionService
       .where.not(check_number: nil)
       .pluck(:check_number)
       .sort_by { |number| [number.to_s.to_i, number.to_s] }
+  end
+
+  def synced_non_employee_check_numbers(transmittal)
+    numbers = (transmittal.non_employee_check_numbers || {}).stringify_keys
+    pay_period.non_employee_checks.active.find_each do |check|
+      if check.check_number.present?
+        numbers[check.id.to_s] = check.check_number
+      else
+        numbers.delete(check.id.to_s)
+      end
+    end
+    numbers
   end
 
   def audit_reason(old_check_number)

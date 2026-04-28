@@ -377,7 +377,16 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
         pay_period: pay_period,
         company: company,
         check_number_first: "2019",
-        check_number_last: "2026"
+        check_number_last: "2026",
+        non_employee_check_numbers: {}
+      )
+      non_employee_check = NonEmployeeCheck.create!(
+        pay_period: pay_period,
+        company: company,
+        payable_to: "Treasurer of Guam",
+        amount: 50.52,
+        check_type: "tax_deposit",
+        check_number: "3011"
       )
       CheckSignoffSheet.create!(
         pay_period: pay_period,
@@ -394,6 +403,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.transmittal.reload.check_number_first).to eq("3001")
       expect(pay_period.transmittal.check_number_last).to eq("3010")
+      expect(pay_period.transmittal.non_employee_check_numbers[non_employee_check.id.to_s]).to eq("3011")
       synced_entry = pay_period.check_signoff_sheet.reload.entries.find { |entry| entry["name"] == "Reyes, Alice" }
       expect(synced_entry["check_number"]).to eq("3010")
     end
