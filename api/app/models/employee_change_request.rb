@@ -49,6 +49,7 @@ class EmployeeChangeRequest < ApplicationRecord
   enum :status, { pending: 0, approved: 1, rejected: 2 }
 
   validates :proposed_changes, presence: true
+  validates :requested_by, presence: true, on: :create
 
   scope :recent_first, -> { order(created_at: :desc) }
   scope :for_company, ->(company_id) { where(company_id: company_id) }

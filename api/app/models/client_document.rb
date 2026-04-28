@@ -33,6 +33,7 @@ class ClientDocument < ApplicationRecord
   belongs_to :uploaded_by, class_name: "User", optional: true
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
+  validates :uploaded_by, presence: true, on: :create
   validates :category, inclusion: { in: CATEGORIES }
   validates :file_size, numericality: { greater_than: 0 }
   validates :preview_status, inclusion: { in: PREVIEW_STATUSES }
