@@ -3,6 +3,11 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Form500s", type: :request do
+  it "ships the official Form 500 template used by production previews" do
+    expect(File).to exist(Form500Generator::TEMPLATE_PATH)
+    expect(File.binread(Form500Generator::TEMPLATE_PATH, 4)).to eq("%PDF")
+  end
+
   let!(:company) do
     create(:company,
       name: "Form 500 Co",
