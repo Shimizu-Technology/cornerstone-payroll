@@ -93,7 +93,7 @@ class CheckNumberCorrectionService
     updated = false
     entries = Array(sheet.entries).map do |entry|
       normalized = entry.stringify_keys
-      if normalized["name"].to_s == name || normalized["check_number"].to_s == old_check_number
+      if normalized["name"].to_s == name && normalized["check_number"].to_s == old_check_number
         updated = true
         normalized.merge("check_number" => new_check_number)
       else
