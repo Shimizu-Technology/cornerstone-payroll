@@ -105,5 +105,49 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(wage_rates.find { |rate| rate["label"] == "Legacy Training" }["regular_hours"]).to eq(4.0)
       expect(item.reload.hours_worked).to eq(11.0)
     end
+
+    it "resets non-regular hour fields when applying OCR hours to a single-rate employee" do
+      single_rate_employee = create(:employee, company: company, first_name: "Single", last_name: "Rate", employment_type: "hourly", pay_rate: 22)
+      single_rate_timecard = Timecard.create!(
+        company: company,
+        pay_period: pay_period,
+        employee_name: single_rate_employee.full_name,
+        ocr_status: "reviewed",
+        reviewed_by_name: "Admin",
+        reviewed_at: Time.current,
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+      PunchEntry.create!(
+        timecard: single_rate_timecard,
+        card_day: 1,
+        date: pay_period.start_date,
+        clock_in: "08:00",
+        clock_out: "13:00",
+        confidence: 0.95,
+        review_state: "approved",
+        reviewed_by_name: "Admin"
+      )
+      item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: single_rate_employee,
+        company: company,
+        employment_type: "hourly",
+        hours_worked: 1,
+        overtime_hours: 2,
+        holiday_hours: 3,
+        pto_hours: 4
+      )
+
+      post "/api/v1/admin/timecards/#{single_rate_timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: single_rate_employee.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(item.reload.hours_worked).to eq(5.0)
+      expect(item.overtime_hours).to eq(0)
+      expect(item.holiday_hours).to eq(0)
+      expect(item.pto_hours).to eq(0)
+    end
   end
 end

@@ -502,9 +502,18 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
   describe "PATCH /api/v1/admin/companies/next_check_number" do
     it "rejects a number that is already in the issued check range" do
-      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 100 }
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 3001 }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("highest issued check number")
+    end
+
+    it "rejects moving backward into an unissued range below the current next number" do
+      company.update!(next_check_number: 5000)
+
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 4000 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("cannot move backward")
     end
 
     it "allows moving the next check number forward after checks exist" do
