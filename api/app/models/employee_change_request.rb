@@ -43,12 +43,13 @@ class EmployeeChangeRequest < ApplicationRecord
 
   belongs_to :company
   belongs_to :employee
-  belongs_to :requested_by, class_name: "User"
+  belongs_to :requested_by, class_name: "User", optional: true
   belongs_to :reviewed_by, class_name: "User", optional: true
 
   enum :status, { pending: 0, approved: 1, rejected: 2 }
 
   validates :proposed_changes, presence: true
+  validates :requested_by, presence: true, on: :create
 
   scope :recent_first, -> { order(created_at: :desc) }
   scope :for_company, ->(company_id) { where(company_id: company_id) }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_27_093000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -93,7 +93,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_27_093000) do
     t.string "preview_status", default: "pending", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
-    t.bigint "uploaded_by_id", null: false
+    t.bigint "uploaded_by_id"
     t.index ["company_id", "category"], name: "index_client_documents_on_company_id_and_category"
     t.index ["company_id", "created_at"], name: "index_client_documents_on_company_id_and_created_at"
     t.index ["company_id", "preview_status"], name: "index_client_documents_on_company_id_and_preview_status"
@@ -210,7 +210,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_27_093000) do
     t.jsonb "original_values", default: {}, null: false
     t.jsonb "proposed_changes", default: {}, null: false
     t.text "request_notes"
-    t.bigint "requested_by_id", null: false
+    t.bigint "requested_by_id"
     t.text "review_notes"
     t.datetime "reviewed_at"
     t.bigint "reviewed_by_id"
@@ -760,7 +760,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_27_093000) do
     t.string "email", null: false
     t.datetime "expires_at", null: false
     t.datetime "invited_at", null: false
-    t.bigint "invited_by_id", null: false
+    t.bigint "invited_by_id"
     t.string "name"
     t.integer "role", default: 2, null: false
     t.string "token", null: false

@@ -248,4 +248,37 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
   end
+
+  describe "DELETE /api/v1/admin/users/:id" do
+    it "deletes the user while preserving historical records that reference them" do
+      document = create(:client_document, company: client_company, uploaded_by: managed_user)
+      invitation = UserInvitation.create!(
+        company: client_company,
+        invited_by: managed_user,
+        email: "pending-client@example.com",
+        name: "Pending Client",
+        role: "client",
+        token: SecureRandom.hex(16),
+        invited_at: Time.current,
+        expires_at: 7.days.from_now
+      )
+      change_request = EmployeeChangeRequest.create!(
+        company: client_company,
+        employee: create(:employee, company: client_company),
+        requested_by: managed_user,
+        proposed_changes: { "phone" => "671-555-0101" },
+        original_values: {},
+        direct_changes_applied: {}
+      )
+
+      expect {
+        delete "/api/v1/admin/users/#{managed_user.id}", params: { user: {} }
+      }.to change(User, :count).by(-1)
+
+      expect(response).to have_http_status(:no_content)
+      expect(document.reload.uploaded_by_id).to be_nil
+      expect(invitation.reload.invited_by_id).to be_nil
+      expect(change_request.reload.requested_by_id).to be_nil
+    end
+  end
 end
