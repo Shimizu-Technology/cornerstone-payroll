@@ -89,14 +89,6 @@ export function DocumentPreviewModal({
                 {payload.textContent}
               </pre>
             </div>
-          ) : payload?.kind === 'html' ? (
-            <div className="min-h-[420px] overflow-auto rounded-2xl border border-neutral-200 bg-white p-5">
-              {payload.message ? <p className="mb-4 text-sm text-neutral-500">{payload.message}</p> : null}
-              <div
-                className="document-preview-html prose prose-neutral max-w-none prose-table:my-0 prose-table:w-full prose-th:border prose-th:border-neutral-200 prose-th:bg-neutral-50 prose-th:px-3 prose-th:py-2 prose-td:border prose-td:border-neutral-200 prose-td:px-3 prose-td:py-2"
-                dangerouslySetInnerHTML={{ __html: payload.htmlContent || '' }}
-              />
-            </div>
           ) : (
             <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 px-8 py-10">
               <div className="max-w-md text-center">
