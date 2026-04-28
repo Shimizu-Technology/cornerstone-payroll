@@ -398,6 +398,27 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(synced_entry["check_number"]).to eq("3010")
     end
 
+    it "only syncs the matching sign-off row when names repeat" do
+      CheckSignoffSheet.create!(
+        pay_period: pay_period,
+        company: company,
+        entries: [
+          { name: "Reyes, Alice", check_number: "3000" },
+          { name: "Reyes, Alice", check_number: "3999" },
+          { name: "Someone Else", check_number: "3000" }
+        ]
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Corrected after print test" }
+
+      expect(response).to have_http_status(:ok)
+      entries = pay_period.check_signoff_sheet.reload.entries
+      expect(entries).to include({ "name" => "Reyes, Alice", "check_number" => "3010" })
+      expect(entries).to include({ "name" => "Reyes, Alice", "check_number" => "3999" })
+      expect(entries).to include({ "name" => "Someone Else", "check_number" => "3000" })
+    end
+
     it "returns 422 for non-numeric check numbers" do
       patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
         params: { check_number: "ABC123" }

@@ -415,8 +415,8 @@ function TransmittalEditorModal({
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
           setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
-          setCheckFirst(saved.check_number_first || data.payroll_checks.first || '');
-          setCheckLast(saved.check_number_last || data.payroll_checks.last || '');
+          setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
+          setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
@@ -1095,12 +1095,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     }
   };
 
-  const savedToOptions = (saved: SavedTransmittal): TransmittalOptions => ({
+  const savedToOptions = (saved: SavedTransmittal, preview?: TransmittalPreview): TransmittalOptions => ({
     preparerName: saved.preparer_name || undefined,
     notes: saved.notes?.length ? saved.notes : undefined,
     reportList: saved.report_list || [],
-    checkNumberFirst: saved.check_number_first || undefined,
-    checkNumberLast: saved.check_number_last || undefined,
+    checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
+    checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
     nonEmployeeCheckNumbers: saved.non_employee_check_numbers
       ? Object.fromEntries(Object.entries(saved.non_employee_check_numbers).map(([k, v]) => [Number(k), v]))
       : undefined,
@@ -1108,8 +1108,15 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
 
   const handleReprint = async (reportKey: ReportKey, label: string) => {
     if (!savedTransmittal) return;
-    await handlePreview(reportKey, label, savedToOptions(savedTransmittal));
-    refreshSavedState();
+    try {
+      const preview = await transmittalApi.preview(payPeriodId);
+      setSavedTransmittal(preview.saved_transmittal);
+      const saved = preview.saved_transmittal || savedTransmittal;
+      await handlePreview(reportKey, label, savedToOptions(saved, preview));
+      refreshSavedState();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh transmittal data');
+    }
   };
 
   const refreshSavedState = () => {
