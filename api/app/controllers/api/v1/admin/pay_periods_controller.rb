@@ -25,7 +25,7 @@ module Api
           @pay_periods = PayPeriod.where(company_id: current_company_id)
                                    .includes(:payroll_items, :voided_by, :correction_events,
                                              :supplemental_pay_periods)
-                                   .order(end_date: :desc, start_date: :desc, pay_date: :desc, id: :desc)
+                                   .order(Arel.sql("end_date DESC NULLS LAST, start_date DESC NULLS LAST, pay_date DESC NULLS LAST, id DESC"))
 
           # Filter by status
           @pay_periods = @pay_periods.where(status: params[:status]) if params[:status].present?

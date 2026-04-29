@@ -1228,6 +1228,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   const [statusFilter, setStatusFilter] = useState('');
   const perPage = 12;
   const embeddedPerPage = 100;
+  const embeddedMaxPages = 3;
   const listScrollYRef = useRef(0);
 
   const loadEmbeddedTimecards = useCallback(async () => {
@@ -1240,8 +1241,9 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     });
     const all = [...first.timecards];
 
+    const pagesToLoad = Math.min(first.meta.total_pages, embeddedMaxPages);
     const remainingPages = Array.from(
-      { length: Math.max(first.meta.total_pages - 1, 0) },
+      { length: Math.max(pagesToLoad - 1, 0) },
       (_, index) => index + 2
     );
     const remainingResponses = await Promise.all(remainingPages.map((nextPage) => timecardsApi.listPaginated({
