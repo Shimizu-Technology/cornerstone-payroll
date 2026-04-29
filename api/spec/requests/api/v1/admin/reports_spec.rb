@@ -1278,6 +1278,64 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "payroll summary by employee Excel sheets" do
+    it "uses a summary-specific workbook instead of payroll register sheets" do
+      report = {
+        summary: {
+          employee_count: 1,
+          total_gross: 1_000.00,
+          total_reported_tips: 50.00,
+          total_tips_paid_out: 25.00,
+          total_bonus: 10.00,
+          total_custom_earnings: 20.00,
+          total_withholding: 100.00,
+          total_social_security: 62.00,
+          total_medicare: 14.50,
+          total_traditional_retirement: 40.00,
+          total_roth_retirement: 30.00,
+          total_employer_traditional_retirement: 20.00,
+          total_employer_roth_retirement: 15.00,
+          total_deductions: 246.50,
+          total_net: 753.50
+        },
+        employees: [
+          {
+            employee_last_name: "Terlaje",
+            employee_first_name: "Mina",
+            employee_name: "Mina Terlaje",
+            employment_type: "hourly",
+            gross_pay: 1_000.00,
+            reported_tips: 50.00,
+            tips_paid_out: 25.00,
+            bonus: 10.00,
+            custom_earnings_total: 20.00,
+            withholding_tax: 100.00,
+            social_security_tax: 62.00,
+            medicare_tax: 14.50,
+            retirement_payment: 40.00,
+            roth_retirement_payment: 30.00,
+            loan_deduction: 0.00,
+            insurance_payment: 0.00,
+            total_deductions: 246.50,
+            net_pay: 753.50,
+            employer_social_security_tax: 62.00,
+            employer_medicare_tax: 14.50,
+            employer_retirement_match: 20.00,
+            employer_roth_retirement_match: 15.00
+          }
+        ]
+      }
+
+      sheets = Api::V1::Admin::ReportsController.new.send(:payroll_summary_by_employee_sheets, report)
+
+      expect(sheets.map { |sheet| sheet[:name] }).to include("Employee Summary", "Totals")
+      expect(sheets.first[:rows].first).to include("Total Payroll Cost")
+      expect(sheets.first[:rows].first).not_to include("Check Number", "Check Date")
+      expect(sheets.first[:rows].last).to include("Mina Terlaje", 1_000.00, 1_111.50)
+      expect(sheets.second[:rows]).to include([ "Roth 401(k)", 30.00 ])
+    end
+  end
+
   describe "GET /api/v1/admin/reports/form_1099_nec_xlsx" do
     it "returns 422 for a non-numeric year" do
       get "/api/v1/admin/reports/form_1099_nec_xlsx", params: { year: "not-a-year" }

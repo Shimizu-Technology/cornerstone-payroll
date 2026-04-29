@@ -2008,6 +2008,7 @@ export function PayPeriodDetail() {
           <ReportsDownloadPanel
             payPeriodId={payPeriod.id}
             payPeriodStatus={payPeriod.status}
+            payDate={payPeriod.pay_date}
           />
         )}
 
