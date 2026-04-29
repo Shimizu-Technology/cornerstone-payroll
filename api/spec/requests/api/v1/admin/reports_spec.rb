@@ -1242,4 +1242,32 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to eq("year must be a valid 4-digit tax year")
     end
   end
+
+  describe "employee pay history Excel sheets" do
+    it "uses human-readable labels for the YTD worksheet" do
+      sheets = Api::V1::Admin::ReportsController.new.send(:employee_pay_history_sheets, {
+        history: [],
+        ytd: {
+          year: 2026,
+          gross_pay: 1_000.00,
+          withholding_tax: 100.00,
+          social_security_tax: 62.00,
+          medicare_tax: 14.50,
+          retirement: 50.00,
+          roth_retirement: 25.00,
+          tips: 20.00,
+          tips_paid_out: 15.00,
+          bonus: 10.00,
+          net_pay: 738.50
+        }
+      })
+
+      ytd_rows = sheets.fetch(1).fetch(:rows)
+      expect(ytd_rows).to include([ "Metric", "Amount" ])
+      expect(ytd_rows).to include([ "Gross Pay", 1_000.00 ])
+      expect(ytd_rows).to include([ "401(k)", 50.00 ])
+      expect(ytd_rows).to include([ "Roth 401(k)", 25.00 ])
+      expect(ytd_rows.flatten).not_to include(:gross_pay, :roth_retirement)
+    end
+  end
 end

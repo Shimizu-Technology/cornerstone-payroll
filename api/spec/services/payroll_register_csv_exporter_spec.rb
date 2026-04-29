@@ -28,6 +28,10 @@ RSpec.describe PayrollRegisterCsvExporter do
         total_additional_withholding: 15.00,
         total_employer_social_security: 310.00,
         total_employer_medicare: 72.50,
+        total_traditional_retirement: 125.00,
+        total_roth_retirement: 75.00,
+        total_employer_traditional_retirement: 30.00,
+        total_employer_roth_retirement: 20.00,
         total_employer_retirement: 50.00,
         total_loan_payments: 20.00,
         total_retirement: 200.00,
@@ -116,6 +120,10 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(totals.fields.length).to eq(described_class::HEADERS.length)
       expect(totals["Reported Tips"]).to eq("100.00")
       expect(totals["PTO Hours"]).to eq("")
+      expect(totals["401(k)"]).to eq("125.00")
+      expect(totals["Roth 401(k)"]).to eq("75.00")
+      expect(totals["Employer Match"]).to eq("30.00")
+      expect(totals["Employer Roth Match"]).to eq("20.00")
       expect(totals["Total Deductions"]).to eq("932.50")
       expect(totals["Net Pay"]).to eq("4067.50")
       expect(totals["Check Number"]).to eq("")

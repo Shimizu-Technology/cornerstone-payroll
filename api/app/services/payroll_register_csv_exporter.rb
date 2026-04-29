@@ -117,6 +117,9 @@ class PayrollRegisterCsvExporter
 
   def summary_row
     s = report[:summary] || {}
+    total_traditional_retirement = s.key?(:total_traditional_retirement) ? s[:total_traditional_retirement] : s[:total_retirement]
+    total_employer_traditional_retirement = s.key?(:total_employer_traditional_retirement) ? s[:total_employer_traditional_retirement] : s[:total_employer_retirement]
+
     [
       sanitize_csv_field("TOTALS (#{s[:employee_count]} employees)"),
       "",
@@ -140,10 +143,10 @@ class PayrollRegisterCsvExporter
       format_currency(s[:total_medicare]),
       format_currency(s[:total_employer_social_security]),
       format_currency(s[:total_employer_medicare]),
-      format_currency(s[:total_retirement]),
-      "",
-      format_currency(s[:total_employer_retirement]),
-      "",
+      format_currency(total_traditional_retirement),
+      format_currency(s[:total_roth_retirement]),
+      format_currency(total_employer_traditional_retirement),
+      format_currency(s[:total_employer_roth_retirement]),
       "",
       format_currency(s[:total_loan_payments]),
       "",
