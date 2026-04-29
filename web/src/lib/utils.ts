@@ -37,6 +37,35 @@ export function formatDate(dateString: string, options?: Intl.DateTimeFormatOpti
   });
 }
 
+export function formatGuamDateTime(dateString?: string | null, options?: Intl.DateTimeFormatOptions): string {
+  if (!dateString) return 'Not recorded';
+
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+    ...options,
+    timeZone: 'Pacific/Guam',
+  }).format(new Date(dateString));
+}
+
+export function formatGuamDateTimeShort(dateString?: string | null): string {
+  if (!dateString) return 'Not processed';
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Pacific/Guam',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(dateString));
+}
+
 /**
  * Format a date range (e.g., "Jan 1 - Jan 15, 2026")
  */

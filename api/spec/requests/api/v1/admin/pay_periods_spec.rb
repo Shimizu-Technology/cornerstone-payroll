@@ -61,6 +61,48 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_periods"][0]["status"]).to eq("draft")
     end
 
+    it "includes processing lifecycle fields for list transparency" do
+      committed_at = Time.zone.parse("2026-03-30 05:00:06")
+      pay_period.update!(status: "committed", committed_at: committed_at, created_by_id: admin_user.id)
+      AuditLog.create!(
+        user: admin_user,
+        company: company,
+        action: "pay_periods#commit",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        metadata: {},
+        created_at: committed_at + 1.second
+      )
+
+      get "/api/v1/admin/pay_periods"
+
+      json = JSON.parse(response.body)
+      period = json["pay_periods"].first
+      expect(period["processed_at"]).to be_present
+      expect(period["processed_by_name"]).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "created", "actor_name")).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "committed")).not_to have_key("actor_id")
+      expect(period.dig("lifecycle", "committed")).not_to have_key("actor_email")
+    end
+
+    it "does not expose creator names from unrelated companies" do
+      other_company = Company.create!(name: "Other Company")
+      other_user = User.create!(
+        company: other_company,
+        email: "other-creator@example.com",
+        name: "Other Creator",
+        role: "manager",
+        active: true
+      )
+      pay_period.update!(created_by_id: other_user.id)
+
+      get "/api/v1/admin/pay_periods"
+
+      period = JSON.parse(response.body)["pay_periods"].first
+      expect(period.dig("lifecycle", "created", "actor_name")).to be_nil
+    end
+
     it "filters by status" do
       PayPeriod.create!(company: company, start_date: Date.today - 28.days, end_date: Date.today - 14.days, pay_date: Date.today - 11.days, status: "committed")
 
@@ -80,6 +122,34 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       json = JSON.parse(response.body)
       expect(json["pay_period"]["id"]).to eq(pay_period.id)
       expect(json["pay_period"]).to have_key("payroll_items")
+    end
+
+    it "returns audit-backed lifecycle events" do
+      AuditLog.create!(
+        user: admin_user,
+        company: company,
+        action: "pay_periods#run_payroll",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        metadata: {}
+      )
+      AuditLog.create!(
+        user: admin_user,
+        company: company,
+        action: "pay_periods#unapprove",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        metadata: {}
+      )
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      json = JSON.parse(response.body)
+      expect(json.dig("pay_period", "lifecycle", "created", "timestamp")).to be_present
+      expect(json.dig("pay_period", "lifecycle", "calculated", "actor_name")).to eq("Pay Period Admin")
+      expect(json.dig("pay_period", "lifecycle", "unapproved", "timestamp")).to be_present
+      expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_id")
+      expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_email")
     end
   end
 
