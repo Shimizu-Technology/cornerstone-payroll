@@ -917,7 +917,11 @@ module Api
               total_medicare: w2_items.sum(&:medicare_tax),
               total_employer_social_security: w2_items.sum(&:employer_social_security_tax),
               total_employer_medicare: w2_items.sum(&:employer_medicare_tax),
+              total_traditional_retirement: w2_items.sum(&:retirement_payment),
+              total_roth_retirement: w2_items.sum(&:roth_retirement_payment),
               total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
+              total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
               total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
               total_loan_payments: w2_items.sum(&:loan_payment),
               total_deductions: w2_items.sum(&:total_deductions),
@@ -1232,7 +1236,12 @@ module Api
               total_withholding: w2_items.sum(&:withholding_tax),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
+              total_traditional_retirement: w2_items.sum(&:retirement_payment),
+              total_roth_retirement: w2_items.sum(&:roth_retirement_payment),
               total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_employer_traditional_retirement: w2_items.sum(&:employer_retirement_match),
+              total_employer_roth_retirement: w2_items.sum(&:employer_roth_retirement_match),
+              total_employer_retirement: w2_items.sum(&:employer_retirement_match).to_f + w2_items.sum(&:employer_roth_retirement_match).to_f,
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay)
             },
@@ -1349,7 +1358,25 @@ module Api
               item[:check_number]
             ]
           end
-          [{ name: "Pay History", rows: rows }, { name: "YTD", rows: report[:ytd].to_a }]
+          [{ name: "Pay History", rows: rows }, { name: "YTD", rows: employee_ytd_summary_rows(report[:ytd]) }]
+        end
+
+        def employee_ytd_summary_rows(ytd)
+          ytd ||= {}
+          [
+            [ "Metric", "Amount" ],
+            [ "Tax Year", ytd[:year] ],
+            [ "Gross Pay", ytd[:gross_pay] ],
+            [ "FIT", ytd[:withholding_tax] ],
+            [ "SS Tax", ytd[:social_security_tax] ],
+            [ "Medicare Tax", ytd[:medicare_tax] ],
+            [ "401(k)", ytd[:retirement] ],
+            [ "Roth 401(k)", ytd[:roth_retirement] ],
+            [ "Tips", ytd[:tips] ],
+            [ "Tips Paid Out", ytd[:tips_paid_out] ],
+            [ "Bonus", ytd[:bonus] ],
+            [ "Net Pay", ytd[:net_pay] ]
+          ]
         end
 
         def tax_summary_sheets(report)
