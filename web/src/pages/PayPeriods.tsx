@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 
@@ -42,7 +42,9 @@ export function PayPeriods() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<'pay_period' | 'pay_date' | 'employees' | 'gross' | 'net' | 'status'>('pay_date');
+  const [sortBy, setSortBy] = useState<
+    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status'
+  >('pay_date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // Modal state
@@ -253,6 +255,8 @@ export function PayPeriods() {
             new Date(period.pay_date).toLocaleDateString('en-US'),
             period.status,
             payPeriodStatusConfig[period.status]?.label,
+            period.processed_by_name,
+            period.processed_at ? formatGuamDateTimeShort(period.processed_at) : '',
           ]
             .filter(Boolean)
             .join(' ')
@@ -286,6 +290,11 @@ export function PayPeriods() {
         return compareStrings(
           payPeriodStatusConfig[left.status]?.label || left.status,
           payPeriodStatusConfig[right.status]?.label || right.status
+        );
+      case 'processed':
+        return compareNumbers(
+          left.processed_at ? new Date(left.processed_at).getTime() : 0,
+          right.processed_at ? new Date(right.processed_at).getTime() : 0
         );
       case 'pay_date':
       default:
@@ -371,6 +380,7 @@ export function PayPeriods() {
               className="w-44"
             >
               <option value="pay_date">Sort: Pay Date</option>
+              <option value="processed">Sort: Processed</option>
               <option value="pay_period">Sort: Pay Period</option>
               <option value="employees">Sort: Employees</option>
               <option value="gross">Sort: Gross Pay</option>
@@ -406,6 +416,7 @@ export function PayPeriods() {
                   <TableHead>Gross Pay</TableHead>
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Processed</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -461,6 +472,20 @@ export function PayPeriods() {
                             <Badge variant="warning">Correction</Badge>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell className={rowTone}>
+                        {period.processed_at ? (
+                          <div className="text-sm">
+                            <p className="font-medium text-gray-900">
+                              {formatGuamDateTimeShort(period.processed_at)}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {period.processed_by_name ? `by ${period.processed_by_name}` : 'Operator not recorded'}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-gray-400">Not processed</span>
+                        )}
                       </TableCell>
                       <TableCell className={`text-right ${rowTone}`}>
                         <div className="flex items-center justify-end gap-3">

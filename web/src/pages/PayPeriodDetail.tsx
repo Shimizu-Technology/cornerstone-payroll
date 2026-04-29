@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -672,6 +672,62 @@ export function PayPeriodDetail() {
       }
     });
 
+  const lifecycle = payPeriod.lifecycle || {};
+  const processedAt = payPeriod.processed_at || payPeriod.committed_at || lifecycle.committed?.timestamp;
+  const processedBy = payPeriod.processed_by_name || lifecycle.committed?.actor_name;
+  const lifecycleActor = (actorName?: string | null) => {
+    if (actorName) return `by ${actorName}`;
+    return 'Operator not recorded';
+  };
+  const lifecycleItems = [
+    {
+      label: 'Created',
+      timestamp: lifecycle.created?.timestamp || payPeriod.created_at,
+      actor: lifecycleActor(lifecycle.created?.actor_name),
+      tone: 'default' as const,
+    },
+    {
+      label: 'Calculated',
+      timestamp: lifecycle.calculated?.timestamp,
+      actor: lifecycleActor(lifecycle.calculated?.actor_name),
+      tone: isDraft ? 'default' as const : 'warning' as const,
+    },
+    {
+      label: 'Approved',
+      timestamp: lifecycle.approved?.timestamp,
+      actor: lifecycleActor(lifecycle.approved?.actor_name),
+      tone: (isApproved || isCommitted) ? 'info' as const : 'default' as const,
+    },
+    ...(lifecycle.unapproved?.timestamp ? [{
+      label: 'Unapproved',
+      timestamp: lifecycle.unapproved.timestamp,
+      actor: lifecycleActor(lifecycle.unapproved.actor_name),
+      tone: 'warning' as const,
+    }] : []),
+    {
+      label: 'Committed / processed',
+      timestamp: processedAt,
+      actor: processedBy
+        ? `by ${processedBy}`
+        : lifecycleActor(lifecycle.committed?.actor_name),
+      tone: isCommitted ? 'success' as const : 'default' as const,
+    },
+    {
+      label: 'Tax sync',
+      timestamp: lifecycle.tax_synced?.timestamp || payPeriod.tax_synced_at,
+      actor: syncConfig?.label || 'Not started',
+      tone: syncConfig?.variant || 'default' as const,
+    },
+  ].sort((left, right) => {
+    if (left.timestamp && right.timestamp) {
+      return new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
+    }
+
+    if (left.timestamp) return -1;
+    if (right.timestamp) return 1;
+    return 0;
+  });
+
   return (
     <div>
       <Header
@@ -740,7 +796,8 @@ export function PayPeriodDetail() {
           )}
           {isCommitted && payPeriod.committed_at && (
             <span className="text-sm text-gray-500">
-              Committed {new Date(payPeriod.committed_at).toLocaleString()}
+              Processed {formatGuamDateTime(payPeriod.committed_at)}
+              {processedBy ? ` by ${processedBy}` : ''}
             </span>
           )}
           {isCommitted && syncConfig && (
@@ -750,7 +807,7 @@ export function PayPeriodDetail() {
               </Badge>
               {syncStatus === 'synced' && payPeriod.tax_synced_at && (
                 <span className="text-sm text-gray-500">
-                  Synced {new Date(payPeriod.tax_synced_at).toLocaleString()}
+                  Synced {formatGuamDateTime(payPeriod.tax_synced_at)}
                 </span>
               )}
               {syncStatus === 'failed' && payPeriod.tax_sync_last_error && (
@@ -776,6 +833,32 @@ export function PayPeriodDetail() {
             </>
           )}
         </div>
+
+        <Card>
+          <div className="border-b px-4 py-3">
+            <h3 className="text-base font-semibold text-gray-900">Processing Timeline</h3>
+            <p className="text-sm text-gray-500">
+              Guam timestamps for payroll lifecycle, operator actions, and tax sync.
+            </p>
+          </div>
+          <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
+            {lifecycleItems.map((item) => (
+              <div key={item.label} className="min-w-0 p-4">
+                <div className="mb-2 flex items-center gap-2">
+                  <Badge variant={item.timestamp ? item.tone : 'outline'}>
+                    {item.label}
+                  </Badge>
+                </div>
+                <p className="text-sm font-medium text-gray-900">
+                  {item.timestamp ? formatGuamDateTime(item.timestamp) : 'Not recorded'}
+                </p>
+                <p className={`mt-1 text-xs ${item.timestamp ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {item.timestamp ? item.actor : 'No audit timestamp yet'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Card>
 
         {/* Summary Cards */}
         {payrollItems.length > 0 && (
