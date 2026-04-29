@@ -178,5 +178,17 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       ])
       expect(submitted_item.gross_pay.to_f).to eq(72.35)
     end
+
+    it "serializes payroll items without department fields when the employee is missing" do
+      item = build_stubbed(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      allow(item).to receive(:employee).and_return(nil)
+      allow(item).to receive(:employee_full_name).and_return("Deleted Employee")
+      controller = Api::V1::Admin::PayPeriodsController.new
+
+      payload = controller.send(:payroll_item_json, item)
+
+      expect(payload[:department_id]).to be_nil
+      expect(payload[:department_name]).to be_nil
+    end
   end
 end
