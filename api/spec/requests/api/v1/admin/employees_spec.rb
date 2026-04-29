@@ -339,6 +339,25 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(response).to have_http_status(:ok)
         expect(employee.reload.pay_rate).to eq(25.00)
       end
+
+      it "updates recurring custom earnings" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            default_custom_earnings: [
+              { label: "Chief Stipend", amount: "125.555" },
+              { label: "Bad Infinity", amount: "Infinity" },
+              { label: "Bad NaN", amount: "NaN" },
+              { label: "Ignored", amount: "0" },
+              { label: "", amount: "50" }
+            ]
+          }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload.default_custom_earnings).to eq([
+          { "label" => "Chief Stipend", "amount" => 125.56 }
+        ])
+      end
     end
 
     context "with invalid params" do

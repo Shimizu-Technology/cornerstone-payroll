@@ -80,10 +80,16 @@ export interface EmployeeWageRate {
   updated_at?: string;
 }
 
+export interface CustomEarning {
+  label: string;
+  amount: number;
+}
+
 export interface Employee {
   id: number;
   company_id: number;
   department_id?: number;
+  department?: { id: number; name: string };
   user_id?: number;
   first_name: string;
   middle_name?: string;
@@ -121,6 +127,7 @@ export interface Employee {
   state?: string;
   zip?: string;
   wage_rates?: EmployeeWageRate[];
+  default_custom_earnings?: CustomEarning[];
   created_at: string;
   updated_at: string;
 }
@@ -159,6 +166,7 @@ export interface EmployeeFormData {
   state?: string;
   zip?: string;
   wage_rates?: EmployeeWageRate[];
+  default_custom_earnings?: CustomEarning[];
 }
 
 // ----------------
@@ -269,6 +277,7 @@ export interface PayrollItem {
   withholding_tax?: number; // Guam Territorial Income Tax (same as federal)
   social_security_tax?: number;
   medicare_tax?: number;
+  state_withheld?: number | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;
   withholding_tax_adjustment?: number | null;
@@ -295,6 +304,8 @@ export interface PayrollItem {
   ytd_retirement?: number;
   // Custom earnings (e.g., Chief Stipend, Asst Chief Stipend)
   custom_earnings?: { label: string; amount: number }[];
+  department_id?: number | null;
+  department_name?: string | null;
   // Check info
   // CPR-66: Check printing lifecycle
   check_number?: string | null;

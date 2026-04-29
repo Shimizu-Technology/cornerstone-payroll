@@ -15,7 +15,18 @@ module Api
           timecards = timecards.where(ocr_status: params[:status]) if params[:status].present?
 
           if params[:search].present?
-            timecards = timecards.where("employee_name ILIKE ?", "%#{params[:search]}%")
+            term = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%"
+            timecards = timecards.left_joins(:pay_period).where(
+              <<~SQL.squish,
+                timecards.employee_name ILIKE :term
+                OR timecards.period_start::text ILIKE :term
+                OR timecards.period_end::text ILIKE :term
+                OR pay_periods.start_date::text ILIKE :term
+                OR pay_periods.end_date::text ILIKE :term
+                OR pay_periods.pay_date::text ILIKE :term
+              SQL
+              term: term
+            )
           end
 
           total_count = timecards.count
@@ -111,10 +122,6 @@ module Api
 
           reviewer_name = review_params[:reviewed_by_name].to_s.strip.presence
 
-          if @timecard.overall_confidence.to_f < 0.7
-            return render json: { error: "OCR confidence is too low. Re-run OCR or verify flagged rows first." }, status: :unprocessable_entity
-          end
-
           summary = TimecardOcr::ReviewSummary.build(@timecard)
           if summary["attention_count"].positive?
             return render json: { error: "Resolve or approve all flagged rows before marking reviewed" }, status: :unprocessable_entity
@@ -160,24 +167,60 @@ module Api
           end
 
           total_hours = timecard.punch_entries.where.not(hours_worked: nil).sum(:hours_worked)
+          item = nil
+          multi_rate_error = nil
 
-          item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
-          if item.new_record?
-            item.company_id = current_company_id
-            item.employment_type = employee.employment_type
-            item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+          begin
+            ApplicationRecord.transaction do
+              item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
+              if item.new_record?
+                item.company_id = current_company_id
+                item.employment_type = employee.employment_type
+                item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+              end
+
+              multi_rate_error = apply_timecard_hours_to_payroll_item(item, employee, total_hours)
+              raise ActiveRecord::Rollback if multi_rate_error
+
+              item.import_source = "timecard_ocr"
+              item.custom_earnings = employee.default_custom_earnings if item.new_record? && item.custom_earnings.blank?
+              item.calculate!
+
+              timecard.update!(
+                pay_period: pay_period,
+                applied_employee: employee,
+                applied_payroll_item: item,
+                applied_to_payroll_at: Time.current
+              )
+            end
+          rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotSaved => e
+            Rails.logger.warn("apply_to_payroll validation failed for timecard #{timecard.id}: #{e.class}: #{e.message}")
+            return render json: { error: e.message.presence || "Could not apply timecard to payroll" }, status: :unprocessable_entity
+          rescue StandardError => e
+            Rails.logger.error("apply_to_payroll failed for timecard #{timecard.id}: #{e.class}: #{e.message}")
+            return render json: { error: "Failed to apply timecard to payroll" }, status: :unprocessable_entity
           end
 
-          item.hours_worked = total_hours.round(2)
-          item.import_source = "timecard_ocr"
-          item.save!
+          return render json: { error: multi_rate_error }, status: :unprocessable_entity if multi_rate_error
+
+          unless item&.persisted?
+            return render json: { error: "Could not apply timecard to payroll" }, status: :unprocessable_entity
+          end
+
+          item = PayrollItem.includes(employee: :department).find(item.id)
+
+          unless item&.persisted? && timecard.reload.applied_payroll_item_id == item.id
+            return render json: { error: "Could not apply timecard to payroll" }, status: :unprocessable_entity
+          end
 
           render json: {
             employee_id: employee.id,
             employee_name: employee.full_name,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
-            timecard_id: timecard.id
+            timecard_id: timecard.id,
+            payroll_item: payroll_item_json(item),
+            timecard: timecard_json(timecard.reload)
           }
         end
 
@@ -234,6 +277,73 @@ module Api
           best_score >= 0.6 ? best : nil
         end
 
+        def apply_timecard_hours_to_payroll_item(item, employee, total_hours)
+          active_rates = employee.active_wage_rates.to_a
+          rounded_hours = total_hours.round(2)
+          uses_rate_selection = (employee.hourly? || employee.contractor_pay_type == "hourly") && active_rates.length > 1
+
+          unless uses_rate_selection
+            item.clear_wage_rate_hours!
+            item.hours_worked = rounded_hours
+            item.overtime_hours = 0
+            item.holiday_hours = 0
+            item.pto_hours = 0
+            return nil
+          end
+
+          selected_rate_id = params[:wage_rate_id].presence&.to_i
+          return "Choose which earning type these timecard hours should apply to." if selected_rate_id.blank?
+
+          selected_rate = active_rates.find { |rate| rate.id == selected_rate_id }
+          return "Selected earning type does not belong to this employee." unless selected_rate
+
+          current_entries = item.wage_rate_hours
+          active_rate_ids = active_rates.map(&:id)
+          active_rate_labels = active_rates.map { |rate| rate.label.to_s.strip.downcase }
+          inactive_entries = current_entries.reject do |entry|
+            entry_rate_id = entry["employee_wage_rate_id"].presence&.to_i
+            entry_label = entry["label"].to_s.strip.downcase
+            (entry_rate_id.present? && active_rate_ids.include?(entry_rate_id)) ||
+              (entry_rate_id.blank? && active_rate_labels.include?(entry_label))
+          end
+          entries_by_id = current_entries.index_by { |entry| entry["employee_wage_rate_id"].to_i if entry["employee_wage_rate_id"].present? }
+          entries_by_label = current_entries.index_by { |entry| entry["label"].to_s.strip.downcase }
+
+          active_entries = active_rates.map do |rate|
+            existing = entries_by_id[rate.id] || entries_by_label[rate.label.to_s.strip.downcase] || {}
+            entry = {
+              employee_wage_rate_id: rate.id,
+              label: rate.label,
+              rate: rate.rate,
+              regular_hours: existing["regular_hours"].to_f,
+              overtime_hours: existing["overtime_hours"].to_f,
+              holiday_hours: existing["holiday_hours"].to_f,
+              pto_hours: existing["pto_hours"].to_f,
+              is_primary: rate.is_primary,
+              active: rate.active
+            }
+            if rate.id == selected_rate.id
+              entry[:regular_hours] = rounded_hours
+              entry[:overtime_hours] = 0
+              entry[:holiday_hours] = 0
+              entry[:pto_hours] = 0
+            end
+            entry
+          end
+
+          entries = inactive_entries + active_entries
+          item.wage_rate_hours = entries
+          item.hours_worked = entries.sum { |entry| entry_hours(entry, :regular_hours) }
+          item.overtime_hours = entries.sum { |entry| entry_hours(entry, :overtime_hours) }
+          item.holiday_hours = entries.sum { |entry| entry_hours(entry, :holiday_hours) }
+          item.pto_hours = entries.sum { |entry| entry_hours(entry, :pto_hours) }
+          nil
+        end
+
+        def entry_hours(entry, key)
+          (entry[key] || entry[key.to_s]).to_f
+        end
+
         def timecard_json(timecard)
           {
             id: timecard.id,
@@ -249,6 +359,10 @@ module Api
             ocr_error: timecard.raw_ocr_response.is_a?(Hash) ? timecard.raw_ocr_response["error"] : nil,
             reviewed_by_name: timecard.reviewed_by_name,
             reviewed_at: timecard.reviewed_at,
+            applied_employee_id: timecard.applied_employee_id,
+            applied_employee_name: timecard.applied_employee&.full_name,
+            applied_payroll_item_id: timecard.applied_payroll_item_id,
+            applied_to_payroll_at: timecard.applied_to_payroll_at,
             review_summary: TimecardOcr::ReviewSummary.build(timecard),
             created_at: timecard.created_at,
             punch_entries: timecard.punch_entries.map do |pe|
@@ -275,6 +389,76 @@ module Api
               }
             end
           }
+        end
+
+        def payroll_item_json(item)
+          {
+            id: item.id,
+            pay_period_id: item.pay_period_id,
+            employee_id: item.employee_id,
+            employee_name: item.employee_full_name,
+            employment_type: item.employment_type,
+            pay_rate: item.pay_rate,
+            salary_override: item.salary_override,
+            non_taxable_pay: item.non_taxable_pay,
+            hours_worked: item.hours_worked,
+            overtime_hours: item.overtime_hours,
+            holiday_hours: item.holiday_hours,
+            pto_hours: item.pto_hours,
+            bonus: item.bonus,
+            reported_tips: item.reported_tips,
+            tips_paid_out: item.tips_paid_out,
+            additional_withholding: item.additional_withholding,
+            additional_withholding_override: item.additional_withholding_override,
+            withholding_tax_adjustment: item.withholding_tax_adjustment,
+            withholding_tax_override: item.withholding_tax_override,
+            custom_earnings: item.custom_earnings || [],
+            gross_pay: item.gross_pay,
+            withholding_tax: item.withholding_tax,
+            social_security_tax: item.social_security_tax,
+            medicare_tax: item.medicare_tax,
+            state_withheld: payroll_item_state_withheld(item),
+            retirement_payment: item.retirement_payment,
+            roth_retirement_payment: item.roth_retirement_payment,
+            loan_payment: item.loan_payment,
+            insurance_payment: item.insurance_payment,
+            total_deductions: item.total_deductions,
+            net_pay: item.net_pay,
+            employer_social_security_tax: item.employer_social_security_tax,
+            employer_medicare_tax: item.employer_medicare_tax,
+            employer_retirement_match: item.employer_retirement_match,
+            employer_roth_retirement_match: item.employer_roth_retirement_match,
+            department_id: item.employee&.department_id,
+            department_name: item.employee&.department&.name,
+            check_number: item.check_number,
+            check_printed_at: item.check_printed_at,
+            check_print_count: item.check_print_count,
+            check_status: item.check_status,
+            loan_deduction: item.loan_deduction,
+            tip_pool: item.tip_pool,
+            import_source: item.import_source,
+            custom_columns_data: item.custom_columns_data || {},
+            voided: item.voided,
+            voided_at: item.voided_at,
+            void_reason: item.void_reason,
+            reprint_of_check_number: item.reprint_of_check_number,
+            ytd_gross: item.ytd_gross,
+            ytd_net: item.ytd_net,
+            ytd_withholding_tax: item.ytd_withholding_tax,
+            ytd_social_security_tax: item.ytd_social_security_tax,
+            ytd_medicare_tax: item.ytd_medicare_tax,
+            ytd_retirement: item.ytd_retirement,
+            ytd_roth_retirement: item.ytd_roth_retirement,
+            created_at: item.created_at,
+            updated_at: item.updated_at,
+            wage_rate_hours: item.wage_rate_hours
+          }
+        end
+
+        def payroll_item_state_withheld(item)
+          return item.state_withheld if item.respond_to?(:state_withheld)
+
+          item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data["state_withheld"] : nil
         end
       end
     end

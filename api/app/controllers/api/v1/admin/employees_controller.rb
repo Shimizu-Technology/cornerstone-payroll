@@ -17,7 +17,7 @@ module Api
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
-            data: employees.map { |e| serialize_employee(e) },
+            data: employees.map { |e| serialize_employee(e, include_department: true) },
             meta: pagination_meta(employees)
           }
         end
@@ -118,8 +118,13 @@ module Api
             :state,
             :zip,
             :phone,
-            :status
+            :status,
+            default_custom_earnings: [ :label, :amount ]
           ).tap do |permitted|
+            if permitted.key?(:default_custom_earnings)
+              permitted[:default_custom_earnings] = normalize_custom_earnings(permitted[:default_custom_earnings])
+            end
+
             if permitted[:ssn].present?
               permitted[:ssn_encrypted] = permitted.delete(:ssn)
             else
@@ -213,6 +218,18 @@ module Api
           end
 
           data
+        end
+
+        def normalize_custom_earnings(entries)
+          Array(entries).filter_map do |entry|
+            label = entry[:label].to_s.strip
+            amount = BigDecimal(entry[:amount].to_s)
+            next if label.blank? || amount <= 0 || !amount.finite?
+
+            { "label" => label, "amount" => amount.round(2).to_f }
+          rescue ArgumentError, FloatDomainError
+            nil
+          end
         end
       end
     end

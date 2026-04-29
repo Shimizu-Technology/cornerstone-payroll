@@ -206,6 +206,7 @@ export function PayPeriodDetail() {
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState<'all' | 'salary' | 'hourly' | 'contractor'>('all');
+  const [departmentFilter, setDepartmentFilter] = useState<string>('all');
   const [hoursSortBy, setHoursSortBy] = useState<'name' | 'rate' | 'hours' | 'gross'>('name');
   const [hoursSortDirection, setHoursSortDirection] = useState<'asc' | 'desc'>('asc');
   const [resultsSortBy, setResultsSortBy] = useState<'name' | 'rate' | 'hours' | 'gross' | 'net' | 'fit'>('name');
@@ -527,6 +528,29 @@ export function PayPeriodDetail() {
     );
   };
 
+  const handlePayrollItemApplied = (updated?: PayrollItem) => {
+    if (!updated) return;
+
+    setPayrollItems((prev) => {
+      const exists = prev.some((item) => item.id === updated.id);
+      return exists
+        ? prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item))
+        : [...prev, updated];
+    });
+    setHoursMap((prev) => {
+      const updatedHours = buildHoursMap([updated], employees)[String(updated.employee_id)] || {
+        regular: toNumber(updated.hours_worked),
+        overtime: toNumber(updated.overtime_hours),
+        wage_rates: updated.wage_rate_hours,
+      };
+
+      return {
+        ...prev,
+        [String(updated.employee_id)]: updatedHours,
+      };
+    });
+  };
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Loading...</div>;
   }
@@ -580,13 +604,30 @@ export function PayPeriodDetail() {
       ? { calculated: totalWithholding, deposited: fitDepositAmount, delta: fitDepositAmount - totalWithholding }
       : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
+  const totalCustomEarnings = payrollItems.reduce(
+    (sum, item) => sum + (item.custom_earnings || []).reduce((itemSum, earning) => itemSum + toNumber(earning.amount), 0),
+    0
+  );
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
+  const departmentOptions = Array.from(
+    new Map(
+      [
+        ...employees
+          .filter((emp) => emp.department_id && emp.department?.name)
+          .map((emp) => [String(emp.department_id), emp.department?.name || ''] as const),
+        ...payrollItems
+          .filter((item) => item.department_id && item.department_name)
+          .map((item) => [String(item.department_id), item.department_name || ''] as const),
+      ].sort((left, right) => left[1].localeCompare(right[1]))
+    ).entries()
+  );
   const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
-  const matchesEmployeeFilters = (employmentType: string, searchableValues: string[]) => {
+  const matchesEmployeeFilters = (employmentType: string, searchableValues: string[], departmentId?: number | null) => {
     if (employeeTypeFilter !== 'all' && employmentType !== employeeTypeFilter) return false;
+    if (departmentFilter !== 'all' && String(departmentId || '') !== departmentFilter) return false;
     if (!searchTerm.trim()) return true;
 
     const term = searchTerm.trim().toLowerCase();
@@ -605,7 +646,8 @@ export function PayPeriodDetail() {
   const sortPayrollItems = [...payrollItems]
     .filter((item) => matchesEmployeeFilters(
       item.employment_type,
-      [item.employee_name || '', item.check_number || '']
+      [item.employee_name || '', item.check_number || '', item.department_name || employeeLookup.get(item.employee_id)?.department?.name || ''],
+      item.department_id ?? employeeLookup.get(item.employee_id)?.department_id
     ))
     .sort((left, right) => {
       const typeDiff = employeeTypeFilter === 'all'
@@ -874,6 +916,16 @@ export function PayPeriodDetail() {
                       <option value="contractor">1099</option>
                     </Select>
                     <Select
+                      value={departmentFilter}
+                      onChange={(event) => setDepartmentFilter(event.target.value)}
+                      className="w-44"
+                    >
+                      <option value="all">All Departments</option>
+                      {departmentOptions.map(([deptId, deptName]) => (
+                        <option key={deptId} value={deptId}>{deptName}</option>
+                      ))}
+                    </Select>
+                    <Select
                       value={`${hoursSortBy}:${hoursSortDirection}`}
                       onChange={(event) => {
                         const [sortBy, direction] = event.target.value.split(':') as [typeof hoursSortBy, typeof hoursSortDirection];
@@ -952,7 +1004,8 @@ export function PayPeriodDetail() {
                     const displayEmployees = [...filtered]
                       .filter((emp) => matchesEmployeeFilters(
                         emp.employment_type,
-                        [`${emp.first_name} ${emp.last_name}`, `${emp.last_name}, ${emp.first_name}`]
+                        [`${emp.first_name} ${emp.last_name}`, `${emp.last_name}, ${emp.first_name}`, emp.department?.name || ''],
+                        emp.department_id
                       ))
                       .sort((a, b) => {
                         const orderDiff = employeeTypeFilter === 'all'
@@ -1058,6 +1111,7 @@ export function PayPeriodDetail() {
                             </div>
                             <p className="text-xs text-gray-500 capitalize">
                               {isContractorHourly ? '1099 (Hourly)' : isContractorFlat ? '1099 (Flat Fee)' : emp.employment_type}
+                              {emp.department?.name ? ` · ${emp.department.name}` : ''}
                             </p>
                           </div>
                         </TableCell>
@@ -1236,7 +1290,8 @@ export function PayPeriodDetail() {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
           const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
           const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
-          const extraColCount = (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
+          const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
+          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
@@ -1258,6 +1313,16 @@ export function PayPeriodDetail() {
                     <option value="salary">Salary</option>
                     <option value="hourly">Hourly</option>
                     <option value="contractor">1099</option>
+                  </Select>
+                  <Select
+                    value={departmentFilter}
+                    onChange={(event) => setDepartmentFilter(event.target.value)}
+                    className="w-44"
+                  >
+                    <option value="all">All Departments</option>
+                    {departmentOptions.map(([deptId, deptName]) => (
+                      <option key={deptId} value={deptId}>{deptName}</option>
+                    ))}
                   </Select>
                   <Select
                     value={`${resultsSortBy}:${resultsSortDirection}`}
@@ -1304,6 +1369,7 @@ export function PayPeriodDetail() {
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Hours</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
+                    {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom</TableHead>}
                     {hasTips && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
                     {hasLoans && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
@@ -1362,6 +1428,11 @@ export function PayPeriodDetail() {
                             <div className="flex items-center gap-2">
                               <div>
                                 <p className="font-medium text-gray-900">{item.employee_name}</p>
+                                {(item.department_name || empRecord?.department?.name) && (
+                                  <p className="mt-0.5 text-xs text-gray-500">
+                                    {item.department_name || empRecord?.department?.name}
+                                  </p>
+                                )}
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   {isSalary && (
                                     <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
@@ -1469,6 +1540,22 @@ export function PayPeriodDetail() {
                             })()}
                           </TableCell>
                           <TableCell className={`text-right font-medium ${rowTone}`}>{formatCurrency(toNumber(item.gross_pay))}</TableCell>
+                          {hasCustomEarnings && (
+                          <TableCell className={`text-right ${rowTone}`}>
+                            {(item.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0) ? (
+                              <div className="space-y-1">
+                                {(item.custom_earnings || []).filter((earning) => toNumber(earning.amount) > 0).map((earning) => (
+                                  <div key={`${item.id}-${earning.label}`} className="text-xs">
+                                    <span className="text-gray-500">{earning.label}</span>{' '}
+                                    <span className="font-medium text-gray-900">{formatCurrency(toNumber(earning.amount))}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
+                          )}
                           {hasTips && (
                           <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.reported_tips) > 0 ? (
@@ -1589,6 +1676,7 @@ export function PayPeriodDetail() {
                       <TableRow className="bg-gray-50 font-bold border-t-2">
                         <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({payrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
+                        {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
                         {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
                         {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
                         {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
@@ -1807,7 +1895,7 @@ export function PayPeriodDetail() {
         {isDraft && (
           <TimecardOcrPanel
             payPeriodId={payPeriod.id}
-            onPayrollUpdated={() => loadPayPeriod(payPeriod.id, true)}
+            onPayrollUpdated={handlePayrollItemApplied}
           />
         )}
 

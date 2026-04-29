@@ -501,31 +501,34 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
   end
 
   describe "PATCH /api/v1/admin/companies/next_check_number" do
-    # The existing pay_period in this spec is dated 2026-03-19 (past year relative to test run).
-    # To test "no checks issued this year", we need a company whose pay_periods
-    # all have pay_dates before the current calendar year.
-    # Since current year is 2026 and the existing items ARE 2026, we verify the
-    # correct guard fires. Use a future year for the "allowed" case by making
-    # a clean company with no 2026 pay periods.
-    let!(:clean_company) do
-      create(:company, name: "Clean Co for Check # Test", next_check_number: 5000)
-    end
-    let!(:clean_admin) do
-      # current_user = User.find_by(role: "admin") - this picks admin_user (belonging to company)
-      # so clean_company requests still go through company's admin_user context.
-      # The update_next_check_number endpoint uses current_company_id from admin_user.
-      # We test by verifying the endpoint updates the CURRENT company (admin_user's company).
-      # For the "allowed" test we need a company with no current-year checks.
-      # Since admin_user's company has 2026 items, we can't use that for the "allowed" case.
-      # Instead we verify what we can: the guard correctly blocks 2026 changes.
-      nil
+    it "rejects a number that is already in the issued check range" do
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 3001 }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("highest issued check number")
     end
 
-    it "rejects the change when checks have already been issued this year" do
-      # admin_user's company (company) has item_a with check 3000 dated 2026 (current year)
-      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 100 }
+    it "rejects moving backward into an unissued range below the current next number" do
+      company.update!(next_check_number: 5000)
+
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 4000 }
+
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to include("Cannot change")
+      expect(response.parsed_body["error"]).to include("cannot move backward")
+    end
+
+    it "allows moving the next check number forward after checks exist" do
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 4000 }
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.next_check_number).to eq(4000)
+    end
+
+    it "ignores non-numeric historical check numbers when finding the highest issued number" do
+      item_a.update!(check_number: "VOID-3000")
+
+      patch "/api/v1/admin/companies/next_check_number", params: { next_check_number: 4000 }
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.next_check_number).to eq(4000)
     end
 
     it "rejects a value less than 1" do

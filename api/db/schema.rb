@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_28_154744) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -307,6 +307,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
     t.string "contractor_type", default: "individual"
     t.datetime "created_at", null: false
     t.date "date_of_birth"
+    t.jsonb "default_custom_earnings", default: [], null: false
     t.bigint "department_id"
     t.string "email"
     t.decimal "employer_retirement_match_rate", precision: 5, scale: 4, default: "0.0"
@@ -712,6 +713,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
   end
 
   create_table "timecards", force: :cascade do |t|
+    t.bigint "applied_employee_id"
+    t.bigint "applied_payroll_item_id"
+    t.datetime "applied_to_payroll_at"
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.string "employee_name"
@@ -727,6 +731,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
     t.datetime "reviewed_at"
     t.string "reviewed_by_name"
     t.datetime "updated_at", null: false
+    t.index ["applied_employee_id"], name: "index_timecards_on_applied_employee_id"
+    t.index ["applied_payroll_item_id"], name: "index_timecards_on_applied_payroll_item_id"
     t.index ["company_id", "image_hash"], name: "index_timecards_on_company_id_and_image_hash", unique: true, where: "(image_hash IS NOT NULL)"
     t.index ["company_id"], name: "index_timecards_on_company_id"
     t.index ["pay_period_id"], name: "index_timecards_on_pay_period_id"
@@ -893,7 +899,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_150000) do
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
   add_foreign_key "timecards", "companies"
+  add_foreign_key "timecards", "employees", column: "applied_employee_id"
   add_foreign_key "timecards", "pay_periods"
+  add_foreign_key "timecards", "payroll_items", column: "applied_payroll_item_id"
   add_foreign_key "transmittals", "companies"
   add_foreign_key "transmittals", "pay_periods"
   add_foreign_key "transmittals", "users", column: "created_by_id"

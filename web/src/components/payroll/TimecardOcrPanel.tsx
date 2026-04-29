@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { timecardsApi, punchEntriesApi, employeesApi } from '@/services/api';
 import type { TimecardData, PunchEntryData } from '@/services/api';
-import type { Employee } from '@/types';
+import type { Employee, PayrollItem } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
 
 // ──── Time format helpers ──────────────────────────────
 function to12h(time24: string | null): string {
@@ -56,6 +57,11 @@ function statusBadge(status: string) {
   };
   return <Badge className={colors[status] || 'bg-gray-100'}>{status}</Badge>;
 }
+
+const toNumber = (value: unknown): number => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 // ──── Spinner ──────────────────────────────────────────
 function Spinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
@@ -161,8 +167,18 @@ function findBestEmployeeMatch(ocrName: string | null, employees: Employee[]): n
   return '';
 }
 
+function activeHourlyWageRates(employee?: Employee) {
+  return (employee?.wage_rates || []).filter((rate) => rate.active !== false && rate.id != null);
+}
+
+function employeeNeedsWageRateChoice(employee?: Employee) {
+  if (!employee) return false;
+  const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
+  return (employee.employment_type === 'hourly' || isHourlyContractor) && activeHourlyWageRates(employee).length > 1;
+}
+
 // ──── Timecard List Item (Inline Review) ──────────────────
-function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, employees, payPeriodId, onRefresh, onPayrollUpdated }: {
+function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, employees, payPeriodId, onTimecardUpdated, onPayrollUpdated }: {
   tc: TimecardData;
   onSelect: () => void;
   onReprocess: () => void;
@@ -170,8 +186,8 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
   isDeleting: boolean;
   employees: Employee[];
   payPeriodId?: number;
-  onRefresh: () => void;
-  onPayrollUpdated?: () => void;
+  onTimecardUpdated: (timecard: TimecardData) => void;
+  onPayrollUpdated?: (payrollItem?: PayrollItem) => void;
 }) {
   const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
   const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
@@ -181,10 +197,14 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
   const hasAttention = tc.review_summary.attention_count > 0;
 
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
+  const [selectedWageRateId, setSelectedWageRateId] = useState<number | ''>('');
   const [reviewing, setReviewing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
+  const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
+  const wageRateChoices = activeHourlyWageRates(selectedEmployee);
+  const needsWageRateChoice = employeeNeedsWageRateChoice(selectedEmployee);
 
   // Re-run auto-match when employees finish loading (race condition fix)
   useEffect(() => {
@@ -195,6 +215,18 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [employees]);
 
+  useEffect(() => {
+    if (!needsWageRateChoice) {
+      setSelectedWageRateId('');
+      return;
+    }
+
+    const primary = wageRateChoices.find((rate) => rate.is_primary) || wageRateChoices[0];
+    if (primary && !wageRateChoices.some((rate) => rate.id === selectedWageRateId)) {
+      setSelectedWageRateId(Number(primary.id));
+    }
+  }, [needsWageRateChoice, selectedWageRateId, wageRateChoices]);
+
   const handleApproveAll = async () => {
     setApproving(true);
     setError('');
@@ -204,11 +236,11 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
           await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' } as Partial<PunchEntryData>);
         }
       }
+      onTimecardUpdated(await timecardsApi.show(tc.id));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Approve failed');
     } finally {
       setApproving(false);
-      onRefresh();
     }
   };
 
@@ -216,8 +248,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
     setReviewing(true);
     setError('');
     try {
-      await timecardsApi.review(tc.id, 'Admin');
-      onRefresh();
+      onTimecardUpdated(await timecardsApi.review(tc.id, 'Admin'));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Review failed');
     } finally {
@@ -231,9 +262,15 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
     setError('');
     try {
       const empId = selectedEmployeeId || undefined;
-      await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
-      onRefresh();
-      onPayrollUpdated?.();
+      const wageRateId = needsWageRateChoice ? selectedWageRateId || undefined : undefined;
+      const response = await timecardsApi.applyToPayroll(
+        tc.id,
+        payPeriodId,
+        empId ? Number(empId) : undefined,
+        wageRateId ? Number(wageRateId) : undefined
+      );
+      if (response.timecard) onTimecardUpdated(response.timecard);
+      onPayrollUpdated?.(response.payroll_item);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Apply failed');
     } finally {
@@ -329,10 +366,13 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
             {/* Employee assignment dropdown */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-gray-600">Assign to:</span>
-              <select
-                className="border rounded px-2 py-1 text-sm max-w-[200px] focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+              <Select
+                className="max-w-[220px] py-1.5"
                 value={selectedEmployeeId}
-                onChange={(e) => setSelectedEmployeeId(e.target.value ? Number(e.target.value) : '')}
+                onChange={(e) => {
+                  setSelectedEmployeeId(e.target.value ? Number(e.target.value) : '');
+                  setSelectedWageRateId('');
+                }}
                 disabled={busy}
               >
                 <option value="">Auto-match ({tc.employee_name || '?'})</option>
@@ -341,8 +381,25 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
                     {emp.first_name} {emp.last_name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
+            {needsWageRateChoice && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-gray-600">Apply hours to:</span>
+                <Select
+                  className="max-w-[220px] py-1.5"
+                  value={selectedWageRateId}
+                  onChange={(e) => setSelectedWageRateId(e.target.value ? Number(e.target.value) : '')}
+                  disabled={busy}
+                >
+                  {wageRateChoices.map((rate) => (
+                    <option key={rate.id} value={rate.id ?? ''}>
+                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
 
             <div className="flex-1" />
 
@@ -360,9 +417,16 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
             )}
 
             {isReviewed && (
-              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApply} disabled={busy}>
-                {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply to Payroll'}
+              <>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={handleApply} disabled={busy || (needsWageRateChoice && !selectedWageRateId)}>
+                {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply to Payroll'}
               </Button>
+              {tc.applied_to_payroll_at && (
+                <Badge className="bg-green-100 text-green-800">
+                  Applied{tc.applied_employee_name ? ` to ${tc.applied_employee_name}` : ''}
+                </Badge>
+              )}
+              </>
             )}
 
             <Button size="sm" variant="outline" onClick={onSelect}>
@@ -559,8 +623,8 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
 
   return (
     <div className="flex items-center gap-2">
-      <select
-        className="border rounded px-2 py-1.5 text-sm max-w-xs focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+      <Select
+        className="max-w-xs py-1.5"
         value={selectedEmployeeId}
         onChange={(e) => onSelectEmployee(e.target.value ? Number(e.target.value) : '')}
       >
@@ -570,7 +634,7 @@ function EmployeeSelector({ currentName, employees, selectedEmployeeId, onSelect
             {emp.first_name} {emp.last_name}
           </option>
         ))}
-      </select>
+      </Select>
       <button
         className="text-xs text-indigo-600 hover:text-indigo-800 underline"
         onClick={() => setMode('custom')}
@@ -716,7 +780,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   onBack: () => void;
   payPeriodId?: number;
   employees: Employee[];
-  onApplied?: () => void;
+  onApplied?: (timecard?: TimecardData, payrollItem?: PayrollItem) => void;
 }) {
   const [tc, setTc] = useState(initialTc);
   const [editable, setEditable] = useState<EditableEntry[]>(() =>
@@ -728,8 +792,12 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
   const [reviewing, setReviewing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | ''>('');
+  const [selectedWageRateId, setSelectedWageRateId] = useState<number | ''>('');
   const [error, setError] = useState('');
   const [imageCollapsed, setImageCollapsed] = useState(false);
+  const selectedEmployee = employees.find((emp) => emp.id === selectedEmployeeId);
+  const wageRateChoices = activeHourlyWageRates(selectedEmployee);
+  const needsWageRateChoice = employeeNeedsWageRateChoice(selectedEmployee);
 
   const reload = useCallback(async () => {
     const fresh = await timecardsApi.show(tc.id);
@@ -737,6 +805,26 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     setEditable(buildEditableWithAllDates(fresh.punch_entries, fresh.period_start, fresh.period_end));
     setDirty(false);
   }, [tc.id]);
+
+  useEffect(() => {
+    if (selectedEmployeeId === '' && employees.length > 0) {
+      const match = findBestEmployeeMatch(tc.employee_name, employees);
+      if (match !== '') setSelectedEmployeeId(match);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees, tc.employee_name]);
+
+  useEffect(() => {
+    if (!needsWageRateChoice) {
+      setSelectedWageRateId('');
+      return;
+    }
+
+    const primary = wageRateChoices.find((rate) => rate.is_primary) || wageRateChoices[0];
+    if (primary && !wageRateChoices.some((rate) => rate.id === selectedWageRateId)) {
+      setSelectedWageRateId(Number(primary.id));
+    }
+  }, [needsWageRateChoice, selectedWageRateId, wageRateChoices]);
 
   const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
 
@@ -813,6 +901,9 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
         await punchEntriesApi.update(pe.id, { review_state: 'approved', reviewed_by_name: 'Admin' });
       }
       await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Approve failed');
+      try { await reload(); } catch { /* best-effort refresh */ }
     } finally {
       setSaving(false);
     }
@@ -852,8 +943,15 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     setError('');
     try {
       const empId = selectedEmployeeId || undefined;
-      await timecardsApi.applyToPayroll(tc.id, payPeriodId, empId ? Number(empId) : undefined);
-      onApplied();
+      const wageRateId = needsWageRateChoice ? selectedWageRateId || undefined : undefined;
+      const response = await timecardsApi.applyToPayroll(
+        tc.id,
+        payPeriodId,
+        empId ? Number(empId) : undefined,
+        wageRateId ? Number(wageRateId) : undefined
+      );
+      if (response.timecard) setTc(response.timecard);
+      onApplied(response.timecard, response.payroll_item);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply to payroll');
     } finally {
@@ -890,7 +988,10 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
             currentName={tc.employee_name || ''}
             employees={employees}
             selectedEmployeeId={selectedEmployeeId}
-            onSelectEmployee={setSelectedEmployeeId}
+            onSelectEmployee={(employeeId) => {
+              setSelectedEmployeeId(employeeId);
+              setSelectedWageRateId('');
+            }}
             onSaveName={handleSaveName}
           />
         ) : (
@@ -1043,9 +1144,31 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
 
         {tc.ocr_status === 'reviewed' && payPeriodId && (
           <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
-            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying}>
-              {applying ? <><Spinner size="sm" /> Applying...</> : 'Apply Hours to Payroll'}
+            {needsWageRateChoice && (
+              <>
+                <span className="text-xs font-medium text-gray-600">Apply hours to:</span>
+                <Select
+                  className="max-w-[240px] py-1.5"
+                  value={selectedWageRateId}
+                  onChange={(e) => setSelectedWageRateId(e.target.value ? Number(e.target.value) : '')}
+                  disabled={applying}
+                >
+                  {wageRateChoices.map((rate) => (
+                    <option key={rate.id} value={rate.id ?? ''}>
+                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                    </option>
+                  ))}
+                </Select>
+              </>
+            )}
+            <Button className="bg-green-600 hover:bg-green-700" onClick={handleApplyToPayroll} disabled={applying || (needsWageRateChoice && !selectedWageRateId)}>
+              {applying ? <><Spinner size="sm" /> Applying...</> : tc.applied_to_payroll_at ? 'Update Payroll Hours' : 'Apply Hours to Payroll'}
             </Button>
+            {tc.applied_to_payroll_at && (
+              <Badge className="bg-green-100 text-green-800">
+                Applied{tc.applied_employee_name ? ` to ${tc.applied_employee_name}` : ''}
+              </Badge>
+            )}
             <span className="text-xs text-gray-500">
               {selectedEmployeeId
                 ? `Assigning to: ${employees.find(e => e.id === selectedEmployeeId)?.first_name} ${employees.find(e => e.id === selectedEmployeeId)?.last_name}`
@@ -1087,7 +1210,7 @@ function Pagination({ page, totalPages, totalCount, onPageChange }: {
 // ──── Main Panel ───────────────────────────────────────
 export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   payPeriodId?: number;
-  onPayrollUpdated?: () => void;
+  onPayrollUpdated?: (payrollItem?: PayrollItem) => void;
 }) {
   const isStandalone = !payPeriodId;
   const [timecards, setTimecards] = useState<TimecardData[]>([]);
@@ -1104,6 +1227,36 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
   const [activeSearch, setActiveSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const perPage = 12;
+  const embeddedPerPage = 100;
+  const embeddedMaxPages = 3;
+  const listScrollYRef = useRef(0);
+
+  const loadEmbeddedTimecards = useCallback(async () => {
+    const first = await timecardsApi.listPaginated({
+      page: 1,
+      perPage: embeddedPerPage,
+      payPeriodId,
+      search: activeSearch || undefined,
+      status: statusFilter || undefined,
+    });
+    const all = [...first.timecards];
+
+    const pagesToLoad = Math.min(first.meta.total_pages, embeddedMaxPages);
+    const remainingPages = Array.from(
+      { length: Math.max(pagesToLoad - 1, 0) },
+      (_, index) => index + 2
+    );
+    const remainingResponses = await Promise.all(remainingPages.map((nextPage) => timecardsApi.listPaginated({
+      page: nextPage,
+      perPage: embeddedPerPage,
+      payPeriodId,
+      search: activeSearch || undefined,
+      status: statusFilter || undefined,
+    })));
+    remainingResponses.forEach((next) => all.push(...next.timecards));
+
+    return { timecards: all, totalCount: first.meta.total_count };
+  }, [activeSearch, payPeriodId, statusFilter]);
 
   const loadTimecards = useCallback(async () => {
     setLoading(true);
@@ -1116,12 +1269,13 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
         setTotalPages(resp.meta.total_pages);
         setTotalCount(resp.meta.total_count);
       } else {
-        const data = await timecardsApi.list(payPeriodId);
-        setTimecards(data);
+        const resp = await loadEmbeddedTimecards();
+        setTimecards(resp.timecards);
+        setTotalCount(resp.totalCount);
       }
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, [isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter]);
+  }, [isStandalone, page, perPage, activeSearch, statusFilter, loadEmbeddedTimecards]);
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -1183,8 +1337,10 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
             setProcessingIds(new Set(stillProcessing));
           }
         } else {
-          const data = await timecardsApi.list(payPeriodId);
+          const resp = await loadEmbeddedTimecards();
+          const data = resp.timecards;
           setTimecards(data);
+          setTotalCount(resp.totalCount);
           const stillProcessing = data
             .filter(tc => tc.ocr_status === 'pending' || tc.ocr_status === 'processing')
             .map(tc => tc.id);
@@ -1194,7 +1350,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     }, 5000);
 
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [hasProcessing, isStandalone, payPeriodId, page, perPage, activeSearch, statusFilter, processingIds.size]);
+  }, [hasProcessing, isStandalone, page, perPage, activeSearch, statusFilter, processingIds.size, loadEmbeddedTimecards]);
 
   const handleSearch = () => {
     setPage(1);
@@ -1221,17 +1377,37 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
     } catch { /* ignore */ }
   };
 
+  const updateTimecard = useCallback((updated: TimecardData) => {
+    setTimecards((prev) => prev.map((tc) => (tc.id === updated.id ? updated : tc)));
+  }, []);
+
   const selectedTc = timecards.find((tc) => tc.id === selectedId);
+
+  const openDetails = (timecardId: number) => {
+    listScrollYRef.current = window.scrollY;
+    setSelectedId(timecardId);
+  };
+
+  const closeDetails = () => {
+    setSelectedId(null);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: listScrollYRef.current, behavior: 'auto' });
+    });
+  };
 
   if (selectedTc) {
     return (
       <Card className="p-4">
         <TimecardDetail
           timecard={selectedTc}
-          onBack={() => { setSelectedId(null); loadTimecards(); }}
+          onBack={closeDetails}
           payPeriodId={payPeriodId}
           employees={employees}
-          onApplied={() => { setSelectedId(null); loadTimecards(); onPayrollUpdated?.(); }}
+          onApplied={(updated, payrollItem) => {
+            if (updated) updateTimecard(updated);
+            closeDetails();
+            onPayrollUpdated?.(payrollItem);
+          }}
         />
       </Card>
     );
@@ -1249,19 +1425,19 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
       <div className="p-4 space-y-4">
         <UploadSection payPeriodId={payPeriodId} onUploaded={() => { if (isStandalone) setPage(1); loadTimecards(); }} />
 
-        {/* Search & filter — standalone mode only */}
-        {isStandalone && (
+        {/* Search & filter */}
+        {(
           <div className="flex flex-wrap items-center gap-2">
             <input
               className="border rounded px-3 py-1.5 text-sm flex-1 min-w-[200px] max-w-sm focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
-              placeholder="Search by employee name..."
+              placeholder="Search employee, card date, or pay period..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
             <Button size="sm" variant="outline" onClick={handleSearch}>Search</Button>
-            <select
-              className="border rounded px-2 py-1.5 text-sm"
+            <Select
+              className="w-36 py-1.5"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             >
@@ -1271,7 +1447,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               <option value="complete">Complete</option>
               <option value="reviewed">Reviewed</option>
               <option value="failed">Failed</option>
-            </select>
+            </Select>
             {(activeSearch || statusFilter) && (
               <Button size="sm" variant="outline" className="text-gray-500" onClick={() => { setSearchQuery(''); setActiveSearch(''); setStatusFilter(''); setPage(1); }}>
                 Clear filters
@@ -1300,7 +1476,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
           </div>
         ) : timecards.length === 0 ? (
           <p className="text-sm text-gray-400 italic">
-            {isStandalone && (activeSearch || statusFilter)
+            {(activeSearch || statusFilter)
               ? 'No timecards match your filters.'
               : 'No timecards uploaded yet.'}
           </p>
@@ -1313,13 +1489,13 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
               <TimecardListItem
                 key={tc.id}
                 tc={tc}
-                onSelect={() => setSelectedId(tc.id)}
+                onSelect={() => openDetails(tc.id)}
                 onReprocess={() => handleReprocess(tc.id)}
                 onDelete={() => handleDelete(tc.id)}
                 isDeleting={deletingId === tc.id}
                 employees={employees}
                 payPeriodId={payPeriodId}
-                onRefresh={loadTimecards}
+                onTimecardUpdated={updateTimecard}
                 onPayrollUpdated={onPayrollUpdated}
               />
             ))}
