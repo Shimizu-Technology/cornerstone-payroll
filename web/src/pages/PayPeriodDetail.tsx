@@ -642,6 +642,12 @@ export function PayPeriodDetail() {
 
     return ((Number(left) || 0) - (Number(right) || 0)) * multiplier;
   };
+  const employeeLastNameSortKey = (item: PayrollItem) => {
+    const employee = employeeLookup.get(item.employee_id);
+    const lastName = item.employee_last_name || employee?.last_name || '';
+    const firstName = item.employee_first_name || employee?.first_name || '';
+    return `${lastName} ${firstName} ${item.employee_name || ''}`.trim();
+  };
 
   const sortPayrollItems = [...payrollItems]
     .filter((item) => matchesEmployeeFilters(
@@ -668,7 +674,11 @@ export function PayPeriodDetail() {
         return compareDirectional(toNumber(left.withholding_tax), toNumber(right.withholding_tax), resultsSortDirection);
       case 'name':
       default:
-        return compareDirectional(left.employee_name || '', right.employee_name || '', resultsSortDirection);
+        return compareDirectional(
+          employeeLastNameSortKey(left),
+          employeeLastNameSortKey(right),
+          resultsSortDirection
+        );
       }
     });
 
