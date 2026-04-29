@@ -146,6 +146,18 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(hours).to eq(5.0)
     end
 
+    it "serializes payroll items without department fields when the employee is missing" do
+      item = build_stubbed(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      allow(item).to receive(:employee).and_return(nil)
+      allow(item).to receive(:employee_full_name).and_return("Deleted Employee")
+      controller = Api::V1::Admin::TimecardsController.new
+
+      payload = controller.send(:payroll_item_json, item)
+
+      expect(payload[:department_id]).to be_nil
+      expect(payload[:department_name]).to be_nil
+    end
+
     it "returns a friendly error when payroll calculation fails" do
       allow_any_instance_of(PayrollItem).to receive(:calculate!).and_raise(StandardError, "calculation exploded")
 
