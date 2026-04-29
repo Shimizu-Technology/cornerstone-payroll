@@ -567,7 +567,7 @@ module Api
 
           send_spreadsheet!(
             filename: "employee_installment_loans_#{as_of || Date.current}.xlsx",
-            sheets: installment_loans_sheets(company)
+            sheets: installment_loans_sheets(company, as_of_date: as_of)
           )
         end
 
@@ -1481,17 +1481,19 @@ module Api
           [{ name: "Retirement", rows: [headers] + rows }]
         end
 
-        def installment_loans_sheets(company)
-          rows = [["Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Current Balance", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance"]]
-          loans = company.employee_loans.includes(:employee, loan_transactions: :pay_period).order("employees.last_name ASC, employees.first_name ASC, employee_loans.name ASC")
-          loans.each do |loan|
-            if loan.loan_transactions.empty?
-              rows << [loan.employee.last_name, loan.employee.first_name, loan.employee.full_name, loan.name, loan.status, loan.original_amount, loan.current_balance, nil, nil, nil, nil, nil]
+        def installment_loans_sheets(company, as_of_date: nil)
+          as_of = as_of_date || Date.current
+          rows = [["Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance"]]
+          InstallmentLoanReportBuilder.new(company, as_of_date: as_of).loans.each do |snapshot|
+            loan = snapshot[:loan]
+            employee = snapshot[:employee]
+            if snapshot[:transactions].empty?
+              rows << [employee.last_name, employee.first_name, employee.full_name, loan.name, snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, nil, nil, nil, nil, nil]
             else
-              loan.loan_transactions.chronological.each do |txn|
+              snapshot[:transactions].each do |txn|
                 rows << [
-                  loan.employee.last_name, loan.employee.first_name, loan.employee.full_name, loan.name,
-                  loan.status, loan.original_amount, loan.current_balance, txn.transaction_date,
+                  employee.last_name, employee.first_name, employee.full_name, loan.name,
+                  snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, txn.transaction_date,
                   txn.transaction_type, txn.amount, txn.balance_before, txn.balance_after
                 ]
               end

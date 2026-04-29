@@ -1234,6 +1234,50 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "installment loans Excel sheets" do
+    it "uses the as_of_date for transaction filtering and balance snapshots" do
+      loan = EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Travel Advance",
+        original_amount: 300.00,
+        current_balance: 100.00,
+        payment_amount: 50.00,
+        start_date: Date.new(2026, 1, 1),
+        status: "active"
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "addition",
+        amount: 300.00,
+        balance_before: 0.00,
+        balance_after: 300.00,
+        transaction_date: Date.new(2026, 1, 1)
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "payment",
+        amount: 100.00,
+        balance_before: 300.00,
+        balance_after: 200.00,
+        transaction_date: Date.new(2026, 2, 1)
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "payment",
+        amount: 100.00,
+        balance_before: 200.00,
+        balance_after: 100.00,
+        transaction_date: Date.new(2026, 4, 1)
+      )
+
+      sheets = Api::V1::Admin::ReportsController.new.send(:installment_loans_sheets, company, as_of_date: Date.new(2026, 3, 1))
+      rows = sheets.first.fetch(:rows)
+
+      expect(rows.first).to include("Balance As Of", "As Of Date")
+      expect(rows.size).to eq(3)
+      expect(rows.last).to include(Date.new(2026, 3, 1), Date.new(2026, 2, 1), "payment", 200.00)
+      expect(rows.flatten).not_to include(Date.new(2026, 4, 1))
+    end
+  end
+
   describe "GET /api/v1/admin/reports/form_1099_nec_xlsx" do
     it "returns 422 for a non-numeric year" do
       get "/api/v1/admin/reports/form_1099_nec_xlsx", params: { year: "not-a-year" }
