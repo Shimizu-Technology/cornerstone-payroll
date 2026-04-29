@@ -66,9 +66,9 @@ export function PayPeriods() {
   });
 
   // Load pay periods
-  const loadPayPeriods = useCallback(async () => {
+  const loadPayPeriods = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
       const response = await payPeriodsApi.list({ status: statusFilter });
       setPayPeriods(response.pay_periods);
@@ -76,7 +76,7 @@ export function PayPeriods() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [statusFilter]);
 
@@ -119,7 +119,7 @@ export function PayPeriods() {
       await payPeriodsApi.create(formData);
       setIsCreateOpen(false);
       setFormData({ start_date: '', end_date: '', pay_date: '', notes: '' });
-      loadPayPeriods();
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create pay period');
     } finally {
@@ -132,7 +132,7 @@ export function PayPeriods() {
       setActionInFlight(`run-${id}`);
       setError(null);
       await payPeriodsApi.runPayroll(id);
-      loadPayPeriods();
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
@@ -170,7 +170,7 @@ export function PayPeriods() {
       await payPeriodsApi.update(editingPayPeriod.id, editFormData);
       setIsEditOpen(false);
       setEditingPayPeriod(null);
-      loadPayPeriods();
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update pay period');
     } finally {
@@ -183,7 +183,7 @@ export function PayPeriods() {
       setActionInFlight(`approve-${id}`);
       setError(null);
       await payPeriodsApi.approve(id);
-      loadPayPeriods();
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve pay period');
     } finally {
@@ -199,7 +199,7 @@ export function PayPeriods() {
       setActionInFlight(`commit-${id}`);
       setError(null);
       await payPeriodsApi.commit(id);
-      loadPayPeriods();
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to commit pay period');
     } finally {
@@ -215,7 +215,8 @@ export function PayPeriods() {
       setActionInFlight(`delete-${id}`);
       setError(null);
       await payPeriodsApi.delete(id);
-      loadPayPeriods();
+      setPayPeriods((prev) => prev.filter((period) => period.id !== id));
+      loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete pay period');
     } finally {
@@ -268,9 +269,12 @@ export function PayPeriods() {
 
       switch (sortBy) {
       case 'pay_period':
-        return compareStrings(
-          formatDateRange(left.start_date, left.end_date),
-          formatDateRange(right.start_date, right.end_date)
+        return compareNumbers(
+          new Date(left.end_date).getTime(),
+          new Date(right.end_date).getTime()
+        ) || compareNumbers(
+          new Date(left.start_date).getTime(),
+          new Date(right.start_date).getTime()
         );
       case 'employees':
         return compareNumbers(left.employee_count || 0, right.employee_count || 0);

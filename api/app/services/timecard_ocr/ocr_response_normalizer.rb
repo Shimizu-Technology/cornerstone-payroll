@@ -18,19 +18,26 @@ module TimecardOcr
     ROUNDED_DRIFT_COMPARISON_WINDOW_MINUTES = 30
     ROUNDED_DRIFT_MIN_COMPARABLE_ROWS = 2
 
-    def self.normalize(payload = nil, reference_date: Time.zone.today, **payload_keywords)
+    def self.normalize(payload = nil, reference_date: Time.zone.today, period_start_hint: nil, period_end_hint: nil, **payload_keywords)
       normalized_payload = payload || payload_keywords
-      new(normalized_payload, reference_date: reference_date).normalize
+      new(
+        normalized_payload,
+        reference_date: reference_date,
+        period_start_hint: period_start_hint,
+        period_end_hint: period_end_hint
+      ).normalize
     end
 
-    def initialize(payload, reference_date: nil)
+    def initialize(payload, reference_date: nil, period_start_hint: nil, period_end_hint: nil)
       @payload = payload || {}
       @reference_date = reference_date&.to_date || Time.zone.today
+      @period_start_hint = normalize_date(period_start_hint)
+      @period_end_hint = normalize_date(period_end_hint)
     end
 
     def normalize
-      period_start = normalize_date(@payload["period_start"])
-      period_end = normalize_date(@payload["period_end"])
+      period_start = normalize_date(@payload["period_start"]) || @period_start_hint
+      period_end = normalize_date(@payload["period_end"]) || @period_end_hint
       period_start, period_end, period_year_corrected = reconcile_period_years(period_start, period_end)
       employee_name = normalize_employee_name(@payload["employee_name"])
       entries = Array(@payload["entries"]).map do |entry|

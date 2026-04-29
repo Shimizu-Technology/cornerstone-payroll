@@ -652,6 +652,11 @@ export interface RunPayrollHoursEntry {
   wage_rates?: PayrollItemWageRateHours[];
 }
 
+export interface RunPayrollCustomEarningEntry {
+  label: string;
+  amount: number;
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }) =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params),
@@ -663,7 +668,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
@@ -832,6 +837,10 @@ export interface TimecardData {
   ocr_error: string | null;
   reviewed_by_name: string | null;
   reviewed_at: string | null;
+  applied_employee_id: number | null;
+  applied_employee_name: string | null;
+  applied_payroll_item_id: number | null;
+  applied_to_payroll_at: string | null;
   review_summary: ReviewSummary;
   created_at: string;
   punch_entries: PunchEntryData[];
@@ -843,6 +852,8 @@ export interface ApplyToPayrollResponse {
   hours_worked: number;
   overtime_hours: number;
   timecard_id: number;
+  payroll_item?: import('@/types').PayrollItem;
+  timecard?: TimecardData;
 }
 
 export interface TimecardListMeta {
@@ -884,10 +895,11 @@ export const timecardsApi = {
     api.patch<TimecardData>(`/admin/timecards/${id}/review`, { review: { reviewed_by_name: reviewedByName } }),
   reprocess: (id: number) => api.patch<TimecardData>(`/admin/timecards/${id}/reprocess`),
   delete: (id: number) => api.delete(`/admin/timecards/${id}`),
-  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number) =>
+  applyToPayroll: (id: number, payPeriodId: number, employeeId?: number, wageRateId?: number) =>
     api.post<ApplyToPayrollResponse>(`/admin/timecards/${id}/apply_to_payroll`, {
       pay_period_id: payPeriodId,
       ...(employeeId ? { employee_id: employeeId } : {}),
+      ...(wageRateId ? { wage_rate_id: wageRateId } : {}),
     }),
 };
 

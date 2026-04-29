@@ -42,6 +42,7 @@ const initialFormData: EmployeeFormData = {
   city: '',
   state: '',
   zip: '',
+  default_custom_earnings: [],
 };
 
 interface FormErrors {
@@ -50,6 +51,12 @@ interface FormErrors {
 
 interface WageRateFormRow extends EmployeeWageRate {
   temp_id: string;
+}
+
+interface CustomEarningFormRow {
+  temp_id: string;
+  label: string;
+  amount: number;
 }
 
 type W4MonetaryField =
@@ -102,6 +109,7 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
+  const [defaultCustomEarnings, setDefaultCustomEarnings] = useState<CustomEarningFormRow[]>([]);
   const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
     additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
     w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
@@ -162,6 +170,7 @@ export function EmployeeForm() {
         city: employee.city || '',
         state: employee.state || '',
         zip: employee.zip || '',
+        default_custom_earnings: employee.default_custom_earnings || [],
       };
       setForm(normalizeEmployeeMonetaryFields(nextForm));
       setW4CurrencyDrafts({
@@ -186,6 +195,11 @@ export function EmployeeForm() {
               }]
         );
       }
+      setDefaultCustomEarnings((employee.default_custom_earnings || []).map((earning) => ({
+        temp_id: crypto.randomUUID(),
+        label: earning.label,
+        amount: toNumberOrZero(earning.amount),
+      })));
       
       setEmployeeStatus(employee.status || 'active');
       setTerminationDate(employee.termination_date || null);
@@ -294,6 +308,30 @@ export function EmployeeForm() {
     replaceWageRates(wageRates.filter((rate) => rate.temp_id !== tempId));
   };
 
+  const addDefaultCustomEarning = () => {
+    setDefaultCustomEarnings((prev) => [
+      ...prev,
+      { temp_id: crypto.randomUUID(), label: '', amount: 0 },
+    ]);
+  };
+
+  const updateDefaultCustomEarning = (tempId: string, patch: Partial<CustomEarningFormRow>) => {
+    setDefaultCustomEarnings((prev) => prev.map((earning) => (
+      earning.temp_id === tempId ? { ...earning, ...patch } : earning
+    )));
+  };
+
+  const removeDefaultCustomEarning = (tempId: string) => {
+    setDefaultCustomEarnings((prev) => prev.filter((earning) => earning.temp_id !== tempId));
+  };
+
+  const normalizeDefaultCustomEarnings = () => defaultCustomEarnings
+    .map((earning) => ({
+      label: earning.label.trim(),
+      amount: roundCurrencyValue(Number(earning.amount) || 0),
+    }))
+    .filter((earning) => earning.label !== '' && earning.amount > 0);
+
   const normalizeWageRates = (): WageRateFormRow[] => {
     const activeRates = wageRates
       .map((rate) => ({
@@ -350,6 +388,11 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
     }
+    const defaultEarnings = normalizeDefaultCustomEarnings();
+    const defaultEarningLabels = defaultEarnings.map((earning) => earning.label.toLowerCase());
+    if (new Set(defaultEarningLabels).size !== defaultEarningLabels.length) {
+      newErrors.default_custom_earnings = ['Recurring earning labels must be unique'];
+    }
     if (form.employment_type !== 'contractor') {
       if (!String(form.address_line1 || '').trim()) {
         newErrors.address_line1 = ['Address line 1 is required'];
@@ -400,6 +443,7 @@ export function EmployeeForm() {
               active: rate.active !== false,
             }))
           : undefined,
+        default_custom_earnings: normalizeDefaultCustomEarnings(),
       };
 
       let savedEmployeeId: number;
@@ -828,6 +872,63 @@ export function EmployeeForm() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Recurring Custom Earnings</CardTitle>
+            <CardDescription>
+              Earnings added here are copied into each new pay period and can still be edited for that period.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {getFieldError('default_custom_earnings') && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {getFieldError('default_custom_earnings')}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {defaultCustomEarnings.map((earning) => (
+                <div key={earning.temp_id} className="grid grid-cols-1 items-end gap-3 rounded-lg border border-gray-200 p-3 md:grid-cols-[minmax(0,1fr)_10rem_auto]">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-600">
+                      Earning Label
+                    </label>
+                    <Input
+                      value={earning.label}
+                      onChange={(event) => updateDefaultCustomEarning(earning.temp_id, { label: event.target.value })}
+                      placeholder="Chief Stipend"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-gray-600">
+                      Amount
+                    </label>
+                    <NumericInput
+                      value={earning.amount}
+                      onValueChange={(value) => updateDefaultCustomEarning(earning.temp_id, { amount: value ?? 0 })}
+                      min={0}
+                      fixedDecimalsOnBlur={2}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => removeDefaultCustomEarning(earning.temp_id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addDefaultCustomEarning}>
+              <Plus className="mr-1 h-4 w-4" />
+              Add Recurring Earning
+            </Button>
           </CardContent>
         </Card>
 

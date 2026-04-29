@@ -26,6 +26,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       pay_frequency: "biweekly",
       filing_status: "single",
       allowances: 1,
+      address_line1: "123 Payroll Way",
+      city: "Hagatna",
+      state: "GU",
+      zip: "96910",
       status: "active",
       hire_date: Date.today - 1.year
     )
