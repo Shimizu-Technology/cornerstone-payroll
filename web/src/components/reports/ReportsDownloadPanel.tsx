@@ -10,6 +10,7 @@ import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
   payPeriodStatus: string;
+  payDate: string;
 }
 
 type ReportKey =
@@ -894,6 +895,7 @@ function downloadBlob(blobData: BlobDownload, fallbackName: string) {
 async function fetchReport(
   reportKey: ReportKey,
   payPeriodId: number,
+  payPeriodPayDate?: string,
   transmittalOptions?: TransmittalOptions
 ): Promise<BlobDownload> {
   switch (reportKey) {
@@ -910,13 +912,13 @@ async function fetchReport(
     case 'transmittalLog':
       return reportsApi.transmittalLogPdf(payPeriodId, transmittalOptions);
     case 'installmentLoans':
-      return reportsApi.installmentLoansPdf();
+      return reportsApi.installmentLoansPdf(payPeriodPayDate);
     case 'fullPrintPackage':
       return reportsApi.fullPrintPackagePdf(payPeriodId, transmittalOptions);
   }
 }
 
-async function fetchSpreadsheet(reportKey: ReportKey, payPeriodId: number): Promise<BlobDownload | null> {
+async function fetchSpreadsheet(reportKey: ReportKey, payPeriodId: number, payPeriodPayDate?: string): Promise<BlobDownload | null> {
   switch (reportKey) {
     case 'payrollRegister':
       return reportsApi.payrollRegisterXlsx(payPeriodId);
@@ -929,7 +931,7 @@ async function fetchSpreadsheet(reportKey: ReportKey, payPeriodId: number): Prom
     case 'retirementPlans':
       return reportsApi.retirementPlansXlsx(payPeriodId);
     case 'installmentLoans':
-      return reportsApi.installmentLoansXlsx();
+      return reportsApi.installmentLoansXlsx(payPeriodPayDate);
     default:
       return null;
   }
@@ -1027,7 +1029,7 @@ function PdfPreviewModal({
   );
 }
 
-export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDownloadPanelProps) {
+export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [previewState, setPreviewState] = useState<{
@@ -1089,7 +1091,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     setPreviewState({ open: true, key: reportKey, label, pdfUrl: null, blobData: null });
 
     try {
-      const blobData = await fetchReport(reportKey, payPeriodId, transmittalOpts);
+      const blobData = await fetchReport(reportKey, payPeriodId, payDate, transmittalOpts);
       const url = URL.createObjectURL(blobData.blob);
       setPreviewState(prev => ({ ...prev, pdfUrl: url, blobData }));
     } catch (err) {
@@ -1111,7 +1113,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     setError(null);
 
     try {
-      const blobData = await fetchReport(reportKey, payPeriodId, transmittalOpts);
+      const blobData = await fetchReport(reportKey, payPeriodId, payDate, transmittalOpts);
       downloadBlob(blobData, `${reportKey}.pdf`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to download report');
@@ -1126,7 +1128,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus }: ReportsDo
     setError(null);
 
     try {
-      const blobData = await fetchSpreadsheet(reportKey, payPeriodId);
+      const blobData = await fetchSpreadsheet(reportKey, payPeriodId, payDate);
       if (!blobData) return;
       downloadBlob(blobData, `${reportKey}.xlsx`);
     } catch (err) {

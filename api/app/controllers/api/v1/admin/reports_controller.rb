@@ -477,7 +477,7 @@ module Api
           report_data = build_pay_period_payroll_items_report(pp)
           send_spreadsheet!(
             filename: "payroll_summary_by_employee_#{pp.start_date}_to_#{pp.end_date}.xlsx",
-            sheets: payroll_register_sheets(report_data)
+            sheets: payroll_summary_by_employee_sheets(report_data)
           )
         end
 
@@ -1300,6 +1300,67 @@ module Api
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
           sheets
+        end
+
+        PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS = [
+          "Last Name", "First Name", "Employee Name", "Type", "Gross Pay",
+          "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings",
+          "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
+          "Loan Deduction", "Insurance", "Total Deductions", "Net Pay",
+          "Employer SS", "Employer Medicare", "Employer Match",
+          "Employer Roth Match", "Total Payroll Cost"
+        ].freeze
+
+        def payroll_summary_by_employee_sheets(report)
+          employees = Array(report[:employees])
+          summary_rows = employees.map { |emp| payroll_summary_by_employee_row(emp) }
+          [
+            { name: "Employee Summary", rows: [PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS] + summary_rows },
+            payroll_summary_totals_sheet(report[:summary] || {}),
+            earnings_breakdown_sheet(report),
+            deductions_breakdown_sheet(report)
+          ]
+        end
+
+        def payroll_summary_by_employee_row(emp)
+          total_payroll_cost = emp[:gross_pay].to_f +
+            emp[:employer_social_security_tax].to_f +
+            emp[:employer_medicare_tax].to_f +
+            emp[:employer_retirement_match].to_f +
+            emp[:employer_roth_retirement_match].to_f
+
+          [
+            emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
+            emp[:employment_type], emp[:gross_pay], emp[:reported_tips], emp[:tips_paid_out],
+            emp[:bonus], emp[:custom_earnings_total], emp[:withholding_tax],
+            emp[:social_security_tax], emp[:medicare_tax], emp[:retirement_payment],
+            emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
+            emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
+            emp[:employer_medicare_tax], emp[:employer_retirement_match],
+            emp[:employer_roth_retirement_match], total_payroll_cost
+          ]
+        end
+
+        def payroll_summary_totals_sheet(summary)
+          rows = [
+            [ "Metric", "Amount" ],
+            [ "Employees", summary[:employee_count] ],
+            [ "Gross Pay", summary[:total_gross] ],
+            [ "Reported Tips", summary[:total_reported_tips] ],
+            [ "Tips Paid Out", summary[:total_tips_paid_out] ],
+            [ "Bonus", summary[:total_bonus] ],
+            [ "Custom Earnings", summary[:total_custom_earnings] ],
+            [ "FIT", summary[:total_withholding] ],
+            [ "SS Tax", summary[:total_social_security] ],
+            [ "Medicare Tax", summary[:total_medicare] ],
+            [ "401(k)", summary[:total_traditional_retirement] ],
+            [ "Roth 401(k)", summary[:total_roth_retirement] ],
+            [ "Employer Match", summary[:total_employer_traditional_retirement] ],
+            [ "Employer Roth Match", summary[:total_employer_roth_retirement] ],
+            [ "Total Deductions", summary[:total_deductions] ],
+            [ "Net Pay", summary[:total_net] ]
+          ]
+          { name: "Totals", rows: rows }
         end
 
         def payroll_export_row(emp)
