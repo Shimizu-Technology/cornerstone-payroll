@@ -213,8 +213,18 @@ export interface PayPeriod {
   created_by_id?: number;
   approved_by_id?: number;
   committed_at?: string;
+  processed_at?: string | null;
+  processed_by_name?: string | null;
   created_at?: string;
   updated_at?: string;
+  lifecycle?: {
+    created?: PayPeriodLifecycleEvent;
+    calculated?: PayPeriodLifecycleEvent;
+    approved?: PayPeriodLifecycleEvent;
+    unapproved?: PayPeriodLifecycleEvent;
+    committed?: PayPeriodLifecycleEvent;
+    tax_synced?: PayPeriodLifecycleEvent;
+  };
   // Tax sync fields (CPR-53)
   tax_sync_status?: TaxSyncStatus | null;
   tax_sync_attempts?: number;
@@ -243,6 +253,13 @@ export interface PayPeriod {
   total_net?: number;
   // Nested payroll items (when requested)
   payroll_items?: PayrollItem[];
+}
+
+export interface PayPeriodLifecycleEvent {
+  timestamp?: string | null;
+  actor_id?: number | null;
+  actor_name?: string | null;
+  actor_email?: string | null;
 }
 
 // ----------------

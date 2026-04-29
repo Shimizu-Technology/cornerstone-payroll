@@ -34,6 +34,7 @@ module Api
           @pay_periods = @pay_periods.for_year(params[:year].to_i) if params[:year].present?
 
           loaded = @pay_periods.to_a
+          preload_pay_period_audit_logs!(loaded)
           render json: {
             pay_periods: loaded.map { |pp| pay_period_json(pp) },
             meta: {
@@ -745,6 +746,7 @@ module Api
 
         def pay_period_json(pay_period, include_items: false)
           agg = pay_period_aggregates(pay_period)
+          lifecycle = pay_period_lifecycle_summary(pay_period)
 
           json = {
             id: pay_period.id,
@@ -761,10 +763,13 @@ module Api
             total_employer_ss: agg[:employer_ss],
             total_employer_medicare: agg[:employer_medicare],
             committed_at: pay_period.committed_at,
+            processed_at: pay_period.committed_at,
+            processed_by_name: lifecycle.dig(:committed, :actor_name),
             tax_sync_status: pay_period.tax_sync_status,
             tax_sync_attempts: pay_period.tax_sync_attempts,
             tax_sync_last_error: pay_period.tax_sync_last_error,
             tax_synced_at: pay_period.tax_synced_at,
+            lifecycle: lifecycle,
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,
             voided_at:                pay_period.voided_at,
@@ -976,6 +981,87 @@ module Api
               net_delta:   items.sum { |i| i.net_pay.to_f }
             }
           }
+        end
+
+        def preload_pay_period_audit_logs!(pay_periods)
+          @pay_period_audit_logs_by_record_id =
+            if pay_periods.empty?
+              {}
+            else
+              AuditLog
+                .where(
+                  company_id: current_company_id,
+                  record_type: "pay_periods",
+                  record_id: pay_periods.map(&:id)
+                )
+                .includes(:user)
+                .order(:created_at)
+                .group_by { |log| log.record_id.to_i }
+            end
+        end
+
+        def pay_period_audit_logs(pay_period)
+          @pay_period_audit_logs_by_record_id ||= {}
+          @pay_period_audit_logs_by_record_id.fetch(pay_period.id) do
+            @pay_period_audit_logs_by_record_id[pay_period.id] =
+              AuditLog
+                .where(
+                  company_id: pay_period.company_id,
+                  record_type: "pay_periods",
+                  record_id: pay_period.id
+                )
+                .includes(:user)
+                .order(:created_at)
+                .to_a
+          end
+        end
+
+        def pay_period_lifecycle_summary(pay_period)
+          logs = pay_period_audit_logs(pay_period)
+
+          {
+            created: lifecycle_event_json(
+              timestamp: pay_period.created_at,
+              actor_id: pay_period.created_by_id,
+              actor_name: historical_user_name(pay_period.created_by_id)
+            ),
+            calculated: lifecycle_event_from_log(logs, "pay_periods#run_payroll"),
+            approved: lifecycle_event_from_log(logs, "pay_periods#approve"),
+            unapproved: lifecycle_event_from_log(logs, "pay_periods#unapprove"),
+            committed: lifecycle_event_from_log(
+              logs,
+              "pay_periods#commit",
+              fallback_timestamp: pay_period.committed_at
+            ),
+            tax_synced: lifecycle_event_json(timestamp: pay_period.tax_synced_at)
+          }
+        end
+
+        def lifecycle_event_from_log(logs, action, fallback_timestamp: nil)
+          log = logs.select { |entry| entry.action == action }.last
+          return lifecycle_event_json(timestamp: fallback_timestamp) unless log
+
+          lifecycle_event_json(
+            timestamp: log.created_at,
+            actor_id: log.user_id,
+            actor_name: log.user&.name,
+            actor_email: log.user&.email
+          )
+        end
+
+        def lifecycle_event_json(timestamp:, actor_id: nil, actor_name: nil, actor_email: nil)
+          {
+            timestamp: timestamp,
+            actor_id: actor_id,
+            actor_name: actor_name,
+            actor_email: actor_email
+          }
+        end
+
+        def historical_user_name(user_id)
+          return nil if user_id.blank?
+
+          User.find_by(id: user_id)&.name
         end
 
         def correction_event_json(event)
