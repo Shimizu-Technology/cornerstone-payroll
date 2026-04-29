@@ -290,7 +290,9 @@ module Api
         # GET /api/v1/admin/reports/form_1099_nec
         # Annual 1099-NEC summary for contractor filing preparation.
         def form_1099_nec
-          year = params[:year]&.to_i || Date.current.year
+          year = parse_tax_year_param
+          return if performed?
+
           company = Company.find(current_company_id)
           report = Form1099NecAggregator.new(company, year).generate
           render json: { report: report }
@@ -301,7 +303,9 @@ module Api
         # GET /api/v1/admin/reports/form_1099_nec_pdf
         # Downloads 1099-NEC annual summary as PDF.
         def form_1099_nec_pdf
-          year = params[:year]&.to_i || Date.current.year
+          year = parse_tax_year_param
+          return if performed?
+
           company = Company.find(current_company_id)
           report = Form1099NecAggregator.new(company, year).generate
           generator = Form1099NecPdfGenerator.new(report)
@@ -314,7 +318,9 @@ module Api
         end
 
         def form_1099_nec_xlsx
-          year = params[:year]&.to_i || Date.current.year
+          year = parse_tax_year_param
+          return if performed?
+
           company = Company.find(current_company_id)
           report = Form1099NecAggregator.new(company, year).generate
           send_spreadsheet!(
@@ -1521,6 +1527,14 @@ module Api
           Date.iso8601(value)
         rescue ArgumentError, Date::Error
           render json: { error: "Invalid #{param_name} - expected YYYY-MM-DD" }, status: :unprocessable_entity
+          nil
+        end
+
+        def parse_tax_year_param
+          year = params[:year].present? ? Integer(params[:year], exception: false) : Date.current.year
+          return year if year && year > 2000 && year <= Date.current.year + 1
+
+          render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           nil
         end
       end

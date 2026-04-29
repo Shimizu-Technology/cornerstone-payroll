@@ -76,21 +76,26 @@ module Api
           end_date_was = @pay_period.end_date
           pay_date_was = @pay_period.pay_date
 
-          if @pay_period.update(pay_period_params)
-            dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
-            if dates_changed && !@pay_period.draft?
-              @pay_period.update!(
-                status: "draft",
-                approved_by_id: nil,
-                approved_at: nil,
-                calculated_at: nil,
-                calculated_by_id: nil,
-                unapproved_at: nil,
-                unapproved_by_id: nil
-              )
+          begin
+            @pay_period.transaction do
+              @pay_period.update!(pay_period_params)
+              dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
+
+              if dates_changed && !@pay_period.draft?
+                @pay_period.update!(
+                  status: "draft",
+                  approved_by_id: nil,
+                  approved_at: nil,
+                  calculated_at: nil,
+                  calculated_by_id: nil,
+                  unapproved_at: nil,
+                  unapproved_by_id: nil
+                )
+              end
             end
+
             render json: { pay_period: pay_period_json(@pay_period) }
-          else
+          rescue ActiveRecord::RecordInvalid
             render json: { errors: @pay_period.errors.full_messages }, status: :unprocessable_entity
           end
         end
@@ -309,7 +314,9 @@ module Api
               calculated_at: Time.current,
               calculated_by_id: current_user_id,
               approved_at: nil,
-              approved_by_id: nil
+              approved_by_id: nil,
+              unapproved_at: nil,
+              unapproved_by_id: nil
             )
           end
 
