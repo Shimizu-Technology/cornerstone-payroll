@@ -1233,4 +1233,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to eq("Invalid as_of_date - expected YYYY-MM-DD")
     end
   end
+
+  describe "GET /api/v1/admin/reports/form_1099_nec_xlsx" do
+    it "returns 422 for a non-numeric year" do
+      get "/api/v1/admin/reports/form_1099_nec_xlsx", params: { year: "not-a-year" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("year must be a valid 4-digit tax year")
+    end
+  end
 end
