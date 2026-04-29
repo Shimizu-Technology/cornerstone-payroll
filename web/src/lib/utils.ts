@@ -41,7 +41,6 @@ export function formatGuamDateTime(dateString?: string | null, options?: Intl.Da
   if (!dateString) return 'Not recorded';
 
   return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Pacific/Guam',
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -50,6 +49,7 @@ export function formatGuamDateTime(dateString?: string | null, options?: Intl.Da
     second: '2-digit',
     timeZoneName: 'short',
     ...options,
+    timeZone: 'Pacific/Guam',
   }).format(new Date(dateString));
 }
 
