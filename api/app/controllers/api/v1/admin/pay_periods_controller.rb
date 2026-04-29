@@ -72,7 +72,23 @@ module Api
             return render json: { error: message }, status: :unprocessable_entity
           end
 
+          start_date_was = @pay_period.start_date
+          end_date_was = @pay_period.end_date
+          pay_date_was = @pay_period.pay_date
+
           if @pay_period.update(pay_period_params)
+            dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
+            if dates_changed && !@pay_period.draft?
+              @pay_period.update!(
+                status: "draft",
+                approved_by_id: nil,
+                approved_at: nil,
+                calculated_at: nil,
+                calculated_by_id: nil,
+                unapproved_at: nil,
+                unapproved_by_id: nil
+              )
+            end
             render json: { pay_period: pay_period_json(@pay_period) }
           else
             render json: { errors: @pay_period.errors.full_messages }, status: :unprocessable_entity
@@ -287,7 +303,15 @@ module Api
           end
 
           # Update pay period status
-          @pay_period.update!(status: "calculated") if results[:errors].empty?
+          if results[:errors].empty?
+            @pay_period.update!(
+              status: "calculated",
+              calculated_at: Time.current,
+              calculated_by_id: current_user_id,
+              approved_at: nil,
+              approved_by_id: nil
+            )
+          end
 
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true),
@@ -301,7 +325,11 @@ module Api
             return render json: { error: "Can only approve a calculated pay period" }, status: :unprocessable_entity
           end
 
-          @pay_period.update!(status: "approved", approved_by_id: current_user_id)
+          @pay_period.update!(
+            status: "approved",
+            approved_by_id: current_user_id,
+            approved_at: Time.current
+          )
           render json: { pay_period: pay_period_json(@pay_period) }
         end
 
@@ -312,7 +340,13 @@ module Api
             return render json: { error: "Can only unapprove an approved pay period" }, status: :unprocessable_entity
           end
 
-          @pay_period.update!(status: "calculated", approved_by_id: nil)
+          @pay_period.update!(
+            status: "calculated",
+            approved_by_id: nil,
+            approved_at: nil,
+            unapproved_at: Time.current,
+            unapproved_by_id: current_user_id
+          )
           render json: { pay_period: pay_period_json(@pay_period) }
         end
 
@@ -328,7 +362,11 @@ module Api
           end
 
           ActiveRecord::Base.transaction do
-            @pay_period.update!(status: "committed", committed_at: Time.current)
+            @pay_period.update!(
+              status: "committed",
+              committed_at: Time.current,
+              committed_by_id: current_user_id
+            )
             committed_items = @pay_period.payroll_items.includes(
               :employee,
               payroll_item_deductions: :deduction_type,
@@ -763,7 +801,11 @@ module Api
             total_net: agg[:net],
             total_employer_ss: agg[:employer_ss],
             total_employer_medicare: agg[:employer_medicare],
+            calculated_at: pay_period.calculated_at,
+            calculated_by_id: pay_period.calculated_by_id,
+            approved_at: pay_period.approved_at,
             committed_at: pay_period.committed_at,
+            committed_by_id: pay_period.committed_by_id,
             processed_at: pay_period.committed_at,
             processed_by_name: lifecycle.dig(:committed, :actor_name),
             tax_sync_status: pay_period.tax_sync_status,
@@ -804,6 +846,8 @@ module Api
           {
             id: item.id,
             employee_id: item.employee_id,
+            employee_first_name: item.employee&.first_name,
+            employee_last_name: item.employee&.last_name,
             employee_name: item.employee_full_name,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
@@ -1030,13 +1074,33 @@ module Api
               timestamp: pay_period.created_at,
               actor_name: historical_user_name(pay_period.created_by_id)
             ),
-            calculated: lifecycle_event_from_log(logs, "pay_periods#run_payroll"),
-            approved: lifecycle_event_from_log(logs, "pay_periods#approve"),
-            unapproved: lifecycle_event_from_log(logs, "pay_periods#unapprove"),
-            committed: lifecycle_event_from_log(
+            calculated: lifecycle_event_from_saved_or_log(
+              pay_period,
+              logs,
+              "pay_periods#run_payroll",
+              timestamp: pay_period.calculated_at,
+              user_id: pay_period.calculated_by_id
+            ),
+            approved: lifecycle_event_from_saved_or_log(
+              pay_period,
+              logs,
+              "pay_periods#approve",
+              timestamp: pay_period.approved_at,
+              user_id: pay_period.approved_by_id
+            ),
+            unapproved: lifecycle_event_from_saved_or_log(
+              pay_period,
+              logs,
+              "pay_periods#unapprove",
+              timestamp: pay_period.unapproved_at,
+              user_id: pay_period.unapproved_by_id
+            ),
+            committed: lifecycle_event_from_saved_or_log(
+              pay_period,
               logs,
               "pay_periods#commit",
-              fallback_timestamp: pay_period.committed_at
+              timestamp: pay_period.committed_at,
+              user_id: pay_period.committed_by_id
             ),
             tax_synced: lifecycle_event_json(timestamp: pay_period.tax_synced_at)
           }
@@ -1050,6 +1114,17 @@ module Api
             timestamp: log.created_at,
             actor_name: log.user&.name
           )
+        end
+
+        def lifecycle_event_from_saved_or_log(pay_period, logs, action, timestamp:, user_id: nil)
+          log_event = lifecycle_event_from_log(logs, action)
+          event = lifecycle_event_json(
+            timestamp: timestamp,
+            actor_name: historical_user_name(user_id) || log_event[:actor_name]
+          )
+          return event if timestamp.present?
+
+          log_event
         end
 
         def lifecycle_event_json(timestamp:, actor_name: nil)

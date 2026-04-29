@@ -8,11 +8,12 @@ module PayrollImport
   # 4. Return preview data
   # 5. Apply import to create/update PayrollItems
   class ImportService
-    attr_reader :pay_period, :company_id
+    attr_reader :pay_period, :company_id, :actor
 
-    def initialize(pay_period)
+    def initialize(pay_period, actor: nil)
       @pay_period = pay_period
       @company_id = pay_period.company_id
+      @actor = actor
     end
 
     # Preview: parse files and match names without persisting
@@ -134,7 +135,15 @@ module PayrollImport
 
       # Update pay period status outside row-write transaction so status transition
       # failures don't roll back successful payroll item writes.
-      pay_period.update!(status: "calculated") if results[:errors].empty? && results[:success].any?
+      if results[:errors].empty? && results[:success].any?
+        pay_period.update!(
+          status: "calculated",
+          calculated_at: Time.current,
+          calculated_by_id: actor&.id,
+          approved_at: nil,
+          approved_by_id: nil
+        )
+      end
 
       results
     end

@@ -1192,12 +1192,14 @@ export interface Form941GuReport {
     total_employer_taxes: number;
   };
   monthly_liability: {
-    month: number;
-    month_name: string;
+    month: string;
+    month_start: string;
+    month_end: string;
     fit_withheld: number;
     ss_combined: number;
+    ss_tips_combined: number;
     medicare_combined: number;
-    additional_medicare: number;
+    add_medicare_tax: number;
     total_liability: number;
   }[];
 }
@@ -1212,6 +1214,8 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/payroll_register_csv', { pay_period_id: payPeriodId }),
   payrollRegisterPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
+  payrollRegisterXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
   employeePayHistory: (employeeId: number, limit?: number) =>
     api.get<{ report: {
       employee: { id: number; name: string; employment_type: string; pay_rate: number };
@@ -1228,6 +1232,8 @@ export const reportsApi = {
       }[];
       ytd: Record<string, number>;
     } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
+  employeePayHistoryXlsx: (employeeId: number, limit?: number) =>
+    api.getBlobWithParams('/admin/reports/employee_pay_history_xlsx', { employee_id: employeeId, limit }),
   taxSummary: (year?: number, quarter?: number) =>
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
   // CPR-70: Tax Summary exports
@@ -1235,8 +1241,12 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/tax_summary_csv', { year, quarter }),
   taxSummaryPdf: (year: number, quarter?: number) =>
     api.getBlobWithParams('/admin/reports/tax_summary_pdf', { year, quarter }),
+  taxSummaryXlsx: (year: number, quarter?: number) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_xlsx', { year, quarter }),
   ytdSummary: (year?: number) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
+  ytdSummaryXlsx: (year?: number) =>
+    api.getBlobWithParams('/admin/reports/ytd_summary_xlsx', { year }),
   // CPR-68: W-2GU Annual Report
   w2Gu: (year: number) =>
     api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),
@@ -1244,6 +1254,8 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/w2_gu_csv', { year }),
   w2GuPdf: (year: number) =>
     api.getBlobWithParams('/admin/reports/w2_gu_pdf', { year }),
+  w2GuXlsx: (year: number) =>
+    api.getBlobWithParams('/admin/reports/w2_gu_xlsx', { year }),
   // CPR-74: W-2 filing operationalization
   w2GuPreflight: (year: number) =>
     api.post<W2GuPreflightResponse>('/admin/reports/w2_gu_preflight', { year }),
@@ -1254,22 +1266,36 @@ export const reportsApi = {
   // Form 941-GU Quarterly Report
   form941Gu: (year: number, quarter: number) =>
     api.get<{ report: Form941GuReport }>('/admin/reports/form_941_gu', { year, quarter }),
+  form941GuXlsx: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/form_941_gu_xlsx', { year, quarter }),
   // 1099-NEC Annual Report
   form1099Nec: (year: number) =>
     api.get('/admin/reports/form_1099_nec', { year }),
   form1099NecPdf: (year: number) =>
     api.getBlobWithParams('/admin/reports/form_1099_nec_pdf', { year }),
+  form1099NecXlsx: (year: number) =>
+    api.getBlobWithParams('/admin/reports/form_1099_nec_xlsx', { year }),
   // Payroll parity reports
   payrollSummaryByEmployeePdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_pdf', { pay_period_id: payPeriodId }),
+  payrollSummaryByEmployeeXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_xlsx', { pay_period_id: payPeriodId }),
   deductionsContributionsPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/deductions_contributions_pdf', { pay_period_id: payPeriodId }),
+  deductionsContributionsXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/deductions_contributions_xlsx', { pay_period_id: payPeriodId }),
   paycheckHistoryPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/paycheck_history_pdf', { pay_period_id: payPeriodId }),
+  paycheckHistoryXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/paycheck_history_xlsx', { pay_period_id: payPeriodId }),
   retirementPlansPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
+  retirementPlansXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
+  installmentLoansXlsx: (asOfDate?: string) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
@@ -1736,14 +1762,24 @@ export const companyAssignmentsApi = {
 export const payrollReportsApi = {
   payrollSummaryByEmployeePdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_pdf', { pay_period_id: payPeriodId }),
+  payrollSummaryByEmployeeXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/payroll_summary_by_employee_xlsx', { pay_period_id: payPeriodId }),
   deductionsContributionsPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/deductions_contributions_pdf', { pay_period_id: payPeriodId }),
+  deductionsContributionsXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/deductions_contributions_xlsx', { pay_period_id: payPeriodId }),
   paycheckHistoryPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/paycheck_history_pdf', { pay_period_id: payPeriodId }),
+  paycheckHistoryXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/paycheck_history_xlsx', { pay_period_id: payPeriodId }),
   retirementPlansPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/retirement_plans_pdf', { pay_period_id: payPeriodId }),
+  retirementPlansXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/admin/reports/retirement_plans_xlsx', { pay_period_id: payPeriodId }),
   installmentLoansPdf: (asOfDate?: string) =>
     api.getBlobWithParams('/admin/reports/installment_loans_pdf', { as_of_date: asOfDate }),
+  installmentLoansXlsx: (asOfDate?: string) =>
+    api.getBlobWithParams('/admin/reports/installment_loans_xlsx', { as_of_date: asOfDate }),
   transmittalLogPdf: (payPeriodId: number, options?: TransmittalOptions) =>
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,

@@ -73,6 +73,7 @@ function PayrollRegisterPanel() {
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<PayrollRegisterReport['report'] | null>(null);
 
@@ -93,7 +94,7 @@ function PayrollRegisterPanel() {
       .finally(() => setLoadingPeriods(false));
   }, []);
 
-  const busy = loading || exportingCsv || exportingPdf;
+  const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
 
   async function loadReport() {
     if (!selectedPeriodId) return;
@@ -136,6 +137,20 @@ function PayrollRegisterPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingPdf(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    if (!selectedPeriodId) return;
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.payrollRegisterXlsx(selectedPeriodId);
+      triggerDownload(blob, filename || `payroll_register_${selectedPeriodId}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
     }
   }
 
@@ -198,6 +213,15 @@ function PayrollRegisterPanel() {
                 title="Download Payroll Register as PDF"
               >
                 {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadXlsx}
+                disabled={busy || !selectedPeriodId}
+                title="Download Payroll Register as Excel"
+              >
+                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
               </Button>
             </div>
           </div>
@@ -296,10 +320,11 @@ function TaxSummaryPanel() {
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
-  const busy = loading || exportingCsv || exportingPdf;
+  const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
 
   async function loadReport() {
     setLoading(true);
@@ -339,6 +364,19 @@ function TaxSummaryPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingPdf(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryXlsx(year, quarter);
+      triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
     }
   }
 
@@ -415,6 +453,15 @@ function TaxSummaryPanel() {
               >
                 {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadXlsx}
+                disabled={busy}
+                title={`Download Tax Summary Excel for ${periodLabel}`}
+              >
+                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
+              </Button>
             </div>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -466,6 +513,7 @@ function W2GuPanel() {
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<W2GuReport | null>(null);
   const [preflightLoading, setPreflightLoading] = useState(false);
@@ -584,7 +632,20 @@ function W2GuPanel() {
     }
   }
 
-  const busy = loading || exportingCsv || exportingPdf || preflightLoading || markingReady;
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.w2GuXlsx(year);
+      triggerDownload(blob, filename || `w2gu_${year}.xlsx`);
+    } catch (err: unknown) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
+    }
+  }
+
+  const busy = loading || exportingCsv || exportingPdf || exportingXlsx || preflightLoading || markingReady;
 
   return (
     <div className="space-y-6">
@@ -665,6 +726,15 @@ function W2GuPanel() {
                 title={`Download W-2GU PDF for ${year}`}
               >
                 {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={downloadXlsx}
+                disabled={busy}
+                title={`Download W-2GU Excel for ${year}`}
+              >
+                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
               </Button>
             </div>
           </div>
@@ -877,6 +947,7 @@ function EmployeePayHistoryPanel() {
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<{
     employee: { id: number; name: string; employment_type: string; pay_rate: number };
@@ -934,6 +1005,20 @@ function EmployeePayHistoryPanel() {
     }
   }
 
+  async function downloadXlsx() {
+    if (!selectedEmployeeId) return;
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.employeePayHistoryXlsx(selectedEmployeeId);
+      triggerDownload(blob, filename || `employee_pay_history_${selectedEmployeeId}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -974,6 +1059,9 @@ function EmployeePayHistoryPanel() {
             </div>
             <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
               {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx || !selectedEmployeeId}>
+              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
             </Button>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -1057,6 +1145,7 @@ function YtdSummaryPanel() {
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
   const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
 
@@ -1071,6 +1160,19 @@ function YtdSummaryPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.ytdSummaryXlsx(year);
+      triggerDownload(blob, filename || `ytd_summary_${year}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
     }
   }
 
@@ -1101,6 +1203,9 @@ function YtdSummaryPanel() {
             </div>
             <Button onClick={loadReport} disabled={loading}>
               {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
+              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
             </Button>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -1195,6 +1300,7 @@ function EmployerLiabilityPanel() {
   const [year, setYear] = useState(currentYear);
   const [quarter, setQuarter] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
@@ -1209,6 +1315,19 @@ function EmployerLiabilityPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryXlsx(year, quarter);
+      triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
     }
   }
 
@@ -1257,6 +1376,9 @@ function EmployerLiabilityPanel() {
             </div>
             <Button onClick={loadReport} disabled={loading}>
               {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
+              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
             </Button>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -1341,6 +1463,7 @@ function Form941GuPanel() {
   const [year, setYear] = useState(currentYear);
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Form941GuReport | null>(null);
 
@@ -1355,6 +1478,19 @@ function Form941GuPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.form941GuXlsx(year, quarter);
+      triggerDownload(blob, filename || `form_941_gu_${year}_q${quarter}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
     }
   }
 
@@ -1402,6 +1538,9 @@ function Form941GuPanel() {
             </div>
             <Button onClick={loadReport} disabled={loading}>
               {loading ? 'Loading…' : 'Generate Report'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
+              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
             </Button>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -1557,11 +1696,11 @@ function Form941GuPanel() {
                         <tbody>
                           {report.monthly_liability.map((m) => (
                             <tr key={m.month} className="border-b last:border-0">
-                              <td className="px-4 py-2">{m.month_name}</td>
+                              <td className="px-4 py-2">{m.month}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.fit_withheld)}</td>
-                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.ss_combined)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.ss_combined + m.ss_tips_combined)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.medicare_combined)}</td>
-                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.additional_medicare)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.add_medicare_tax)}</td>
                               <td className="px-4 py-2 text-right tabular-nums font-semibold">{fmt(m.total_liability)}</td>
                             </tr>
                           ))}
@@ -1677,6 +1816,7 @@ function Form1099NecPanel() {
   const [report, setReport] = useState<NecReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadReport = async () => {
@@ -1709,6 +1849,19 @@ function Form1099NecPanel() {
     }
   };
 
+  const downloadXlsx = async () => {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const blobData = await reportsApi.form1099NecXlsx(year);
+      triggerDownload(blobData.blob, blobData.filename || `1099-NEC_${year}.xlsx`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export Excel');
+    } finally {
+      setExportingXlsx(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <Card>
@@ -1736,9 +1889,14 @@ function Form1099NecPanel() {
               {loading ? 'Loading...' : 'Generate 1099-NEC Report'}
             </Button>
             {report && (
-              <Button variant="outline" onClick={downloadPdf} disabled={exportingPdf}>
-                {exportingPdf ? 'Exporting...' : 'Download PDF'}
-              </Button>
+              <>
+                <Button variant="outline" onClick={downloadPdf} disabled={exportingPdf || exportingXlsx}>
+                  {exportingPdf ? 'Exporting...' : 'Download PDF'}
+                </Button>
+                <Button variant="outline" onClick={downloadXlsx} disabled={exportingPdf || exportingXlsx}>
+                  {exportingXlsx ? 'Exporting...' : 'Download Excel'}
+                </Button>
+              </>
             )}
           </div>
         </CardContent>
