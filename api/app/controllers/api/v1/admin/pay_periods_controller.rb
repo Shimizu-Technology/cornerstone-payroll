@@ -1003,12 +1003,7 @@ module Api
 
         def preload_pay_period_created_users!(pay_periods)
           user_ids = pay_periods.filter_map(&:created_by_id).uniq
-          @pay_period_created_user_names_by_id =
-            if user_ids.empty?
-              {}
-            else
-              User.where(id: user_ids).pluck(:id, :name).to_h
-            end
+          @pay_period_created_user_names_by_id = visible_user_names_for_pay_periods(user_ids)
         end
 
         def pay_period_audit_logs(pay_period)
@@ -1033,7 +1028,6 @@ module Api
           {
             created: lifecycle_event_json(
               timestamp: pay_period.created_at,
-              actor_id: pay_period.created_by_id,
               actor_name: historical_user_name(pay_period.created_by_id)
             ),
             calculated: lifecycle_event_from_log(logs, "pay_periods#run_payroll"),
@@ -1054,15 +1048,13 @@ module Api
 
           lifecycle_event_json(
             timestamp: log.created_at,
-            actor_id: log.user_id,
             actor_name: log.user&.name
           )
         end
 
-        def lifecycle_event_json(timestamp:, actor_id: nil, actor_name: nil)
+        def lifecycle_event_json(timestamp:, actor_name: nil)
           {
             timestamp: timestamp,
-            actor_id: actor_id,
             actor_name: actor_name
           }
         end
@@ -1072,8 +1064,24 @@ module Api
 
           @pay_period_created_user_names_by_id ||= {}
           @pay_period_created_user_names_by_id.fetch(user_id) do
-            @pay_period_created_user_names_by_id[user_id] = User.find_by(id: user_id)&.name
+            @pay_period_created_user_names_by_id[user_id] =
+              visible_user_names_for_pay_periods([ user_id ])[user_id]
           end
+        end
+
+        def visible_user_names_for_pay_periods(user_ids)
+          return {} if user_ids.empty?
+
+          User.left_outer_joins(:company_assignments)
+              .where(id: user_ids)
+              .where(
+                "users.company_id = :company_id OR users.role = :admin_role OR company_assignments.company_id = :company_id",
+                company_id: current_company_id,
+                admin_role: User.roles.fetch("admin")
+              )
+              .distinct
+              .pluck("users.id", "users.name")
+              .to_h
         end
 
         def correction_event_json(event)

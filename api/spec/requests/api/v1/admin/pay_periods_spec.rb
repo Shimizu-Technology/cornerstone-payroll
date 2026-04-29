@@ -82,7 +82,25 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(period["processed_by_name"]).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "created", "actor_name")).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "committed")).not_to have_key("actor_id")
       expect(period.dig("lifecycle", "committed")).not_to have_key("actor_email")
+    end
+
+    it "does not expose creator names from unrelated companies" do
+      other_company = Company.create!(name: "Other Company")
+      other_user = User.create!(
+        company: other_company,
+        email: "other-creator@example.com",
+        name: "Other Creator",
+        role: "manager",
+        active: true
+      )
+      pay_period.update!(created_by_id: other_user.id)
+
+      get "/api/v1/admin/pay_periods"
+
+      period = JSON.parse(response.body)["pay_periods"].first
+      expect(period.dig("lifecycle", "created", "actor_name")).to be_nil
     end
 
     it "filters by status" do
@@ -130,6 +148,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json.dig("pay_period", "lifecycle", "created", "timestamp")).to be_present
       expect(json.dig("pay_period", "lifecycle", "calculated", "actor_name")).to eq("Pay Period Admin")
       expect(json.dig("pay_period", "lifecycle", "unapproved", "timestamp")).to be_present
+      expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_id")
       expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_email")
     end
   end
