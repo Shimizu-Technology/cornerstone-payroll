@@ -127,6 +127,7 @@ class PayrollRegisterCsvExporter
       "",
       "",
       "",
+      "",
       format_currency(s[:total_reported_tips]),
       format_currency(s[:total_tips_paid_out]),
       format_currency(s[:total_bonus]),
