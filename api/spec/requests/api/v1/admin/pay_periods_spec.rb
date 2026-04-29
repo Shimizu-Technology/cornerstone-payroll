@@ -63,7 +63,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
     it "includes processing lifecycle fields for list transparency" do
       committed_at = Time.zone.parse("2026-03-30 05:00:06")
-      pay_period.update!(status: "committed", committed_at: committed_at)
+      pay_period.update!(status: "committed", committed_at: committed_at, created_by_id: admin_user.id)
       AuditLog.create!(
         user: admin_user,
         company: company,
@@ -80,7 +80,9 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       period = json["pay_periods"].first
       expect(period["processed_at"]).to be_present
       expect(period["processed_by_name"]).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "created", "actor_name")).to eq("Pay Period Admin")
       expect(period.dig("lifecycle", "committed", "actor_name")).to eq("Pay Period Admin")
+      expect(period.dig("lifecycle", "committed")).not_to have_key("actor_email")
     end
 
     it "filters by status" do
@@ -113,12 +115,22 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         record_id: pay_period.id,
         metadata: {}
       )
+      AuditLog.create!(
+        user: admin_user,
+        company: company,
+        action: "pay_periods#unapprove",
+        record_type: "pay_periods",
+        record_id: pay_period.id,
+        metadata: {}
+      )
 
       get "/api/v1/admin/pay_periods/#{pay_period.id}"
 
       json = JSON.parse(response.body)
       expect(json.dig("pay_period", "lifecycle", "created", "timestamp")).to be_present
       expect(json.dig("pay_period", "lifecycle", "calculated", "actor_name")).to eq("Pay Period Admin")
+      expect(json.dig("pay_period", "lifecycle", "unapproved", "timestamp")).to be_present
+      expect(json.dig("pay_period", "lifecycle", "unapproved")).not_to have_key("actor_email")
     end
   end
 

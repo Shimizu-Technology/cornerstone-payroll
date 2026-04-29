@@ -35,6 +35,7 @@ module Api
 
           loaded = @pay_periods.to_a
           preload_pay_period_audit_logs!(loaded)
+          preload_pay_period_created_users!(loaded)
           render json: {
             pay_periods: loaded.map { |pp| pay_period_json(pp) },
             meta: {
@@ -1000,6 +1001,16 @@ module Api
             end
         end
 
+        def preload_pay_period_created_users!(pay_periods)
+          user_ids = pay_periods.filter_map(&:created_by_id).uniq
+          @pay_period_created_user_names_by_id =
+            if user_ids.empty?
+              {}
+            else
+              User.where(id: user_ids).pluck(:id, :name).to_h
+            end
+        end
+
         def pay_period_audit_logs(pay_period)
           @pay_period_audit_logs_by_record_id ||= {}
           @pay_period_audit_logs_by_record_id.fetch(pay_period.id) do
@@ -1044,24 +1055,25 @@ module Api
           lifecycle_event_json(
             timestamp: log.created_at,
             actor_id: log.user_id,
-            actor_name: log.user&.name,
-            actor_email: log.user&.email
+            actor_name: log.user&.name
           )
         end
 
-        def lifecycle_event_json(timestamp:, actor_id: nil, actor_name: nil, actor_email: nil)
+        def lifecycle_event_json(timestamp:, actor_id: nil, actor_name: nil)
           {
             timestamp: timestamp,
             actor_id: actor_id,
-            actor_name: actor_name,
-            actor_email: actor_email
+            actor_name: actor_name
           }
         end
 
         def historical_user_name(user_id)
           return nil if user_id.blank?
 
-          User.find_by(id: user_id)&.name
+          @pay_period_created_user_names_by_id ||= {}
+          @pay_period_created_user_names_by_id.fetch(user_id) do
+            @pay_period_created_user_names_by_id[user_id] = User.find_by(id: user_id)&.name
+          end
         end
 
         def correction_event_json(event)

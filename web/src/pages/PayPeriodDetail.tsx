@@ -675,36 +675,41 @@ export function PayPeriodDetail() {
   const lifecycle = payPeriod.lifecycle || {};
   const processedAt = payPeriod.processed_at || payPeriod.committed_at || lifecycle.committed?.timestamp;
   const processedBy = payPeriod.processed_by_name || lifecycle.committed?.actor_name;
-  const lifecycleActor = (actorName?: string | null, actorEmail?: string | null) => {
+  const lifecycleActor = (actorName?: string | null) => {
     if (actorName) return `by ${actorName}`;
-    if (actorEmail) return `by ${actorEmail}`;
     return 'Operator not recorded';
   };
   const lifecycleItems = [
     {
       label: 'Created',
       timestamp: lifecycle.created?.timestamp || payPeriod.created_at,
-      actor: lifecycleActor(lifecycle.created?.actor_name, lifecycle.created?.actor_email),
+      actor: lifecycleActor(lifecycle.created?.actor_name),
       tone: 'default' as const,
     },
     {
       label: 'Calculated',
       timestamp: lifecycle.calculated?.timestamp,
-      actor: lifecycleActor(lifecycle.calculated?.actor_name, lifecycle.calculated?.actor_email),
+      actor: lifecycleActor(lifecycle.calculated?.actor_name),
       tone: isDraft ? 'default' as const : 'warning' as const,
     },
     {
       label: 'Approved',
       timestamp: lifecycle.approved?.timestamp,
-      actor: lifecycleActor(lifecycle.approved?.actor_name, lifecycle.approved?.actor_email),
+      actor: lifecycleActor(lifecycle.approved?.actor_name),
       tone: (isApproved || isCommitted) ? 'info' as const : 'default' as const,
     },
+    ...(lifecycle.unapproved?.timestamp ? [{
+      label: 'Unapproved',
+      timestamp: lifecycle.unapproved.timestamp,
+      actor: lifecycleActor(lifecycle.unapproved.actor_name),
+      tone: 'warning' as const,
+    }] : []),
     {
       label: 'Committed / processed',
       timestamp: processedAt,
       actor: processedBy
         ? `by ${processedBy}`
-        : lifecycleActor(lifecycle.committed?.actor_name, lifecycle.committed?.actor_email),
+        : lifecycleActor(lifecycle.committed?.actor_name),
       tone: isCommitted ? 'success' as const : 'default' as const,
     },
     {
@@ -713,7 +718,15 @@ export function PayPeriodDetail() {
       actor: syncConfig?.label || 'Not started',
       tone: syncConfig?.variant || 'default' as const,
     },
-  ];
+  ].sort((left, right) => {
+    if (left.timestamp && right.timestamp) {
+      return new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
+    }
+
+    if (left.timestamp) return -1;
+    if (right.timestamp) return 1;
+    return 0;
+  });
 
   return (
     <div>
@@ -828,7 +841,7 @@ export function PayPeriodDetail() {
               Guam timestamps for payroll lifecycle, operator actions, and tax sync.
             </p>
           </div>
-          <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-5">
+          <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
             {lifecycleItems.map((item) => (
               <div key={item.label} className="min-w-0 p-4">
                 <div className="mb-2 flex items-center gap-2">
