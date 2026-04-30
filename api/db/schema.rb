@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_29_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_30_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -91,16 +91,52 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_29_120000) do
     t.string "preview_file_key"
     t.datetime "preview_generated_at"
     t.string "preview_status", default: "pending", null: false
+    t.boolean "shared_by_staff", default: false, null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.bigint "uploaded_by_id"
+    t.boolean "visible_to_client", default: true, null: false
     t.index ["company_id", "category"], name: "index_client_documents_on_company_id_and_category"
     t.index ["company_id", "created_at"], name: "index_client_documents_on_company_id_and_created_at"
     t.index ["company_id", "preview_status"], name: "index_client_documents_on_company_id_and_preview_status"
+    t.index ["company_id", "visible_to_client"], name: "index_client_documents_on_company_and_client_visibility"
     t.index ["company_id"], name: "index_client_documents_on_company_id"
     t.index ["employee_id"], name: "index_client_documents_on_employee_id"
     t.index ["file_key"], name: "index_client_documents_on_file_key", unique: true
     t.index ["uploaded_by_id"], name: "index_client_documents_on_uploaded_by_id"
+  end
+
+  create_table "client_portal_messages", force: :cascade do |t|
+    t.bigint "author_id"
+    t.text "body"
+    t.bigint "client_document_id"
+    t.bigint "client_portal_thread_id", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_client_portal_messages_on_author_id"
+    t.index ["client_document_id"], name: "index_client_portal_messages_on_client_document_id"
+    t.index ["client_portal_thread_id"], name: "index_client_portal_messages_on_thread_id"
+    t.index ["company_id", "created_at"], name: "index_client_portal_messages_on_company_created_at"
+    t.index ["company_id"], name: "index_client_portal_messages_on_company_id"
+  end
+
+  create_table "client_portal_threads", force: :cascade do |t|
+    t.datetime "client_last_read_at"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "last_message_at"
+    t.datetime "resolved_at"
+    t.bigint "resolved_by_id"
+    t.datetime "staff_last_read_at"
+    t.string "status", default: "open", null: false
+    t.string "subject", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "status", "last_message_at"], name: "index_client_portal_threads_on_company_status_last_message"
+    t.index ["company_id"], name: "index_client_portal_threads_on_company_id"
+    t.index ["created_by_id"], name: "index_client_portal_threads_on_created_by_id"
+    t.index ["resolved_by_id"], name: "index_client_portal_threads_on_resolved_by_id"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -850,6 +886,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_29_120000) do
   add_foreign_key "client_documents", "companies"
   add_foreign_key "client_documents", "employees"
   add_foreign_key "client_documents", "users", column: "uploaded_by_id"
+  add_foreign_key "client_portal_messages", "client_documents", on_delete: :nullify
+  add_foreign_key "client_portal_messages", "client_portal_threads"
+  add_foreign_key "client_portal_messages", "companies"
+  add_foreign_key "client_portal_messages", "users", column: "author_id", on_delete: :nullify
+  add_foreign_key "client_portal_threads", "companies"
+  add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_ytd_totals", "companies"
