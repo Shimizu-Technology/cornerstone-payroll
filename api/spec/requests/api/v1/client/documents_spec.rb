@@ -83,6 +83,20 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
       expect(ClientDocument.exists?(document.id)).to be(true)
     end
 
+    it "does not list staff-only documents in the client portal" do
+      hidden_document = create(:client_document,
+        company: company,
+        uploaded_by: client_user,
+        title: "Internal memo",
+        visible_to_client: false)
+
+      get "/api/v1/client/documents"
+
+      expect(response).to have_http_status(:ok)
+      ids = response.parsed_body.fetch("data").map { |document| document.fetch("id") }
+      expect(ids).not_to include(hidden_document.id)
+    end
+
     it "keeps storage intact if the database destroy fails" do
       post "/api/v1/client/documents",
         params: {

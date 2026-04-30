@@ -8,8 +8,9 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
+import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
-import { clientDocumentsApi, clientEmployeesApi } from '@/services/api';
+import { clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi } from '@/services/api';
 import type { ClientDocument } from '@/services/api';
 import type { Employee } from '@/types';
 
@@ -352,6 +353,13 @@ export function ClientDocuments() {
             </form>
           </CardContent>
         </Card>
+
+        <PortalMessagesPanel
+          api={clientPortalThreadsApi}
+          documents={documents}
+          audienceLabel="to your payroll team"
+          description="Ask questions, send corrections, and tie follow-up notes to uploaded files."
+        />
 
         <Card>
           <CardHeader>

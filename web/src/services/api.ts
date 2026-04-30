@@ -54,6 +54,10 @@ class ApiClient {
     return this.authToken;
   }
 
+  async getResolvedAuthToken(): Promise<string | null> {
+    return this.resolveAuthToken();
+  }
+
   private async resolveAuthToken(): Promise<string | null> {
     if (!this.authTokenProvider) return this.authToken;
 
@@ -289,6 +293,9 @@ export { api as apiClient };
 export const setAuthToken = (token: string | null) => api.setAuthToken(token);
 export const setAuthTokenProvider = (provider: (() => Promise<string | null>) | null) =>
   api.setAuthTokenProvider(provider);
+export const getAuthToken = () => api.getResolvedAuthToken();
+export const getActiveCompanyId = () => api.getActiveCompanyId();
+export const getApiBaseUrl = () => API_BASE_URL;
 
 // ========================================
 // API Endpoints
@@ -1437,6 +1444,11 @@ export const payStubsApi = {
     `${API_BASE_URL}/admin/pay_stubs/${payrollItemId}/download`,
   batchGenerate: (payPeriodId: number) =>
     api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
+  batchPdf: (payPeriodId: number, payrollItemIds?: number[]) =>
+    api.postBlob('/admin/pay_stubs/batch_pdf', {
+      pay_period_id: payPeriodId,
+      payroll_item_ids: payrollItemIds && payrollItemIds.length > 0 ? payrollItemIds : undefined,
+    }),
   employeeStubs: (employeeId: number, limit?: number) =>
     api.get<{ employee: { id: number; name: string }; pay_stubs: PayStubInfo[] }>(`/admin/pay_stubs/employee/${employeeId}`, { limit }),
 };
@@ -1676,6 +1688,8 @@ export interface ClientDocument {
   employee_name?: string | null;
   uploaded_by_id: number;
   uploaded_by_name?: string | null;
+  visible_to_client: boolean;
+  shared_by_staff: boolean;
   created_at: string;
   preview_status: 'pending' | 'processing' | 'ready' | 'failed' | 'not_required';
   preview_available: boolean;
@@ -1687,6 +1701,35 @@ export interface ClientDocument {
 export interface ClientDocumentsUploadResponse {
   data: ClientDocument[];
   message?: string;
+}
+
+export interface ClientPortalMessage {
+  id: number;
+  thread_id: number;
+  body?: string | null;
+  author_id?: number | null;
+  author_name?: string | null;
+  author_role?: string | null;
+  created_at: string;
+  document?: ClientDocument | null;
+}
+
+export interface ClientPortalThread {
+  id: number;
+  company_id: number;
+  subject: string;
+  status: 'open' | 'resolved';
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+  resolved_by_id?: number | null;
+  resolved_by_name?: string | null;
+  resolved_at?: string | null;
+  last_message_at?: string | null;
+  unread: boolean;
+  created_at: string;
+  updated_at: string;
+  latest_message?: ClientPortalMessage | null;
+  messages?: ClientPortalMessage[];
 }
 
 export interface EmployeeChangeRequest {
@@ -1842,15 +1885,47 @@ export const clientDocumentsApi = {
     api.delete<void>(`/client/documents/${id}`),
 };
 
+export const clientPortalThreadsApi = {
+  list: (params?: { status?: string }) =>
+    api.get<{ data: ClientPortalThread[] }>('/client/portal_threads', params),
+  get: (id: number) =>
+    api.get<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`),
+  create: (data: { subject: string; body?: string; document_id?: number }) =>
+    api.post<{ data: ClientPortalThread }>('/client/portal_threads', data),
+  update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
+    api.patch<{ data: ClientPortalThread }>(`/client/portal_threads/${id}`, data),
+  markRead: (id: number) =>
+    api.post<{ data: ClientPortalThread }>(`/client/portal_threads/${id}/mark_read`),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+    api.post<{ data: ClientPortalMessage }>(`/client/portal_threads/${threadId}/messages`, data),
+};
+
 export const adminClientDocumentsApi = {
   list: (params?: { category?: string; employee_id?: number; uploaded_by_id?: number }) =>
     api.get<{ data: ClientDocument[] }>('/admin/client_documents', params),
+  upload: (formData: FormData) =>
+    api.postForm<ClientDocumentsUploadResponse>('/admin/client_documents', formData),
   preview: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/preview`),
   download: (id: number) =>
     api.getBlobWithParams(`/admin/client_documents/${id}/download`),
   delete: (id: number) =>
     api.delete<void>(`/admin/client_documents/${id}`),
+};
+
+export const adminPortalThreadsApi = {
+  list: (params?: { status?: string }) =>
+    api.get<{ data: ClientPortalThread[] }>('/admin/portal_threads', params),
+  get: (id: number) =>
+    api.get<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`),
+  create: (data: { subject: string; body?: string; document_id?: number }) =>
+    api.post<{ data: ClientPortalThread }>('/admin/portal_threads', data),
+  update: (id: number, data: { subject?: string; status?: 'open' | 'resolved' }) =>
+    api.patch<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}`, data),
+  markRead: (id: number) =>
+    api.post<{ data: ClientPortalThread }>(`/admin/portal_threads/${id}/mark_read`),
+  createMessage: (threadId: number, data: { body?: string; document_id?: number }) =>
+    api.post<{ data: ClientPortalMessage }>(`/admin/portal_threads/${threadId}/messages`, data),
 };
 
 export const clientEmployeeChangeRequestsApi = {
@@ -1977,6 +2052,7 @@ export const dashboardApi = {
 // Auth
 export const authApi = {
   me: () => api.get<{ user: AuthApiUser }>('/auth/me'),
+  createCableTicket: () => api.post<{ ticket: string; expires_in: number }>('/cable_ticket'),
   login: (token: string) => {
     api.setAuthToken(token);
     return api.get<{ user: AuthApiUser }>('/auth/me');

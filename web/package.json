@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.61.1",
+    "@rails/actioncable": "^8.1.300",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dompurify": "^3.4.1",

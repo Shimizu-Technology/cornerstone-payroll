@@ -4,6 +4,8 @@ require "rails_helper"
 require "pdf/reader"
 
 RSpec.describe PayStubGenerator do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:company) { create(:company, name: "Stub Company") }
   let(:pay_period) { create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 4, 15)) }
   let(:employee) do
@@ -51,5 +53,28 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Bonus")
     expect(text).to include("Reported Tips")
     expect(text).to include("Chief Stipend")
+  end
+
+  it "keeps a standard earnings statement to one page" do
+    payroll_item.payroll_item_earnings.create!(
+      category: "regular",
+      label: "Regular Pay",
+      hours: 8,
+      rate: 20,
+      amount: 160
+    )
+
+    pdf = described_class.new(payroll_item).generate
+
+    expect(PDF::Reader.new(StringIO.new(pdf)).page_count).to eq(1)
+  end
+
+  it "prints the generated timestamp in Guam time" do
+    travel_to Time.utc(2026, 4, 29, 19, 48) do
+      pdf = described_class.new(payroll_item).generate
+      text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Generated on April 30, 2026 at 05:48 AM ChST")
+    end
   end
 end
