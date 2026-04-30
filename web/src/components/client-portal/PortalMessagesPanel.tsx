@@ -89,10 +89,10 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
           return currentSelectedId;
         });
       },
+      onConnected: () => setConnected(true),
       onError: () => setConnected(false),
     }).then((cleanup) => {
       unsubscribe = cleanup;
-      setConnected(true);
     }).catch(() => setConnected(false));
 
     return () => {
