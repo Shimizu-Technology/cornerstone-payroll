@@ -10,7 +10,7 @@ module Api
           pay_periods = PayPeriod.reportable_committed
                                  .where(company_id: current_company_id)
                                  .includes(payroll_items: :employee)
-                                 .order(pay_date: :desc)
+                                 .period_chronological
 
           pay_periods = pay_periods.for_year(params[:year].to_i) if params[:year].present?
 
