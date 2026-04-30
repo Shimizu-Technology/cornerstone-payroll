@@ -67,7 +67,15 @@ class ClientPortalThreadSerializer
       preview_available: document.preview_available?,
       preview_generated_at: document.preview_generated_at,
       preview_content_type: document.preview_content_type,
-      preview_error: document.preview_error
+      preview_error: public_preview_error(document)
     }
+  end
+
+  private
+
+  def public_preview_error(document)
+    return nil unless document.preview_status == "failed"
+
+    "Preview is unavailable for this file."
   end
 end
