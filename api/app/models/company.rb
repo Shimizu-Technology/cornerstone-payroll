@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
 
@@ -50,11 +52,14 @@ class Company < ApplicationRecord
     self.class.transaction do
       lock!  # SELECT … FOR UPDATE on this company row
       next_number = next_check_number
+      issued_numbers = issued_check_numbers
       assignments = {}
 
       items.each do |item|
-        next_number += 1 while check_number_already_issued?(next_number.to_s)
-        assignments[item.id] = next_number.to_s
+        next_number += 1 while issued_numbers.include?(next_number.to_s)
+        check_number = next_number.to_s
+        assignments[item.id] = check_number
+        issued_numbers.add(check_number)
         next_number += 1
       end
 
@@ -85,7 +90,8 @@ class Company < ApplicationRecord
     self.class.transaction do
       lock!
       next_number = next_check_number
-      next_number += 1 while check_number_already_issued?(next_number.to_s)
+      issued_numbers = issued_check_numbers
+      next_number += 1 while issued_numbers.include?(next_number.to_s)
       reserved = next_number.to_s
       update_column(:next_check_number, next_number + 1)
     end
@@ -93,8 +99,7 @@ class Company < ApplicationRecord
   end
 
   def check_number_already_issued?(number)
-    PayrollItem.where(company_id: id, check_number: number).exists? ||
-      NonEmployeeCheck.where(company_id: id, check_number: number).exists?
+    issued_check_numbers.include?(number.to_s)
   end
 
   def full_address
@@ -115,5 +120,12 @@ class Company < ApplicationRecord
     return if check_layout_config.is_a?(Hash)
 
     errors.add(:check_layout_config, "must be a JSON object")
+  end
+
+  def issued_check_numbers
+    payroll_numbers = PayrollItem.where(company_id: id).where.not(check_number: nil).pluck(:check_number)
+    non_employee_numbers = NonEmployeeCheck.where(company_id: id).where.not(check_number: nil).pluck(:check_number)
+
+    Set.new(payroll_numbers + non_employee_numbers)
   end
 end

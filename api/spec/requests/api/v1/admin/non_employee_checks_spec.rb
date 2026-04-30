@@ -131,6 +131,13 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       ids = response.parsed_body["non_employee_checks"].map { |row| row["id"] }
       expect(ids).to eq([ standalone.id ])
     end
+
+    it "returns 422 instead of 500 for malformed date filters" do
+      get "/api/v1/admin/non_employee_checks", params: { from: "04/30/2026" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("from must be an ISO-8601 date")
+    end
   end
 
   describe "PATCH /api/v1/admin/non_employee_checks/:id" do
@@ -306,6 +313,26 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(check.reload.pay_period_id).to eq(pay_period.id)
     end
 
+    it "can detach from a pay period and reclassify as a monthly standalone check in one update" do
+      patch "/api/v1/admin/non_employee_checks/#{check.id}",
+        params: {
+          non_employee_check: {
+            pay_period_id: nil,
+            payment_period_type: "month",
+            tax_year: 2026,
+            tax_month: 4
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      check.reload
+      expect(check.pay_period_id).to be_nil
+      expect(check.payment_period_type).to eq("month")
+      expect(check.tax_year).to eq(2026)
+      expect(check.tax_month).to eq(4)
+    end
+
     it "creates an audit log entry capturing changed fields and reason" do
       expect {
         patch "/api/v1/admin/non_employee_checks/#{check.id}",
@@ -358,6 +385,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
               memo:              check.memo,                # unchanged
               description:       "",                        # was nil — should NOT diff
               reference_number:  "",                        # was nil — should NOT diff
+              confirmation_number: "",                      # was nil — should NOT diff
               check_number:      ""                         # was nil — should NOT diff
             },
             reason: "Touching payable_to only"
@@ -370,6 +398,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       check.reload
       expect(check.description).to be_nil
       expect(check.reference_number).to be_nil
+      expect(check.confirmation_number).to be_nil
       expect(check.check_number).to be_nil
     end
 
