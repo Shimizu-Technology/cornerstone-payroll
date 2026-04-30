@@ -18,13 +18,13 @@ module PdfFooter
   # @param text [String] the footer text
   # @param font_size [Numeric] footer font size (default 6)
   # @return [String] the final PDF bytes
-  def render_with_footer(pdf, text, font_size: 6)
+  def render_with_footer(pdf, text, font_size: 6, height: 16)
     pdf.repeat(:all, dynamic: true) do
       pdf.canvas do
         left = pdf.page.margins[:left]
         right = pdf.page.margins[:right]
         width = pdf.bounds.width - left - right
-        pdf.bounding_box([left, 26], width: width, height: 16) do
+        pdf.bounding_box([ left, 26 ], width: width, height: height) do
           pdf.stroke_color "CCCCCC"
           pdf.stroke_horizontal_rule
           pdf.move_down 3
@@ -37,11 +37,23 @@ module PdfFooter
       end
     end
 
-    strip_trailing_blank_page(pdf.render)
+    strip_trailing_blank_page(pdf.render, footer_text: text)
   end
 
-  def strip_trailing_blank_page(raw_pdf)
+  def strip_trailing_blank_page(raw_pdf, footer_text:)
     require "combine_pdf"
+    require "pdf/reader"
+
+    reader = PDF::Reader.new(StringIO.new(raw_pdf))
+    return raw_pdf if reader.pages.length <= 1
+
+    last_page_text = reader.pages.last.text.dup
+    footer_text.to_s.lines.map(&:strip).reject(&:blank?).each do |line|
+      last_page_text.gsub!(line, "")
+    end
+
+    return raw_pdf if last_page_text.gsub(/\s+/, "").present?
+
     parsed = CombinePDF.parse(raw_pdf)
     return raw_pdf if parsed.pages.length <= 1
 
