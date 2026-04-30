@@ -9,6 +9,7 @@ module Api
 
         def index
           documents = ClientDocument.where(company_id: current_company_id)
+                                    .client_visible
                                     .includes(:employee, :uploaded_by)
                                     .recent_first
 
@@ -21,46 +22,12 @@ module Api
         end
 
         def create
-          files = uploaded_files
-          return render json: { error: "at least one file is required" }, status: :unprocessable_entity if files.empty?
-
-          employee = if params[:employee_id].present?
-            Employee.find_by(id: params[:employee_id], company_id: current_company_id)
-          end
-          return render json: { error: "Employee not found" }, status: :not_found if params[:employee_id].present? && employee.nil?
-
-          validation_errors = validation_errors_for(files)
-          if validation_errors.any?
-            return render json: { error: "Validation failed", details: { file: validation_errors } }, status: :unprocessable_entity
-          end
-
-          storage = R2StorageService.new
-          uploaded_keys = []
-          documents = []
-
-          ClientDocument.transaction do
-            files.each do |file|
-              file_key = build_file_key(file.original_filename)
-              content_type = ClientDocument.detected_content_type(file)
-              storage.upload(file_key, file.tempfile || file, content_type: content_type)
-              uploaded_keys << file_key
-
-              document = ClientDocument.create!(
-                company_id: current_company_id,
-                employee: employee,
-                uploaded_by: current_user,
-                title: document_title_for(file, files.count),
-                category: params[:category].presence || "misc",
-                file_name: file.original_filename,
-                file_key: file_key,
-                content_type: content_type,
-                file_size: file.size,
-                notes: params[:notes],
-                preview_status: ClientDocument.initial_preview_status_for(file)
-              )
-              documents << document
-            end
-          end
+          result = ClientDocumentUploadService.new(
+            company_id: current_company_id,
+            current_user: current_user,
+            params: params.merge(visible_to_client: true)
+          ).upload!
+          documents = result.documents
 
           documents.each do |document|
             enqueue_preview_generation(document)
@@ -78,13 +45,15 @@ module Api
 
           render json: {
             data: documents.map { |document| serialize_document(document) },
-            message: files.count == 1 ? "Document uploaded successfully" : "#{files.count} documents uploaded successfully"
+            message: documents.count == 1 ? "Document uploaded successfully" : "#{documents.count} documents uploaded successfully"
           }, status: :created
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Employee not found" }, status: :not_found
         rescue ActiveRecord::RecordInvalid => e
-          uploaded_keys&.each { |key| storage&.delete(key) }
           render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
         rescue R2StorageService::UploadError => e
-          uploaded_keys&.each { |key| storage&.delete(key) }
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -130,7 +99,7 @@ module Api
         private
 
         def set_document
-          @document = ClientDocument.find_by(id: params[:id], company_id: current_company_id)
+          @document = ClientDocument.client_visible.find_by(id: params[:id], company_id: current_company_id)
           return if @document
 
           render json: { error: "Document not found" }, status: :not_found
@@ -160,6 +129,8 @@ module Api
             employee_name: document.employee&.full_name,
             uploaded_by_id: document.uploaded_by_id,
             uploaded_by_name: document.uploaded_by&.name,
+            visible_to_client: document.visible_to_client,
+            shared_by_staff: document.shared_by_staff,
             created_at: document.created_at,
             preview_status: document.preview_status,
             preview_available: document.preview_available?,
@@ -167,29 +138,6 @@ module Api
             preview_content_type: document.preview_content_type,
             preview_error: public_preview_error(document)
           }
-        end
-
-        def build_file_key(original_filename)
-          sanitized_name = File.basename(original_filename.to_s).gsub(/[^A-Za-z0-9.\-_]/, "_")
-          "client_documents/company_#{current_company_id}/#{Time.current.strftime('%Y/%m')}/#{SecureRandom.uuid}_#{sanitized_name}"
-        end
-
-        def uploaded_files
-          Array.wrap(params[:files].presence || params[:file]).compact
-        end
-
-        def validation_errors_for(files)
-          files.flat_map do |file|
-            ClientDocument.upload_validation_errors(file).map do |message|
-              "#{file.original_filename}: #{message}"
-            end
-          end
-        end
-
-        def document_title_for(file, total_files)
-          return file.original_filename if total_files > 1
-
-          params[:title].presence || file.original_filename
         end
 
         def enqueue_preview_generation(document)

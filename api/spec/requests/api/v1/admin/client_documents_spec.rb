@@ -5,6 +5,8 @@ require "rails_helper"
 RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
   let!(:company) { create(:company, name: "Admin Docs Co") }
   let!(:admin_user) { create(:user, company: company, role: "admin", email: "admin-docs@example.com") }
+  let(:fixture_path) { Rails.root.join("spec/fixtures/files/client_portal_upload.txt") }
+  let(:upload) { Rack::Test::UploadedFile.new(fixture_path, "text/plain") }
   let!(:document) do
     create(:client_document,
       company: company,
@@ -27,6 +29,26 @@ RSpec.describe "Api::V1::Admin::ClientDocuments", type: :request do
     storage = R2StorageService.new
     storage.upload(document.file_key, "admin review document", content_type: "text/plain")
     storage.upload(document.preview_file_key, "%PDF-1.4\npreview", content_type: "application/pdf")
+  end
+
+  it "allows staff to upload a document for client portal sharing" do
+    expect do
+      post "/api/v1/admin/client_documents",
+        params: {
+          title: "Payroll packet",
+          category: "payroll_source",
+          notes: "Shared by accounting",
+          visible_to_client: "true",
+          file: upload
+        }
+    end.to change(ClientDocument, :count).by(1)
+
+    expect(response).to have_http_status(:created)
+    created = ClientDocument.order(:created_at).last
+    expect(created.shared_by_staff).to be(true)
+    expect(created.visible_to_client).to be(true)
+    expect(created.uploaded_by).to eq(admin_user)
+    expect(AuditLog.where(action: "admin_client_documents#create", record_id: created.id)).to exist
   end
 
   it "keeps storage intact if the database destroy fails" do

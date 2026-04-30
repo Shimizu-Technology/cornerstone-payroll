@@ -44,5 +44,11 @@ module Api
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    cable_origins = ENV.fetch("CORS_ORIGINS", "")
+                       .split(",")
+                       .map(&:strip)
+                       .reject(&:empty?)
+    config.action_cable.allowed_request_origins = cable_origins if cable_origins.any?
   end
 end

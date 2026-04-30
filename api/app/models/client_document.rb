@@ -31,6 +31,7 @@ class ClientDocument < ApplicationRecord
   belongs_to :company
   belongs_to :employee, optional: true
   belongs_to :uploaded_by, class_name: "User", optional: true
+  has_many :client_portal_messages, dependent: :nullify
 
   validates :title, :category, :file_name, :file_key, :content_type, presence: true
   validates :uploaded_by, presence: true, on: :create
@@ -39,6 +40,7 @@ class ClientDocument < ApplicationRecord
   validates :preview_status, inclusion: { in: PREVIEW_STATUSES }
 
   scope :recent_first, -> { order(created_at: :desc) }
+  scope :client_visible, -> { where(visible_to_client: true) }
 
   def self.detected_content_type(file)
     detected = file.content_type.presence

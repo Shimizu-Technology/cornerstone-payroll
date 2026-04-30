@@ -12,5 +12,7 @@ FactoryBot.define do
     content_type { "text/csv" }
     file_size { 128 }
     notes { "Uploaded by client" }
+    visible_to_client { true }
+    shared_by_staff { false }
   end
 end

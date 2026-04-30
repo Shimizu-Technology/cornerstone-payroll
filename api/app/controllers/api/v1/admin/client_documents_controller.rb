@@ -20,6 +20,46 @@ module Api
           }
         end
 
+        def create
+          result = ClientDocumentUploadService.new(
+            company_id: current_company_id,
+            current_user: current_user,
+            params: params
+          ).upload!
+          documents = result.documents
+
+          documents.each do |document|
+            enqueue_preview_generation(document)
+            AuditLog.record!(
+              user: current_user,
+              company_id: current_company_id,
+              action: "admin_client_documents#create",
+              record_type: "client_documents",
+              record_id: document.id,
+              metadata: {
+                title: document.title,
+                category: document.category,
+                visible_to_client: document.visible_to_client
+              },
+              ip_address: request.remote_ip,
+              user_agent: request.user_agent
+            )
+          end
+
+          render json: {
+            data: documents.map { |document| serialize_document(document) },
+            message: documents.count == 1 ? "Document shared successfully" : "#{documents.count} documents shared successfully"
+          }, status: :created
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Employee not found" }, status: :not_found
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def download
           data = R2StorageService.new.download(@document.file_key)
           return render json: { error: "File not found" }, status: :not_found unless data
@@ -80,6 +120,8 @@ module Api
             employee_name: document.employee&.full_name,
             uploaded_by_id: document.uploaded_by_id,
             uploaded_by_name: document.uploaded_by&.name,
+            visible_to_client: document.visible_to_client,
+            shared_by_staff: document.shared_by_staff,
             created_at: document.created_at,
             preview_status: document.preview_status,
             preview_available: document.preview_available?,
@@ -98,6 +140,12 @@ module Api
         rescue ClientDocumentPreviewGenerator::GenerationUnavailable, ClientDocumentPreviewGenerator::GenerationFailed => e
           Rails.logger.warn("Admin client document preview generation failed for document #{document.id}: #{e.message}")
           document.reload
+        end
+
+        def enqueue_preview_generation(document)
+          return unless document.preview_generation_required?
+
+          GenerateClientDocumentPreviewJob.perform_later(document.id)
         end
 
         def preview_payload_for(document)
