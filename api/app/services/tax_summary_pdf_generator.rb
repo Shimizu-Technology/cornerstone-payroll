@@ -30,7 +30,7 @@ class TaxSummaryPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", margin: [36, 36, 50, 36])
+    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 36, 36, 50, 36 ])
     render_document(pdf)
   end
 
@@ -50,8 +50,9 @@ class TaxSummaryPdfGenerator
 
     period = report[:period] || {}
     quarter_label = period[:quarter] ? "Q#{period[:quarter]} #{period[:year]}" : "#{period[:year]} Full Year"
+    company_name = report.dig(:meta, :company_name).presence
     render_with_footer(pdf,
-      "Tax Summary \u2014 #{quarter_label} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
+      [ company_name, "Tax Summary", quarter_label, "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
       font_size: 7
     )
   end
@@ -68,7 +69,8 @@ class TaxSummaryPdfGenerator
 
     pdf.bounding_box([ pdf.bounds.left + 12, pdf.bounds.top - 10 ], width: pdf.bounds.width - 24) do
       pdf.font_size(18) { pdf.text "Tax Withholding Summary", style: :bold }
-      pdf.font_size(10) { pdf.text "#{quarter_label} — Guam Payroll Tax Summary for Quarterly Filing Preparation" }
+      subtitle = [ report.dig(:meta, :company_name), quarter_label, "Guam Payroll Tax Summary for Quarterly Filing Preparation" ].compact.join(" — ")
+      pdf.font_size(10) { pdf.text subtitle }
     end
 
     pdf.fill_color TEXT_DARK
@@ -89,9 +91,10 @@ class TaxSummaryPdfGenerator
       [ "Quarter",                 quarter_label ],
       [ "Period Start",            period[:start_date].to_s ],
       [ "Period End",              period[:end_date].to_s ],
+      [ "Description",             report.dig(:meta, :report_description).to_s ],
       [ "Pay Periods Included",    report[:pay_periods_included].to_s ],
       [ "Employees with Payroll",  report[:employee_count].to_s ]
-    ]
+    ].reject { |_, value| value.blank? }
 
     table_data = rows.map { |k, v| [ { content: k, font_style: :bold }, v ] }
 

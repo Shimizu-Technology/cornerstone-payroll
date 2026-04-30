@@ -206,7 +206,7 @@ function AppRoutes() {
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
         <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
-        <Route path="settings/clients" element={<AdminOnlyRoute><Clients /></AdminOnlyRoute>} />
+        <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>
 
       {/* Catch-all redirect */}

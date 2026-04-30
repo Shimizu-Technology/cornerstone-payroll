@@ -29,7 +29,7 @@ class PayrollRegisterPdfGenerator
   end
 
   def generate
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [36, 36, 50, 36])
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 36, 36, 50, 36 ])
     render_document(pdf)
   end
 
@@ -53,8 +53,9 @@ class PayrollRegisterPdfGenerator
     render_employee_table(pdf)
 
     pp = report[:pay_period] || {}
+    company_name = report.dig(:meta, :company_name).presence
     render_with_footer(pdf,
-      "Payroll Register \u2014 Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]} \u2014 Pay Date: #{pp[:pay_date]} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
+      [ company_name, "Payroll Register", "Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
       font_size: 7
     )
   end
@@ -69,7 +70,8 @@ class PayrollRegisterPdfGenerator
     pdf.bounding_box([ pdf.bounds.left + 12, pdf.bounds.top - 10 ], width: pdf.bounds.width - 24) do
       pdf.font_size(18) { pdf.text "Payroll Register", style: :bold }
       pp = report[:pay_period] || {}
-      subtitle = "Pay Period: #{pp[:start_date]} – #{pp[:end_date]}  |  Pay Date: #{pp[:pay_date]}  |  Status: #{pp[:status]&.capitalize}"
+      company_name = report.dig(:meta, :company_name)
+      subtitle = [ company_name, "Pay Period: #{pp[:start_date]} – #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "Status: #{pp[:status]&.capitalize}" ].compact.join("  |  ")
       pdf.font_size(10) { pdf.text subtitle }
     end
 
@@ -92,8 +94,9 @@ class PayrollRegisterPdfGenerator
       [ "End Date",      pp[:end_date].to_s ],
       [ "Pay Date",      pp[:pay_date].to_s ],
       [ "Status",        pp[:status].to_s.capitalize ],
+      [ "Description",   meta[:report_description].to_s ],
       [ "Generated At",  meta[:generated_at].to_s ]
-    ]
+    ].reject { |_, value| value.blank? }
 
     table_data = rows.map { |k, v| [ { content: k, font_style: :bold }, v ] }
 

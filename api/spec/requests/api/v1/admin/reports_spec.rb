@@ -268,7 +268,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
     it "flags missing employer and employee addresses as compliance issues" do
       company.update!(address_line1: nil, city: nil, state: nil, zip: nil)
-      employee.update!(address_line1: nil, city: nil, state: nil, zip: nil)
+      employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
 
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
 

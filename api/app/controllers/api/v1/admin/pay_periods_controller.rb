@@ -25,7 +25,7 @@ module Api
           @pay_periods = PayPeriod.where(company_id: current_company_id)
                                    .includes(:payroll_items, :voided_by, :correction_events,
                                              :supplemental_pay_periods)
-                                   .order(Arel.sql("end_date DESC NULLS LAST, start_date DESC NULLS LAST, pay_date DESC NULLS LAST, id DESC"))
+                                   .order(Arel.sql("pay_date DESC NULLS LAST, end_date DESC NULLS LAST, start_date DESC NULLS LAST, id DESC"))
 
           # Filter by status
           @pay_periods = @pay_periods.where(status: params[:status]) if params[:status].present?
@@ -703,7 +703,7 @@ module Api
 
           permitted = raw.permit(
             *scalar_fields,
-            custom_earnings: [:label, :amount]
+            custom_earnings: [ :label, :amount ]
           ).to_h
 
           if raw[:custom_columns_data].present?

@@ -4,6 +4,21 @@ module Api
   module V1
     module Admin
       class ReportsController < BaseController
+        REPORT_DESCRIPTIONS = {
+          payroll_register: "Full payroll detail for the selected pay period, including hours, earnings, taxes, deductions, employer taxes, net pay, and check numbers.",
+          payroll_summary_by_employee: "Employee-by-employee payroll summary for the selected pay period, including earnings, deductions, taxes, employer contributions, and total payroll cost.",
+          deductions_contributions: "Detailed employee deductions and employer contribution activity for the selected pay period.",
+          paycheck_history: "Check numbers, check dates, earnings, deductions, and net pay for payroll items in the selected pay period.",
+          retirement_plans: "401(k), Roth 401(k), and employer retirement contribution activity for the selected pay period.",
+          tax_summary: "Payroll tax withholding summary used to review Guam/federal payroll tax liability for the selected year or quarter.",
+          ytd_summary: "Year-to-date payroll totals by worker for the selected tax year.",
+          employee_pay_history: "Paycheck history for an individual worker, including recent pay periods and year-to-date totals.",
+          form_941_gu: "Quarterly 941-GU preparation workbook summarizing wages, withholding, FICA, and monthly tax liability.",
+          w2_gu: "W-2GU preparation workbook for W-2 employees for the selected tax year.",
+          form_1099_nec: "1099-NEC preparation workbook for contractor compensation and filing readiness.",
+          installment_loans: "Employee installment loan balances and transaction history as of the selected date."
+        }.freeze
+
         # GET /api/v1/admin/reports/dashboard
         # Dashboard stats and metrics
         def dashboard
@@ -761,6 +776,7 @@ module Api
           render json: {
             report: {
               type: "ytd_summary",
+              meta: report_meta(Company.find(current_company_id), :ytd_summary),
               year: year,
               employees: employees.map { |emp| employee_ytd_row(emp, year) },
               company_totals: ytd_company_totals(year)
@@ -775,6 +791,7 @@ module Api
                              .order(:last_name, :first_name)
           report = {
             type: "ytd_summary",
+            meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: year,
             employees: employees.map { |emp| employee_ytd_row(emp, year) },
             company_totals: ytd_company_totals(year)
@@ -839,7 +856,7 @@ module Api
               notes = []
             end
           end
-          [entries, notes]
+          [ entries, notes ]
         end
 
         def save_signoff_state!(pay_period, entries, notes)
@@ -882,7 +899,7 @@ module Api
             return [ nil, render(json: { error: "pay_period_id is required" }, status: :unprocessable_entity) ]
           end
 
-          pay_period = PayPeriod.includes(payroll_items: [:payroll_item_earnings, { payroll_item_deductions: :deduction_type, employee: :department }]).find_by(id: pay_period_id)
+          pay_period = PayPeriod.includes(payroll_items: [ :payroll_item_earnings, { payroll_item_deductions: :deduction_type, employee: :department } ]).find_by(id: pay_period_id)
 
           unless pay_period && pay_period.company_id == current_company_id
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
@@ -892,9 +909,10 @@ module Api
           w2_items = items.reject { |i| i.employment_type == "contractor" }
           contractor_items = items.select { |i| i.employment_type == "contractor" }
 
+          company = pay_period.company
           report_data = {
             type: "payroll_register",
-            meta: { generated_at: Time.current.iso8601 },
+            meta: report_meta(company, :payroll_register),
             pay_period: {
               id: pay_period.id,
               start_date: pay_period.start_date,
@@ -967,9 +985,10 @@ module Api
           employer_medicare_total = items.sum(:employer_medicare_tax)
           withholding_total       = items.sum(:withholding_tax)
 
+          company = Company.find(current_company_id)
           report_data = {
             type: "tax_summary",
-            meta: { generated_at: Time.current.iso8601 },
+            meta: report_meta(company, :tax_summary),
             period: {
               year:       year,
               quarter:    quarter,
@@ -1078,6 +1097,7 @@ module Api
             employee_name: item.employee.full_name,
             department_name: item.employee&.department&.name,
             employment_type: item.employment_type,
+            worker_classification: employment_type_label(item.employment_type),
             pay_rate: item.pay_rate,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
@@ -1184,6 +1204,7 @@ module Api
         def employee_pay_history_report(employee, items)
           {
             type: "employee_pay_history",
+            meta: report_meta(employee.company, :employee_pay_history),
             employee: {
               id: employee.id,
               name: employee.full_name,
@@ -1216,9 +1237,10 @@ module Api
             )
           )
           w2_items = items.reject { |i| i.employment_type == "contractor" }
+          contractor_items = items.select { |i| i.employment_type == "contractor" }
           {
             type: "payroll_summary_by_employee",
-            meta: { generated_at: Time.current.iso8601 },
+            meta: report_meta(pay_period.company, :payroll_summary_by_employee),
             pay_period: {
               id: pay_period.id,
               start_date: pay_period.start_date,
@@ -1245,7 +1267,8 @@ module Api
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay)
             },
-            employees: w2_items.map { |item| payroll_item_detail(item) }
+            employees: w2_items.map { |item| payroll_item_detail(item) },
+            contractors: contractor_items.map { |item| payroll_item_detail(item) }
           }
         end
 
@@ -1280,6 +1303,44 @@ module Api
             disposition: "attachment"
         end
 
+        def report_meta(company, report_key)
+          {
+            company_id: company&.id,
+            company_name: company&.name,
+            generated_at: Time.current.iso8601,
+            report_description: REPORT_DESCRIPTIONS.fetch(report_key, nil)
+          }
+        end
+
+        def report_info_sheet(report, title:, description: nil)
+          meta = report[:meta] || {}
+          pp = report[:pay_period] || {}
+          rows = [
+            [ "Field", "Value" ],
+            [ "Report", title ],
+            [ "Client", meta[:company_name] || report.dig(:company, :name) || report.dig(:employer, :name) || report.dig(:payer, :name) ],
+            [ "Description", description || meta[:report_description] ],
+            [ "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
+            [ "Pay Date", pp[:pay_date] ],
+            [ "Generated At", meta[:generated_at] || report.dig(:meta, :generated_at) ]
+          ].reject { |_, value| value.blank? }
+
+          { name: "Report Info", rows: rows }
+        end
+
+        def employment_type_label(type)
+          case type.to_s
+          when "salary"
+            "W-2 Salary"
+          when "hourly"
+            "W-2 Hourly"
+          when "contractor"
+            "1099 Contractor"
+          else
+            type.to_s.titleize
+          end
+        end
+
         PAYROLL_REGISTER_HEADERS = [
           "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
           "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
@@ -1294,11 +1355,12 @@ module Api
           employee_rows = Array(report[:employees]).map { |emp| payroll_export_row(emp) }
           contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
           sheets = [
-            { name: "Employees", rows: [PAYROLL_REGISTER_HEADERS] + employee_rows }
+            { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
           ]
-          sheets << { name: "Contractors", rows: [PAYROLL_REGISTER_HEADERS] + contractor_rows } if contractor_rows.any?
+          sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
+          sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
         end
 
@@ -1313,13 +1375,17 @@ module Api
 
         def payroll_summary_by_employee_sheets(report)
           employees = Array(report[:employees])
+          contractors = Array(report[:contractors])
           summary_rows = employees.map { |emp| payroll_summary_by_employee_row(emp) }
-          [
-            { name: "Employee Summary", rows: [PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS] + summary_rows },
+          sheets = [
+            { name: "Employee Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + summary_rows },
             payroll_summary_totals_sheet(report[:summary] || {}),
             earnings_breakdown_sheet(report),
             deductions_breakdown_sheet(report)
           ]
+          sheets << { name: "Contractor Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + contractors.map { |emp| payroll_summary_by_employee_row(emp) } } if contractors.any?
+          sheets << report_info_sheet(report, title: "Payroll Summary by Employee")
+          sheets
         end
 
         def payroll_summary_by_employee_row(emp)
@@ -1331,7 +1397,7 @@ module Api
 
           [
             emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
-            emp[:employment_type], emp[:gross_pay], emp[:reported_tips], emp[:tips_paid_out],
+            employment_type_label(emp[:employment_type]), emp[:gross_pay], emp[:reported_tips], emp[:tips_paid_out],
             emp[:bonus], emp[:custom_earnings_total], emp[:withholding_tax],
             emp[:social_security_tax], emp[:medicare_tax], emp[:retirement_payment],
             emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
@@ -1366,7 +1432,7 @@ module Api
         def payroll_export_row(emp)
           [
             emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
-            emp[:department_name], emp[:employment_type], emp[:pay_rate],
+            emp[:department_name], employment_type_label(emp[:employment_type]), emp[:pay_rate],
             emp[:hours_worked], emp[:overtime_hours], emp[:holiday_hours], emp[:pto_hours],
             emp[:reported_tips], emp[:tips_paid_out], emp[:bonus], emp[:custom_earnings_total],
             emp[:non_taxable_pay], emp[:gross_pay], emp[:withholding_tax], emp[:additional_withholding],
@@ -1379,7 +1445,7 @@ module Api
         end
 
         def earnings_breakdown_sheet(report)
-          rows = [["Last Name", "First Name", "Employee Name", "Category", "Label", "Hours", "Rate", "Amount"]]
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Category", "Label", "Hours", "Rate", "Amount" ] ]
           (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
             Array(emp[:earnings_breakdown]).each do |earning|
               rows << [
@@ -1392,7 +1458,7 @@ module Api
         end
 
         def deductions_breakdown_sheet(report)
-          rows = [["Last Name", "First Name", "Employee Name", "Category", "Label", "Deduction Type", "Amount"]]
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Category", "Label", "Deduction Type", "Amount" ] ]
           (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
             Array(emp[:deductions_breakdown]).each do |deduction|
               rows << [
@@ -1405,11 +1471,11 @@ module Api
         end
 
         def employee_pay_history_sheets(report)
-          rows = [[
+          rows = [ [
             "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Gross Pay",
             "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number"
-          ]]
+          ] ]
           Array(report[:history]).each do |item|
             rows << [
               item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
@@ -1419,7 +1485,11 @@ module Api
               item[:check_number]
             ]
           end
-          [{ name: "Pay History", rows: rows }, { name: "YTD", rows: employee_ytd_summary_rows(report[:ytd]) }]
+          [
+            { name: "Pay History", rows: rows },
+            { name: "YTD", rows: employee_ytd_summary_rows(report[:ytd]) },
+            report_info_sheet(report, title: "Employee Pay History")
+          ]
         end
 
         def employee_ytd_summary_rows(ytd)
@@ -1442,26 +1512,34 @@ module Api
 
         def tax_summary_sheets(report)
           totals = report[:totals] || {}
-          rows = [["Category", "Amount"]] + totals.map { |key, value| [key.to_s.humanize, value] }
-          meta = [["Field", "Value"], ["Year", report.dig(:period, :year)], ["Quarter", report.dig(:period, :quarter)], ["Pay Periods", report[:pay_periods_included]], ["Employees", report[:employee_count]]]
-          [{ name: "Summary", rows: rows }, { name: "Meta", rows: meta }]
+          rows = [ [ "Category", "Amount" ] ] + totals.map { |key, value| [ key.to_s.humanize, value ] }
+          meta = [ [ "Field", "Value" ], [ "Year", report.dig(:period, :year) ], [ "Quarter", report.dig(:period, :quarter) ], [ "Pay Periods", report[:pay_periods_included] ], [ "Employees", report[:employee_count] ] ]
+          [
+            { name: "Summary", rows: rows },
+            { name: "Meta", rows: meta },
+            report_info_sheet(report, title: "Tax Summary")
+          ]
         end
 
         def ytd_summary_sheets(report)
-          rows = [[
+          rows = [ [
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Gross Pay",
             "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Net Pay"
-          ]]
+          ] ]
           Array(report[:employees]).each do |emp|
             rows << [
-              emp[:last_name], emp[:first_name], emp[:name], emp[:employment_type], emp[:status],
+              emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
               emp[:gross_pay], emp[:tips], emp[:tips_paid_out], emp[:bonus],
               emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:net_pay]
             ]
           end
-          [{ name: "YTD Summary", rows: rows }, { name: "Company Totals", rows: (report[:company_totals] || {}).to_a }]
+          [
+            { name: "YTD Summary", rows: rows },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
+            report_info_sheet(report, title: "YTD Summary")
+          ]
         end
 
         def form_941_gu_sheets(report)
@@ -1471,17 +1549,18 @@ module Api
           [
             {
               name: "941-GU Lines",
-              rows: [["Line", "Amount"]] + lines.map { |key, value| [key.to_s.humanize, value] }
+              rows: [ [ "Line", "Amount" ] ] + lines.map { |key, value| [ key.to_s.humanize, value ] }
             },
             {
               name: "Tax Detail",
-              rows: [["Category", "Amount"]] + tax_detail.map { |key, value| [key.to_s.humanize, value] }
+              rows: [ [ "Category", "Amount" ] ] + tax_detail.map { |key, value| [ key.to_s.humanize, value ] }
             },
             {
               name: "Monthly Liability",
-              rows: [["Month", "FIT", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Total"]] +
-                monthly.map { |row| [row[:month], row[:fit_withheld], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability]] }
-            }
+              rows: [ [ "Month", "FIT", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Total" ] ] +
+                monthly.map { |row| [ row[:month], row[:fit_withheld], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability] ] }
+            },
+            report_info_sheet(report, title: "Form 941-GU", description: REPORT_DESCRIPTIONS[:form_941_gu])
           ]
         end
 
@@ -1500,7 +1579,11 @@ module Api
               emp[:reported_tips_total], emp[:non_taxable_total]
             ]
           end
-          [{ name: "W-2GU", rows: [headers] + rows }, { name: "Totals", rows: (report[:totals] || {}).to_a }]
+          [
+            { name: "W-2GU", rows: [ headers ] + rows },
+            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            report_info_sheet(report, title: "W-2GU", description: REPORT_DESCRIPTIONS[:w2_gu])
+          ]
         end
 
         def form_1099_nec_sheets(report)
@@ -1516,22 +1599,33 @@ module Api
               contractor[:w9_on_file], Array(contractor[:compliance_issues]).join("; ")
             ]
           end
-          [{ name: "1099-NEC", rows: [headers] + rows }, { name: "Totals", rows: (report[:totals] || {}).to_a }]
+          [
+            { name: "1099-NEC", rows: [ headers ] + rows },
+            { name: "Totals", rows: (report[:totals] || {}).to_a },
+            report_info_sheet(report, title: "1099-NEC", description: REPORT_DESCRIPTIONS[:form_1099_nec])
+          ]
         end
 
         def deductions_contributions_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          [deductions_breakdown_sheet(report), { name: "Payroll Rows", rows: [PAYROLL_REGISTER_HEADERS] + Array(report[:employees]).map { |emp| payroll_export_row(emp) } }]
+          [
+            deductions_breakdown_sheet(report),
+            { name: "Payroll Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            report_info_sheet(report, title: "Deductions & Contributions", description: REPORT_DESCRIPTIONS[:deductions_contributions])
+          ]
         end
 
         def paycheck_history_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          [{ name: "Paycheck History", rows: [PAYROLL_REGISTER_HEADERS] + Array(report[:employees]).map { |emp| payroll_export_row(emp) } }]
+          [
+            { name: "Paycheck History", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            report_info_sheet(report, title: "Paycheck History", description: REPORT_DESCRIPTIONS[:paycheck_history])
+          ]
         end
 
         def retirement_plans_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          headers = ["Last Name", "First Name", "Employee Name", "Gross Pay", "401(k)", "Roth 401(k)", "Employer Match", "Employer Roth Match", "Total Employee", "Total Employer"]
+          headers = [ "Last Name", "First Name", "Employee Name", "Gross Pay", "401(k)", "Roth 401(k)", "Employer Match", "Employer Roth Match", "Total Employee", "Total Employer" ]
           rows = Array(report[:employees]).map do |emp|
             [
               emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name], emp[:gross_pay],
@@ -1539,17 +1633,20 @@ module Api
               emp[:employer_roth_retirement_match], emp[:total_retirement_payment], emp[:total_employer_retirement_match]
             ]
           end
-          [{ name: "Retirement", rows: [headers] + rows }]
+          [
+            { name: "Retirement", rows: [ headers ] + rows },
+            report_info_sheet(report, title: "Retirement Plans Report", description: REPORT_DESCRIPTIONS[:retirement_plans])
+          ]
         end
 
         def installment_loans_sheets(company, as_of_date: nil)
           as_of = as_of_date || Date.current
-          rows = [["Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance"]]
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Loan", "Status", "Original Amount", "Balance As Of", "As Of Date", "Date", "Type", "Amount", "Beginning Balance", "Ending Balance" ] ]
           InstallmentLoanReportBuilder.new(company, as_of_date: as_of).loans.each do |snapshot|
             loan = snapshot[:loan]
             employee = snapshot[:employee]
             if snapshot[:transactions].empty?
-              rows << [employee.last_name, employee.first_name, employee.full_name, loan.name, snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, nil, nil, nil, nil, nil]
+              rows << [ employee.last_name, employee.first_name, employee.full_name, loan.name, snapshot[:status_as_of], loan.original_amount, snapshot[:balance_as_of], as_of, nil, nil, nil, nil, nil ]
             else
               snapshot[:transactions].each do |txn|
                 rows << [
@@ -1560,7 +1657,14 @@ module Api
               end
             end
           end
-          [{ name: "Installment Loans", rows: rows }]
+          [
+            { name: "Installment Loans", rows: rows },
+            report_info_sheet(
+              { meta: report_meta(company, :installment_loans) },
+              title: "Employee Installment Loans",
+              description: REPORT_DESCRIPTIONS[:installment_loans]
+            )
+          ]
         end
 
         def apply_preflight_to_filing!(filing, preflight, update_preflight_run_at:)
