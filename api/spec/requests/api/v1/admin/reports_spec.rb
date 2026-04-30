@@ -1376,6 +1376,41 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "filing workbook report info sheets" do
+    it "includes client and generated-at metadata for 941-GU, W-2GU, and 1099-NEC sheets" do
+      controller = Api::V1::Admin::ReportsController.new
+      generated_at = "2026-04-30T12:00:00Z"
+      meta = { company_name: company.name, generated_at: generated_at }
+
+      reports = [
+        controller.send(:form_941_gu_sheets, {
+          meta: meta,
+          lines: {},
+          tax_detail: {},
+          monthly_liability: []
+        }),
+        controller.send(:w2_gu_sheets, {
+          "meta" => meta.stringify_keys,
+          "employer" => { "name" => company.name },
+          employees: [],
+          totals: {}
+        }),
+        controller.send(:form_1099_nec_sheets, {
+          "meta" => meta.stringify_keys,
+          "payer" => { "name" => company.name },
+          reportable_contractors: [],
+          totals: {}
+        })
+      ]
+
+      reports.each do |sheets|
+        rows = sheets.find { |sheet| sheet[:name] == "Report Info" }.fetch(:rows)
+        expect(rows).to include([ "Client", company.name ])
+        expect(rows).to include([ "Generated At", generated_at ])
+      end
+    end
+  end
+
   describe "employee pay history Excel sheets" do
     it "uses human-readable labels for the YTD worksheet" do
       sheets = Api::V1::Admin::ReportsController.new.send(:employee_pay_history_sheets, {

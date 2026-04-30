@@ -1313,19 +1313,27 @@ module Api
         end
 
         def report_info_sheet(report, title:, description: nil)
-          meta = report[:meta] || {}
-          pp = report[:pay_period] || {}
+          meta = report_value(report, :meta) || {}
+          pp = report_value(report, :pay_period) || {}
           rows = [
             [ "Field", "Value" ],
             [ "Report", title ],
-            [ "Client", meta[:company_name] || report.dig(:company, :name) || report.dig(:employer, :name) || report.dig(:payer, :name) ],
-            [ "Description", description || meta[:report_description] ],
-            [ "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
-            [ "Pay Date", pp[:pay_date] ],
-            [ "Generated At", meta[:generated_at] || report.dig(:meta, :generated_at) ]
+            [ "Client", report_value(meta, :company_name) || report_value(report, :company, :name) || report_value(report, :employer, :name) || report_value(report, :payer, :name) ],
+            [ "Description", description || report_value(meta, :report_description) ],
+            [ "Pay Period", [ report_value(pp, :start_date), report_value(pp, :end_date) ].compact.join(" to ") ],
+            [ "Pay Date", report_value(pp, :pay_date) ],
+            [ "Generated At", report_value(meta, :generated_at) ]
           ].reject { |_, value| value.blank? }
 
           { name: "Report Info", rows: rows }
+        end
+
+        def report_value(hash, *keys)
+          keys.reduce(hash) do |current, key|
+            break nil unless current.respond_to?(:[])
+
+            current[key] || current[key.to_s]
+          end
         end
 
         def employment_type_label(type)
