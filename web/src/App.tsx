@@ -12,6 +12,7 @@ import { Departments } from '@/pages/Departments';
 import { PayPeriods } from '@/pages/PayPeriods';
 import { PayPeriodDetail } from '@/pages/PayPeriodDetail';
 import { Reports } from '@/pages/Reports';
+import { ChecksPayments } from '@/pages/ChecksPayments';
 import { ClientDashboard } from '@/pages/client/ClientDashboard';
 import { ClientPayPeriods } from '@/pages/client/ClientPayPeriods';
 import { ClientPayPeriodDetail } from '@/pages/client/ClientPayPeriodDetail';
@@ -194,6 +195,7 @@ function AppRoutes() {
         <Route path="departments" element={<Departments />} />
         <Route path="pay-periods" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
         <Route path="pay-periods/:id" element={isClient ? <ClientPayPeriodDetail /> : <PayPeriodDetail />} />
+        <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />
         <Route path="pay-periods/:id/form-500" element={<StaffOnlyRoute><Form500Page /></StaffOnlyRoute>} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={isClient ? <ClientReports /> : <Reports />} />

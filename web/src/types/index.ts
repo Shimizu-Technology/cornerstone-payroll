@@ -813,11 +813,24 @@ export interface LoanTransaction {
 // Non-Employee Checks
 // ----------------
 
-export type NonEmployeeCheckType = 'contractor' | 'tax_deposit' | 'child_support' | 'garnishment' | 'vendor' | 'reimbursement' | 'other';
+export type NonEmployeeCheckType =
+  | 'contractor'
+  | 'tax_deposit'
+  | 'grt'
+  | 'estimated_tax'
+  | 'w1_balance'
+  | 'swica'
+  | 'child_support'
+  | 'garnishment'
+  | 'vendor'
+  | 'reimbursement'
+  | 'other';
+
+export type PaymentPeriodType = 'none' | 'pay_period' | 'month' | 'quarter' | 'year';
 
 export interface NonEmployeeCheck {
   id: number;
-  pay_period_id: number;
+  pay_period_id: number | null;
   company_id: number;
   check_number?: string | null;
   payable_to: string;
@@ -827,6 +840,13 @@ export interface NonEmployeeCheck {
   memo?: string;
   description?: string;
   reference_number?: string;
+  payment_period_type: PaymentPeriodType;
+  tax_year?: number | null;
+  tax_quarter?: number | null;
+  tax_month?: number | null;
+  due_date?: string | null;
+  payment_date?: string | null;
+  confirmation_number?: string | null;
   print_count: number;
   printed_at?: string;
   voided: boolean;

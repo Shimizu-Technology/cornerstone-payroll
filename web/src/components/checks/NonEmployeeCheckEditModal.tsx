@@ -15,6 +15,10 @@ interface NonEmployeeCheckEditModalProps {
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
   tax_deposit: 'Tax Deposit',
+  grt: 'GRT',
+  estimated_tax: 'Estimated Tax',
+  w1_balance: 'W-1 Balance',
+  swica: 'SWICA',
   child_support: 'Child Support',
   garnishment: 'Garnishment',
   vendor: 'Vendor',

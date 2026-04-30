@@ -40,6 +40,56 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
 
       expect(response).to have_http_status(:created)
       expect(NonEmployeeCheck.last.pay_period_id).to eq(pay_period.id)
+      expect(NonEmployeeCheck.last.payment_period_type).to eq("pay_period")
+    end
+
+    it "creates a standalone GRT check without a pay period" do
+      expect {
+        post "/api/v1/admin/non_employee_checks",
+          params: {
+            non_employee_check: {
+              payable_to: "Treasurer of Guam",
+              amount: 425.75,
+              check_type: "grt",
+              payment_period_type: "month",
+              tax_year: 2026,
+              tax_month: 3,
+              due_date: "2026-04-20",
+              payment_date: "2026-04-18",
+              confirmation_number: "GRT-12345",
+              memo: "March GRT"
+            }
+          },
+          as: :json
+      }.to change(NonEmployeeCheck, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      check = NonEmployeeCheck.last
+      expect(check.pay_period_id).to be_nil
+      expect(check.check_type).to eq("grt")
+      expect(check.payment_period_type).to eq("month")
+      expect(check.tax_year).to eq(2026)
+      expect(check.tax_month).to eq(3)
+      expect(check.confirmation_number).to eq("GRT-12345")
+      expect(response.parsed_body.dig("non_employee_check", "pay_period_id")).to be_nil
+    end
+
+    it "validates required tax period fields for standalone monthly payments" do
+      expect {
+        post "/api/v1/admin/non_employee_checks",
+          params: {
+            non_employee_check: {
+              payable_to: "Treasurer of Guam",
+              amount: 425.75,
+              check_type: "grt",
+              payment_period_type: "month"
+            }
+          },
+          as: :json
+      }.not_to change(NonEmployeeCheck, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join(", ")).to match(/Tax year|Tax month/)
     end
 
     it "rejects a pay period from another company on create" do
@@ -52,6 +102,34 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       }.not_to change(NonEmployeeCheck, :count)
 
       expect(response).to have_http_status(:not_found)
+    end
+
+    it "filters standalone checks separately from pay-period checks" do
+      NonEmployeeCheck.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: admin_user,
+        payable_to: "Payroll Vendor",
+        amount: 50.00,
+        check_type: "vendor",
+        payment_period_type: "pay_period"
+      )
+      standalone = NonEmployeeCheck.create!(
+        company: company,
+        created_by: admin_user,
+        payable_to: "Treasurer of Guam",
+        amount: 425.75,
+        check_type: "grt",
+        payment_period_type: "month",
+        tax_year: 2026,
+        tax_month: 3
+      )
+
+      get "/api/v1/admin/non_employee_checks", params: { standalone: "true" }
+
+      expect(response).to have_http_status(:ok)
+      ids = response.parsed_body["non_employee_checks"].map { |row| row["id"] }
+      expect(ids).to eq([ standalone.id ])
     end
   end
 

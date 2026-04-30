@@ -1964,18 +1964,35 @@ export const form500Api = {
 // Non-Employee Checks API
 // ============================================================
 export const nonEmployeeChecksApi = {
-  list: (params?: { pay_period_id?: number; check_type?: string; active?: string }) =>
+  list: (params?: {
+    pay_period_id?: number;
+    check_type?: string;
+    active?: string;
+    standalone?: string;
+    payment_period_type?: string;
+    tax_year?: number;
+    tax_quarter?: number;
+    tax_month?: number;
+    from?: string;
+    to?: string;
+  }) =>
     api.get<{ non_employee_checks: NonEmployeeCheck[] }>('/admin/non_employee_checks', params),
   get: (id: number) =>
     api.get<{ non_employee_check: NonEmployeeCheck }>(`/admin/non_employee_checks/${id}`),
   create: (data: {
-    pay_period_id: number; payable_to: string; amount: number; check_type: string;
+    pay_period_id?: number | null; payable_to: string; amount: number; check_type: string;
     memo?: string; description?: string; reference_number?: string; check_number?: string;
+    payment_period_type?: string; tax_year?: number | null; tax_quarter?: number | null;
+    tax_month?: number | null; due_date?: string | null; payment_date?: string | null;
+    confirmation_number?: string | null;
   }) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>('/admin/non_employee_checks', { non_employee_check: data }),
   update: (id: number, data: Partial<{
-    payable_to: string; amount: number; check_type: string;
+    pay_period_id: number | null; payable_to: string; amount: number; check_type: string;
     memo: string; description: string; reference_number: string;
+    payment_period_type: string; tax_year: number | null; tax_quarter: number | null;
+    tax_month: number | null; due_date: string | null; payment_date: string | null;
+    confirmation_number: string | null;
     // `check_number` is nullable so the modal can clear an existing one.
     // Sending `null` (or omitting the key) keeps the partial unique index
     // on (company_id, check_number) WHERE check_number IS NOT NULL from
