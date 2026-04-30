@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from 'clsx';
+import type { PayPeriod } from '@/types';
 
 /**
  * Merge class names with clsx
@@ -83,6 +84,26 @@ export function formatDateRange(startDate: string, endDate: string): string {
     return `${startMonth} ${startDay} - ${endDay}, ${year}`;
   }
   return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
+}
+
+function parseDateForSort(dateString?: string | null): number {
+  if (!dateString) return 0;
+  const parsed = Date.parse(dateString);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function comparePayPeriodsByPeriod(
+  left: Pick<PayPeriod, 'id' | 'start_date' | 'end_date' | 'pay_date'>,
+  right: Pick<PayPeriod, 'id' | 'start_date' | 'end_date' | 'pay_date'>,
+  direction: 'asc' | 'desc' = 'asc'
+): number {
+  const directionMultiplier = direction === 'asc' ? 1 : -1;
+  return (
+    (parseDateForSort(left.start_date) - parseDateForSort(right.start_date)) * directionMultiplier ||
+    (parseDateForSort(left.end_date) - parseDateForSort(right.end_date)) * directionMultiplier ||
+    (parseDateForSort(left.pay_date) - parseDateForSort(right.pay_date)) * directionMultiplier ||
+    right.id - left.id
+  );
 }
 
 /**

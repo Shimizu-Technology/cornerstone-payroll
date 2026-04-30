@@ -12,6 +12,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
+import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport } from '@/services/api';
 import type {
   PayPeriod,
@@ -81,12 +82,7 @@ function PayrollRegisterPanel() {
     payPeriodsApi.list({ status: 'committed' })
       .then((res) => {
         const periods = res.pay_periods ?? [];
-        const sorted = [...periods].sort((a, b) => {
-          const aDate = Date.parse(a.pay_date || '');
-          const bDate = Date.parse(b.pay_date || '');
-          if (!Number.isNaN(aDate) && !Number.isNaN(bDate)) return bDate - aDate;
-          return b.id - a.id;
-        });
+        const sorted = [...periods].sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
         setPayPeriods(sorted);
         if (sorted.length > 0) setSelectedPeriodId(sorted[0].id);
       })
