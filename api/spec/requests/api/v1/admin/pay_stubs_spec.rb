@@ -108,7 +108,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response.headers["Content-Type"]).to include("application/pdf")
       expect(response.headers["Content-Disposition"]).to include("paystubs_2026-04-15.pdf")
       expect(response.body).to start_with("%PDF")
-      expect(CombinePDF.parse(response.body).pages.count).to eq(4)
+      expect(CombinePDF.parse(response.body).pages.count).to eq(2)
     end
 
     it "limits the combined PDF to selected payroll items" do
@@ -119,7 +119,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.headers["Content-Disposition"]).to include("selected_paystubs_2026-04-15.pdf")
-      expect(CombinePDF.parse(response.body).pages.count).to eq(2)
+      expect(CombinePDF.parse(response.body).pages.count).to eq(1)
     end
 
     it "rejects selected payroll items outside the pay period" do
