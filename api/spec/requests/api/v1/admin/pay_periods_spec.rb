@@ -206,6 +206,28 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
     end
+
+    it "rolls back date changes if reverting a non-draft period to draft fails" do
+      original_pay_date = pay_period.pay_date
+      pay_period.update!(status: "approved", approved_at: 1.hour.ago, approved_by_id: admin_user.id)
+
+      allow_any_instance_of(PayPeriod).to receive(:update!).and_wrap_original do |method, *args|
+        attrs = args.first || {}
+        raise ActiveRecord::RecordInvalid.new(method.receiver) if attrs[:status] == "draft"
+
+        method.call(*args)
+      end
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { pay_date: original_pay_date + 1.day }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(pay_period.reload).to have_attributes(
+        pay_date: original_pay_date,
+        status: "approved"
+      )
+    end
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:id" do
@@ -332,6 +354,23 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["results"]["success"].length).to eq(1)
       expect(json["pay_period"]["status"]).to eq("calculated")
       expect(pay_period.reload.payroll_items.count).to eq(1)
+    end
+
+    it "clears stale unapproval lifecycle metadata when payroll is recalculated" do
+      pay_period.update!(
+        status: "calculated",
+        unapproved_at: 1.day.ago,
+        unapproved_by_id: admin_user.id
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to have_attributes(
+        status: "calculated",
+        unapproved_at: nil,
+        unapproved_by_id: nil
+      )
     end
 
     it "calculates with custom hours" do

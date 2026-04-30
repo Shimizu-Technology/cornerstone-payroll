@@ -21,7 +21,7 @@ module Api
           end
 
           begin
-            service = PayrollImport::ImportService.new(@pay_period)
+            service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
             preview_data = service.preview(pdf_file: pdf_file, excel_file: excel_file)
 
             # Persist preview for later apply
@@ -63,7 +63,7 @@ module Api
           end
 
           begin
-            service = PayrollImport::ImportService.new(@pay_period)
+            service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
 
             # Allow overrides from frontend (e.g., removing employees or adjusting hours)
             matched_data = if params[:matched].present?

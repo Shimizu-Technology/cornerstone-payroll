@@ -24,12 +24,9 @@ class InstallmentLoanReportPdfGenerator
   end
 
   def generate
-    loans = company.employee_loans
-      .includes(:employee, loan_transactions: :pay_period)
-      .order("employees.last_name ASC, employees.first_name ASC, employee_loans.name ASC")
-
+    loans = InstallmentLoanReportBuilder.new(company, as_of_date: as_of_date).loans
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 36, 50, 36])
-    render_document(pdf, loans.to_a)
+    render_document(pdf, loans)
   end
 
   def filename
@@ -46,7 +43,7 @@ class InstallmentLoanReportPdfGenerator
       return
     end
 
-    loans.group_by(&:employee).each do |employee, emp_loans|
+    loans.group_by { |snapshot| snapshot[:employee] }.each do |employee, emp_loans|
       render_employee_loans(pdf, employee, emp_loans)
     end
 
@@ -77,19 +74,20 @@ class InstallmentLoanReportPdfGenerator
     pdf.move_down 10
   end
 
-  def render_loan_detail(pdf, loan)
+  def render_loan_detail(pdf, snapshot)
     pdf.start_new_page if pdf.cursor < 80
 
-    status_text = loan.status.capitalize
-    status_text += " (#{loan.paid_off_date.strftime('%m/%d/%Y')})" if loan.paid_off?
+    loan = snapshot[:loan]
+    status_text = snapshot[:status_as_of].to_s.capitalize
+    status_text += " (#{loan.paid_off_date.strftime('%m/%d/%Y')})" if snapshot[:status_as_of] == "paid_off" && loan.paid_off_date.present? && loan.paid_off_date <= as_of_date
 
     pdf.font_size(9) do
-      pdf.text "#{loan.name} — Original: #{fmt(loan.original_amount)} | Current Balance: #{fmt(loan.current_balance)} | Status: #{status_text}",
+      pdf.text "#{loan.name} — Original: #{fmt(loan.original_amount)} | Balance as of #{as_of_date.strftime('%m/%d/%Y')}: #{fmt(snapshot[:balance_as_of])} | Status: #{status_text}",
         style: :bold
     end
     pdf.move_down 2
 
-    transactions = loan.loan_transactions.chronological.to_a
+    transactions = snapshot[:transactions]
     if transactions.empty?
       pdf.font_size(8) { pdf.text "No transactions recorded.", style: :italic, color: TEXT_MUTED }
       pdf.move_down 6
