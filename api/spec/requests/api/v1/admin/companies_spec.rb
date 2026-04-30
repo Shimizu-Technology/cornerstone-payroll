@@ -116,5 +116,26 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
 
       expect(response).to have_http_status(:forbidden)
     end
+
+    it "prevents non-staff users from updating company details even when they can access the company" do
+      client_user = User.create!(
+        company: client_company,
+        email: "assigned-client@example.com",
+        name: "Assigned Client",
+        role: "client",
+        active: true
+      )
+      CompanyAssignment.create!(user: client_user, company: client_company)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:require_staff_access!)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(client_user)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user_id).and_return(client_user.id)
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: { address_line1: "Should Not Save" }
+      }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(client_company.reload.address_line1).not_to eq("Should Not Save")
+    end
   end
 end
