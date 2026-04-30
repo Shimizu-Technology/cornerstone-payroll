@@ -11,6 +11,8 @@ require "prawn/table"
 #   # pdf_data is raw PDF binary
 #
 class PayStubGenerator
+  GUAM_TIME_ZONE = "Pacific/Guam"
+
   attr_reader :payroll_item, :employee, :pay_period, :company
 
   def initialize(payroll_item)
@@ -21,7 +23,7 @@ class PayStubGenerator
   end
 
   def generate
-    Prawn::Document.new(page_size: "LETTER", margin: 40) do |pdf|
+    Prawn::Document.new(page_size: "LETTER", margin: 32) do |pdf|
       # Header
       render_header(pdf)
 
@@ -55,12 +57,12 @@ class PayStubGenerator
   private
 
   def render_header(pdf)
-    pdf.font_size(18) do
+    pdf.font_size(16) do
       pdf.text company.name, style: :bold
     end
 
     if company.address_line1.present?
-      pdf.font_size(10) do
+      pdf.font_size(9) do
         pdf.text company.address_line1
         pdf.text company.address_line2 if company.address_line2.present?
         pdf.text "#{company.city}, #{company.state} #{company.zip}"
@@ -68,18 +70,18 @@ class PayStubGenerator
       end
     end
 
-    pdf.move_down 10
+    pdf.move_down 6
     pdf.stroke_horizontal_rule
-    pdf.move_down 15
+    pdf.move_down 10
 
-    pdf.font_size(14) do
+    pdf.font_size(13) do
       pdf.text "EARNINGS STATEMENT", style: :bold, align: :center
     end
-    pdf.move_down 15
+    pdf.move_down 10
   end
 
   def render_employee_info(pdf)
-    pdf.font_size(10) do
+    pdf.font_size(9) do
       data = [
         [ "Employee:", employee.full_name ],
         [ "Employee ID:", employee.id.to_s ],
@@ -92,11 +94,11 @@ class PayStubGenerator
         column(0).width = 100
       end
     end
-    pdf.move_down 15
+    pdf.move_down 10
   end
 
   def render_pay_period_info(pdf)
-    pdf.font_size(10) do
+    pdf.font_size(9) do
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
@@ -108,14 +110,14 @@ class PayStubGenerator
         column(0).width = 100
       end
     end
-    pdf.move_down 20
+    pdf.move_down 12
   end
 
   def render_earnings(pdf)
-    pdf.font_size(11) do
+    pdf.font_size(10) do
       pdf.text "EARNINGS", style: :bold
     end
-    pdf.move_down 5
+    pdf.move_down 3
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
 
@@ -220,24 +222,24 @@ class PayStubGenerator
       { content: format_currency(payroll_item.ytd_gross), font_style: :bold }
     ]
 
-    pdf.font_size(9) do
+    pdf.font_size(8) do
       pdf.table(earnings_data, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 5, 8 ]
+        cells.padding = [ 3, 6 ]
         columns(1..4).align = :right
         row(-1).background_color = "F5F5F5"
       end
     end
 
-    pdf.move_down 20
+    pdf.move_down 12
   end
 
   def render_deductions(pdf)
-    pdf.font_size(11) do
+    pdf.font_size(10) do
       pdf.text "DEDUCTIONS", style: :bold
     end
-    pdf.move_down 5
+    pdf.move_down 3
 
     deductions_data = [ [ "Description", "Current", "YTD" ] ]
 
@@ -336,17 +338,17 @@ class PayStubGenerator
       "—"
     ]
 
-    pdf.font_size(9) do
+    pdf.font_size(8) do
       pdf.table(deductions_data, header: true, width: pdf.bounds.width) do
         row(0).font_style = :bold
         row(0).background_color = "EEEEEE"
-        cells.padding = [ 5, 8 ]
+        cells.padding = [ 3, 6 ]
         columns(1..2).align = :right
         row(-1).background_color = "F5F5F5"
       end
     end
 
-    pdf.move_down 20
+    pdf.move_down 12
   end
 
   def render_net_pay(pdf)
@@ -358,23 +360,23 @@ class PayStubGenerator
         ]
       ]
 
-      pdf.font_size(12) do
+      pdf.font_size(11) do
         pdf.table(data, width: 200) do
-          cells.padding = [ 10, 15 ]
+          cells.padding = [ 7, 12 ]
           cells.background_color = "E8F5E9"
           column(1).align = :right
         end
       end
     end
 
-    pdf.move_down 30
+    pdf.move_down 14
   end
 
   def render_ytd_summary(pdf)
-    pdf.font_size(11) do
+    pdf.font_size(10) do
       pdf.text "YEAR-TO-DATE SUMMARY", style: :bold
     end
-    pdf.move_down 5
+    pdf.move_down 3
 
     ytd_data = [
       [ "Gross Earnings", format_currency(payroll_item.ytd_gross) ],
@@ -384,9 +386,9 @@ class PayStubGenerator
       [ "Net Pay", format_currency(payroll_item.ytd_net) ]
     ]
 
-    pdf.font_size(9) do
+    pdf.font_size(8) do
       pdf.table(ytd_data, width: 250) do
-        cells.padding = [ 4, 8 ]
+        cells.padding = [ 3, 6 ]
         cells.borders = []
         column(0).font_style = :bold
         column(1).align = :right
@@ -396,14 +398,19 @@ class PayStubGenerator
   end
 
   def render_footer(pdf)
-    pdf.move_down 30
-    pdf.stroke_horizontal_rule
-    pdf.move_down 10
+    pdf.bounding_box([ 0, 34 ], width: pdf.bounds.width, height: 32) do
+      pdf.stroke_horizontal_rule
+      pdf.move_down 6
 
-    pdf.font_size(8) do
-      pdf.text "This is your official earnings statement. Please retain for your records.", align: :center, color: "666666"
-      pdf.text "Generated on #{Time.current.strftime('%B %d, %Y at %I:%M %p')}", align: :center, color: "999999"
+      pdf.font_size(7.5) do
+        pdf.text "This is your official earnings statement. Please retain for your records.", align: :center, color: "666666"
+        pdf.text "Generated on #{guam_generated_timestamp}", align: :center, color: "999999"
+      end
     end
+  end
+
+  def guam_generated_timestamp
+    Time.current.in_time_zone(GUAM_TIME_ZONE).strftime("%B %d, %Y at %I:%M %p ChST")
   end
 
   def employee_ytd_additional_withholding
