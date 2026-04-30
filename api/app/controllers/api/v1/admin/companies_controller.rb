@@ -77,7 +77,7 @@ module Api
         # PATCH/PUT /api/v1/admin/companies/:id
         def update
           company = Company.find(params[:id])
-          unless current_user&.can_access_company?(company.id)
+          unless current_user&.admin? || staff_can_update_company?(company)
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
