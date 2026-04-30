@@ -6,6 +6,8 @@ class ClientPortalThreadSerializer
   end
 
   def thread(thread, include_messages: false)
+    thread_messages = include_messages ? messages_for_thread(thread) : nil
+
     payload = {
       id: thread.id,
       company_id: thread.company_id,
@@ -20,12 +22,10 @@ class ClientPortalThreadSerializer
       unread: thread.unread_for?(@current_user),
       created_at: thread.created_at,
       updated_at: thread.updated_at,
-      latest_message: thread.messages.loaded? ? message(thread.messages.max_by(&:created_at)) : message(thread.messages.order(created_at: :desc, id: :desc).first)
+      latest_message: message(latest_message_for(thread, thread_messages))
     }
 
-    if include_messages
-      payload[:messages] = thread.messages.chronological.includes(:author, client_document: [ :employee, :uploaded_by ]).map { |msg| message(msg) }
-    end
+    payload[:messages] = thread_messages.map { |msg| message(msg) } if include_messages
 
     payload
   end
@@ -72,6 +72,20 @@ class ClientPortalThreadSerializer
   end
 
   private
+
+  def messages_for_thread(thread)
+    thread.messages.chronological.includes(:author, client_document: [ :employee, :uploaded_by ]).to_a
+  end
+
+  def latest_message_for(thread, thread_messages)
+    return thread_messages.last if thread_messages
+
+    if thread.messages.loaded?
+      return thread.messages.max_by { |msg| [ msg.created_at || Time.zone.at(0), msg.id || 0 ] }
+    end
+
+    thread.messages.includes(:author, client_document: [ :employee, :uploaded_by ]).order(created_at: :desc, id: :desc).first
+  end
 
   def public_preview_error(document)
     return nil unless document.preview_status == "failed"

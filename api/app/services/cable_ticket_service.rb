@@ -4,6 +4,8 @@ class CableTicketService
   TTL = 1.minute
 
   def self.issue!(user:, company_id:)
+    CableConnectionTicket.stale.delete_all
+
     ticket = SecureRandom.urlsafe_base64(32)
 
     CableConnectionTicket.create!(
