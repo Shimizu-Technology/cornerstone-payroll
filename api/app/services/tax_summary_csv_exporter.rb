@@ -26,6 +26,8 @@ class TaxSummaryCsvExporter
     CSV.generate(headers: false, force_quotes: false) do |csv|
       # Period metadata header section
       csv << [ "Tax Summary Report" ]
+      csv << [ "Client", report.dig(:meta, :company_name).to_s ] if report.dig(:meta, :company_name).present?
+      csv << [ "Description", report.dig(:meta, :report_description).to_s ] if report.dig(:meta, :report_description).present?
       csv << [ "Year",              period[:year].to_s ]
       csv << [ "Quarter",           period[:quarter] ? "Q#{period[:quarter]}" : "Full Year" ]
       csv << [ "Period Start",      period[:start_date].to_s ]
@@ -51,7 +53,9 @@ class TaxSummaryCsvExporter
     period  = report[:period] || {}
     year    = period[:year] || "unknown"
     quarter = period[:quarter] ? "_q#{period[:quarter]}" : ""
-    "tax_summary_#{year}#{quarter}.csv"
+    company_slug = report.dig(:meta, :company_name).to_s.parameterize.presence
+    prefix = [ "tax_summary", company_slug ].compact.join("_")
+    "#{prefix}_#{year}#{quarter}.csv"
   end
 
   private

@@ -16,7 +16,7 @@ interface ChecksPanelProps {
   searchTerm?: string;
 }
 
-type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted';
+type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted' | 'stub';
 
 function checkStatusBadge(item: CheckItem) {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
@@ -153,6 +153,45 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       });
     } else {
       alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
+    }
+  };
+
+  const handleDownloadStubForItem = async (item: CheckItem) => {
+    setActionLoading({ id: item.id, action: 'stub' });
+    try {
+      const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || `paystub_${item.employee_name.replace(/\s+/g, '_')}_${payPeriod.pay_date ?? 'undated'}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download pay stub');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handlePrintStubForItem = async (item: CheckItem) => {
+    setActionLoading({ id: item.id, action: 'stub' });
+    try {
+      const result = await payStubsApi.batchPdf(payPeriod.id, [item.id]);
+      const url = URL.createObjectURL(result.blob);
+      const printWindow = window.open(url);
+      if (printWindow) {
+        printWindow.addEventListener('load', () => {
+          printWindow.print();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        });
+      } else {
+        URL.revokeObjectURL(url);
+        alert('Pop-up blocked. Please allow pop-ups for this site to print pay stubs.');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to print pay stub');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -468,8 +507,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       </div>
 
       {isFirstHawaiian4Up && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-          First Hawaiian 4-Up mode prints four checks per sheet and keeps payroll stubs separate. Use Print Stubs or Download Stubs to produce plain-paper earnings statements.
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          First Hawaiian 4-Up checks do not include a pay stub on the check stock. Print matching stubs on plain white paper after printing checks.
         </div>
       )}
 
@@ -594,6 +633,18 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                         </Button>
                       )}
 
+                      {!item.voided && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handlePrintStubForItem(item)}
+                          disabled={isActionLoading(item.id, 'stub')}
+                          className="text-xs px-2 py-1"
+                        >
+                          {isActionLoading(item.id, 'stub') ? '…' : 'Stub'}
+                        </Button>
+                      )}
+
                       {/* Mark printed */}
                       {!item.voided && (
                         <Button
@@ -675,9 +726,30 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
                   Preview sized for desktop review and printing checks onto stock paper.
+                  {isFirstHawaiian4Up ? ' Print the matching stub separately on plain paper.' : ' A separate plain-paper stub is also available when needed.'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
+                {!previewItem.voided && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handlePrintStubForItem(previewItem)}
+                      disabled={isActionLoading(previewItem.id, 'stub')}
+                    >
+                      Print Stub
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleDownloadStubForItem(previewItem)}
+                      disabled={isActionLoading(previewItem.id, 'stub')}
+                    >
+                      Download Stub
+                    </Button>
+                  </>
+                )}
                 <Button variant="outline" size="sm" onClick={handlePrintFromPreview}>
                   Print
                 </Button>

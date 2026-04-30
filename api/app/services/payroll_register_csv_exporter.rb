@@ -67,12 +67,14 @@ class PayrollRegisterCsvExporter
   # Suggested filename for Content-Disposition
   def filename
     pp = report[:pay_period] || {}
+    company_slug = report.dig(:meta, :company_name).to_s.parameterize.presence
     start_d = pp[:start_date].to_s.gsub(/[^0-9\-]/, "")
     end_d   = pp[:end_date].to_s.gsub(/[^0-9\-]/, "")
+    prefix = [ "payroll_register", company_slug ].compact.join("_")
     if start_d.present? && end_d.present?
-      "payroll_register_#{start_d}_to_#{end_d}.csv"
+      "#{prefix}_#{start_d}_to_#{end_d}.csv"
     else
-      "payroll_register_unknown_period.csv"
+      "#{prefix}_unknown_period.csv"
     end
   end
 

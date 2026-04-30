@@ -200,6 +200,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
+  const canViewClientManagement = ['admin', 'accountant', 'manager'].includes(user?.role || '');
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -283,11 +284,15 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </>
         )}
 
-        {isAdmin && (
+        {canViewClientManagement && (
           <>
             <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Administration" collapsed={collapsed} />
             <div className="space-y-1.5">
-              <NavSection items={adminNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+              <NavSection
+                items={isAdmin ? adminNavigation : adminNavigation.filter((item) => item.name === 'Client Management')}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+              />
             </div>
           </>
         )}
