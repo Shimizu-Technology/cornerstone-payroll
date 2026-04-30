@@ -557,6 +557,8 @@ class IssueCorrectivePaycheckService
       amount:               fit_total,
       check_type:           "tax_deposit",
       auto_generated_type:  NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
+      payment_period_type:  "pay_period",
+      payment_date:         supplemental.pay_date,
       memo:                 "FIT deposit for corrective paycheck (#{supplemental.start_date} – #{supplemental.end_date})",
       description:          "Federal Income Tax (FIT) — corrective deposit for #{@employee.full_name}"
     )

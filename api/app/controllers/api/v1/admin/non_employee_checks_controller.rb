@@ -9,7 +9,9 @@ module Api
         # which are managed by their own lifecycle methods.
         AUDITED_FIELDS = %w[
           payable_to amount check_type memo description
-          reference_number check_number
+          reference_number check_number payment_period_type
+          tax_year tax_quarter tax_month due_date payment_date
+          confirmation_number
         ].freeze
 
         before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :history]
@@ -26,10 +28,17 @@ module Api
             .includes(:pay_period, :created_by)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
+          checks = checks.standalone if params[:standalone] == "true"
           checks = checks.where(check_type: params[:check_type]) if params[:check_type].present?
+          checks = checks.where(payment_period_type: params[:payment_period_type]) if params[:payment_period_type].present?
+          checks = checks.where(tax_year: params[:tax_year]) if params[:tax_year].present?
+          checks = checks.where(tax_quarter: params[:tax_quarter]) if params[:tax_quarter].present?
+          checks = checks.where(tax_month: params[:tax_month]) if params[:tax_month].present?
+          checks = checks.where("COALESCE(payment_date, DATE(created_at)) >= ?", Date.iso8601(params[:from])) if params[:from].present?
+          checks = checks.where("COALESCE(payment_date, DATE(created_at)) <= ?", Date.iso8601(params[:to])) if params[:to].present?
           checks = checks.active if params[:active] == "true"
 
-          checks = checks.order(created_at: :desc).to_a
+          checks = checks.order(Arel.sql("COALESCE(payment_date, DATE(created_at)) DESC"), created_at: :desc).to_a
 
           edit_counts = NonEmployeeCheckEdit
             .where(non_employee_check_id: checks.map(&:id))
@@ -58,7 +67,10 @@ module Api
           check = NonEmployeeCheck.new(attrs.except("pay_period_id", :pay_period_id))
           check.company_id = current_company_id
           check.created_by = current_user
-          check.pay_period = pay_period if pay_period
+          if pay_period
+            check.pay_period = pay_period
+            check.payment_period_type = "pay_period"
+          end
 
           created = false
           ActiveRecord::Base.transaction do
@@ -93,6 +105,7 @@ module Api
             return if pay_period_id.present? && pay_period.nil?
 
             attrs["pay_period_id"] = pay_period&.id
+            attrs["payment_period_type"] = pay_period ? "pay_period" : "none"
           end
 
           # Snapshot the audited fields before we touch the record so the audit
@@ -228,7 +241,9 @@ module Api
         def check_params
           permitted = params.require(:non_employee_check).permit(
             :pay_period_id, :payable_to, :amount, :check_type,
-            :memo, :description, :reference_number, :check_number
+            :memo, :description, :reference_number, :check_number,
+            :payment_period_type, :tax_year, :tax_quarter, :tax_month,
+            :due_date, :payment_date, :confirmation_number
           )
 
           # Coerce blank values to nil for all optional text fields. The Edit
@@ -281,6 +296,13 @@ module Api
             memo: check.memo,
             description: check.description,
             reference_number: check.reference_number,
+            payment_period_type: check.payment_period_type,
+            tax_year: check.tax_year,
+            tax_quarter: check.tax_quarter,
+            tax_month: check.tax_month,
+            due_date: check.due_date,
+            payment_date: check.payment_date,
+            confirmation_number: check.confirmation_number,
             print_count: check.print_count,
             printed_at: check.printed_at,
             voided: check.voided,

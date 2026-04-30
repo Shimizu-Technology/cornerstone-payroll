@@ -49,18 +49,24 @@ class Company < ApplicationRecord
     assigned = 0
     self.class.transaction do
       lock!  # SELECT … FOR UPDATE on this company row
-      starting = next_check_number
+      next_number = next_check_number
+      assignments = {}
+
+      items.each do |item|
+        next_number += 1 while check_number_already_issued?(next_number.to_s)
+        assignments[item.id] = next_number.to_s
+        next_number += 1
+      end
 
       conn = self.class.connection
-      case_clauses = items.each_with_index.map { |item, idx|
-        "WHEN #{conn.quote(item.id)} THEN #{conn.quote((starting + idx).to_s)}"
+      case_clauses = assignments.map { |id, number|
+        "WHEN #{conn.quote(id)} THEN #{conn.quote(number)}"
       }.join(" ")
-
       PayrollItem.where(id: items.map(&:id))
                  .update_all(Arel.sql("check_number = CASE id #{case_clauses} END"))
 
       assigned = items.size
-      update_column(:next_check_number, starting + assigned)
+      update_column(:next_check_number, next_number)
     end
     assigned
   rescue ActiveRecord::StatementInvalid => e
@@ -78,10 +84,17 @@ class Company < ApplicationRecord
     reserved = nil
     self.class.transaction do
       lock!
-      reserved = next_check_number.to_s
-      update_column(:next_check_number, next_check_number + 1)
+      next_number = next_check_number
+      next_number += 1 while check_number_already_issued?(next_number.to_s)
+      reserved = next_number.to_s
+      update_column(:next_check_number, next_number + 1)
     end
     reserved
+  end
+
+  def check_number_already_issued?(number)
+    PayrollItem.where(company_id: id, check_number: number).exists? ||
+      NonEmployeeCheck.where(company_id: id, check_number: number).exists?
   end
 
   def full_address
