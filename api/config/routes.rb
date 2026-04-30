@@ -1,4 +1,6 @@
 Rails.application.routes.draw do
+  mount ActionCable.server => "/cable"
+
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
@@ -10,6 +12,7 @@ Rails.application.routes.draw do
     namespace :v1 do
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
+      post "cable_ticket", to: "cable_tickets#create"
       get "companies", to: "companies#index"
 
       resources :form_500s, only: [] do
@@ -29,6 +32,12 @@ Rails.application.routes.draw do
             get :download
             get :preview
           end
+        end
+        resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          member do
+            post :mark_read
+          end
+          resources :messages, only: [ :create ], controller: :portal_messages
         end
         resources :employee_change_requests, only: [ :index, :show ]
         resources :pay_periods, only: [ :index, :show ]
@@ -77,11 +86,17 @@ Rails.application.routes.draw do
             patch :reject
           end
         end
-        resources :client_documents, only: [ :index, :destroy ] do
+        resources :client_documents, only: [ :index, :create, :destroy ] do
           member do
             get :download
             get :preview
           end
+        end
+        resources :portal_threads, only: [ :index, :show, :create, :update ] do
+          member do
+            post :mark_read
+          end
+          resources :messages, only: [ :create ], controller: :portal_messages
         end
         resources :user_invitations, only: [ :create ]
 

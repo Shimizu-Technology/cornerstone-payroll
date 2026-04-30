@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   UserCog,
   ClipboardList,
@@ -23,6 +23,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Files,
+  LogOut,
+  UserCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -195,12 +197,34 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 }
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse }: SidebarProps) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const primaryNavigation = isClient ? portalNavigation : clientNavigation;
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!userMenuRef.current?.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [userMenuOpen]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setUserMenuOpen(false);
+    navigate('/login', { replace: true });
+  };
 
   return (
     <aside className={cn(
@@ -292,21 +316,54 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </button>
         )}
         {collapsed && <FloatingTooltip anchorRef={collapseButtonRef} label="Expand sidebar" visible={collapseTooltipVisible} />}
-        <div className={cn(
-          'flex items-center rounded-xl border border-neutral-200/80 bg-neutral-50/70',
-          collapsed ? 'justify-center px-1.5 py-2' : 'gap-3 px-3 py-2.5'
-        )}>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
-            {(user?.name || 'User').charAt(0).toUpperCase()}
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
-              <p className="truncate text-xs text-neutral-500">
-                {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}
-              </p>
+        <div className="relative" ref={userMenuRef}>
+          {userMenuOpen && (
+            <div className={cn(
+              'absolute z-50 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg',
+              collapsed ? 'bottom-0 left-full ml-2 w-56' : 'bottom-full left-0 right-0 mb-2'
+            )}>
+              {!collapsed && (
+                <div className="border-b border-neutral-100 px-4 py-3">
+                  <p className="truncate text-sm font-semibold text-neutral-900">{user?.name || 'User'}</p>
+                  <p className="truncate text-xs text-neutral-500">{user?.email}</p>
+                  <p className="mt-1 truncate text-xs text-neutral-500">{user?.company_name}</p>
+                </div>
+              )}
+              <div className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-700">
+                <UserCircle className="h-4 w-4" />
+                Profile
+              </div>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-danger-600 hover:bg-danger-50"
+                onClick={() => void handleSignOut()}
+              >
+                <LogOut className="h-4 w-4" />
+                Log out
+              </button>
             </div>
           )}
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((open) => !open)}
+            className={cn(
+              'flex w-full items-center rounded-xl border border-neutral-200/80 bg-neutral-50/70 hover:bg-neutral-100 transition-colors',
+              collapsed ? 'justify-center px-1.5 py-2' : 'gap-3 px-3 py-2.5'
+            )}
+            aria-label="Open account menu"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
+              {(user?.name || 'User').charAt(0).toUpperCase()}
+            </div>
+            {!collapsed && (
+              <div className="min-w-0 flex-1 text-left">
+                <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
+                <p className="truncate text-xs text-neutral-500">
+                  {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : 'User'}
+                </p>
+              </div>
+            )}
+          </button>
         </div>
       </div>
     </aside>
