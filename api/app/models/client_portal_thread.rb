@@ -27,6 +27,7 @@ class ClientPortalThread < ApplicationRecord
 
   def mark_read_for!(user)
     return unless user
+    return unless unread_for?(user)
 
     if staff_user?(user)
       update!(staff_last_read_at: Time.current)

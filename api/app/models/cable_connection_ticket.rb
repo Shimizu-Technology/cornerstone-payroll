@@ -8,4 +8,5 @@ class CableConnectionTicket < ApplicationRecord
   validates :token_digest, uniqueness: true
 
   scope :active, -> { where(used_at: nil).where("expires_at > ?", Time.current) }
+  scope :stale, -> { where("expires_at <= :now OR used_at IS NOT NULL", now: Time.current) }
 end
