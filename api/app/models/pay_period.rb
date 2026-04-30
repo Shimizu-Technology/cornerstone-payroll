@@ -94,9 +94,6 @@ class PayPeriod < ApplicationRecord
   scope :period_chronological, -> {
     order(Arel.sql("start_date ASC NULLS LAST, end_date ASC NULLS LAST, pay_date ASC NULLS LAST, id DESC"))
   }
-  scope :period_recent_first, -> {
-    order(Arel.sql("start_date DESC NULLS LAST, end_date DESC NULLS LAST, pay_date DESC NULLS LAST, id DESC"))
-  }
   # Cycle scopes
   scope :regular_cycle, -> { where(cycle: "regular") }
   scope :supplemental_cycle, -> { where(cycle: "supplemental") }
