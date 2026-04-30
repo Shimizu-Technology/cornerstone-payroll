@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "combine_pdf"
 
 RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
   let!(:company) { create(:company, name: "Staff HQ") }
@@ -22,6 +23,24 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       employee: employee,
       gross_pay: 1200.0,
       net_pay: 960.0
+    )
+  end
+  let!(:second_employee) do
+    create(
+      :employee,
+      company: company,
+      department: department,
+      first_name: "Alex",
+      last_name: "Ledger"
+    )
+  end
+  let!(:second_payroll_item) do
+    create(
+      :payroll_item,
+      pay_period: pay_period,
+      employee: second_employee,
+      gross_pay: 900.0,
+      net_pay: 720.0
     )
   end
   let!(:admin_user) do
@@ -74,6 +93,46 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.body).to eq("%PDF-legacy")
       expect(response.headers["Content-Type"]).to include("application/pdf")
+    end
+  end
+
+  describe "POST /api/v1/admin/pay_stubs/batch_pdf" do
+    before do
+      allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
+    end
+
+    it "downloads one combined plain-paper pay stub PDF for a pay period" do
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Content-Type"]).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("paystubs_2026-04-15.pdf")
+      expect(response.body).to start_with("%PDF")
+      expect(CombinePDF.parse(response.body).pages.count).to eq(4)
+    end
+
+    it "limits the combined PDF to selected payroll items" do
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_item_ids: [ second_payroll_item.id ]
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Content-Disposition"]).to include("selected_paystubs_2026-04-15.pdf")
+      expect(CombinePDF.parse(response.body).pages.count).to eq(2)
+    end
+
+    it "rejects selected payroll items outside the pay period" do
+      other_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 4, 30))
+      other_item = create(:payroll_item, pay_period: other_period, employee: employee)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_item_ids: [ other_item.id ]
+      }
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body.fetch("error")).to eq("One or more selected pay stubs were not found")
     end
   end
 end

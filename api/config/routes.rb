@@ -247,6 +247,7 @@ Rails.application.routes.draw do
         get "pay_stubs/:id", to: "pay_stubs#show"
         post "pay_stubs/:id/generate", to: "pay_stubs#generate"
         get "pay_stubs/:id/download", to: "pay_stubs#download"
+        post "pay_stubs/batch_pdf", to: "pay_stubs#batch_pdf"
         post "pay_stubs/batch_generate", to: "pay_stubs#batch_generate"
         get "pay_stubs/employee/:employee_id", to: "pay_stubs#employee_stubs"
 

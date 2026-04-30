@@ -81,12 +81,8 @@ export function AdminClientDocumentsPage() {
     try {
       setLoading(true);
       setError(null);
-      const [documentsResponse, employeesResponse] = await Promise.all([
-        adminClientDocumentsApi.list({ category: category || undefined }),
-        loadAllEmployees(),
-      ]);
+      const documentsResponse = await adminClientDocumentsApi.list({ category: category || undefined });
       setDocuments(documentsResponse.data);
-      setEmployees(employeesResponse);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load client documents');
     } finally {
@@ -97,6 +93,21 @@ export function AdminClientDocumentsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    loadAllEmployees()
+      .then((allEmployees) => {
+        if (active) setEmployees(allEmployees);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : 'Failed to load employees');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const totalFiles = useMemo(() => documents.length, [documents]);
   const employeeLinkedFiles = useMemo(
