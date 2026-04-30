@@ -57,9 +57,11 @@ module PdfFooter
 
     parsed.remove(parsed.pages.length - 1)
     parsed.to_pdf
+  rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError, ArgumentError
+    raw_pdf
   end
 
   def normalized_pdf_text(text)
-    text.to_s.lines.map(&:strip).reject(&:blank?).join("\n")
+    text.to_s.gsub(/\s+/, " ").strip
   end
 end
