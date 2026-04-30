@@ -18,13 +18,13 @@ module PdfFooter
   # @param text [String] the footer text
   # @param font_size [Numeric] footer font size (default 6)
   # @return [String] the final PDF bytes
-  def render_with_footer(pdf, text, font_size: 6)
+  def render_with_footer(pdf, text, font_size: 6, height: 16)
     pdf.repeat(:all, dynamic: true) do
       pdf.canvas do
         left = pdf.page.margins[:left]
         right = pdf.page.margins[:right]
         width = pdf.bounds.width - left - right
-        pdf.bounding_box([left, 26], width: width, height: 16) do
+        pdf.bounding_box([ left, 26 ], width: width, height: height) do
           pdf.stroke_color "CCCCCC"
           pdf.stroke_horizontal_rule
           pdf.move_down 3
@@ -37,15 +37,31 @@ module PdfFooter
       end
     end
 
-    strip_trailing_blank_page(pdf.render)
+    strip_trailing_blank_page(pdf.render, footer_text: text)
   end
 
-  def strip_trailing_blank_page(raw_pdf)
+  def strip_trailing_blank_page(raw_pdf, footer_text:)
     require "combine_pdf"
+    require "pdf/reader"
+
+    reader = PDF::Reader.new(StringIO.new(raw_pdf))
+    return raw_pdf if reader.pages.length <= 1
+
+    expected_footer_text = normalized_pdf_text(footer_text)
+    actual_last_page_text = normalized_pdf_text(reader.pages.last.text)
+
+    return raw_pdf unless actual_last_page_text == expected_footer_text
+
     parsed = CombinePDF.parse(raw_pdf)
     return raw_pdf if parsed.pages.length <= 1
 
     parsed.remove(parsed.pages.length - 1)
     parsed.to_pdf
+  rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError, ArgumentError
+    raw_pdf
+  end
+
+  def normalized_pdf_text(text)
+    text.to_s.gsub(/\s+/, " ").strip
   end
 end
