@@ -1596,6 +1596,8 @@ export interface CompanyDetail extends CompanyListItem {
   check_offset_y?: number;
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
+  can_update?: boolean;
+  editable_fields?: string[];
 }
 
 export interface CompanyFormData {
@@ -1620,6 +1622,7 @@ export interface CompanyFormData {
 interface CompanyListResponse {
   companies: CompanyListItem[];
   can_manage_clients: boolean;
+  can_view_client_management?: boolean;
   can_switch_company: boolean;
   current_company_id: number;
 }
