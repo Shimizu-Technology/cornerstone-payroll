@@ -1360,7 +1360,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(sheets.first[:rows].last).to include("Mina Terlaje", 1_000.00, 1_111.50)
       expect(sheets.second[:rows]).to include([ "Roth 401(k)", 30.00 ])
       contractor_totals = sheets.find { |sheet| sheet[:name] == "Contractor Totals" }
-      expect(contractor_totals[:rows]).to include([ "Employees", 1 ])
+      expect(contractor_totals[:rows]).to include([ "Contractors", 1 ])
       expect(contractor_totals[:rows]).to include([ "Gross Pay", 600.00 ])
       expect(contractor_totals[:rows]).to include([ "Custom Earnings", 75.00 ])
       expect(contractor_totals[:rows]).to include([ "Net Pay", 600.00 ])

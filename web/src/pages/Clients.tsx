@@ -128,7 +128,7 @@ export function Clients() {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
+    if (canManageClients && !form.name.trim()) {
       setFormError('Client name is required');
       return;
     }
