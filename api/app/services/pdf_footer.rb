@@ -47,17 +47,19 @@ module PdfFooter
     reader = PDF::Reader.new(StringIO.new(raw_pdf))
     return raw_pdf if reader.pages.length <= 1
 
-    last_page_text = reader.pages.last.text.dup
-    footer_text.to_s.lines.map(&:strip).reject(&:blank?).each do |line|
-      last_page_text.gsub!(line, "")
-    end
+    expected_footer_text = normalized_pdf_text(footer_text)
+    actual_last_page_text = normalized_pdf_text(reader.pages.last.text)
 
-    return raw_pdf if last_page_text.gsub(/\s+/, "").present?
+    return raw_pdf unless actual_last_page_text == expected_footer_text
 
     parsed = CombinePDF.parse(raw_pdf)
     return raw_pdf if parsed.pages.length <= 1
 
     parsed.remove(parsed.pages.length - 1)
     parsed.to_pdf
+  end
+
+  def normalized_pdf_text(text)
+    text.to_s.lines.map(&:strip).reject(&:blank?).join("\n")
   end
 end
