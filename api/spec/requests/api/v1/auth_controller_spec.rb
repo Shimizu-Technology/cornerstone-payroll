@@ -9,10 +9,8 @@ RSpec.describe "Api::V1::Auth", type: :request do
     end
 
     it "returns a short-lived cable ticket for the current company" do
-      cache = ActiveSupport::Cache::MemoryStore.new
       company = create(:company)
       user = create(:user, company: company, role: "admin")
-      allow(Rails).to receive(:cache).and_return(cache)
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
 
       post "/api/v1/cable_ticket"

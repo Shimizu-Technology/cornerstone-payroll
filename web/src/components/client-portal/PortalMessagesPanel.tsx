@@ -174,9 +174,15 @@ export function PortalMessagesPanel({ api, documents, audienceLabel, description
 
   const updateStatus = async (status: 'open' | 'resolved') => {
     if (!selectedThread) return;
-    const response = await api.update(selectedThread.id, { status });
-    setSelectedThread(response.data);
-    setThreads((current) => upsertThread(current, response.data));
+
+    try {
+      setError(null);
+      const response = await api.update(selectedThread.id, { status });
+      setSelectedThread(response.data);
+      setThreads((current) => upsertThread(current, response.data));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update conversation status');
+    }
   };
 
   return (

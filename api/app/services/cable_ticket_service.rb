@@ -2,31 +2,39 @@
 
 class CableTicketService
   TTL = 1.minute
-  CACHE_PREFIX = "cable_ticket:"
 
   def self.issue!(user:, company_id:)
     ticket = SecureRandom.urlsafe_base64(32)
-    Rails.cache.write(
-      cache_key(ticket),
-      {
-        "user_id" => user.id,
-        "company_id" => company_id
-      },
-      expires_in: TTL
+
+    CableConnectionTicket.create!(
+      user: user,
+      company_id: company_id,
+      token_digest: token_digest(ticket),
+      expires_at: TTL.from_now
     )
+
     ticket
   end
 
   def self.consume(ticket)
     return nil if ticket.blank?
 
-    key = cache_key(ticket)
-    payload = Rails.cache.read(key)
-    Rails.cache.delete(key)
-    payload
+    consumed_ticket = nil
+
+    CableConnectionTicket.transaction do
+      consumed_ticket = CableConnectionTicket.lock.active.find_by(token_digest: token_digest(ticket))
+      consumed_ticket&.update!(used_at: Time.current)
+    end
+
+    return nil unless consumed_ticket
+
+    {
+      "user_id" => consumed_ticket.user_id,
+      "company_id" => consumed_ticket.company_id
+    }
   end
 
-  def self.cache_key(ticket)
-    "#{CACHE_PREFIX}#{ticket}"
+  def self.token_digest(ticket)
+    OpenSSL::Digest::SHA256.hexdigest(ticket)
   end
 end

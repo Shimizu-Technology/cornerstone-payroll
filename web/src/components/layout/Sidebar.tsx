@@ -329,10 +329,14 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
                   <p className="mt-1 truncate text-xs text-neutral-500">{user?.company_name}</p>
                 </div>
               )}
-              <div className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-700">
+              <button
+                type="button"
+                disabled
+                className="flex w-full cursor-not-allowed items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-400"
+              >
                 <UserCircle className="h-4 w-4" />
                 Profile
-              </div>
+              </button>
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-danger-600 hover:bg-danger-50"
