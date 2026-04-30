@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi, clientReportsApi } from '@/services/api';
-import { formatCurrency } from '@/lib/utils';
+import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
 
 export function ClientReports() {
@@ -27,9 +27,10 @@ export function ClientReports() {
       setLoading(true);
       setError(null);
       const response = await clientPayPeriodsApi.list();
-      setPayPeriods(response.pay_periods);
-      if (response.pay_periods[0]) {
-        setSelectedPayPeriodId(String(response.pay_periods[0].id));
+      const sorted = [...response.pay_periods].sort((a, b) => comparePayPeriodsByPeriod(a, b, 'desc'));
+      setPayPeriods(sorted);
+      if (sorted[0]) {
+        setSelectedPayPeriodId(String(sorted[0].id));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load reports');

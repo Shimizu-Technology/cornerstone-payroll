@@ -112,6 +112,44 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_periods"].length).to eq(1)
       expect(json["pay_periods"][0]["status"]).to eq("draft")
     end
+
+    it "orders by pay period chronology instead of pay date chronology" do
+      pay_period.destroy!
+
+      mar_1_original = PayPeriod.create!(
+        company: company,
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 15),
+        pay_date: Date.new(2026, 3, 30),
+        status: "committed"
+      )
+      mar_1_correction = PayPeriod.create!(
+        company: company,
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 15),
+        pay_date: Date.new(2026, 3, 30),
+        status: "committed"
+      )
+      mar_16 = PayPeriod.create!(
+        company: company,
+        start_date: Date.new(2026, 3, 16),
+        end_date: Date.new(2026, 3, 31),
+        pay_date: Date.new(2026, 4, 16),
+        status: "committed"
+      )
+      apr_1 = PayPeriod.create!(
+        company: company,
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 15),
+        pay_date: Date.new(2026, 4, 15),
+        status: "committed"
+      )
+
+      get "/api/v1/admin/pay_periods"
+
+      ids = response.parsed_body.fetch("pay_periods").map { |period| period.fetch("id") }
+      expect(ids).to eq([ mar_1_correction.id, mar_1_original.id, mar_16.id, apr_1.id ])
+    end
   end
 
   describe "GET /api/v1/admin/pay_periods/:id" do

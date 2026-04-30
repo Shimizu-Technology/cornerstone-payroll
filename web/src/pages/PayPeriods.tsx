@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 
@@ -44,8 +44,8 @@ export function PayPeriods() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status'
-  >('pay_date');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  >('pay_period');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -283,13 +283,7 @@ export function PayPeriods() {
 
       switch (sortBy) {
       case 'pay_period':
-        return compareNumbers(
-          new Date(left.end_date).getTime(),
-          new Date(right.end_date).getTime()
-        ) || compareNumbers(
-          new Date(left.start_date).getTime(),
-          new Date(right.start_date).getTime()
-        );
+        return comparePayPeriodsByPeriod(left, right, sortDirection);
       case 'employees':
         return compareNumbers(left.employee_count || 0, right.employee_count || 0);
       case 'gross':
@@ -395,9 +389,9 @@ export function PayPeriods() {
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               className="w-44"
             >
+              <option value="pay_period">Sort: Pay Period</option>
               <option value="pay_date">Sort: Pay Date</option>
               <option value="processed">Sort: Processed</option>
-              <option value="pay_period">Sort: Pay Period</option>
               <option value="employees">Sort: Employees</option>
               <option value="gross">Sort: Gross Pay</option>
               <option value="net">Sort: Net Pay</option>
@@ -408,8 +402,8 @@ export function PayPeriods() {
               onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
               className="w-32"
             >
-              <option value="desc">Newest / High</option>
               <option value="asc">Oldest / Low</option>
+              <option value="desc">Newest / High</option>
             </Select>
           </div>
         </div>
