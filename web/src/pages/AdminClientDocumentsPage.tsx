@@ -56,6 +56,7 @@ async function loadAllEmployees() {
 
 export function AdminClientDocumentsPage() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
+  const [messageDocuments, setMessageDocuments] = useState<ClientDocument[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -81,8 +82,15 @@ export function AdminClientDocumentsPage() {
     try {
       setLoading(true);
       setError(null);
-      const documentsResponse = await adminClientDocumentsApi.list({ category: category || undefined });
+      const [documentsResponse, messageDocumentsResponse] = category
+        ? await Promise.all([
+            adminClientDocumentsApi.list({ category }),
+            adminClientDocumentsApi.list(),
+          ])
+        : await adminClientDocumentsApi.list().then((response) => [response, response] as const);
+
       setDocuments(documentsResponse.data);
+      setMessageDocuments(messageDocumentsResponse.data.filter((document) => document.visible_to_client));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load client documents');
     } finally {
@@ -317,7 +325,7 @@ export function AdminClientDocumentsPage() {
 
         <PortalMessagesPanel
           api={adminPortalThreadsApi}
-          documents={documents.filter((document) => document.visible_to_client)}
+          documents={messageDocuments}
           audienceLabel="to the client"
           description="Coordinate corrections, follow-up notes, and updated payroll source files with the client."
           canResolve
