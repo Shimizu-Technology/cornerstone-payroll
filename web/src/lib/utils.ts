@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from 'clsx';
+import type { PayPeriod } from '@/types';
 
 /**
  * Merge class names with clsx
@@ -83,6 +84,41 @@ export function formatDateRange(startDate: string, endDate: string): string {
     return `${startMonth} ${startDay} - ${endDay}, ${year}`;
   }
   return `${startMonth} ${startDay} - ${endMonth} ${endDay}, ${year}`;
+}
+
+function parseDateForSort(dateString?: string | null): number | null {
+  if (!dateString) return null;
+  const parsed = Date.parse(dateString);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function compareDatesNullsLast(
+  leftDate?: string | null,
+  rightDate?: string | null,
+  direction: 'asc' | 'desc' = 'asc'
+): number {
+  const leftTime = parseDateForSort(leftDate);
+  const rightTime = parseDateForSort(rightDate);
+
+  if (leftTime === null && rightTime === null) return 0;
+  if (leftTime === null) return 1;
+  if (rightTime === null) return -1;
+
+  const directionMultiplier = direction === 'asc' ? 1 : -1;
+  return (leftTime - rightTime) * directionMultiplier;
+}
+
+export function comparePayPeriodsByPeriod(
+  left: Pick<PayPeriod, 'id' | 'start_date' | 'end_date' | 'pay_date'>,
+  right: Pick<PayPeriod, 'id' | 'start_date' | 'end_date' | 'pay_date'>,
+  direction: 'asc' | 'desc' = 'asc'
+): number {
+  return (
+    compareDatesNullsLast(left.start_date, right.start_date, direction) ||
+    compareDatesNullsLast(left.end_date, right.end_date, direction) ||
+    compareDatesNullsLast(left.pay_date, right.pay_date, direction) ||
+    right.id - left.id
+  );
 }
 
 /**

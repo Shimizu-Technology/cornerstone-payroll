@@ -40,6 +40,24 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response.parsed_body.dig("meta", "statuses")).to eq("committed" => 1)
   end
 
+  it "orders committed pay periods by pay period chronology" do
+    march_period = create(:pay_period, :committed,
+      company: company,
+      start_date: Date.new(2026, 3, 16),
+      end_date: Date.new(2026, 3, 31),
+      pay_date: Date.new(2026, 4, 20))
+    earlier_march_period = create(:pay_period, :committed,
+      company: company,
+      start_date: Date.new(2026, 3, 1),
+      end_date: Date.new(2026, 3, 15),
+      pay_date: Date.new(2026, 3, 30))
+
+    get "/api/v1/client/pay_periods"
+
+    ids = response.parsed_body.fetch("pay_periods").map { |pay_period| pay_period.fetch("id") }
+    expect(ids).to eq([ earlier_march_period.id, march_period.id, committed_pay_period.id ])
+  end
+
   it "does not allow a client to open a draft pay period detail" do
     get "/api/v1/client/pay_periods/#{draft_pay_period.id}"
 
