@@ -1393,7 +1393,11 @@ module Api
           ]
           if contractors.any?
             sheets << { name: "Contractor Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + contractors.map { |emp| payroll_summary_by_employee_row(emp) } }
-            sheets << payroll_summary_totals_sheet(payroll_summary_totals_for_items(contractors), name: "Contractor Totals")
+            sheets << payroll_summary_totals_sheet(
+              payroll_summary_totals_for_items(contractors),
+              name: "Contractor Totals",
+              count_label: "Contractors"
+            )
           end
           sheets << report_info_sheet(report, title: "Payroll Summary by Employee")
           sheets
@@ -1418,10 +1422,10 @@ module Api
           ]
         end
 
-        def payroll_summary_totals_sheet(summary, name: "Totals")
+        def payroll_summary_totals_sheet(summary, name: "Totals", count_label: "Employees")
           rows = [
             [ "Metric", "Amount" ],
-            [ "Employees", summary[:employee_count] ],
+            [ count_label, summary[:employee_count] ],
             [ "Gross Pay", summary[:total_gross] ],
             [ "Reported Tips", summary[:total_reported_tips] ],
             [ "Tips Paid Out", summary[:total_tips_paid_out] ],
