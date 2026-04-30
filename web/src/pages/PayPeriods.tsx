@@ -166,6 +166,16 @@ export function PayPeriods() {
       return;
     }
 
+    if (
+      editingPayPeriod.status !== 'draft' &&
+      (editFormData.start_date !== editingPayPeriod.start_date ||
+        editFormData.end_date !== editingPayPeriod.end_date ||
+        editFormData.pay_date !== editingPayPeriod.pay_date) &&
+      !window.confirm('Changing payroll dates affects tax year, YTD, checks, and reports. This pay period will be moved back to draft and must be recalculated before approval/commit. Continue?')
+    ) {
+      return;
+    }
+
     try {
       setIsEditSubmitting(true);
       setError(null);
@@ -727,6 +737,15 @@ export function PayPeriods() {
                   onChange={(e) => setEditFormData({ ...editFormData, pay_date: e.target.value })}
                   required
                 />
+                {editingPayPeriod?.status !== 'draft' && (
+                  editFormData.start_date !== editingPayPeriod?.start_date ||
+                  editFormData.end_date !== editingPayPeriod?.end_date ||
+                  editFormData.pay_date !== editingPayPeriod?.pay_date
+                ) && (
+                  <p className="text-xs text-amber-700">
+                    Changing payroll dates will move this period back to draft so payroll can be recalculated with the new dates.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit_notes">Notes (optional)</Label>

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_28_154744) do
+ActiveRecord::Schema[8.1].define(version: 2026_04_29_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -448,8 +448,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_154744) do
   end
 
   create_table "pay_periods", force: :cascade do |t|
+    t.datetime "approved_at"
     t.bigint "approved_by_id"
+    t.datetime "calculated_at"
+    t.bigint "calculated_by_id"
     t.datetime "committed_at"
+    t.bigint "committed_by_id"
     t.bigint "company_id", null: false
     t.string "correction_status"
     t.bigint "corrects_pay_period_id"
@@ -468,10 +472,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_154744) do
     t.text "tax_sync_last_error"
     t.string "tax_sync_status", default: "pending"
     t.datetime "tax_synced_at"
+    t.datetime "unapproved_at"
+    t.bigint "unapproved_by_id"
     t.datetime "updated_at", null: false
     t.text "void_reason"
     t.datetime "voided_at"
     t.bigint "voided_by_id"
+    t.index ["calculated_by_id"], name: "index_pay_periods_on_calculated_by_id"
+    t.index ["committed_by_id"], name: "index_pay_periods_on_committed_by_id"
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
@@ -484,6 +492,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_28_154744) do
     t.index ["superseded_by_id"], name: "idx_pay_periods_unique_superseded_by", unique: true, where: "(superseded_by_id IS NOT NULL)"
     t.index ["tax_sync_idempotency_key"], name: "index_pay_periods_on_tax_sync_idempotency_key", unique: true
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
+    t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying, 'supplemental'::character varying]::text[])", name: "pay_periods_cycle_check"
   end

@@ -20,6 +20,20 @@ RSpec.describe PayrollRegisterCsvExporter do
         total_withholding: 350.00,
         total_social_security: 310.00,
         total_medicare: 72.50,
+        total_reported_tips: 100.00,
+        total_tips_paid_out: 80.00,
+        total_bonus: 25.00,
+        total_custom_earnings: 60.00,
+        total_non_taxable_pay: 40.00,
+        total_additional_withholding: 15.00,
+        total_employer_social_security: 310.00,
+        total_employer_medicare: 72.50,
+        total_traditional_retirement: 125.00,
+        total_roth_retirement: 75.00,
+        total_employer_traditional_retirement: 30.00,
+        total_employer_roth_retirement: 20.00,
+        total_employer_retirement: 50.00,
+        total_loan_payments: 20.00,
         total_retirement: 200.00,
         total_deductions: 932.50,
         total_net: 4067.50
@@ -97,6 +111,22 @@ RSpec.describe PayrollRegisterCsvExporter do
     it "includes employee count in TOTALS row" do
       csv = exporter.generate
       expect(csv).to include("2 employees")
+    end
+
+    it "keeps the TOTALS row aligned with the headers" do
+      rows = CSV.parse(exporter.generate, headers: true)
+      totals = rows[-1]
+
+      expect(totals.fields.length).to eq(described_class::HEADERS.length)
+      expect(totals["Reported Tips"]).to eq("100.00")
+      expect(totals["PTO Hours"]).to eq("")
+      expect(totals["401(k)"]).to eq("125.00")
+      expect(totals["Roth 401(k)"]).to eq("75.00")
+      expect(totals["Employer Match"]).to eq("30.00")
+      expect(totals["Employer Roth Match"]).to eq("20.00")
+      expect(totals["Total Deductions"]).to eq("932.50")
+      expect(totals["Net Pay"]).to eq("4067.50")
+      expect(totals["Check Number"]).to eq("")
     end
 
     it "handles nil hours gracefully (salary employee)" do

@@ -212,6 +212,12 @@ export interface PayPeriod {
   period_description?: string;
   created_by_id?: number;
   approved_by_id?: number;
+  calculated_at?: string | null;
+  calculated_by_id?: number | null;
+  approved_at?: string | null;
+  unapproved_at?: string | null;
+  unapproved_by_id?: number | null;
+  committed_by_id?: number | null;
   committed_at?: string;
   processed_at?: string | null;
   processed_by_name?: string | null;
@@ -268,6 +274,8 @@ export interface PayrollItem {
   id: number;
   pay_period_id?: number;
   employee_id: number;
+  employee_first_name?: string | null;
+  employee_last_name?: string | null;
   employee_name?: string;
   employment_type: EmploymentType;
   pay_rate: number;

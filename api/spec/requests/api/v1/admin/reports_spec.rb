@@ -1233,4 +1233,143 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body["error"]).to eq("Invalid as_of_date - expected YYYY-MM-DD")
     end
   end
+
+  describe "installment loans Excel sheets" do
+    it "uses the as_of_date for transaction filtering and balance snapshots" do
+      loan = EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Travel Advance",
+        original_amount: 300.00,
+        current_balance: 100.00,
+        payment_amount: 50.00,
+        start_date: Date.new(2026, 1, 1),
+        status: "active"
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "addition",
+        amount: 300.00,
+        balance_before: 0.00,
+        balance_after: 300.00,
+        transaction_date: Date.new(2026, 1, 1)
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "payment",
+        amount: 100.00,
+        balance_before: 300.00,
+        balance_after: 200.00,
+        transaction_date: Date.new(2026, 2, 1)
+      )
+      loan.loan_transactions.create!(
+        transaction_type: "payment",
+        amount: 100.00,
+        balance_before: 200.00,
+        balance_after: 100.00,
+        transaction_date: Date.new(2026, 4, 1)
+      )
+
+      sheets = Api::V1::Admin::ReportsController.new.send(:installment_loans_sheets, company, as_of_date: Date.new(2026, 3, 1))
+      rows = sheets.first.fetch(:rows)
+
+      expect(rows.first).to include("Balance As Of", "As Of Date")
+      expect(rows.size).to eq(3)
+      expect(rows.last).to include(Date.new(2026, 3, 1), Date.new(2026, 2, 1), "payment", 200.00)
+      expect(rows.flatten).not_to include(Date.new(2026, 4, 1))
+    end
+  end
+
+  describe "payroll summary by employee Excel sheets" do
+    it "uses a summary-specific workbook instead of payroll register sheets" do
+      report = {
+        summary: {
+          employee_count: 1,
+          total_gross: 1_000.00,
+          total_reported_tips: 50.00,
+          total_tips_paid_out: 25.00,
+          total_bonus: 10.00,
+          total_custom_earnings: 20.00,
+          total_withholding: 100.00,
+          total_social_security: 62.00,
+          total_medicare: 14.50,
+          total_traditional_retirement: 40.00,
+          total_roth_retirement: 30.00,
+          total_employer_traditional_retirement: 20.00,
+          total_employer_roth_retirement: 15.00,
+          total_deductions: 246.50,
+          total_net: 753.50
+        },
+        employees: [
+          {
+            employee_last_name: "Terlaje",
+            employee_first_name: "Mina",
+            employee_name: "Mina Terlaje",
+            employment_type: "hourly",
+            gross_pay: 1_000.00,
+            reported_tips: 50.00,
+            tips_paid_out: 25.00,
+            bonus: 10.00,
+            custom_earnings_total: 20.00,
+            withholding_tax: 100.00,
+            social_security_tax: 62.00,
+            medicare_tax: 14.50,
+            retirement_payment: 40.00,
+            roth_retirement_payment: 30.00,
+            loan_deduction: 0.00,
+            insurance_payment: 0.00,
+            total_deductions: 246.50,
+            net_pay: 753.50,
+            employer_social_security_tax: 62.00,
+            employer_medicare_tax: 14.50,
+            employer_retirement_match: 20.00,
+            employer_roth_retirement_match: 15.00
+          }
+        ]
+      }
+
+      sheets = Api::V1::Admin::ReportsController.new.send(:payroll_summary_by_employee_sheets, report)
+
+      expect(sheets.map { |sheet| sheet[:name] }).to include("Employee Summary", "Totals")
+      expect(sheets.first[:rows].first).to include("Total Payroll Cost")
+      expect(sheets.first[:rows].first).not_to include("Check Number", "Check Date")
+      expect(sheets.first[:rows].last).to include("Mina Terlaje", 1_000.00, 1_111.50)
+      expect(sheets.second[:rows]).to include([ "Roth 401(k)", 30.00 ])
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/form_1099_nec_xlsx" do
+    it "returns 422 for a non-numeric year" do
+      get "/api/v1/admin/reports/form_1099_nec_xlsx", params: { year: "not-a-year" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("year must be a valid 4-digit tax year")
+    end
+  end
+
+  describe "employee pay history Excel sheets" do
+    it "uses human-readable labels for the YTD worksheet" do
+      sheets = Api::V1::Admin::ReportsController.new.send(:employee_pay_history_sheets, {
+        history: [],
+        ytd: {
+          year: 2026,
+          gross_pay: 1_000.00,
+          withholding_tax: 100.00,
+          social_security_tax: 62.00,
+          medicare_tax: 14.50,
+          retirement: 50.00,
+          roth_retirement: 25.00,
+          tips: 20.00,
+          tips_paid_out: 15.00,
+          bonus: 10.00,
+          net_pay: 738.50
+        }
+      })
+
+      ytd_rows = sheets.fetch(1).fetch(:rows)
+      expect(ytd_rows).to include([ "Metric", "Amount" ])
+      expect(ytd_rows).to include([ "Gross Pay", 1_000.00 ])
+      expect(ytd_rows).to include([ "401(k)", 50.00 ])
+      expect(ytd_rows).to include([ "Roth 401(k)", 25.00 ])
+      expect(ytd_rows.flatten).not_to include(:gross_pay, :roth_retirement)
+    end
+  end
 end
