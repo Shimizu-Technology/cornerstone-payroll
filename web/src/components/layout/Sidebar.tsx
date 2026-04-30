@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 
 interface NavItem {
@@ -76,6 +77,7 @@ const adminNavigation: NavItem[] = [
   { name: 'User Management', href: '/settings/users', icon: <UserCog className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Audit Logs', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
 ];
+const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
@@ -198,9 +200,9 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse }: SidebarProps) {
   const { user, signOut } = useAuth();
+  const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin';
-  const canViewClientManagement = ['admin', 'accountant', 'manager'].includes(user?.role || '');
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -289,7 +291,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Administration" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={isAdmin ? adminNavigation : adminNavigation.filter((item) => item.name === 'Client Management')}
+                items={isAdmin ? adminNavigation : adminNavigation.filter((item) => item.href === CLIENT_MANAGEMENT_PATH)}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />
