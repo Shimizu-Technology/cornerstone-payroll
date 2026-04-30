@@ -53,7 +53,8 @@ function formatEIN(value: string): string {
 
 export function Clients() {
   const { refreshCompanies } = useCompany();
-  const { isAdmin: canManageClients } = useAuth();
+  const { isAdmin: canManageClients, isAccountant, isManager } = useAuth();
+  const canEditAssignedClients = canManageClients || isAccountant || isManager;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +128,7 @@ export function Clients() {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim()) {
+    if (canManageClients && !form.name.trim()) {
       setFormError('Client name is required');
       return;
     }
@@ -164,8 +165,8 @@ export function Clients() {
   return (
     <>
       <Header
-        title="Client Management"
-        subtitle="Manage payroll clients"
+        title={canManageClients ? 'Client Management' : 'Client Info'}
+        subtitle={canManageClients ? 'Manage payroll clients' : 'View and update assigned client contact details'}
       />
 
       <div className="p-6 space-y-6">
@@ -211,6 +212,7 @@ export function Clients() {
                     value={form.name}
                     onChange={(e) => updateField('name', e.target.value)}
                     placeholder="e.g. MoSa's Hotbox, Inc."
+                    disabled={!canManageClients}
                   />
                 </div>
                 <div>
@@ -219,6 +221,7 @@ export function Clients() {
                     value={form.ein || ''}
                     onChange={(e) => updateField('ein', formatEIN(e.target.value))}
                     placeholder="XX-XXXXXXX"
+                    disabled={!canManageClients}
                   />
                 </div>
                 <div>
@@ -226,6 +229,7 @@ export function Clients() {
                   <Select
                     value={form.pay_frequency}
                     onChange={(e) => updateField('pay_frequency', e.target.value)}
+                    disabled={!canManageClients}
                   >
                     {payFrequencyOptions.map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -303,54 +307,58 @@ export function Clients() {
                 </div>
               </div>
 
-              {/* Bank Info */}
-              <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
-                  <Input
-                    value={form.bank_name || ''}
-                    onChange={(e) => updateField('bank_name', e.target.value)}
-                    placeholder="Bank of Guam"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
-                  <Input
-                    value={form.bank_address || ''}
-                    onChange={(e) => updateField('bank_address', e.target.value)}
-                    placeholder="111 Chalan Santo Papa"
-                  />
-                </div>
-              </div>
+              {canManageClients && (
+                <>
+                  {/* Bank Info */}
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
+                      <Input
+                        value={form.bank_name || ''}
+                        onChange={(e) => updateField('bank_name', e.target.value)}
+                        placeholder="Bank of Guam"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
+                      <Input
+                        value={form.bank_address || ''}
+                        onChange={(e) => updateField('bank_address', e.target.value)}
+                        placeholder="111 Chalan Santo Papa"
+                      />
+                    </div>
+                  </div>
 
-              {/* Check Settings */}
-              <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
-                  <Select
-                    value={form.check_stock_type || 'bottom_check'}
-                    onChange={(e) => updateField('check_stock_type', e.target.value)}
-                  >
-                    {checkStockOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
-                  <NumericInput
-                    value={form.next_check_number ?? 1001}
-                    onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
-                    min={1}
-                    fixedDecimalsOnBlur={0}
-                  />
-                </div>
-              </div>
+                  {/* Check Settings */}
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
+                      <Select
+                        value={form.check_stock_type || 'bottom_check'}
+                        onChange={(e) => updateField('check_stock_type', e.target.value)}
+                      >
+                        {checkStockOptions.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
+                      <NumericInput
+                        value={form.next_check_number ?? 1001}
+                        onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
+                        min={1}
+                        fixedDecimalsOnBlur={0}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Active toggle (edit only) */}
-              {editingId && (
+              {editingId && canManageClients && (
                 <div className="flex items-center gap-3 pt-2">
                   <label className="text-sm font-medium text-gray-700">Active</label>
                   <button
@@ -398,14 +406,14 @@ export function Clients() {
                   <TableHead>Pay Frequency</TableHead>
                   <TableHead className="text-center">Employees</TableHead>
                   <TableHead className="text-center">Status</TableHead>
-                  {canManageClients && <TableHead className="text-right">Actions</TableHead>}
+                  {canEditAssignedClients && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {companies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canManageClients ? 6 : 5} className="text-center py-8 text-gray-500">
-                      No clients found. Click "Add New Client" to get started.
+                    <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="text-center py-8 text-gray-500">
+                      {canManageClients ? 'No clients found. Click "Add New Client" to get started.' : 'No assigned clients found.'}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -430,7 +438,7 @@ export function Clients() {
                           <Badge variant="default">Inactive</Badge>
                         )}
                       </TableCell>
-                      {canManageClients && (
+                      {canEditAssignedClients && (
                         <TableCell className="text-right">
                           <Button
                             size="sm"

@@ -4,7 +4,18 @@ module Api
   module V1
     module Admin
       class CompaniesController < BaseController
-        skip_before_action :enforce_company_access!, only: [:index]
+        STAFF_EDITABLE_COMPANY_FIELDS = %i[
+          address_line1 address_line2 city state zip phone email
+        ].freeze
+        ADMIN_EDITABLE_COMPANY_FIELDS = (
+          %i[
+            name ein pay_frequency active address_line1 address_line2 city state zip
+            phone email bank_name bank_address check_stock_type check_offset_x check_offset_y
+            next_check_number
+          ] + [ "check_layout_config" ]
+        ).freeze
+
+        skip_before_action :enforce_company_access!, only: [ :index ]
 
         # GET /api/v1/admin/companies
         # Admins see all companies; non-admin staff see only accessible ones.
@@ -26,6 +37,7 @@ module Api
               )
             end,
             can_manage_clients: current_user&.admin? || false,
+            can_view_client_management: staff_client_access?,
             can_switch_company: current_user&.admin? || company_ids.length > 1,
             current_company_id: current_company_id
           }
@@ -59,23 +71,28 @@ module Api
             render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
           end
         rescue ActiveRecord::RecordNotUnique => e
-          render json: { errors: ["EIN is already taken by another company"] }, status: :unprocessable_entity
+          render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/companies/:id
         def update
           company = Company.find(params[:id])
-          unless current_user&.admin?
-            return render json: { error: "Only admins can update companies" }, status: :forbidden
+          unless current_user&.admin? || staff_can_update_company?(company)
+            return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          if company.update(company_params)
+          update_params = current_user&.admin? ? company_params : staff_company_params
+          if update_params.blank?
+            return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
+          end
+
+          if company.update(update_params)
             render json: { company: company_payload(company, detailed: true) }
           else
             render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
           end
         rescue ActiveRecord::RecordNotUnique => e
-          render json: { errors: ["EIN is already taken by another company"] }, status: :unprocessable_entity
+          render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
         end
 
         private
@@ -90,6 +107,10 @@ module Api
             :next_check_number,
             check_layout_config: {}
           )
+        end
+
+        def staff_company_params
+          params.require(:company).permit(*STAFF_EDITABLE_COMPANY_FIELDS)
         end
 
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)
@@ -122,7 +143,18 @@ module Api
             )
           end
 
+          payload[:can_update] = current_user&.admin? || staff_can_update_company?(company)
+          payload[:editable_fields] = current_user&.admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+
           payload
+        end
+
+        def staff_client_access?
+          current_user&.admin? || current_user&.accountant? || current_user&.manager?
+        end
+
+        def staff_can_update_company?(company)
+          staff_client_access? && current_user&.can_access_company?(company.id)
         end
 
         def employee_counts_by_company(company_ids, active_only: false)

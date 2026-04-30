@@ -311,7 +311,13 @@ export function PayPeriods() {
         return compareNumbers(
           new Date(left.pay_date).getTime(),
           new Date(right.pay_date).getTime()
-        );
+        ) || compareNumbers(
+          new Date(left.end_date).getTime(),
+          new Date(right.end_date).getTime()
+        ) || compareNumbers(
+          new Date(left.start_date).getTime(),
+          new Date(right.start_date).getTime()
+        ) || compareNumbers(left.id, right.id);
       }
     });
   }, [payPeriods, searchTerm, sortBy, sortDirection]);

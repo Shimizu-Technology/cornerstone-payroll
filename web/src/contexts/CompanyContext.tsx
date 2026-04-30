@@ -8,6 +8,7 @@ interface CompanyContextValue {
   activeCompany: CompanyListItem | null;
   activeCompanyId: number | null;
   canManageClients: boolean;
+  canViewClientManagement: boolean;
   canSwitchCompany: boolean;
   loading: boolean;
   switchCompany: (companyId: number) => void;
@@ -19,6 +20,7 @@ const CompanyContext = createContext<CompanyContextValue>({
   activeCompany: null,
   activeCompanyId: null,
   canManageClients: false,
+  canViewClientManagement: false,
   canSwitchCompany: false,
   loading: true,
   switchCompany: () => {},
@@ -30,15 +32,17 @@ export function useCompany() {
 }
 
 function applyCompanyResponse(
-  res: { companies: CompanyListItem[]; can_manage_clients: boolean; can_switch_company: boolean; current_company_id: number },
+  res: { companies: CompanyListItem[]; can_manage_clients: boolean; can_view_client_management?: boolean; can_switch_company: boolean; current_company_id: number },
   setCompanies: (c: CompanyListItem[]) => void,
   setCanManageClients: (v: boolean) => void,
+  setCanViewClientManagement: (v: boolean) => void,
   setCanSwitchCompany: (v: boolean) => void,
   setActiveCompanyId: (id: number | null) => void,
   setFetched: (v: boolean) => void,
 ) {
   setCompanies(res.companies);
   setCanManageClients(res.can_manage_clients);
+  setCanViewClientManagement(res.can_view_client_management ?? res.can_manage_clients);
   setCanSwitchCompany(res.can_switch_company ?? res.can_manage_clients);
 
   const storedId = companiesApi.getActiveCompanyId();
@@ -60,6 +64,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     companiesApi.getActiveCompanyId()
   );
   const [canManageClients, setCanManageClients] = useState(false);
+  const [canViewClientManagement, setCanViewClientManagement] = useState(false);
   const [canSwitchCompany, setCanSwitchCompany] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fetched, setFetched] = useState(false);
@@ -75,6 +80,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     setCompanies([]);
     setActiveCompanyId(null);
     setCanManageClients(false);
+    setCanViewClientManagement(false);
     setCanSwitchCompany(false);
     setFetched(false);
     setLoading(false);
@@ -84,14 +90,14 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     try {
       const res = await companiesApi.list();
       if (!mountedRef.current) return;
-      applyCompanyResponse(res, setCompanies, setCanManageClients, setCanSwitchCompany, setActiveCompanyId, setFetched);
+      applyCompanyResponse(res, setCompanies, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
     } catch {
       // Retry once after a short delay (handles race with auth/server startup)
       setTimeout(async () => {
         try {
           const res = await companiesApi.list();
           if (!mountedRef.current) return;
-          applyCompanyResponse(res, setCompanies, setCanManageClients, setCanSwitchCompany, setActiveCompanyId, setFetched);
+          applyCompanyResponse(res, setCompanies, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
         } catch { /* give up */ }
         if (mountedRef.current) setLoading(false);
       }, 1500);
@@ -150,6 +156,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         activeCompany,
         activeCompanyId,
         canManageClients,
+        canViewClientManagement,
         canSwitchCompany,
         loading,
         switchCompany,
