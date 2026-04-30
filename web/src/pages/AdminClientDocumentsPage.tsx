@@ -35,6 +35,25 @@ function formatFileSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+async function loadAllEmployees() {
+  const employees: Employee[] = [];
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const response = await employeesApi.list({ per_page: 100, page, sort_by: 'name', sort_direction: 'asc' });
+    employees.push(...response.data);
+    totalPages = response.meta.total_pages;
+    page += 1;
+  } while (page <= totalPages);
+
+  return employees.sort((a, b) => {
+    const lastName = (a.last_name || '').localeCompare(b.last_name || '');
+    if (lastName !== 0) return lastName;
+    return (a.first_name || '').localeCompare(b.first_name || '');
+  });
+}
+
 export function AdminClientDocumentsPage() {
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -48,6 +67,7 @@ export function AdminClientDocumentsPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewPayload, setPreviewPayload] = useState<Awaited<ReturnType<typeof prepareDocumentPreview>> | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileKeysRef = useRef(new WeakMap<File, string>());
   const [uploadForm, setUploadForm] = useState({
     title: '',
     category: 'misc',
@@ -63,10 +83,10 @@ export function AdminClientDocumentsPage() {
       setError(null);
       const [documentsResponse, employeesResponse] = await Promise.all([
         adminClientDocumentsApi.list({ category: category || undefined }),
-        employeesApi.list({ per_page: 500, sort_by: 'name', sort_direction: 'asc' }),
+        loadAllEmployees(),
       ]);
       setDocuments(documentsResponse.data);
-      setEmployees(employeesResponse.data);
+      setEmployees(employeesResponse);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load client documents');
     } finally {
@@ -89,6 +109,14 @@ export function AdminClientDocumentsPage() {
   );
   const selectedFiles = uploadForm.files;
   const supportsSingleTitle = selectedFiles.length <= 1;
+  const fileKey = (file: File) => {
+    const existingKey = fileKeysRef.current.get(file);
+    if (existingKey) return existingKey;
+
+    const nextKey = `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`;
+    fileKeysRef.current.set(file, nextKey);
+    return nextKey;
+  };
   const employeeOptions = useMemo(
     () => employees.map((employee) => ({ value: String(employee.id), label: `${employee.first_name} ${employee.last_name}` })),
     [employees]
@@ -252,7 +280,7 @@ export function AdminClientDocumentsPage() {
                 {selectedFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedFiles.map((file) => (
-                      <span key={`${file.name}-${file.size}`} className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700">
+                      <span key={fileKey(file)} className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-700">
                         {file.name}
                         <button
                           type="button"
