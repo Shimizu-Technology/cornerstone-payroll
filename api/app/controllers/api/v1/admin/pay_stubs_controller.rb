@@ -132,7 +132,6 @@ module Api
           requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
           base_items = pay_period.payroll_items
                                  .includes(:employee, :pay_period)
-                                 .left_outer_joins(:employee)
 
           if requested_ids.any?
             selected_items = base_items.where(id: requested_ids).to_a
@@ -150,12 +149,12 @@ module Api
               }, status: :unprocessable_entity
             end
 
-            items = base_items.where(id: requested_ids)
+            items = selected_items
           else
-            items = base_items.where(voided: false)
+            items = base_items.where(voided: false).to_a
           end
 
-          items = items.order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC").to_a
+          items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
 
           if items.empty?
             return render json: { error: "No pay stubs found for this pay period" }, status: :unprocessable_entity
