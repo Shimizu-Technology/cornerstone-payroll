@@ -134,5 +134,32 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response).to have_http_status(:not_found)
       expect(response.parsed_body.fetch("error")).to eq("One or more selected pay stubs were not found")
     end
+
+    it "reports selected voided payroll items clearly" do
+      voided_employee = create(
+        :employee,
+        company: company,
+        department: department,
+        first_name: "Vera",
+        last_name: "Voided"
+      )
+      voided_item = create(
+        :payroll_item,
+        :voided,
+        pay_period: pay_period,
+        employee: voided_employee,
+        gross_pay: 1200.0,
+        net_pay: 960.0
+      )
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_item_ids: [ voided_item.id ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Voided checks do not have printable pay stubs")
+      expect(response.parsed_body.fetch("details")).to include(voided_employee.full_name)
+    end
   end
 end

@@ -129,17 +129,33 @@ module Api
             return render json: { error: "Pay stubs are only available for committed pay periods" }, status: :unprocessable_entity
           end
 
-          items = pay_period.payroll_items
-                            .includes(:employee, :pay_period)
-                            .left_outer_joins(:employee)
-                            .where(voided: false)
           requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
-          items = items.where(id: requested_ids) if requested_ids.any?
-          items = items.order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC").to_a
+          base_items = pay_period.payroll_items
+                                 .includes(:employee, :pay_period)
+                                 .left_outer_joins(:employee)
 
-          if requested_ids.any? && items.size != requested_ids.size
-            return render json: { error: "One or more selected pay stubs were not found" }, status: :not_found
+          if requested_ids.any?
+            selected_items = base_items.where(id: requested_ids).to_a
+
+            if selected_items.size != requested_ids.size
+              return render json: { error: "One or more selected pay stubs were not found" }, status: :not_found
+            end
+
+            voided_items = selected_items.select(&:voided?)
+            if voided_items.any?
+              names = voided_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
+              return render json: {
+                error: "Voided checks do not have printable pay stubs",
+                details: "Remove #{names} from the selection and try again."
+              }, status: :unprocessable_entity
+            end
+
+            items = base_items.where(id: requested_ids)
+          else
+            items = base_items.where(voided: false)
           end
+
+          items = items.order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC").to_a
 
           if items.empty?
             return render json: { error: "No pay stubs found for this pay period" }, status: :unprocessable_entity

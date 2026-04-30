@@ -77,4 +77,21 @@ RSpec.describe PayStubGenerator do
       expect(text).to include("Generated on April 30, 2026 at 05:48 AM ChST")
     end
   end
+
+  it "lets dense earnings statements flow to additional content pages without a footer-only page" do
+    120.times do |index|
+      payroll_item.payroll_item_earnings.create!(
+        category: "other",
+        label: "Supplemental Earning #{index + 1}",
+        amount: 10 + index
+      )
+    end
+
+    pdf = described_class.new(payroll_item).generate
+    pages = PDF::Reader.new(StringIO.new(pdf)).pages
+
+    expect(pages.count).to be > 1
+    expect(pages.last.text).to include("Supplemental Earning 120")
+    expect(pages.last.text).to include("Generated on")
+  end
 end

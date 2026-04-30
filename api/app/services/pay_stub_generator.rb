@@ -11,6 +11,8 @@ require "prawn/table"
 #   # pdf_data is raw PDF binary
 #
 class PayStubGenerator
+  include PdfFooter
+
   GUAM_TIME_ZONE = "Pacific/Guam"
 
   attr_reader :payroll_item, :employee, :pay_period, :company
@@ -23,31 +25,35 @@ class PayStubGenerator
   end
 
   def generate
-    Prawn::Document.new(page_size: "LETTER", margin: 32) do |pdf|
-      # Header
-      render_header(pdf)
+    pdf = Prawn::Document.new(page_size: "LETTER", margin: [ 32, 32, 64, 32 ])
 
-      # Employee Info
-      render_employee_info(pdf)
+    # Header
+    render_header(pdf)
 
-      # Pay Period Info
-      render_pay_period_info(pdf)
+    # Employee Info
+    render_employee_info(pdf)
 
-      # Earnings Section
-      render_earnings(pdf)
+    # Pay Period Info
+    render_pay_period_info(pdf)
 
-      # Deductions Section
-      render_deductions(pdf)
+    # Earnings Section
+    render_earnings(pdf)
 
-      # Net Pay
-      render_net_pay(pdf)
+    # Deductions Section
+    render_deductions(pdf)
 
-      # YTD Summary
-      render_ytd_summary(pdf)
+    # Net Pay
+    render_net_pay(pdf)
 
-      # Footer
-      render_footer(pdf)
-    end.render
+    # YTD Summary
+    render_ytd_summary(pdf)
+
+    render_with_footer(
+      pdf,
+      "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
+      font_size: 7,
+      height: 30
+    )
   end
 
   def filename
@@ -393,18 +399,6 @@ class PayStubGenerator
         column(0).font_style = :bold
         column(1).align = :right
         row(-1).background_color = "F5F5F5"
-      end
-    end
-  end
-
-  def render_footer(pdf)
-    pdf.bounding_box([ 0, 34 ], width: pdf.bounds.width, height: 32) do
-      pdf.stroke_horizontal_rule
-      pdf.move_down 6
-
-      pdf.font_size(7.5) do
-        pdf.text "This is your official earnings statement. Please retain for your records.", align: :center, color: "666666"
-        pdf.text "Generated on #{guam_generated_timestamp}", align: :center, color: "999999"
       end
     end
   end
