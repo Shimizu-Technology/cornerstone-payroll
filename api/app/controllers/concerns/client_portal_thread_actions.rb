@@ -36,6 +36,8 @@ module ClientPortalThreadActions
       initial_message = create_message_for_thread!(created_thread) if params[:body].present? || params[:document_id].present?
     end
 
+    created_thread.reload if initial_message
+
     record_audit!("client_portal_threads#create", created_thread, { subject: created_thread.subject })
     record_audit!("client_portal_messages#create", initial_message, { thread_id: created_thread.id }) if initial_message
     ClientPortalThreadChannel.broadcast_thread(created_thread, event: "thread_created")

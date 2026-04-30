@@ -33,4 +33,19 @@ RSpec.describe "Api::V1::Client::PortalThreads", type: :request do
     expect(thread.reload).to be_resolved
     expect(thread.resolved_by).to eq(staff_user)
   end
+
+  it "returns the committed last message timestamp when creating a thread with an initial message" do
+    post "/api/v1/client/portal_threads", params: { subject: "Payroll notes", body: "Updated hours attached." }
+
+    expect(response).to have_http_status(:created)
+
+    data = response.parsed_body.fetch("data")
+    expect(data.fetch("last_message_at")).to be_present
+    expect(data.dig("latest_message", "body")).to eq("Updated hours attached.")
+
+    created_thread = ClientPortalThread.find(data.fetch("id"))
+    expect(created_thread.last_message_at).to be_present
+    expect(Time.zone.parse(data.fetch("last_message_at")).to_i).to eq(created_thread.last_message_at.to_i)
+    expect(ClientPortalThreadChannel).to have_received(:broadcast_thread).with(created_thread, event: "thread_created")
+  end
 end
