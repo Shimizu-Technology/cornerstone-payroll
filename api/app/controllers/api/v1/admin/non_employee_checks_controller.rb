@@ -34,8 +34,8 @@ module Api
           checks = checks.where(tax_year: params[:tax_year]) if params[:tax_year].present?
           checks = checks.where(tax_quarter: params[:tax_quarter]) if params[:tax_quarter].present?
           checks = checks.where(tax_month: params[:tax_month]) if params[:tax_month].present?
-          checks = checks.where("COALESCE(payment_date, DATE(created_at)) >= ?", Date.iso8601(params[:from])) if params[:from].present?
-          checks = checks.where("COALESCE(payment_date, DATE(created_at)) <= ?", Date.iso8601(params[:to])) if params[:to].present?
+          checks = checks.where("COALESCE(payment_date, DATE(created_at)) >= ?", filter_date_param(:from)) if params[:from].present?
+          checks = checks.where("COALESCE(payment_date, DATE(created_at)) <= ?", filter_date_param(:to)) if params[:to].present?
           checks = checks.active if params[:active] == "true"
 
           checks = checks.order(Arel.sql("COALESCE(payment_date, DATE(created_at)) DESC"), created_at: :desc).to_a
@@ -50,6 +50,8 @@ module Api
               check_payload(c, edit_count: edit_counts[c.id] || 0)
             }
           }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/non_employee_checks/:id
@@ -105,7 +107,11 @@ module Api
             return if pay_period_id.present? && pay_period.nil?
 
             attrs["pay_period_id"] = pay_period&.id
-            attrs["payment_period_type"] = pay_period ? "pay_period" : "none"
+            attrs["payment_period_type"] = if pay_period
+              "pay_period"
+            else
+              attrs["payment_period_type"].presence || "none"
+            end
           end
 
           # Snapshot the audited fields before we touch the record so the audit
@@ -273,7 +279,15 @@ module Api
         # Optional text fields whose blank ("" or whitespace-only) values
         # should be stored as NULL. Centralised so `check_params` and
         # `audit_snapshot` agree on the normalisation.
-        BLANKABLE_TEXT_FIELDS = %i[check_number memo description reference_number].freeze
+        BLANKABLE_TEXT_FIELDS = %i[
+          check_number memo description reference_number confirmation_number
+        ].freeze
+
+        def filter_date_param(name)
+          Date.iso8601(params[name])
+        rescue ArgumentError
+          raise ArgumentError, "#{name} must be an ISO-8601 date"
+        end
 
         def resolve_pay_period(pay_period_id)
           pay_period = PayPeriod.find_by(id: pay_period_id, company_id: current_company_id)
