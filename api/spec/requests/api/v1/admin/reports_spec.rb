@@ -1323,16 +1323,47 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
             employer_retirement_match: 20.00,
             employer_roth_retirement_match: 15.00
           }
+        ],
+        contractors: [
+          {
+            employee_last_name: "Santos",
+            employee_first_name: "Kai",
+            employee_name: "Kai Santos",
+            employment_type: "contractor",
+            gross_pay: 600.00,
+            reported_tips: 0.00,
+            tips_paid_out: 0.00,
+            bonus: 0.00,
+            custom_earnings_total: 75.00,
+            withholding_tax: 0.00,
+            social_security_tax: 0.00,
+            medicare_tax: 0.00,
+            retirement_payment: 0.00,
+            roth_retirement_payment: 0.00,
+            loan_deduction: 0.00,
+            insurance_payment: 0.00,
+            total_deductions: 0.00,
+            net_pay: 600.00,
+            employer_social_security_tax: 0.00,
+            employer_medicare_tax: 0.00,
+            employer_retirement_match: 0.00,
+            employer_roth_retirement_match: 0.00
+          }
         ]
       }
 
       sheets = Api::V1::Admin::ReportsController.new.send(:payroll_summary_by_employee_sheets, report)
 
-      expect(sheets.map { |sheet| sheet[:name] }).to include("Employee Summary", "Totals")
+      expect(sheets.map { |sheet| sheet[:name] }).to include("Employee Summary", "Totals", "Contractor Summary", "Contractor Totals")
       expect(sheets.first[:rows].first).to include("Total Payroll Cost")
       expect(sheets.first[:rows].first).not_to include("Check Number", "Check Date")
       expect(sheets.first[:rows].last).to include("Mina Terlaje", 1_000.00, 1_111.50)
       expect(sheets.second[:rows]).to include([ "Roth 401(k)", 30.00 ])
+      contractor_totals = sheets.find { |sheet| sheet[:name] == "Contractor Totals" }
+      expect(contractor_totals[:rows]).to include([ "Employees", 1 ])
+      expect(contractor_totals[:rows]).to include([ "Gross Pay", 600.00 ])
+      expect(contractor_totals[:rows]).to include([ "Custom Earnings", 75.00 ])
+      expect(contractor_totals[:rows]).to include([ "Net Pay", 600.00 ])
     end
   end
 

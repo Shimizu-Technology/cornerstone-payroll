@@ -1383,7 +1383,10 @@ module Api
             earnings_breakdown_sheet(report),
             deductions_breakdown_sheet(report)
           ]
-          sheets << { name: "Contractor Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + contractors.map { |emp| payroll_summary_by_employee_row(emp) } } if contractors.any?
+          if contractors.any?
+            sheets << { name: "Contractor Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + contractors.map { |emp| payroll_summary_by_employee_row(emp) } }
+            sheets << payroll_summary_totals_sheet(payroll_summary_totals_for_items(contractors), name: "Contractor Totals")
+          end
           sheets << report_info_sheet(report, title: "Payroll Summary by Employee")
           sheets
         end
@@ -1407,7 +1410,7 @@ module Api
           ]
         end
 
-        def payroll_summary_totals_sheet(summary)
+        def payroll_summary_totals_sheet(summary, name: "Totals")
           rows = [
             [ "Metric", "Amount" ],
             [ "Employees", summary[:employee_count] ],
@@ -1426,7 +1429,27 @@ module Api
             [ "Total Deductions", summary[:total_deductions] ],
             [ "Net Pay", summary[:total_net] ]
           ]
-          { name: "Totals", rows: rows }
+          { name: name, rows: rows }
+        end
+
+        def payroll_summary_totals_for_items(items)
+          {
+            employee_count: items.length,
+            total_gross: items.sum { |item| item[:gross_pay].to_f },
+            total_reported_tips: items.sum { |item| item[:reported_tips].to_f },
+            total_tips_paid_out: items.sum { |item| item[:tips_paid_out].to_f },
+            total_bonus: items.sum { |item| item[:bonus].to_f },
+            total_custom_earnings: items.sum { |item| item[:custom_earnings_total].to_f },
+            total_withholding: items.sum { |item| item[:withholding_tax].to_f },
+            total_social_security: items.sum { |item| item[:social_security_tax].to_f },
+            total_medicare: items.sum { |item| item[:medicare_tax].to_f },
+            total_traditional_retirement: items.sum { |item| item[:retirement_payment].to_f },
+            total_roth_retirement: items.sum { |item| item[:roth_retirement_payment].to_f },
+            total_employer_traditional_retirement: items.sum { |item| item[:employer_retirement_match].to_f },
+            total_employer_roth_retirement: items.sum { |item| item[:employer_roth_retirement_match].to_f },
+            total_deductions: items.sum { |item| item[:total_deductions].to_f },
+            total_net: items.sum { |item| item[:net_pay].to_f }
+          }
         end
 
         def payroll_export_row(emp)
