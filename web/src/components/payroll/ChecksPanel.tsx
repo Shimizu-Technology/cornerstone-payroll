@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
-import { checksApi } from '@/services/api';
+import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { VoidCheckModal } from './VoidCheckModal';
@@ -46,6 +46,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const [editingCheckId, setEditingCheckId] = useState<number | null>(null);
   const [draftCheckNumber, setDraftCheckNumber] = useState('');
   const [checkNumberError, setCheckNumberError] = useState<{ id: number; message: string } | null>(null);
+  const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -60,6 +61,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       const data = await checksApi.list(payPeriod.id);
       setChecks(data.checks);
       setMeta(data.meta);
+      setSelectedStubIds((current) => current.filter((id) => data.checks.some((item) => item.id === id && !item.voided)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load checks');
     } finally {
@@ -173,6 +175,56 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to generate PDF for printing');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
+    }
+  };
+
+  const selectedStubIdSet = new Set(selectedStubIds);
+
+  const selectedStubRequestIds = () =>
+    selectedStubIds.length > 0 ? selectedStubIds : undefined;
+
+  const handleDownloadPayStubs = async () => {
+    setBatchLoading(true);
+    setBatchAction(selectedStubIds.length > 0 ? 'Generating selected pay stubs...' : 'Generating pay stubs...');
+    try {
+      const result = await payStubsApi.batchPdf(payPeriod.id, selectedStubRequestIds());
+      setBatchAction('Downloading pay stubs...');
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || `paystubs_${payPeriod.pay_date ?? 'undated'}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download pay stubs');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
+    }
+  };
+
+  const handlePrintPayStubs = async () => {
+    setBatchLoading(true);
+    setBatchAction(selectedStubIds.length > 0 ? 'Generating selected pay stubs...' : 'Generating pay stubs...');
+    try {
+      const result = await payStubsApi.batchPdf(payPeriod.id, selectedStubRequestIds());
+      setBatchAction('Opening pay stubs...');
+      const url = URL.createObjectURL(result.blob);
+      const printWindow = window.open(url);
+      if (printWindow) {
+        printWindow.addEventListener('load', () => {
+          printWindow.print();
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        });
+      } else {
+        URL.revokeObjectURL(url);
+        alert('Pop-up blocked. Please allow pop-ups for this site to print pay stubs.');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to print pay stubs');
     } finally {
       setBatchLoading(false);
       setBatchAction(null);
@@ -304,6 +356,29 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
         ].some((value) => value?.toLowerCase().includes(normalizedSearch));
       })
     : checks;
+  const stubEligibleChecks = filteredChecks.filter((item) => !item.voided);
+  const stubEligibleIds = stubEligibleChecks.map((item) => item.id);
+  const allVisibleStubsSelected = stubEligibleIds.length > 0 && stubEligibleIds.every((id) => selectedStubIdSet.has(id));
+  const hasPrintableStub = checks.some((item) => !item.voided);
+
+  const toggleStubSelection = (item: CheckItem) => {
+    if (item.voided) return;
+    setSelectedStubIds((current) =>
+      current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]
+    );
+  };
+
+  const toggleAllVisibleStubs = () => {
+    setSelectedStubIds((current) => {
+      const currentSet = new Set(current);
+      if (allVisibleStubsSelected) {
+        stubEligibleIds.forEach((id) => currentSet.delete(id));
+      } else {
+        stubEligibleIds.forEach((id) => currentSet.add(id));
+      }
+      return Array.from(currentSet);
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -361,6 +436,22 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           <Button
             size="sm"
             variant="outline"
+            onClick={() => void handlePrintPayStubs()}
+            disabled={batchLoading || !hasPrintableStub}
+          >
+            {selectedStubIds.length > 0 ? `Print ${selectedStubIds.length} Stub${selectedStubIds.length === 1 ? '' : 's'}` : 'Print All Stubs'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void handleDownloadPayStubs()}
+            disabled={batchLoading || !hasPrintableStub}
+          >
+            {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download All Stubs'}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
             onClick={handlePrintAll}
             disabled={batchLoading || checks.length === 0}
           >
@@ -378,7 +469,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
 
       {isFirstHawaiian4Up && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-          First Hawaiian 4-Up mode prints four checks per sheet and keeps payroll stubs separate. Use the start slot when loading a partially used sheet.
+          First Hawaiian 4-Up mode prints four checks per sheet and keeps payroll stubs separate. Use Print Stubs or Download Stubs to produce plain-paper earnings statements.
         </div>
       )}
 
@@ -392,6 +483,15 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
+                <th className="w-10 px-3 py-2 text-left font-medium text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleStubsSelected}
+                    onChange={toggleAllVisibleStubs}
+                    disabled={stubEligibleIds.length === 0}
+                    aria-label="Select all visible pay stubs"
+                  />
+                </th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600">Check #</th>
                 <th className="px-3 py-2 text-left font-medium text-gray-600">Employee</th>
                 <th className="px-3 py-2 text-right font-medium text-gray-600">Net Pay</th>
@@ -405,6 +505,15 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                   key={item.id}
                   className={`border-b border-gray-100 hover:bg-gray-50 ${item.voided ? 'opacity-60' : ''}`}
                 >
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedStubIdSet.has(item.id)}
+                      onChange={() => toggleStubSelection(item)}
+                      disabled={item.voided}
+                      aria-label={`Select pay stub for ${item.employee_name}`}
+                    />
+                  </td>
                   <td className="px-3 py-2 text-gray-800">
                     {editingCheckId === item.id ? (
                       <div className="space-y-1">

@@ -116,6 +116,51 @@ module Api
           }
         end
 
+        # POST /api/v1/admin/pay_stubs/batch_pdf
+        # Generate one plain-paper PDF containing all or selected pay stubs for a pay period.
+        def batch_pdf
+          pay_period = PayPeriod.find(params[:pay_period_id])
+
+          unless pay_period.company_id == current_company_id
+            return render json: { error: "Pay period not found" }, status: :not_found
+          end
+
+          unless pay_period.committed?
+            return render json: { error: "Pay stubs are only available for committed pay periods" }, status: :unprocessable_entity
+          end
+
+          items = pay_period.payroll_items
+                            .includes(:employee, :pay_period)
+                            .left_outer_joins(:employee)
+                            .where(voided: false)
+          requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
+          items = items.where(id: requested_ids) if requested_ids.any?
+          items = items.order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC").to_a
+
+          if requested_ids.any? && items.size != requested_ids.size
+            return render json: { error: "One or more selected pay stubs were not found" }, status: :not_found
+          end
+
+          if items.empty?
+            return render json: { error: "No pay stubs found for this pay period" }, status: :unprocessable_entity
+          end
+
+          combined_pdf = combine_pdfs(items.map { |item| PayStubGenerator.new(item).generate })
+          pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
+          filename_prefix = requested_ids.any? ? "selected_paystubs" : "paystubs"
+
+          send_data combined_pdf,
+            type: "application/pdf",
+            disposition: "attachment",
+            filename: "#{filename_prefix}_#{pay_date}.pdf"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Pay period not found" }, status: :not_found
+        rescue LoadError
+          render json: {
+            error: "Batch pay stub PDF requires the combine_pdf gem. Please install it or contact your administrator."
+          }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/pay_stubs/employee/:employee_id
         # List all pay stubs for an employee
         def employee_stubs
@@ -182,7 +227,7 @@ module Api
           return nil unless r2_configured?
 
           storage ||= R2StorageService.new
-          [pay_stub_key(item), legacy_pay_stub_key(item)].uniq.find do |key|
+          [ pay_stub_key(item), legacy_pay_stub_key(item) ].uniq.find do |key|
             storage.exists?(key)
           end
         rescue StandardError
@@ -191,6 +236,14 @@ module Api
 
         def pay_stub_exists?
           existing_storage_key.present?
+        end
+
+        def combine_pdfs(pdf_binaries)
+          require "combine_pdf"
+
+          combined = CombinePDF.new
+          pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
+          combined.to_pdf
         end
 
         def r2_configured?

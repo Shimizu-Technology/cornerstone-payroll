@@ -1444,6 +1444,11 @@ export const payStubsApi = {
     `${API_BASE_URL}/admin/pay_stubs/${payrollItemId}/download`,
   batchGenerate: (payPeriodId: number) =>
     api.post<{ pay_period_id: number; total: number; generated: number; errors: number }>('/admin/pay_stubs/batch_generate', { pay_period_id: payPeriodId }),
+  batchPdf: (payPeriodId: number, payrollItemIds?: number[]) =>
+    api.postBlob('/admin/pay_stubs/batch_pdf', {
+      pay_period_id: payPeriodId,
+      payroll_item_ids: payrollItemIds && payrollItemIds.length > 0 ? payrollItemIds : undefined,
+    }),
   employeeStubs: (employeeId: number, limit?: number) =>
     api.get<{ employee: { id: number; name: string }; pay_stubs: PayStubInfo[] }>(`/admin/pay_stubs/employee/${employeeId}`, { limit }),
 };
