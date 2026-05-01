@@ -34,6 +34,10 @@ const PERIOD_LABELS: Record<PaymentPeriodType, string> = {
   year: 'Annual',
 };
 
+const currentYear = new Date().getFullYear();
+const currentMonth = new Date().getMonth() + 1;
+const currentQuarter = Math.floor(new Date().getMonth() / 3) + 1;
+
 interface FormState {
   payable_to: string;
   amount: string;
@@ -83,6 +87,50 @@ function periodPayload(form: Pick<FormState, 'payment_period_type' | 'tax_year' 
       ? Number(form.tax_month)
       : null,
   };
+}
+
+function handlePeriodTypeChange(
+  prev: FormState,
+  paymentPeriodType: PaymentPeriodType
+): FormState {
+  const taxYear = prev.tax_year || String(currentYear);
+
+  switch (paymentPeriodType) {
+  case 'month':
+    return {
+      ...prev,
+      payment_period_type: paymentPeriodType,
+      tax_year: taxYear,
+      tax_month: prev.tax_month || String(currentMonth),
+      tax_quarter: '',
+    };
+  case 'quarter':
+    return {
+      ...prev,
+      payment_period_type: paymentPeriodType,
+      tax_year: taxYear,
+      tax_quarter: prev.tax_quarter || String(currentQuarter),
+      tax_month: '',
+    };
+  case 'year':
+    return {
+      ...prev,
+      payment_period_type: paymentPeriodType,
+      tax_year: taxYear,
+      tax_month: '',
+      tax_quarter: '',
+    };
+  case 'none':
+    return {
+      ...prev,
+      payment_period_type: paymentPeriodType,
+      tax_year: '',
+      tax_month: '',
+      tax_quarter: '',
+    };
+  default:
+    return { ...prev, payment_period_type: paymentPeriodType };
+  }
 }
 
 export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmployeeCheckEditModalProps) {
@@ -310,7 +358,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                   <select
                     className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                     value={form.payment_period_type}
-                    onChange={e => setForm(p => p && { ...p, payment_period_type: e.target.value as PaymentPeriodType })}
+                    onChange={e => setForm(p => p && handlePeriodTypeChange(p, e.target.value as PaymentPeriodType))}
                   >
                     {(['none', 'month', 'quarter', 'year'] as PaymentPeriodType[]).map(type => (
                       <option key={type} value={type}>{PERIOD_LABELS[type]}</option>
@@ -337,6 +385,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                       value={form.tax_quarter}
                       onChange={e => setForm(p => p && { ...p, tax_quarter: e.target.value })}
                     >
+                      <option value="" disabled>Select quarter</option>
                       {[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}
                     </select>
                   </Field>
@@ -349,6 +398,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                       value={form.tax_month}
                       onChange={e => setForm(p => p && { ...p, tax_month: e.target.value })}
                     >
+                      <option value="" disabled>Select month</option>
                       {Array.from({ length: 12 }, (_, i) => i + 1).map(month => (
                         <option key={month} value={month}>
                           {new Date(2026, month - 1, 1).toLocaleString(undefined, { month: 'long' })}
