@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CheckCircle2, FileText, Printer, Search, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CheckCircle2, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi, companiesApi, type CompanyDetail } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -86,6 +88,21 @@ const initialForm: FormState = {
   reference_number: '',
   description: '',
 };
+
+const fieldClassName = 'rounded-xl';
+
+function periodPayload(form: Pick<FormState, 'payment_period_type' | 'tax_year' | 'tax_quarter' | 'tax_month'>) {
+  return {
+    payment_period_type: form.payment_period_type,
+    tax_year: form.payment_period_type === 'none' ? null : form.tax_year ? Number(form.tax_year) : null,
+    tax_quarter: form.payment_period_type === 'quarter' && form.tax_quarter
+      ? Number(form.tax_quarter)
+      : null,
+    tax_month: form.payment_period_type === 'month' && form.tax_month
+      ? Number(form.tax_month)
+      : null,
+  };
+}
 
 export function ChecksPayments() {
   const { activeCompanyId } = useCompany();
@@ -172,10 +189,7 @@ export function ChecksPayments() {
       amount: Number(form.amount),
       check_type: form.check_type,
       check_number: form.check_number.trim() || undefined,
-      payment_period_type: form.payment_period_type,
-      tax_year: form.tax_year ? Number(form.tax_year) : null,
-      tax_quarter: form.tax_quarter ? Number(form.tax_quarter) : null,
-      tax_month: form.tax_month ? Number(form.tax_month) : null,
+      ...periodPayload(form),
       due_date: form.due_date || null,
       payment_date: form.payment_date || null,
       confirmation_number: form.confirmation_number.trim() || null,
@@ -293,41 +307,111 @@ export function ChecksPayments() {
         )}
 
         {showForm && (
-          <Card className="p-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-              <Input placeholder="Payable to" value={form.payable_to} onChange={e => setForm(p => ({ ...p, payable_to: e.target.value }))} />
-              <NumericInput placeholder="Amount" min={0.01} fixedDecimalsOnBlur={2} value={form.amount === '' ? null : Number(form.amount)} onValueChange={value => setForm(p => ({ ...p, amount: value == null ? '' : String(value) }))} />
-              <select className="rounded border px-3 py-2 text-sm" value={form.check_type} onChange={e => setForm(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}>
+          <Card className="p-4 sm:p-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <Input
+                label="Payable to"
+                value={form.payable_to}
+                onChange={e => setForm(p => ({ ...p, payable_to: e.target.value }))}
+              />
+              <FormField label="Amount">
+                <NumericInput
+                  min={0.01}
+                  fixedDecimalsOnBlur={2}
+                  value={form.amount === '' ? null : Number(form.amount)}
+                  onValueChange={value => setForm(p => ({ ...p, amount: value == null ? '' : String(value) }))}
+                />
+              </FormField>
+              <Select
+                label="Check type"
+                value={form.check_type}
+                onChange={e => setForm(p => ({ ...p, check_type: e.target.value as NonEmployeeCheckType }))}
+              >
                 {STANDALONE_TYPES.map(type => <option key={type} value={type}>{CHECK_TYPE_LABELS[type]}</option>)}
-              </select>
-              <Input placeholder="Check #" value={form.check_number} onChange={e => setForm(p => ({ ...p, check_number: e.target.value }))} />
-              <select className="rounded border px-3 py-2 text-sm" value={form.payment_period_type} onChange={e => setForm(p => ({ ...p, payment_period_type: e.target.value as PaymentPeriodType }))}>
+              </Select>
+              <Input
+                label="Check number"
+                helperText="Optional until printed."
+                value={form.check_number}
+                onChange={e => setForm(p => ({ ...p, check_number: e.target.value }))}
+              />
+              <Select
+                label="Tax/reporting period"
+                value={form.payment_period_type}
+                onChange={e => setForm(p => ({ ...p, payment_period_type: e.target.value as PaymentPeriodType }))}
+              >
                 {(['none', 'month', 'quarter', 'year'] as PaymentPeriodType[]).map(type => <option key={type} value={type}>{PERIOD_LABELS[type]}</option>)}
-              </select>
-              <Input placeholder="Tax year" inputMode="numeric" value={form.tax_year} onChange={e => setForm(p => ({ ...p, tax_year: e.target.value }))} />
+              </Select>
+              {form.payment_period_type !== 'none' && (
+                <Input
+                  label="Tax year"
+                  inputMode="numeric"
+                  value={form.tax_year}
+                  onChange={e => setForm(p => ({ ...p, tax_year: e.target.value }))}
+                />
+              )}
               {form.payment_period_type === 'quarter' && (
-                <select className="rounded border px-3 py-2 text-sm" value={form.tax_quarter} onChange={e => setForm(p => ({ ...p, tax_quarter: e.target.value }))}>
+                <Select
+                  label="Tax quarter"
+                  value={form.tax_quarter}
+                  onChange={e => setForm(p => ({ ...p, tax_quarter: e.target.value }))}
+                >
                   {[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}
-                </select>
+                </Select>
               )}
               {form.payment_period_type === 'month' && (
-                <select className="rounded border px-3 py-2 text-sm" value={form.tax_month} onChange={e => setForm(p => ({ ...p, tax_month: e.target.value }))}>
+                <Select
+                  label="Tax month"
+                  value={form.tax_month}
+                  onChange={e => setForm(p => ({ ...p, tax_month: e.target.value }))}
+                >
                   {Array.from({ length: 12 }, (_, i) => i + 1).map(month => <option key={month} value={month}>{new Date(2026, month - 1, 1).toLocaleString(undefined, { month: 'long' })}</option>)}
-                </select>
+                </Select>
               )}
-              <Input type="date" value={form.payment_date} onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))} />
-              <Input type="date" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
-              <Input placeholder="Confirmation #" value={form.confirmation_number} onChange={e => setForm(p => ({ ...p, confirmation_number: e.target.value }))} />
-              <Input placeholder="Reference #" value={form.reference_number} onChange={e => setForm(p => ({ ...p, reference_number: e.target.value }))} />
-              <Input placeholder="Memo" value={form.memo} onChange={e => setForm(p => ({ ...p, memo: e.target.value }))} />
+              <Input
+                label="Payment date"
+                helperText="Date the check/payment is issued."
+                type="date"
+                value={form.payment_date}
+                onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))}
+              />
+              <Input
+                label="Due date"
+                helperText="Deadline for the tax bill or obligation."
+                type="date"
+                value={form.due_date}
+                onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))}
+              />
+              <Input
+                label="Confirmation number"
+                value={form.confirmation_number}
+                onChange={e => setForm(p => ({ ...p, confirmation_number: e.target.value }))}
+              />
+              <Input
+                label="Reference number"
+                value={form.reference_number}
+                onChange={e => setForm(p => ({ ...p, reference_number: e.target.value }))}
+              />
+              <Input
+                label="Memo"
+                value={form.memo}
+                onChange={e => setForm(p => ({ ...p, memo: e.target.value }))}
+              />
             </div>
-            <textarea
-              className="mt-3 w-full rounded border px-3 py-2 text-sm"
-              rows={2}
-              placeholder="Description"
-              value={form.description}
-              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-            />
+            <FormField label="Description" className="mt-4">
+              <textarea
+                className={`${fieldClassName} min-h-[88px] w-full border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm transition-all duration-200 placeholder:text-neutral-400 focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200`}
+                rows={2}
+                value={form.description}
+                onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+              />
+            </FormField>
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
+              <Link to="/check-settings" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
+                Open Check Settings
+              </Link>
+            </div>
             <div className="mt-4 flex gap-2">
               <Button onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : 'Create Check'}</Button>
               <Button variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
@@ -347,19 +431,25 @@ export function ChecksPayments() {
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <select className="rounded border bg-white px-3 py-2 text-sm" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+              <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
                 <option value="all">All types</option>
                 {STANDALONE_TYPES.map(type => <option key={type} value={type}>{CHECK_TYPE_LABELS[type]}</option>)}
               </select>
-              <select className="rounded border bg-white px-3 py-2 text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                 <option value="active">Active only</option>
                 <option value="all">Include voided</option>
               </select>
               {company?.check_stock_type === 'first_hawaiian_4up' && (
-                <select className="rounded border bg-white px-3 py-2 text-sm" value={startingSlot} onChange={e => setStartingSlot(Number(e.target.value))}>
+                <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={startingSlot} onChange={e => setStartingSlot(Number(e.target.value))}>
                   {[1, 2, 3, 4].map(slot => <option key={slot} value={slot}>Slot {slot}</option>)}
                 </select>
               )}
+              <Link
+                to="/check-settings"
+                className="inline-flex items-center rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm font-medium text-neutral-700 shadow-sm hover:bg-neutral-50"
+              >
+                <Settings className="mr-1.5 h-4 w-4" /> Check Settings
+              </Link>
             </div>
           </div>
         </Card>
@@ -481,4 +571,23 @@ function periodLabel(check: NonEmployeeCheck) {
   if (check.payment_period_type === 'quarter' && check.tax_year && check.tax_quarter) return `Q${check.tax_quarter} ${check.tax_year}`;
   if (check.payment_period_type === 'year' && check.tax_year) return String(check.tax_year);
   return PERIOD_LABELS[check.payment_period_type] || 'No tax period';
+}
+
+function FormField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <label className="mb-1.5 block text-sm font-medium text-neutral-700">
+        {label}
+      </label>
+      {children}
+    </div>
+  );
 }

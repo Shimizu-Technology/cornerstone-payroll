@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi } from '@/services/api';
-import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
+import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
 
 interface NonEmployeeCheckEditModalProps {
   check: NonEmployeeCheck | null;
@@ -26,11 +26,26 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
+const PERIOD_LABELS: Record<PaymentPeriodType, string> = {
+  none: 'No tax period',
+  pay_period: 'Pay period',
+  month: 'Monthly',
+  quarter: 'Quarterly',
+  year: 'Annual',
+};
+
 interface FormState {
   payable_to: string;
   amount: string;
   check_type: NonEmployeeCheckType;
   check_number: string;
+  payment_period_type: PaymentPeriodType;
+  tax_year: string;
+  tax_quarter: string;
+  tax_month: string;
+  due_date: string;
+  payment_date: string;
+  confirmation_number: string;
   reference_number: string;
   memo: string;
   description: string;
@@ -43,10 +58,30 @@ function buildInitialState(check: NonEmployeeCheck): FormState {
     amount: String(check.amount),
     check_type: check.check_type,
     check_number: check.check_number || '',
+    payment_period_type: check.payment_period_type,
+    tax_year: check.tax_year ? String(check.tax_year) : '',
+    tax_quarter: check.tax_quarter ? String(check.tax_quarter) : '',
+    tax_month: check.tax_month ? String(check.tax_month) : '',
+    due_date: check.due_date || '',
+    payment_date: check.payment_date || '',
+    confirmation_number: check.confirmation_number || '',
     reference_number: check.reference_number || '',
     memo: check.memo || '',
     description: check.description || '',
     reason: '',
+  };
+}
+
+function periodPayload(form: Pick<FormState, 'payment_period_type' | 'tax_year' | 'tax_quarter' | 'tax_month'>) {
+  return {
+    payment_period_type: form.payment_period_type,
+    tax_year: form.payment_period_type === 'none' ? null : form.tax_year ? Number(form.tax_year) : null,
+    tax_quarter: form.payment_period_type === 'quarter' && form.tax_quarter
+      ? Number(form.tax_quarter)
+      : null,
+    tax_month: form.payment_period_type === 'month' && form.tax_month
+      ? Number(form.tax_month)
+      : null,
   };
 }
 
@@ -156,6 +191,10 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
         amount: amountNum,
         check_type: form.check_type,
         check_number: checkNumberValue,
+        ...(check.pay_period_id ? {} : periodPayload(form)),
+        due_date: check.pay_period_id ? undefined : form.due_date || null,
+        payment_date: check.pay_period_id ? undefined : form.payment_date || null,
+        confirmation_number: check.pay_period_id ? undefined : form.confirmation_number.trim() || null,
         reference_number: form.reference_number,
         memo: form.memo,
         description: form.description,
@@ -223,7 +262,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Payable To" required>
               <input
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.payable_to}
                 onChange={e => setForm(p => p && { ...p, payable_to: e.target.value })}
               />
@@ -244,7 +283,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Check Type">
               <select
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.check_type}
                 onChange={e => setForm(p => p && { ...p, check_type: e.target.value as NonEmployeeCheckType })}
               >
@@ -256,15 +295,96 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Check Number">
               <input
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.check_number}
                 onChange={e => setForm(p => p && { ...p, check_number: e.target.value })}
               />
             </Field>
 
+            {!check.pay_period_id && (
+              <>
+                <Field label="Tax/reporting period">
+                  <select
+                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    value={form.payment_period_type}
+                    onChange={e => setForm(p => p && { ...p, payment_period_type: e.target.value as PaymentPeriodType })}
+                  >
+                    {(['none', 'month', 'quarter', 'year'] as PaymentPeriodType[]).map(type => (
+                      <option key={type} value={type}>{PERIOD_LABELS[type]}</option>
+                    ))}
+                  </select>
+                </Field>
+
+                {form.payment_period_type !== 'none' && (
+                  <Field label="Tax year">
+                    <input
+                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      inputMode="numeric"
+                      value={form.tax_year}
+                      onChange={e => setForm(p => p && { ...p, tax_year: e.target.value })}
+                    />
+                  </Field>
+                )}
+
+                {form.payment_period_type === 'quarter' && (
+                  <Field label="Tax quarter">
+                    <select
+                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      value={form.tax_quarter}
+                      onChange={e => setForm(p => p && { ...p, tax_quarter: e.target.value })}
+                    >
+                      {[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}
+                    </select>
+                  </Field>
+                )}
+
+                {form.payment_period_type === 'month' && (
+                  <Field label="Tax month">
+                    <select
+                      className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                      value={form.tax_month}
+                      onChange={e => setForm(p => p && { ...p, tax_month: e.target.value })}
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(month => (
+                        <option key={month} value={month}>
+                          {new Date(2026, month - 1, 1).toLocaleString(undefined, { month: 'long' })}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+
+                <Field label="Payment date" hint="Date the check/payment is issued.">
+                  <input
+                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    type="date"
+                    value={form.payment_date}
+                    onChange={e => setForm(p => p && { ...p, payment_date: e.target.value })}
+                  />
+                </Field>
+
+                <Field label="Due date" hint="Deadline for the tax bill or obligation.">
+                  <input
+                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    type="date"
+                    value={form.due_date}
+                    onChange={e => setForm(p => p && { ...p, due_date: e.target.value })}
+                  />
+                </Field>
+
+                <Field label="Confirmation Number">
+                  <input
+                    className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    value={form.confirmation_number}
+                    onChange={e => setForm(p => p && { ...p, confirmation_number: e.target.value })}
+                  />
+                </Field>
+              </>
+            )}
+
             <Field label="Memo" className="md:col-span-2">
               <input
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.memo}
                 onChange={e => setForm(p => p && { ...p, memo: e.target.value })}
               />
@@ -272,7 +392,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             <Field label="Reference #" className="md:col-span-2">
               <input
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.reference_number}
                 onChange={e => setForm(p => p && { ...p, reference_number: e.target.value })}
               />
@@ -281,7 +401,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             <Field label="Description" className="md:col-span-2">
               <textarea
                 rows={2}
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 value={form.description}
                 onChange={e => setForm(p => p && { ...p, description: e.target.value })}
               />
@@ -293,7 +413,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               className="md:col-span-2"
             >
               <input
-                className="w-full rounded border px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                 placeholder="e.g. Updated check number after re-run"
                 value={form.reason}
                 onChange={e => setForm(p => p && { ...p, reason: e.target.value })}
@@ -369,6 +489,13 @@ function fieldLabel(field: string): string {
     amount: 'Amount',
     check_type: 'Check Type',
     check_number: 'Check Number',
+    payment_period_type: 'Tax/reporting Period',
+    tax_year: 'Tax Year',
+    tax_quarter: 'Tax Quarter',
+    tax_month: 'Tax Month',
+    due_date: 'Due Date',
+    payment_date: 'Payment Date',
+    confirmation_number: 'Confirmation Number',
     reference_number: 'Reference #',
     memo: 'Memo',
     description: 'Description',

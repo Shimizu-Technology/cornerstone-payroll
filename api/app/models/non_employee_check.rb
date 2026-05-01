@@ -26,6 +26,7 @@ class NonEmployeeCheck < ApplicationRecord
            dependent: :delete_all
 
   before_validation :normalize_payment_period_type
+  before_validation :clear_inapplicable_tax_period_fields
 
   validates :payable_to, presence: true
   validates :amount, presence: true, numericality: { greater_than: 0 }
@@ -103,6 +104,22 @@ class NonEmployeeCheck < ApplicationRecord
       "pay_period"
     else
       payment_period_type.presence || "none"
+    end
+  end
+
+  def clear_inapplicable_tax_period_fields
+    case payment_period_type
+    when "month"
+      self.tax_quarter = nil
+    when "quarter"
+      self.tax_month = nil
+    when "year"
+      self.tax_month = nil
+      self.tax_quarter = nil
+    else
+      self.tax_year = nil
+      self.tax_month = nil
+      self.tax_quarter = nil
     end
   end
 
