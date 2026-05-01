@@ -52,11 +52,19 @@ class Company < ApplicationRecord
     self.class.transaction do
       lock!  # SELECT … FOR UPDATE on this company row
       next_number = next_check_number
-      issued_numbers = issued_check_numbers
+      window_size = [ items.size * 2, 100 ].max
+      window_end = next_number + window_size - 1
+      issued_numbers = issued_check_numbers_in_range(next_number, window_end)
       assignments = {}
 
       items.each do |item|
-        next_number += 1 while issued_numbers.include?(next_number.to_s)
+        while issued_numbers.include?(next_number.to_s)
+          next_number += 1
+          if next_number > window_end
+            window_end = next_number + window_size - 1
+            issued_numbers.merge(issued_check_numbers_in_range(next_number, window_end))
+          end
+        end
         check_number = next_number.to_s
         assignments[item.id] = check_number
         issued_numbers.add(check_number)
@@ -90,18 +98,22 @@ class Company < ApplicationRecord
     self.class.transaction do
       lock!
       next_number = next_check_number
-      issued_numbers = issued_check_numbers
-      next_number += 1 while issued_numbers.include?(next_number.to_s)
+      window_size = 100
+      window_end = next_number + window_size - 1
+      issued_numbers = issued_check_numbers_in_range(next_number, window_end)
+
+      while issued_numbers.include?(next_number.to_s)
+        next_number += 1
+        if next_number > window_end
+          window_end = next_number + window_size - 1
+          issued_numbers.merge(issued_check_numbers_in_range(next_number, window_end))
+        end
+      end
+
       reserved = next_number.to_s
       update_column(:next_check_number, next_number + 1)
     end
     reserved
-  end
-
-  def check_number_already_issued?(number)
-    normalized = number.to_s
-    PayrollItem.where(company_id: id, check_number: normalized).exists? ||
-      NonEmployeeCheck.where(company_id: id, check_number: normalized).exists?
   end
 
   def full_address
@@ -124,9 +136,10 @@ class Company < ApplicationRecord
     errors.add(:check_layout_config, "must be a JSON object")
   end
 
-  def issued_check_numbers
-    payroll_numbers = PayrollItem.where(company_id: id).where.not(check_number: nil).pluck(:check_number)
-    non_employee_numbers = NonEmployeeCheck.where(company_id: id).where.not(check_number: nil).pluck(:check_number)
+  def issued_check_numbers_in_range(start_number, end_number)
+    numbers = (start_number..end_number).map(&:to_s)
+    payroll_numbers = PayrollItem.where(company_id: id, check_number: numbers).pluck(:check_number)
+    non_employee_numbers = NonEmployeeCheck.where(company_id: id, check_number: numbers).pluck(:check_number)
 
     Set.new(payroll_numbers + non_employee_numbers)
   end
