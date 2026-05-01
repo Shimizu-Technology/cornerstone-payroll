@@ -11,10 +11,10 @@ module Api
           payable_to amount check_type memo description
           reference_number check_number payment_period_type
           tax_year tax_quarter tax_month due_date payment_date
-          confirmation_number
+          confirmation_number line_items
         ].freeze
 
-        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :history]
+        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :voucher_pdf, :history]
 
         # GET /api/v1/admin/non_employee_checks
         def index
@@ -25,7 +25,7 @@ module Api
           # only an `id → count` map in a single grouped query, then pass
           # those counts into `check_payload` via `edit_count:`.
           checks = NonEmployeeCheck.where(company_id: current_company_id)
-            .includes(:pay_period, :created_by)
+            .includes(:pay_period, :created_by, :line_items)
 
           checks = checks.where(pay_period_id: params[:pay_period_id]) if params[:pay_period_id].present?
           checks = checks.standalone if params[:standalone] == "true"
@@ -136,6 +136,7 @@ module Api
             end
 
             if @check.update(attrs)
+              @check.line_items.reload if attrs.key?("line_items_attributes")
               after_snapshot = audit_snapshot(@check)
               changed = changed_fields(before_snapshot, after_snapshot)
 
@@ -231,13 +232,22 @@ module Api
             filename: filename
         end
 
+        # GET /api/v1/admin/non_employee_checks/:id/voucher_pdf
+        def voucher_pdf
+          generator = NonEmployeeCheckVoucherGenerator.new(@check)
+          send_data generator.generate,
+            type: "application/pdf",
+            disposition: "inline",
+            filename: generator.filename
+        end
+
         private
 
         def set_check
           # Preload :edits so check_payload's `edit_count: check.edits.size`
           # uses the loaded association instead of issuing a per-request COUNT.
           @check = NonEmployeeCheck
-            .includes(:edits)
+            .includes(:edits, :line_items, :pay_period)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
@@ -249,7 +259,11 @@ module Api
             :pay_period_id, :payable_to, :amount, :check_type,
             :memo, :description, :reference_number, :check_number,
             :payment_period_type, :tax_year, :tax_quarter, :tax_month,
-            :due_date, :payment_date, :confirmation_number
+            :due_date, :payment_date, :confirmation_number,
+            line_items_attributes: [
+              :id, :description, :reference_number, :service_period,
+              :amount, :position, :_destroy
+            ]
           )
 
           # Coerce blank values to nil for all optional text fields. The Edit
@@ -317,6 +331,7 @@ module Api
             due_date: check.due_date,
             payment_date: check.payment_date,
             confirmation_number: check.confirmation_number,
+            line_items: check.line_items.map { |line_item| line_item_payload(line_item) },
             print_count: check.print_count,
             printed_at: check.printed_at,
             voided: check.voided,
@@ -409,12 +424,35 @@ module Api
           }
         end
 
+        def line_item_payload(line_item)
+          {
+            id: line_item.id,
+            description: line_item.description,
+            reference_number: line_item.reference_number,
+            service_period: line_item.service_period,
+            amount: line_item.amount,
+            position: line_item.position
+          }
+        end
+
         # Builds a stable hash of the audited fields with normalized types so
         # the diff between before/after isn't muddied by formatting (e.g.
         # BigDecimal vs Float, nil vs "").
         def audit_snapshot(check)
           AUDITED_FIELDS.each_with_object({}) do |field, snapshot|
-            value = check.public_send(field)
+            value = if field == "line_items"
+              check.line_items.map { |item|
+                {
+                  "description" => item.description,
+                  "reference_number" => item.reference_number,
+                  "service_period" => item.service_period,
+                  "amount" => item.amount.to_d.to_s("F"),
+                  "position" => item.position
+                }
+              }
+            else
+              check.public_send(field)
+            end
             # `BigDecimal#to_s` defaults to engineering notation (e.g.
             # "0.12550e3" for 125.50) which is unreadable in audit JSONB
             # and hard to inspect in psql. `to_s("F")` forces fixed-point

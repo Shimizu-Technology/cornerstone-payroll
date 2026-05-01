@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { nonEmployeeChecksApi } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
+import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
+import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
 
 interface NonEmployeeCheckEditModalProps {
   check: NonEmployeeCheck | null;
@@ -53,6 +55,7 @@ interface FormState {
   reference_number: string;
   memo: string;
   description: string;
+  line_items: VoucherLineItemForm[];
   reason: string;
 }
 
@@ -72,6 +75,13 @@ function buildInitialState(check: NonEmployeeCheck): FormState {
     reference_number: check.reference_number || '',
     memo: check.memo || '',
     description: check.description || '',
+    line_items: (check.line_items || []).map(item => ({
+      id: item.id,
+      description: item.description || '',
+      reference_number: item.reference_number || '',
+      service_period: item.service_period || '',
+      amount: String(item.amount),
+    })),
     reason: '',
   };
 }
@@ -170,6 +180,12 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
     const fields: string[] = [];
     (Object.keys(before) as (keyof FormState)[]).forEach(key => {
       if (key === 'reason') return;
+      if (key === 'line_items') {
+        if (JSON.stringify(normalizeVoucherLineItems(form.line_items)) !== JSON.stringify(normalizeVoucherLineItems(before.line_items))) {
+          fields.push('line_items');
+        }
+        return;
+      }
       if (key === 'amount') {
         const beforeNum = parseFloat(before.amount);
         const afterNum = parseFloat(form.amount);
@@ -247,6 +263,30 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
         memo: form.memo,
         description: form.description,
       };
+      const lineItems = normalizeVoucherLineItems(form.line_items);
+      if (form.line_items.length > 0 && lineItems.length !== form.line_items.length) {
+        throw new Error('Each voucher detail line needs an amount, or remove the incomplete line');
+      }
+      if (lineItems.length > 0 || (check.line_items || []).length > 0) {
+        const lineTotal = lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        if (lineItems.length > 0 && Math.abs(lineTotal - amountNum) > 0.005) {
+          throw new Error('Voucher line items must total the check amount');
+        }
+
+        payload.line_items_attributes = [
+          ...lineItems.map((item, index) => ({
+            id: item.id,
+            description: item.description,
+            reference_number: item.reference_number || null,
+            service_period: item.service_period || null,
+            amount: Number(item.amount),
+            position: index,
+          })),
+          ...(check.line_items || [])
+            .filter(existing => existing.id && !lineItems.some(item => item.id === existing.id))
+            .map(existing => ({ id: existing.id, _destroy: true })),
+        ];
+      }
 
       const res = await nonEmployeeChecksApi.update(check.id, payload, form.reason || undefined);
       onSaved(res.non_employee_check);
@@ -465,6 +505,13 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               />
             </Field>
 
+            <VoucherLineItemsEditor
+              items={form.line_items}
+              amount={form.amount}
+              onChange={line_items => setForm(p => p && { ...p, line_items })}
+              className="md:col-span-2"
+            />
+
             <Field
               label="Reason for change (optional)"
               hint="Recorded in the audit history. Leave blank for routine fixes; fill in for anything you want documented."
@@ -557,6 +604,7 @@ function fieldLabel(field: string): string {
     reference_number: 'Reference #',
     memo: 'Memo',
     description: 'Description',
+    line_items: 'Voucher Detail Lines',
   };
   return map[field] || field;
 }

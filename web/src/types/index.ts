@@ -847,6 +847,7 @@ export interface NonEmployeeCheck {
   due_date?: string | null;
   payment_date?: string | null;
   confirmation_number?: string | null;
+  line_items: NonEmployeeCheckLineItem[];
   print_count: number;
   printed_at?: string;
   voided: boolean;
@@ -857,6 +858,15 @@ export interface NonEmployeeCheck {
   created_by_id?: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface NonEmployeeCheckLineItem {
+  id?: number;
+  description: string;
+  reference_number?: string | null;
+  service_period?: string | null;
+  amount: number;
+  position: number;
 }
 
 export interface NonEmployeeCheckEdit {

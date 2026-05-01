@@ -226,6 +226,7 @@ Rails.application.routes.draw do
             post :mark_printed
             post :void_check
             get :check_pdf
+            get :voucher_pdf
             get :history
           end
         end
