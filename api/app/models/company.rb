@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
 
@@ -49,18 +51,35 @@ class Company < ApplicationRecord
     assigned = 0
     self.class.transaction do
       lock!  # SELECT … FOR UPDATE on this company row
-      starting = next_check_number
+      next_number = next_check_number
+      window_size = [ items.size * 2, 100 ].max
+      window_end = next_number + window_size - 1
+      issued_numbers = issued_check_numbers_in_range(next_number, window_end)
+      assignments = {}
+
+      items.each do |item|
+        while issued_numbers.include?(next_number.to_s)
+          next_number += 1
+          if next_number > window_end
+            window_end = next_number + window_size - 1
+            issued_numbers.merge(issued_check_numbers_in_range(next_number, window_end))
+          end
+        end
+        check_number = next_number.to_s
+        assignments[item.id] = check_number
+        issued_numbers.add(check_number)
+        next_number += 1
+      end
 
       conn = self.class.connection
-      case_clauses = items.each_with_index.map { |item, idx|
-        "WHEN #{conn.quote(item.id)} THEN #{conn.quote((starting + idx).to_s)}"
+      case_clauses = assignments.map { |id, number|
+        "WHEN #{conn.quote(id)} THEN #{conn.quote(number)}"
       }.join(" ")
-
       PayrollItem.where(id: items.map(&:id))
                  .update_all(Arel.sql("check_number = CASE id #{case_clauses} END"))
 
       assigned = items.size
-      update_column(:next_check_number, starting + assigned)
+      update_column(:next_check_number, next_number)
     end
     assigned
   rescue ActiveRecord::StatementInvalid => e
@@ -78,8 +97,21 @@ class Company < ApplicationRecord
     reserved = nil
     self.class.transaction do
       lock!
-      reserved = next_check_number.to_s
-      update_column(:next_check_number, next_check_number + 1)
+      next_number = next_check_number
+      window_size = 100
+      window_end = next_number + window_size - 1
+      issued_numbers = issued_check_numbers_in_range(next_number, window_end)
+
+      while issued_numbers.include?(next_number.to_s)
+        next_number += 1
+        if next_number > window_end
+          window_end = next_number + window_size - 1
+          issued_numbers.merge(issued_check_numbers_in_range(next_number, window_end))
+        end
+      end
+
+      reserved = next_number.to_s
+      update_column(:next_check_number, next_number + 1)
     end
     reserved
   end
@@ -102,5 +134,13 @@ class Company < ApplicationRecord
     return if check_layout_config.is_a?(Hash)
 
     errors.add(:check_layout_config, "must be a JSON object")
+  end
+
+  def issued_check_numbers_in_range(start_number, end_number)
+    numbers = (start_number..end_number).map(&:to_s)
+    payroll_numbers = PayrollItem.where(company_id: id, check_number: numbers).pluck(:check_number)
+    non_employee_numbers = NonEmployeeCheck.where(company_id: id, check_number: numbers).pluck(:check_number)
+
+    Set.new(payroll_numbers + non_employee_numbers)
   end
 end

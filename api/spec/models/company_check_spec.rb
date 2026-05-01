@@ -53,6 +53,50 @@ RSpec.describe Company, type: :model do
       expect(company.reload.next_check_number).to eq(2010)
     end
 
+    it "skips check numbers already used by standalone non-employee checks" do
+      NonEmployeeCheck.create!(
+        company: company,
+        payable_to: "Treasurer of Guam",
+        amount: 125.00,
+        check_type: "grt",
+        check_number: "2000",
+        payment_period_type: "month",
+        tax_year: 2026,
+        tax_month: 3
+      )
+
+      items = make_items(2)
+      company.assign_check_numbers!(items)
+
+      expect(items.map { |item| item.reload.check_number }).to eq(%w[2001 2002])
+      expect(company.reload.next_check_number).to eq(2003)
+    end
+
+    it "skips check numbers already used by payroll and non-employee checks" do
+      existing_employee = create(:employee, company: company)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: existing_employee,
+        check_number: "2000"
+      )
+      NonEmployeeCheck.create!(
+        company: company,
+        payable_to: "Treasurer of Guam",
+        amount: 125.00,
+        check_type: "grt",
+        check_number: "2001",
+        payment_period_type: "month",
+        tax_year: 2026,
+        tax_month: 3
+      )
+
+      items = make_items(2)
+      company.assign_check_numbers!(items)
+
+      expect(items.map { |item| item.reload.check_number }).to eq(%w[2002 2003])
+      expect(company.reload.next_check_number).to eq(2004)
+    end
+
     it "allows the same check number to exist in another company" do
       other_company = create(:company, next_check_number: 2000)
       other_period = create(:pay_period, :committed, company: other_company)
@@ -83,6 +127,22 @@ RSpec.describe Company, type: :model do
       n1 = company.next_check_number!
       n2 = company.next_check_number!
       expect(n1).not_to eq(n2)
+    end
+
+    it "skips a number already used by a standalone non-employee check" do
+      NonEmployeeCheck.create!(
+        company: company,
+        payable_to: "Treasurer of Guam",
+        amount: 125.00,
+        check_type: "grt",
+        check_number: "2000",
+        payment_period_type: "month",
+        tax_year: 2026,
+        tax_month: 3
+      )
+
+      expect(company.next_check_number!).to eq("2001")
+      expect(company.reload.next_check_number).to eq(2002)
     end
   end
 

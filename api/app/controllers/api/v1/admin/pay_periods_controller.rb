@@ -734,6 +734,8 @@ module Api
             amount: total_fit,
             check_type: "tax_deposit",
             auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
+            payment_period_type: "pay_period",
+            payment_date: @pay_period.pay_date,
             memo: "FIT Withholding · PPE #{@pay_period.end_date.strftime('%m/%d/%Y')} · Form 500",
             description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
             created_by: current_user

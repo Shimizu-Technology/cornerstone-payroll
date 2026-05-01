@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_30_120200) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_01_090100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -454,15 +454,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_30_120200) do
     t.string "check_number"
     t.string "check_type", null: false
     t.bigint "company_id", null: false
+    t.string "confirmation_number"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
     t.text "description"
+    t.date "due_date"
     t.string "memo"
-    t.bigint "pay_period_id", null: false
+    t.bigint "pay_period_id"
     t.string "payable_to", null: false
+    t.date "payment_date"
+    t.string "payment_period_type", default: "none", null: false
     t.integer "print_count", default: 0, null: false
     t.datetime "printed_at"
     t.string "reference_number"
+    t.integer "tax_month"
+    t.integer "tax_quarter"
+    t.integer "tax_year"
     t.datetime "updated_at", null: false
     t.string "void_reason"
     t.boolean "voided", default: false, null: false
@@ -470,10 +477,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_30_120200) do
     t.index ["auto_generated_type"], name: "index_non_employee_checks_on_auto_generated_type", where: "(auto_generated_type IS NOT NULL)"
     t.index ["check_type"], name: "index_non_employee_checks_on_check_type"
     t.index ["company_id", "check_number"], name: "idx_ne_checks_on_company_check_num", unique: true, where: "(check_number IS NOT NULL)"
+    t.index ["company_id", "payment_date"], name: "idx_ne_checks_on_company_payment_date"
+    t.index ["company_id", "payment_period_type", "tax_year", "tax_month"], name: "idx_ne_checks_on_company_month"
+    t.index ["company_id", "payment_period_type", "tax_year", "tax_quarter"], name: "idx_ne_checks_on_company_quarter"
     t.index ["company_id"], name: "index_non_employee_checks_on_company_id"
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
     t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
+    t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying, 'pay_period'::character varying, 'month'::character varying, 'quarter'::character varying, 'year'::character varying]::text[])", name: "non_employee_checks_payment_period_type_check"
+    t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
+    t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
   end
 
   create_table "pay_period_correction_events", force: :cascade do |t|
