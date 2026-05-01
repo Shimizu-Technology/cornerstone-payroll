@@ -74,6 +74,27 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(response.parsed_body.dig("non_employee_check", "pay_period_id")).to be_nil
     end
 
+    it "clears hidden stale tax period fields that do not match the selected period type" do
+      post "/api/v1/admin/non_employee_checks",
+        params: {
+          non_employee_check: {
+            payable_to: "Treasurer of Guam",
+            amount: 425.75,
+            check_type: "grt",
+            payment_period_type: "month",
+            tax_year: 2026,
+            tax_month: 3,
+            tax_quarter: 2
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:created)
+      check = NonEmployeeCheck.last
+      expect(check.tax_month).to eq(3)
+      expect(check.tax_quarter).to be_nil
+    end
+
     it "validates required tax period fields for standalone monthly payments" do
       expect {
         post "/api/v1/admin/non_employee_checks",
