@@ -669,7 +669,7 @@ export const payPeriodsApi = {
     api.get<PayPeriodListResponse>('/admin/pay_periods', params),
   get: (id: number) =>
     api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`),
-  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string }) =>
+  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string }) =>
     api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
   update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string }) =>
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
@@ -1117,6 +1117,8 @@ export interface YtdSummaryReport {
     year: number;
     employees: {
       employee_id: number;
+      first_name: string;
+      last_name: string;
       name: string;
       employment_type: string;
       status: string;
@@ -1138,6 +1140,16 @@ export interface YtdSummaryReport {
       payroll_count: number;
     };
   };
+}
+
+export interface YtdSummaryParams {
+  [key: string]: string | number | boolean | undefined;
+  year?: number;
+  search?: string;
+  employment_type?: string;
+  status?: string;
+  sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'net_pay';
+  sort_direction?: 'asc' | 'desc';
 }
 
 export interface Form941GuReport {
@@ -1250,10 +1262,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/tax_summary_pdf', { year, quarter }),
   taxSummaryXlsx: (year: number, quarter?: number) =>
     api.getBlobWithParams('/admin/reports/tax_summary_xlsx', { year, quarter }),
-  ytdSummary: (year?: number) =>
-    api.get<YtdSummaryReport>('/admin/reports/ytd_summary', { year }),
-  ytdSummaryXlsx: (year?: number) =>
-    api.getBlobWithParams('/admin/reports/ytd_summary_xlsx', { year }),
+  ytdSummary: (params?: YtdSummaryParams) =>
+    api.get<YtdSummaryReport>('/admin/reports/ytd_summary', params),
+  ytdSummaryXlsx: (params?: YtdSummaryParams) =>
+    api.getBlobWithParams('/admin/reports/ytd_summary_xlsx', params),
   // CPR-68: W-2GU Annual Report
   w2Gu: (year: number) =>
     api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),

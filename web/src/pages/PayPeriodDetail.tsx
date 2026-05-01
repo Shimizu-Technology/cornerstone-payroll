@@ -1212,22 +1212,22 @@ export function PayPeriodDetail() {
                           {isVariableSalary ? (
                             <span className="text-indigo-600 font-medium">Variable</span>
                           ) : isPerPeriodSalary ? (
-                            `$${payRate.toFixed(2)}/period`
+                            `${formatCurrency(payRate)}/period`
                           ) : emp.employment_type === 'salary' ? (
-                            `$${(payRate / periodsPerYear).toFixed(2)}/period`
+                            `${formatCurrency(payRate / periodsPerYear)}/period`
                           ) : isContractorFlat ? (
-                            `$${payRate.toFixed(2)}/period`
+                            `${formatCurrency(payRate)}/period`
                           ) : hasMultiRate ? (
                             <div className="space-y-1 text-left">
                               {activeWageRates.map((rate) => (
                                 <div key={`${emp.id}-${rate.label}`} className="text-xs">
                                   <span className="font-medium text-gray-900">{rate.label}</span>{' '}
-                                  <span className="text-gray-500">${toNumber(rate.rate).toFixed(2)}/hr</span>
+                                  <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            `$${payRate.toFixed(2)}/hr`
+                            `${formatCurrency(payRate)}/hr`
                           )}
                         </TableCell>
                         <TableCell className={`text-center align-top ${rowTone}`} colSpan={isVariableSalary ? 2 : 1}>
@@ -1620,16 +1620,16 @@ export function PayPeriodDetail() {
                                     {itemWageRates.map((rate) => (
                                       <div key={`${item.id}-${rate.label}-rate`} className="text-xs">
                                         <span className="font-medium text-gray-900">{rate.label}</span>{' '}
-                                        <span className="text-gray-500">${toNumber(rate.rate).toFixed(2)}/hr</span>
+                                        <span className="text-gray-500">{formatCurrency(toNumber(rate.rate))}/hr</span>
                                       </div>
                                     ))}
                                   </div>
                                 );
                               }
                               if (isContractorHourly) {
-                                return `$${toNumber(item.pay_rate).toFixed(2)}/hr`;
+                                return `${formatCurrency(toNumber(item.pay_rate))}/hr`;
                               }
-                              return `$${toNumber(item.pay_rate).toFixed(2)}/hr`;
+                              return `${formatCurrency(toNumber(item.pay_rate))}/hr`;
                             })()}
                           </TableCell>
                           <TableCell className={`text-right font-medium ${rowTone}`}>{formatCurrency(toNumber(item.gross_pay))}</TableCell>

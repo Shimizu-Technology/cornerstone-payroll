@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { formatCurrency } from '@/lib/utils';
 
 // ──── Time format helpers ──────────────────────────────
 function to12h(time24: string | null): string {
@@ -394,7 +395,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
-                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                      {rate.label} ({formatCurrency(toNumber(rate.rate))}/hr)
                     </option>
                   ))}
                 </Select>
@@ -1155,7 +1156,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
-                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                      {rate.label} ({formatCurrency(toNumber(rate.rate))}/hr)
                     </option>
                   ))}
                 </Select>

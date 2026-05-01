@@ -12,6 +12,7 @@ import { DRT } from '@/lib/constants';
 import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
+import { formatCurrency } from '@/lib/utils';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
@@ -383,7 +384,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const fmt = (v: number | string) => `$${Number(v).toFixed(2)}`;
+  const fmt = (v: number | string) => formatCurrency(Number(v));
 
   return (
     <Card>
@@ -522,7 +523,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   <p className="text-xs font-medium text-amber-600 uppercase tracking-wide mb-1.5">Form 500 Quick-Fill</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
                     {taxDeposit && (
-                      <CopyField label="Total Taxes" value={`$${Number(taxDeposit.amount).toFixed(2)}`} />
+                      <CopyField label="Total Taxes" value={formatCurrency(Number(taxDeposit.amount))} />
                     )}
                     {company?.ein && (
                       <CopyField label="EIN" value={company.ein} />
