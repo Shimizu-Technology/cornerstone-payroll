@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_01_090100) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_01_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -446,6 +446,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_01_090100) do
     t.index ["created_at"], name: "index_non_employee_check_edits_on_created_at"
     t.index ["edited_by_id"], name: "index_non_employee_check_edits_on_edited_by_id"
     t.index ["non_employee_check_id"], name: "index_non_employee_check_edits_on_non_employee_check_id"
+  end
+
+  create_table "non_employee_check_line_items", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.string "description", null: false
+    t.bigint "non_employee_check_id", null: false
+    t.integer "position", default: 0, null: false
+    t.string "reference_number"
+    t.string "service_period"
+    t.datetime "updated_at", null: false
+    t.index ["non_employee_check_id", "position"], name: "idx_ne_check_line_items_on_check_position"
+    t.index ["non_employee_check_id"], name: "idx_ne_check_line_items_on_check"
+    t.check_constraint "amount > 0::numeric", name: "non_employee_check_line_items_amount_positive"
   end
 
   create_table "non_employee_checks", force: :cascade do |t|
@@ -951,6 +965,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_01_090100) do
   add_foreign_key "loan_transactions", "payroll_items"
   add_foreign_key "non_employee_check_edits", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_check_edits", "users", column: "edited_by_id"
+  add_foreign_key "non_employee_check_line_items", "non_employee_checks", on_delete: :cascade
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"

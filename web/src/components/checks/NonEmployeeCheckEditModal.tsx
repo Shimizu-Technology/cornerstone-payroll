@@ -53,7 +53,16 @@ interface FormState {
   reference_number: string;
   memo: string;
   description: string;
+  line_items: VoucherLineItemForm[];
   reason: string;
+}
+
+interface VoucherLineItemForm {
+  id?: number;
+  description: string;
+  reference_number: string;
+  service_period: string;
+  amount: string;
 }
 
 function buildInitialState(check: NonEmployeeCheck): FormState {
@@ -72,6 +81,13 @@ function buildInitialState(check: NonEmployeeCheck): FormState {
     reference_number: check.reference_number || '',
     memo: check.memo || '',
     description: check.description || '',
+    line_items: (check.line_items || []).map(item => ({
+      id: item.id,
+      description: item.description || '',
+      reference_number: item.reference_number || '',
+      service_period: item.service_period || '',
+      amount: String(item.amount),
+    })),
     reason: '',
   };
 }
@@ -170,6 +186,12 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
     const fields: string[] = [];
     (Object.keys(before) as (keyof FormState)[]).forEach(key => {
       if (key === 'reason') return;
+      if (key === 'line_items') {
+        if (JSON.stringify(normalizeVoucherLineItems(form.line_items)) !== JSON.stringify(normalizeVoucherLineItems(before.line_items))) {
+          fields.push('line_items');
+        }
+        return;
+      }
       if (key === 'amount') {
         const beforeNum = parseFloat(before.amount);
         const afterNum = parseFloat(form.amount);
@@ -247,6 +269,27 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
         memo: form.memo,
         description: form.description,
       };
+      const lineItems = normalizeVoucherLineItems(form.line_items);
+      if (lineItems.length > 0 || (check.line_items || []).length > 0) {
+        const lineTotal = lineItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        if (lineItems.length > 0 && Math.abs(lineTotal - amountNum) > 0.005) {
+          throw new Error('Voucher line items must total the check amount');
+        }
+
+        payload.line_items_attributes = [
+          ...lineItems.map((item, index) => ({
+            id: item.id,
+            description: item.description,
+            reference_number: item.reference_number || null,
+            service_period: item.service_period || null,
+            amount: Number(item.amount),
+            position: index,
+          })),
+          ...(check.line_items || [])
+            .filter(existing => existing.id && !lineItems.some(item => item.id === existing.id))
+            .map(existing => ({ id: existing.id, _destroy: true })),
+        ];
+      }
 
       const res = await nonEmployeeChecksApi.update(check.id, payload, form.reason || undefined);
       onSaved(res.non_employee_check);
@@ -465,6 +508,14 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               />
             </Field>
 
+            <Field label="Voucher detail lines" className="md:col-span-2">
+              <VoucherLineItemsEditor
+                items={form.line_items}
+                amount={form.amount}
+                onChange={line_items => setForm(p => p && { ...p, line_items })}
+              />
+            </Field>
+
             <Field
               label="Reason for change (optional)"
               hint="Recorded in the audit history. Leave blank for routine fixes; fill in for anything you want documented."
@@ -541,6 +592,108 @@ function Field({
   );
 }
 
+function normalizeVoucherLineItems(items: VoucherLineItemForm[]) {
+  return items
+    .map((item, index) => ({
+      id: item.id,
+      description: item.description.trim(),
+      reference_number: item.reference_number.trim(),
+      service_period: item.service_period.trim(),
+      amount: item.amount,
+      position: index,
+    }))
+    .filter(item => item.description || item.reference_number || item.service_period || Number(item.amount) > 0)
+    .map(item => ({
+      ...item,
+      description: item.description || 'Payment detail',
+    }));
+}
+
+function VoucherLineItemsEditor({
+  items,
+  amount,
+  onChange,
+}: {
+  items: VoucherLineItemForm[];
+  amount: string;
+  onChange: (items: VoucherLineItemForm[]) => void;
+}) {
+  const normalized = normalizeVoucherLineItems(items);
+  const total = normalized.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const checkAmount = Number(amount || 0);
+  const hasItems = normalized.length > 0;
+  const isBalanced = !hasItems || Math.abs(total - checkAmount) <= 0.005;
+
+  const updateItem = (index: number, patch: Partial<VoucherLineItemForm>) => {
+    onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-neutral-500">Use these for invoices, tax vouchers, reporting periods, or remittance detail.</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onChange([...items, { description: '', reference_number: '', service_period: '', amount: '' }])}
+        >
+          Add line
+        </Button>
+      </div>
+
+      {items.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {items.map((item, index) => (
+            <div key={item.id || index} className="grid grid-cols-1 gap-2 rounded-lg border border-neutral-200 bg-white p-3 md:grid-cols-12">
+              <input
+                className="rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 md:col-span-4"
+                placeholder="Description, e.g., May GRT"
+                value={item.description}
+                onChange={e => updateItem(index, { description: e.target.value })}
+              />
+              <input
+                className="rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 md:col-span-3"
+                placeholder="Reference #"
+                value={item.reference_number}
+                onChange={e => updateItem(index, { reference_number: e.target.value })}
+              />
+              <input
+                className="rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200 md:col-span-2"
+                placeholder="Period"
+                value={item.service_period}
+                onChange={e => updateItem(index, { service_period: e.target.value })}
+              />
+              <div className="md:col-span-2">
+                <NumericInput
+                  placeholder="Amount"
+                  min={0.01}
+                  fixedDecimalsOnBlur={2}
+                  value={item.amount === '' ? null : Number(item.amount)}
+                  onValueChange={value => updateItem(index, { amount: value == null ? '' : String(value) })}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-red-500 md:col-span-1"
+                onClick={() => onChange(items.filter((_, i) => i !== index))}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <p className={`rounded-lg px-3 py-2 text-xs ${isBalanced ? 'bg-white text-neutral-600' : 'bg-red-50 text-red-700'}`}>
+            Voucher detail total: {total.toLocaleString(undefined, { style: 'currency', currency: 'USD' })} · Check amount: {checkAmount.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+            {!isBalanced && ' · totals must match before saving'}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function fieldLabel(field: string): string {
   const map: Record<string, string> = {
     payable_to: 'Payable To',
@@ -557,6 +710,7 @@ function fieldLabel(field: string): string {
     reference_number: 'Reference #',
     memo: 'Memo',
     description: 'Description',
+    line_items: 'Voucher Detail Lines',
   };
   return map[field] || field;
 }
