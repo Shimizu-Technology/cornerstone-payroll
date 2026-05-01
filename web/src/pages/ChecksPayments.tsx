@@ -14,6 +14,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
 import { NonEmployeeCheckEditModal } from '@/components/checks/NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from '@/components/checks/NonEmployeeCheckHistory';
+import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
+import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -70,6 +72,7 @@ interface FormState {
   memo: string;
   reference_number: string;
   description: string;
+  line_items: VoucherLineItemForm[];
 }
 
 const initialForm: FormState = {
@@ -87,6 +90,7 @@ const initialForm: FormState = {
   memo: '',
   reference_number: '',
   description: '',
+  line_items: [],
 };
 
 const fieldClassName = 'rounded-xl';
@@ -123,6 +127,7 @@ export function ChecksPayments() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
+  const [previewTitle, setPreviewTitle] = useState('Check preview');
   const [previewLoaded, setPreviewLoaded] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
@@ -199,6 +204,19 @@ export function ChecksPayments() {
       reference_number: form.reference_number.trim() || undefined,
       description: form.description.trim() || undefined,
     };
+    const lineItems = normalizeVoucherLineItems(form.line_items);
+    if (form.line_items.length > 0 && lineItems.length !== form.line_items.length) {
+      setError('Each voucher detail line needs an amount, or remove the incomplete line');
+      return;
+    }
+    if (lineItems.length > 0) {
+      const lineTotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
+      if (Math.abs(lineTotal - Number(form.amount)) > 0.005) {
+        setError('Voucher line items must total the check amount');
+        return;
+      }
+      Object.assign(payload, { line_items_attributes: lineItems });
+    }
 
     setCreating(true);
     try {
@@ -269,8 +287,25 @@ export function ChecksPayments() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(blob));
       setPreviewCheck(check);
+      setPreviewTitle('Check preview');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate check PDF');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleVoucherPreview = async (check: NonEmployeeCheck) => {
+    setBusyId(check.id);
+    setPreviewLoaded(false);
+    try {
+      const blob = await nonEmployeeChecksApi.voucherPdf(check.id);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(URL.createObjectURL(blob));
+      setPreviewCheck(check);
+      setPreviewTitle('Payment voucher');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate payment voucher');
     } finally {
       setBusyId(null);
     }
@@ -475,6 +510,12 @@ export function ChecksPayments() {
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               />
             </FormField>
+            <VoucherLineItemsEditor
+              items={form.line_items}
+              amount={form.amount}
+              onChange={line_items => setForm(p => ({ ...p, line_items }))}
+              className="mt-4"
+            />
             <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
               <Link to="/check-settings" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
@@ -571,6 +612,9 @@ export function ChecksPayments() {
                       <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Preview
                       </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleVoucherPreview(check)} disabled={busyId === check.id}>
+                        <FileText className="mr-1.5 h-3.5 w-3.5" /> Voucher
+                      </Button>
                       {!check.voided && !check.printed_at && (
                         <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(check)} disabled={busyId === check.id}>
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Printed
@@ -612,7 +656,7 @@ export function ChecksPayments() {
           <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-5 py-4">
               <div>
-                <h2 className="text-lg font-semibold text-neutral-900">{previewCheck.payable_to}</h2>
+                <h2 className="text-lg font-semibold text-neutral-900">{previewTitle}</h2>
                 <p className="text-sm text-neutral-500">{formatCurrency(Number(previewCheck.amount))} · Check #{previewCheck.check_number || '-'}</p>
               </div>
               <div className="flex gap-2">
@@ -627,7 +671,7 @@ export function ChecksPayments() {
                 ref={previewFrameRef}
                 src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
                 className="h-full w-full rounded-lg border bg-white"
-                title="Check preview"
+                title={previewTitle}
                 onLoad={() => setPreviewLoaded(true)}
               />
             </div>

@@ -158,7 +158,7 @@ class FirstHawaiianFourUpCheckGenerator
       check_number: check.check_number,
       payee: check.payable_to,
       amount: check.amount,
-      date: check.pay_period&.pay_date || check.created_at&.to_date || Date.current,
+      date: check.effective_payment_date,
       memo: check.memo.presence || check.description.presence || check.check_type.to_s.titleize,
       voided: check.voided?
     )
