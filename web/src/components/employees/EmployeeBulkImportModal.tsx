@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { employeeBulkImportApi } from '@/services/api';
 import type { BulkImportEmployeeData, BulkImportPreviewResult, BulkImportApplyResult } from '@/services/api';
+import { formatCurrency } from '@/lib/utils';
 import {
   Upload, FileSpreadsheet, CheckCircle2, AlertCircle, AlertTriangle,
   X, Download, Loader2, ChevronDown, ChevronRight, Plus, Info, Pencil,
@@ -548,7 +549,7 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
             {row.data.employment_type || 'hourly'}
           </Badge>
           <span className="text-gray-700 text-xs text-right">
-            {row.data.pay_rate ? `$${Number(row.data.pay_rate).toFixed(2)}` : '—'}
+            {row.data.pay_rate ? formatCurrency(Number(row.data.pay_rate)) : '—'}
           </span>
           <span className="text-gray-500 text-xs">{row.data.pay_frequency || '—'}</span>
           <span className="text-gray-500 text-xs">{row.data.filing_status || '—'}</span>

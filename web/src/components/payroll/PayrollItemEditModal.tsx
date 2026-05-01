@@ -264,7 +264,7 @@ export function PayrollItemEditModal({
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
           <DialogDescription>
-            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} pay rates` : `Rate: $${Number(item.pay_rate).toFixed(2)}`}
+            {item.employee_name} ({isContractor ? '1099 contractor' : item.employment_type}) — {hasMultiRate ? `${fields.wage_rate_hours.length} pay rates` : `Rate: ${formatCurrency(Number(item.pay_rate))}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -326,7 +326,7 @@ export function PayrollItemEditModal({
                     <div key={`${rateEntry.label}-${index}`} className="rounded-lg border border-gray-200 p-3">
                       <div className="mb-2 flex items-center justify-between">
                         <div className="text-sm font-medium text-gray-900">{rateEntry.label}</div>
-                        <div className="text-xs text-gray-500">${Number(rateEntry.rate).toFixed(2)}/hr</div>
+                        <div className="text-xs text-gray-500">{formatCurrency(Number(rateEntry.rate))}/hr</div>
                       </div>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div>
