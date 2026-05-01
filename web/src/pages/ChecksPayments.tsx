@@ -14,6 +14,8 @@ import { useCompany } from '@/contexts/CompanyContext';
 import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
 import { NonEmployeeCheckEditModal } from '@/components/checks/NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from '@/components/checks/NonEmployeeCheckHistory';
+import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
+import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -71,14 +73,6 @@ interface FormState {
   reference_number: string;
   description: string;
   line_items: VoucherLineItemForm[];
-}
-
-interface VoucherLineItemForm {
-  id?: number;
-  description: string;
-  reference_number: string;
-  service_period: string;
-  amount: string;
 }
 
 const initialForm: FormState = {
@@ -211,6 +205,10 @@ export function ChecksPayments() {
       description: form.description.trim() || undefined,
     };
     const lineItems = normalizeVoucherLineItems(form.line_items);
+    if (form.line_items.length > 0 && lineItems.length !== form.line_items.length) {
+      setError('Each voucher detail line needs an amount, or remove the incomplete line');
+      return;
+    }
     if (lineItems.length > 0) {
       const lineTotal = lineItems.reduce((sum, item) => sum + item.amount, 0);
       if (Math.abs(lineTotal - Number(form.amount)) > 0.005) {
@@ -516,6 +514,7 @@ export function ChecksPayments() {
               items={form.line_items}
               amount={form.amount}
               onChange={line_items => setForm(p => ({ ...p, line_items }))}
+              className="mt-4"
             />
             <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
@@ -704,118 +703,6 @@ function periodLabel(check: NonEmployeeCheck) {
 function csvCell(value: string | number) {
   const text = String(value);
   return `"${text.replace(/"/g, '""')}"`;
-}
-
-function normalizeVoucherLineItems(items: VoucherLineItemForm[]) {
-  return items
-    .map((item, index) => ({
-      description: item.description.trim(),
-      reference_number: item.reference_number.trim() || null,
-      service_period: item.service_period.trim() || null,
-      amount: Number(item.amount),
-      position: index,
-    }))
-    .filter(item => item.description || item.reference_number || item.service_period || item.amount > 0)
-    .map(item => ({
-      ...item,
-      description: item.description || 'Payment detail',
-    }));
-}
-
-function VoucherLineItemsEditor({
-  items,
-  amount,
-  onChange,
-}: {
-  items: VoucherLineItemForm[];
-  amount: string;
-  onChange: (items: VoucherLineItemForm[]) => void;
-}) {
-  const normalized = normalizeVoucherLineItems(items);
-  const total = normalized.reduce((sum, item) => sum + item.amount, 0);
-  const checkAmount = Number(amount || 0);
-  const hasItems = normalized.length > 0;
-  const isBalanced = !hasItems || Math.abs(total - checkAmount) <= 0.005;
-
-  const updateItem = (index: number, patch: Partial<VoucherLineItemForm>) => {
-    onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)));
-  };
-
-  const addItem = () => {
-    onChange([
-      ...items,
-      { description: '', reference_number: '', service_period: '', amount: '' },
-    ]);
-  };
-
-  const removeItem = (index: number) => {
-    onChange(items.filter((_, i) => i !== index));
-  };
-
-  return (
-    <div className="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-neutral-900">Voucher detail lines</p>
-          <p className="text-xs text-neutral-500">
-            Optional line-by-line detail for invoices, tax vouchers, periods, or remittance notes.
-          </p>
-        </div>
-        <Button type="button" variant="outline" size="sm" onClick={addItem}>
-          Add line
-        </Button>
-      </div>
-
-      {items.length > 0 && (
-        <div className="mt-3 space-y-3">
-          {items.map((item, index) => (
-            <div key={index} className="grid grid-cols-1 gap-2 rounded-lg border border-neutral-200 bg-white p-3 md:grid-cols-12">
-              <Input
-                className="md:col-span-4"
-                placeholder="Description, e.g. May GRT"
-                value={item.description}
-                onChange={e => updateItem(index, { description: e.target.value })}
-              />
-              <Input
-                className="md:col-span-3"
-                placeholder="Reference #"
-                value={item.reference_number}
-                onChange={e => updateItem(index, { reference_number: e.target.value })}
-              />
-              <Input
-                className="md:col-span-2"
-                placeholder="Period"
-                value={item.service_period}
-                onChange={e => updateItem(index, { service_period: e.target.value })}
-              />
-              <div className="md:col-span-2">
-                <NumericInput
-                  placeholder="Amount"
-                  min={0.01}
-                  fixedDecimalsOnBlur={2}
-                  value={item.amount === '' ? null : Number(item.amount)}
-                  onValueChange={value => updateItem(index, { amount: value == null ? '' : String(value) })}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-red-500 md:col-span-1"
-                onClick={() => removeItem(index)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-          <div className={`rounded-lg px-3 py-2 text-xs ${isBalanced ? 'bg-white text-neutral-600' : 'bg-red-50 text-red-700'}`}>
-            Voucher detail total: {formatCurrency(total)} · Check amount: {formatCurrency(checkAmount)}
-            {!isBalanced && ' · totals must match before saving'}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function FormField({
