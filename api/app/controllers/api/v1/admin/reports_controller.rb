@@ -769,16 +769,14 @@ module Api
         def ytd_summary
           year = params[:year]&.to_i || Date.current.year
 
-          employees = Employee.where(company_id: current_company_id)
-                             .includes(:employee_ytd_totals)
-                             .order(:last_name, :first_name)
+          employees = filtered_ytd_employees
 
           render json: {
             report: {
               type: "ytd_summary",
               meta: report_meta(Company.find(current_company_id), :ytd_summary),
               year: year,
-              employees: employees.map { |emp| employee_ytd_row(emp, year) },
+              employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year) }),
               company_totals: ytd_company_totals(year)
             }
           }
@@ -786,14 +784,12 @@ module Api
 
         def ytd_summary_xlsx
           year = params[:year]&.to_i || Date.current.year
-          employees = Employee.where(company_id: current_company_id)
-                             .includes(:employee_ytd_totals)
-                             .order(:last_name, :first_name)
+          employees = filtered_ytd_employees
           report = {
             type: "ytd_summary",
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: year,
-            employees: employees.map { |emp| employee_ytd_row(emp, year) },
+            employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year) }),
             company_totals: ytd_company_totals(year)
           }
 
@@ -804,6 +800,47 @@ module Api
         end
 
         private
+
+        YTD_SORT_FIELDS = %w[
+          name employment_type status gross_pay withholding_tax social_security_tax
+          medicare_tax retirement net_pay
+        ].freeze
+
+        def filtered_ytd_employees
+          employees = Employee.where(company_id: current_company_id)
+                              .includes(:employee_ytd_totals)
+
+          employees = employees.where(employment_type: params[:employment_type]) if params[:employment_type].present?
+          employees = employees.where(status: params[:status]) if params[:status].present?
+
+          if params[:search].present?
+            query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:search].to_s.strip)}%"
+            employees = employees.where(
+              "first_name ILIKE :query OR last_name ILIKE :query OR CONCAT(first_name, ' ', last_name) ILIKE :query",
+              query:
+            )
+          end
+
+          employees.order(:last_name, :first_name)
+        end
+
+        def sort_ytd_rows(rows)
+          sort_by = YTD_SORT_FIELDS.include?(params[:sort_by].to_s) ? params[:sort_by].to_s : "name"
+          direction = params[:sort_direction].to_s == "desc" ? "desc" : "asc"
+
+          sorted = rows.sort_by do |row|
+            case sort_by
+            when "name"
+              [ row[:last_name].to_s.downcase, row[:first_name].to_s.downcase ]
+            when "employment_type", "status"
+              [ row[sort_by.to_sym].to_s.downcase, row[:last_name].to_s.downcase, row[:first_name].to_s.downcase ]
+            else
+              [ row[sort_by.to_sym].to_d, row[:last_name].to_s.downcase, row[:first_name].to_s.downcase ]
+            end
+          end
+
+          direction == "desc" ? sorted.reverse : sorted
+        end
 
         def transmittal_options
           opts = {}

@@ -54,15 +54,25 @@ module Api
 
         # POST /api/v1/admin/pay_periods
         def create
-          @pay_period = PayPeriod.new(pay_period_params)
+          attrs = pay_period_params.to_h
+          starting_check_number = attrs.delete("starting_check_number")
+          @pay_period = PayPeriod.new(attrs)
           @pay_period.company_id = current_company_id
           @pay_period.status = "draft"
 
-          if @pay_period.save
-            render json: { pay_period: pay_period_json(@pay_period) }, status: :created
-          else
-            render json: { errors: @pay_period.errors.full_messages }, status: :unprocessable_entity
+          ActiveRecord::Base.transaction do
+            apply_starting_check_number!(starting_check_number) if starting_check_number.present?
+            @pay_period.save!
           end
+
+          if @pay_period.persisted?
+            render json: { pay_period: pay_period_json(@pay_period) }, status: :created
+          end
+        rescue ActiveRecord::RecordInvalid => e
+          errors = e.record&.errors&.full_messages.presence || [e.message]
+          render json: { errors: errors }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/pay_periods/:id
@@ -789,7 +799,28 @@ module Api
         end
 
         def pay_period_params
-          params.require(:pay_period).permit(:start_date, :end_date, :pay_date, :notes)
+          params.require(:pay_period).permit(:start_date, :end_date, :pay_date, :notes, :starting_check_number)
+        end
+
+        def apply_starting_check_number!(value)
+          new_number = value.to_s.strip
+          raise ArgumentError, "Starting check number must be numeric" unless new_number.match?(/\A\d+\z/)
+
+          number = new_number.to_i
+          raise ArgumentError, "Starting check number must be greater than 0" if number < 1
+          raise ArgumentError, "Starting check number cannot exceed 9,999,999" if number > 9_999_999
+
+          company = @pay_period.company || Company.find(current_company_id)
+          company.lock!
+          if number < company.next_check_number.to_i
+            raise ArgumentError, "Starting check number cannot move backward. Current next check number is #{company.next_check_number}."
+          end
+
+          issued = PayrollItem.where(company_id: current_company_id, check_number: new_number).exists? ||
+            NonEmployeeCheck.where(company_id: current_company_id, check_number: new_number).exists?
+          raise ArgumentError, "Check number #{new_number} is already used" if issued
+
+          company.update!(next_check_number: number)
         end
 
         def pay_period_json(pay_period, include_items: false)

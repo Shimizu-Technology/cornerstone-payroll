@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { formatCurrency } from '@/lib/utils';
 
 // ──── Time format helpers ──────────────────────────────
 function to12h(time24: string | null): string {
@@ -38,6 +39,53 @@ function to24h(time12: string): string | null {
   if (period.startsWith('A') && h === 12) h = 0;
 
   return `${h.toString().padStart(2, '0')}:${m}`;
+}
+
+const PUNCH_TIME_FIELDS = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
+
+function parseTimeMinutes(value: string): number | null {
+  const normalized = to24h(value);
+  if (!normalized) return null;
+
+  const match = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+
+  return hours * 60 + minutes;
+}
+
+function calculateEditableHours(entry: EditableEntry): number | null {
+  const clockIn = parseTimeMinutes(entry.clock_in);
+  const lunchOut = parseTimeMinutes(entry.lunch_out);
+  const lunchIn = parseTimeMinutes(entry.lunch_in);
+  const clockOut = parseTimeMinutes(entry.clock_out);
+  const in3 = parseTimeMinutes(entry.in3);
+  const out3 = parseTimeMinutes(entry.out3);
+  const pairs: Array<[number, number]> = [];
+
+  if (lunchOut !== null && lunchIn !== null) {
+    if (clockIn !== null) pairs.push([clockIn, lunchOut]);
+    if (clockOut !== null) pairs.push([lunchIn, clockOut]);
+  } else if (clockIn !== null && clockOut !== null) {
+    pairs.push([clockIn, clockOut]);
+  } else if (clockIn !== null && lunchOut !== null) {
+    pairs.push([clockIn, lunchOut]);
+  }
+  if (in3 !== null && out3 !== null) pairs.push([in3, out3]);
+
+  if (pairs.length === 0) return null;
+
+  let totalMinutes = 0;
+  for (const [start, pairEnd] of pairs) {
+    let end = pairEnd;
+    if (end < start) end += 24 * 60;
+    totalMinutes += end - start;
+  }
+
+  return Math.max(Math.round((totalMinutes / 60) * 100) / 100, 0);
 }
 
 function confidenceColor(c: number | null): string {
@@ -394,7 +442,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
-                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                      {rate.label} ({formatCurrency(toNumber(rate.rate))}/hr)
                     </option>
                   ))}
                 </Select>
@@ -826,7 +874,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     }
   }, [needsWageRateChoice, selectedWageRateId, wageRateChoices]);
 
-  const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
+  const editableTotalHours = editable.reduce((sum, entry) => sum + (calculateEditableHours(entry) || 0), 0);
 
   const updateField = (rowKey: string, field: keyof EditableEntry, value: string) => {
     setEditable((prev) => prev.map((e) => {
@@ -840,18 +888,16 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
     setSaving(true);
     setError('');
     try {
-      const timeFields = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
-
       for (const entry of editable) {
         if (entry._isPlaceholder || entry.id == null) {
-          const hasAnyTime = timeFields.some((f) => entry[f].trim() !== '');
+          const hasAnyTime = PUNCH_TIME_FIELDS.some((f) => entry[f].trim() !== '');
           if (!hasAnyTime) continue;
 
           const createData: Record<string, string | number | null> = {
             card_day: entry.card_day,
             date: entry.date || null,
           };
-          for (const f of timeFields) {
+          for (const f of PUNCH_TIME_FIELDS) {
             createData[f] = to24h(entry[f]);
           }
           const created = await punchEntriesApi.create(tc.id, createData as Partial<PunchEntryData>);
@@ -867,7 +913,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           if (!original) continue;
 
           const changes: Record<string, string | null> = {};
-          for (const f of timeFields) {
+          for (const f of PUNCH_TIME_FIELDS) {
             const converted = to24h(entry[f]);
             if (converted !== original[f]) {
               changes[f] = converted;
@@ -1049,6 +1095,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 const original = entry.id != null ? tc.punch_entries.find((pe) => pe.id === entry.id) : null;
                 const isBlank = !entry.clock_in && !entry.lunch_out && !entry.lunch_in && !entry.clock_out && !entry.in3 && !entry.out3;
                 const dow = entry._dow || original?.day_of_week || '';
+                const rowHours = calculateEditableHours(entry);
 
                 const rowBg = original?.needs_attention
                   ? original.review_state === 'approved' ? 'bg-blue-50' : 'bg-orange-50'
@@ -1073,7 +1120,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                     <td className="px-1 py-1"><TimeInput value={entry.in3} onChange={(v) => updateField(rowKey, 'in3', v)} /></td>
                     <td className="px-1 py-1"><TimeInput value={entry.out3} onChange={(v) => updateField(rowKey, 'out3', v)} /></td>
                     <td className="px-1 py-1 text-xs text-right font-mono">
-                      {original?.hours_worked != null ? original.hours_worked.toFixed(2) : isBlank ? '—' : '-'}
+                      {rowHours != null ? rowHours.toFixed(2) : isBlank ? '—' : '-'}
                     </td>
                     <td className="px-1 py-1">
                       {original ? (
@@ -1098,7 +1145,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               <tr className="border-t font-semibold text-sm">
                 <td colSpan={9} className="px-1 py-2 text-right">Total:</td>
                 <td className="px-1 py-2 text-right font-mono">
-                  {punchesWithData.reduce((sum, pe) => sum + (pe.hours_worked || 0), 0).toFixed(2)}
+                  {editableTotalHours.toFixed(2)}
                 </td>
                 <td colSpan={2} />
               </tr>
@@ -1155,7 +1202,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 >
                   {wageRateChoices.map((rate) => (
                     <option key={rate.id} value={rate.id ?? ''}>
-                      {rate.label} (${toNumber(rate.rate).toFixed(2)}/hr)
+                      {rate.label} ({formatCurrency(toNumber(rate.rate))}/hr)
                     </option>
                   ))}
                 </Select>
@@ -1180,7 +1227,7 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
           <div className="flex items-center gap-2 w-full border-t pt-3 mt-1">
             <Badge className="bg-green-100 text-green-800">Reviewed</Badge>
             <span className="text-sm text-gray-600">
-              Total hours: <strong className="font-mono">{punchesWithData.reduce((sum, pe) => sum + (pe.hours_worked || 0), 0).toFixed(2)}</strong>
+              Total hours: <strong className="font-mono">{editableTotalHours.toFixed(2)}</strong>
               — Open this timecard from a pay period to apply hours to payroll.
             </span>
           </div>

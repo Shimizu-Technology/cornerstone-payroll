@@ -86,6 +86,28 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(response.parsed_body.dig("payroll_item", "state_withheld")).to be_nil
     end
 
+    it "applies recalculated punch-pair hours instead of stale stored hours" do
+      timecard.punch_entries.destroy_all
+      stale_entry = PunchEntry.create!(
+        timecard: timecard,
+        card_day: 26,
+        date: Date.new(2026, 4, 26),
+        clock_in: "08:25",
+        lunch_out: "12:02",
+        confidence: 0.95,
+        review_state: "approved",
+        reviewed_by_name: "Admin"
+      )
+      stale_entry.update_column(:hours_worked, 10.77)
+
+      post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payroll_item", "wage_rate_hours").find { |rate| rate["label"] == "Flight Hours" }["regular_hours"]).to eq(3.62)
+      expect(response.parsed_body.dig("timecard", "punch_entries").first["hours_worked"]).to eq(3.62)
+    end
+
     it "preserves hours from inactive wage rates when re-applying OCR hours" do
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, employment_type: "hourly")
       item.wage_rate_hours = [

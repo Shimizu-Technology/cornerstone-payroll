@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { nonEmployeeChecksApi } from '@/services/api';
+import { formatCurrency } from '@/lib/utils';
 import type { NonEmployeeCheckEdit } from '@/types';
 
 interface NonEmployeeCheckHistoryProps {
@@ -18,7 +19,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 function formatValue(field: string, value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
-  if (field === 'amount') return `$${Number(value).toFixed(2)}`;
+  if (field === 'amount') return formatCurrency(Number(value));
   return String(value);
 }
 
