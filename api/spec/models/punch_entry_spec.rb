@@ -57,4 +57,18 @@ RSpec.describe PunchEntry, type: :model do
     expect(entry.hours_worked).to eq(9.0)
     expect(entry).to be_missing_core_punch
   end
+
+  it "flags a trailing third in punch without a matching out punch" do
+    entry = described_class.create!(
+      timecard: timecard,
+      card_day: 28,
+      date: Date.new(2026, 4, 28),
+      clock_in: "08:00",
+      in3: "13:00"
+    )
+
+    expect(entry.hours_worked).to be_nil
+    expect(entry).to be_missing_core_punch
+    expect(entry).to be_needs_attention
+  end
 end
