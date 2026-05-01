@@ -99,7 +99,9 @@ class Company < ApplicationRecord
   end
 
   def check_number_already_issued?(number)
-    issued_check_numbers.include?(number.to_s)
+    normalized = number.to_s
+    PayrollItem.where(company_id: id, check_number: normalized).exists? ||
+      NonEmployeeCheck.where(company_id: id, check_number: normalized).exists?
   end
 
   def full_address

@@ -263,6 +263,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             <Field label="Payable To" required>
               <input
                 className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                placeholder="e.g., Treasurer of Guam"
                 value={form.payable_to}
                 onChange={e => setForm(p => p && { ...p, payable_to: e.target.value })}
               />
@@ -273,6 +274,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 min={0.01}
                 fixedDecimalsOnBlur={2}
                 inputMode="decimal"
+                placeholder="e.g., 256.78"
                 className="w-full px-3 py-2 text-sm"
                 value={form.amount === '' ? null : Number(form.amount)}
                 onValueChange={(value) =>
@@ -296,6 +298,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             <Field label="Check Number">
               <input
                 className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                placeholder="e.g., 1234"
                 value={form.check_number}
                 onChange={e => setForm(p => p && { ...p, check_number: e.target.value })}
               />
@@ -320,6 +323,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                     <input
                       className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
                       inputMode="numeric"
+                      placeholder="e.g., 2026"
                       value={form.tax_year}
                       onChange={e => setForm(p => p && { ...p, tax_year: e.target.value })}
                     />
@@ -375,6 +379,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 <Field label="Confirmation Number">
                   <input
                     className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                    placeholder="e.g., GRT-2026-05"
                     value={form.confirmation_number}
                     onChange={e => setForm(p => p && { ...p, confirmation_number: e.target.value })}
                   />
@@ -385,6 +390,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             <Field label="Memo" className="md:col-span-2">
               <input
                 className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                placeholder="e.g., May GRT payment"
                 value={form.memo}
                 onChange={e => setForm(p => p && { ...p, memo: e.target.value })}
               />
@@ -393,6 +399,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
             <Field label="Reference #" className="md:col-span-2">
               <input
                 className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                placeholder="e.g., invoice or tax voucher #"
                 value={form.reference_number}
                 onChange={e => setForm(p => p && { ...p, reference_number: e.target.value })}
               />
@@ -402,6 +409,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               <textarea
                 rows={2}
                 className="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm shadow-sm focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200"
+                placeholder="e.g., Notes about what this payment covers or how it was calculated"
                 value={form.description}
                 onChange={e => setForm(p => p && { ...p, description: e.target.value })}
               />

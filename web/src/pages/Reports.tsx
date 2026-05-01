@@ -1,4 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -299,6 +300,31 @@ function PayrollRegisterPanel() {
         </>
       )}
     </div>
+  );
+}
+
+function ChecksPaymentsRegisterPanel() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Checks & Payments Register</CardTitle>
+        <CardDescription>
+          Review and export standalone checks for GRT, estimated tax, vendors, reimbursements,
+          and other payments that are not tied to a payroll period.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Link
+          to="/checks-payments"
+          className="inline-flex items-center justify-center rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-700"
+        >
+          Open Checks & Payments
+        </Link>
+        <p className="mt-3 text-sm text-gray-500">
+          Use the register filters, then choose Export Register to download the visible checks as CSV.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -1999,9 +2025,9 @@ function Form1099NecPanel() {
 
 // ─── Report Tiles ─────────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
+type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'employee-pay-history', 'tax-withholding-summary', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
@@ -2011,6 +2037,16 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'checks-payments-register',
+    title: 'Checks & Payments Register',
+    description: 'Standalone non-pay-period checks and payments by payee, date, type, and check number',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14h6m-7 4h8M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6" />
       </svg>
     ),
   },
@@ -2140,6 +2176,7 @@ export function Reports() {
 
         {/* Active report panel */}
         {activeReport === 'payroll-register' && <PayrollRegisterPanel />}
+        {activeReport === 'checks-payments-register' && <ChecksPaymentsRegisterPanel />}
         {activeReport === 'employee-pay-history' && <EmployeePayHistoryPanel />}
         {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
         {activeReport === 'ytd-summary' && <YtdSummaryPanel />}
