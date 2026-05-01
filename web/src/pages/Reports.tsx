@@ -1200,7 +1200,7 @@ function YtdSummaryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
 
-  function reportParams(): YtdSummaryParams {
+  function reportParams(overrides: Partial<YtdSummaryParams> = {}): YtdSummaryParams {
     return {
       year,
       sort_by: sortBy,
@@ -1208,17 +1208,28 @@ function YtdSummaryPanel() {
       ...(search.trim() ? { search: search.trim() } : {}),
       ...(employmentType !== 'all' ? { employment_type: employmentType } : {}),
       ...(status !== 'all' ? { status } : {}),
+      ...overrides,
     };
   }
 
   function updateSort(field: NonNullable<YtdSummaryParams['sort_by']>) {
+    const nextDirection =
+      sortBy === field
+        ? (sortDirection === 'asc' ? 'desc' : 'asc')
+        : (field === 'name' || field === 'employment_type' || field === 'status' ? 'asc' : 'desc');
+
     if (sortBy === field) {
-      setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+      setSortDirection(nextDirection);
     } else {
       setSortBy(field);
-      setSortDirection(field === 'name' || field === 'employment_type' || field === 'status' ? 'asc' : 'desc');
+      setSortDirection(nextDirection);
     }
-    setReport(null);
+
+    if (report) {
+      void loadReport({ sort_by: field, sort_direction: nextDirection });
+    } else {
+      setReport(null);
+    }
   }
 
   function sortLabel(field: NonNullable<YtdSummaryParams['sort_by']>) {
@@ -1226,12 +1237,12 @@ function YtdSummaryPanel() {
     return sortDirection === 'asc' ? ' ↑' : ' ↓';
   }
 
-  async function loadReport() {
+  async function loadReport(overrides: Partial<YtdSummaryParams> = {}) {
     setLoading(true);
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.ytdSummary(reportParams());
+      const res = await reportsApi.ytdSummary(reportParams(overrides));
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1316,7 +1327,7 @@ function YtdSummaryPanel() {
                 <option value="terminated">Terminated</option>
               </select>
             </div>
-            <Button onClick={loadReport} disabled={loading}>
+            <Button onClick={() => loadReport()} disabled={loading}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
             <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>

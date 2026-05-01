@@ -244,6 +244,25 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(JSON.parse(response.body)["error"]).to match(/cannot move backward/i)
     end
 
+    it "returns company validation errors when starting check number save fails" do
+      invalid_company = company
+      invalid_company.errors.add(:next_check_number, "is invalid")
+      allow_any_instance_of(Company).to receive(:update!)
+        .and_raise(ActiveRecord::RecordInvalid.new(invalid_company))
+
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.today,
+          end_date: Date.today + 14.days,
+          pay_date: Date.today + 17.days,
+          starting_check_number: "1250"
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["errors"]).to include("Next check number is invalid")
+    end
+
     it "returns errors for invalid data" do
       params = {
         pay_period: {
