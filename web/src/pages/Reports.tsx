@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -50,6 +50,30 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function SortableTh({
+  label,
+  activeLabel,
+  align = 'left',
+  onClick,
+}: {
+  label: string;
+  activeLabel: string;
+  align?: 'left' | 'right';
+  onClick: () => void;
+}) {
+  return (
+    <th className={`pb-2 pr-4 font-medium ${align === 'right' ? 'text-right' : 'text-left'}`}>
+      <button
+        type="button"
+        className={`text-xs font-medium uppercase tracking-wide text-gray-500 hover:text-gray-900 ${align === 'right' ? 'text-right' : 'text-left'}`}
+        onClick={onClick}
+      >
+        {label}{activeLabel}
+      </button>
+    </th>
+  );
 }
 
 function buildRevalidationPreflight(revalidation: W2GuMarkReadyResponse['revalidation']): W2GuPreflightResult | null {
@@ -1166,17 +1190,59 @@ function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
+  const [search, setSearch] = useState('');
+  const [employmentType, setEmploymentType] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [sortBy, setSortBy] = useState<NonNullable<YtdSummaryParams['sort_by']>>('name');
+  const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
 
-  async function loadReport() {
+  function reportParams(overrides: Partial<YtdSummaryParams> = {}): YtdSummaryParams {
+    return {
+      year,
+      sort_by: sortBy,
+      sort_direction: sortDirection,
+      ...(search.trim() ? { search: search.trim() } : {}),
+      ...(employmentType !== 'all' ? { employment_type: employmentType } : {}),
+      ...(status !== 'all' ? { status } : {}),
+      ...overrides,
+    };
+  }
+
+  function updateSort(field: NonNullable<YtdSummaryParams['sort_by']>) {
+    const nextDirection =
+      sortBy === field
+        ? (sortDirection === 'asc' ? 'desc' : 'asc')
+        : (field === 'name' || field === 'employment_type' || field === 'status' ? 'asc' : 'desc');
+
+    if (sortBy === field) {
+      setSortDirection(nextDirection);
+    } else {
+      setSortBy(field);
+      setSortDirection(nextDirection);
+    }
+
+    if (report) {
+      void loadReport({ sort_by: field, sort_direction: nextDirection });
+    } else {
+      setReport(null);
+    }
+  }
+
+  function sortLabel(field: NonNullable<YtdSummaryParams['sort_by']>) {
+    if (sortBy !== field) return '';
+    return sortDirection === 'asc' ? ' ↑' : ' ↓';
+  }
+
+  async function loadReport(overrides: Partial<YtdSummaryParams> = {}) {
     setLoading(true);
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.ytdSummary(year);
+      const res = await reportsApi.ytdSummary(reportParams(overrides));
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1189,7 +1255,7 @@ function YtdSummaryPanel() {
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.ytdSummaryXlsx(year);
+      const { blob, filename } = await reportsApi.ytdSummaryXlsx(reportParams());
       triggerDownload(blob, filename || `ytd_summary_${year}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1223,7 +1289,45 @@ function YtdSummaryPanel() {
                 ))}
               </select>
             </div>
-            <Button onClick={loadReport} disabled={loading}>
+            <div className="flex items-center gap-2">
+              <label htmlFor="ytd-search" className="text-sm font-medium text-gray-700">Search</label>
+              <input
+                id="ytd-search"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setReport(null); }}
+                placeholder="Employee name"
+                className="h-9 w-48 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="ytd-type" className="text-sm font-medium text-gray-700">Type</label>
+              <select
+                id="ytd-type"
+                value={employmentType}
+                onChange={(e) => { setEmploymentType(e.target.value); setReport(null); }}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="all">All types</option>
+                <option value="hourly">Hourly</option>
+                <option value="salary">Salary</option>
+                <option value="contractor">Contractor</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="ytd-status" className="text-sm font-medium text-gray-700">Status</label>
+              <select
+                id="ytd-status"
+                value={status}
+                onChange={(e) => { setStatus(e.target.value); setReport(null); }}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+                <option value="terminated">Terminated</option>
+              </select>
+            </div>
+            <Button onClick={() => loadReport()} disabled={loading}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
             <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
@@ -1268,15 +1372,15 @@ function YtdSummaryPanel() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-gray-500">
-                    <th className="pb-2 pr-4 font-medium">Employee</th>
-                    <th className="pb-2 pr-4 font-medium">Type</th>
-                    <th className="pb-2 pr-4 font-medium">Status</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
-                    <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
-                    <th className="pb-2 font-medium text-right">Net Pay</th>
+                    <SortableTh label="Employee" activeLabel={sortLabel('name')} onClick={() => updateSort('name')} />
+                    <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
+                    <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
+                    <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
+                    <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
+                    <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
+                    <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
+                    <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                   </tr>
                 </thead>
                 <tbody>
@@ -2136,16 +2240,16 @@ export function Reports() {
 
       <div className="p-8 space-y-8">
         {/* Report tiles */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid items-stretch gap-6 md:grid-cols-2 lg:grid-cols-3">
           {reports.map((report) => {
             const isActive = activeReport === report.id;
             return (
               <Card
                 key={report.id}
-                className={`transition-colors cursor-pointer ${isActive ? 'border-primary-500 bg-primary-50' : 'hover:border-primary-300'}`}
+                className={`flex h-full cursor-pointer flex-col transition-colors ${isActive ? 'border-primary-500 bg-primary-50' : 'hover:border-primary-300'}`}
                 onClick={() => setActiveReport(isActive ? null : report.id)}
               >
-                <CardHeader>
+                <CardHeader className="flex-1">
                   <div className="flex items-start gap-4">
                     <div className={`p-2 rounded-lg ${isActive ? 'bg-primary-200 text-primary-700' : 'bg-primary-100 text-primary-600'}`}>
                       {report.icon}
@@ -2156,7 +2260,7 @@ export function Reports() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="mt-auto">
                   <Button
                     variant={isActive ? 'primary' : 'outline'}
                     size="sm"

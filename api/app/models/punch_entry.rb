@@ -11,12 +11,21 @@ class PunchEntry < ApplicationRecord
   before_update :reset_review_state_if_attention_changed
   after_commit :require_rereview_if_changed, on: :update
 
-  def calculate_hours
+  def calculated_hours
     pairs = punch_pairs
-    return unless pairs.any?
+    return nil unless pairs.any?
 
-    worked = pairs.sum { |pin, pout| (pout - pin) / 3600.0 }
-    self.hours_worked = [worked, 0].max.round(2)
+    worked = pairs.sum do |pin, pout|
+      end_time = pout
+      end_time += 1.day if end_time < pin
+      (end_time - pin) / 3600.0
+    end
+
+    [worked, 0].max.round(2)
+  end
+
+  def calculate_hours
+    self.hours_worked = calculated_hours
   end
 
   def needs_attention?
@@ -38,7 +47,7 @@ class PunchEntry < ApplicationRecord
   end
 
   def missing_core_punch?
-    punch_count.positive? && (first_in.blank? || last_out.blank?)
+    punch_count.positive? && (first_in.blank? || last_out.blank? || incomplete_lunch_break?)
   end
 
   def punch_count
@@ -50,7 +59,7 @@ class PunchEntry < ApplicationRecord
   end
 
   def last_out
-    out3.presence || clock_out
+    out3.presence || clock_out.presence || (lunch_out if lunch_in.blank?)
   end
 
   def blank_row_note?
@@ -76,15 +85,19 @@ class PunchEntry < ApplicationRecord
   def punch_pairs
     pairs = []
     if lunch_out.present? && lunch_in.present?
-      # Full day with lunch break: morning + afternoon segments (+ optional 3rd shift)
-      pairs << [clock_in, lunch_out] if clock_in.present? && lunch_out.present?
-      pairs << [lunch_in, clock_out] if lunch_in.present? && clock_out.present?
+      pairs << [clock_in, lunch_out] if clock_in.present?
+      pairs << [lunch_in, clock_out] if clock_out.present?
     elsif clock_in.present? && clock_out.present?
-      # No lunch break: single continuous shift
       pairs << [clock_in, clock_out]
+    elsif clock_in.present? && lunch_out.present?
+      pairs << [clock_in, lunch_out]
     end
     pairs << [in3, out3] if in3.present? && out3.present?
     pairs
+  end
+
+  def incomplete_lunch_break?
+    clock_out.present? && (lunch_out.present? != lunch_in.present?)
   end
 
   def reset_review_state_if_attention_changed

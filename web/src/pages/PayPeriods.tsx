@@ -58,6 +58,7 @@ export function PayPeriods() {
     start_date: '',
     end_date: '',
     pay_date: '',
+    starting_check_number: '',
     notes: '',
   });
   const [editFormData, setEditFormData] = useState({
@@ -120,7 +121,7 @@ export function PayPeriods() {
       setError(null);
       await payPeriodsApi.create(formData);
       setIsCreateOpen(false);
-      setFormData({ start_date: '', end_date: '', pay_date: '', notes: '' });
+      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '' });
       loadPayPeriods(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create pay period');
@@ -252,6 +253,7 @@ export function PayPeriods() {
       start_date: startDate.toISOString().split('T')[0],
       end_date: endDate.toISOString().split('T')[0],
       pay_date: payDate.toISOString().split('T')[0],
+      starting_check_number: '',
       notes: '',
     });
   };
@@ -666,6 +668,19 @@ export function PayPeriods() {
                   onChange={(e) => setFormData({ ...formData, pay_date: e.target.value })}
                   required
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="starting_check_number">Starting Check Number (optional)</Label>
+                <Input
+                  id="starting_check_number"
+                  inputMode="numeric"
+                  value={formData.starting_check_number}
+                  onChange={(e) => setFormData({ ...formData, starting_check_number: e.target.value })}
+                  placeholder="Use current check settings"
+                />
+                <p className="text-xs text-gray-500">
+                  Sets the company’s next payroll check number before checks are assigned.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes (optional)</Label>

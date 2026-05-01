@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Header } from '@/components/layout/Header';
 import { employeeLoansApi, employeesApi } from '@/services/api';
+import { formatCurrency } from '@/lib/utils';
 import type { EmployeeLoan, Employee, LoanTransaction } from '@/types';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -142,7 +143,7 @@ export default function EmployeeLoans() {
     }
   };
 
-  const fmt = (v: number) => `$${v.toFixed(2)}`;
+  const fmt = (v: number) => formatCurrency(v);
 
   return (
     <>

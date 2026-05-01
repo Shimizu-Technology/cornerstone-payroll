@@ -68,7 +68,7 @@ module Api
             clock_out: pe.clock_out&.strftime("%H:%M"),
             in3: pe.in3&.strftime("%H:%M"),
             out3: pe.out3&.strftime("%H:%M"),
-            hours_worked: pe.hours_worked,
+            hours_worked: pe.calculated_hours,
             confidence: pe.confidence,
             notes: pe.notes,
             manually_edited: pe.manually_edited,
