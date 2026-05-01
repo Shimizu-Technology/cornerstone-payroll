@@ -166,7 +166,7 @@ module Api
             return render json: { error: "Could not match timecard employee. Please specify employee_id." }, status: :unprocessable_entity
           end
 
-          total_hours = timecard.punch_entries.where.not(hours_worked: nil).sum(:hours_worked)
+          total_hours = timecard.punch_entries.to_a.sum { |entry| entry.calculated_hours.to_f }
           item = nil
           multi_rate_error = nil
 
@@ -377,7 +377,7 @@ module Api
                 clock_out: pe.clock_out&.strftime("%H:%M"),
                 in3: pe.in3&.strftime("%H:%M"),
                 out3: pe.out3&.strftime("%H:%M"),
-                hours_worked: pe.hours_worked,
+                hours_worked: pe.calculated_hours,
                 confidence: pe.confidence,
                 notes: pe.notes,
                 manually_edited: pe.manually_edited,

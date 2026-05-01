@@ -68,8 +68,9 @@ module Api
           if @pay_period.persisted?
             render json: { pay_period: pay_period_json(@pay_period) }, status: :created
           end
-        rescue ActiveRecord::RecordInvalid
-          render json: { errors: @pay_period.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          errors = e.record&.errors&.full_messages.presence || [e.message]
+          render json: { errors: errors }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
