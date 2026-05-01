@@ -59,7 +59,7 @@ class PunchEntry < ApplicationRecord
   end
 
   def last_out
-    all_punch_fields.compact.last
+    out3.presence || clock_out.presence || (lunch_out if lunch_in.blank?)
   end
 
   def blank_row_note?
