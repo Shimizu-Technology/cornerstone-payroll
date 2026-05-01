@@ -113,6 +113,50 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(response.parsed_body["errors"].join(", ")).to match(/Tax year|Tax month/)
     end
 
+    it "creates voucher detail lines when they total the check amount" do
+      expect {
+        post "/api/v1/admin/non_employee_checks",
+          params: {
+            non_employee_check: {
+              payable_to: "Island Vendor",
+              amount: 300.00,
+              check_type: "vendor",
+              memo: "Two invoices",
+              line_items_attributes: [
+                { description: "Invoice 101", reference_number: "101", amount: 125.00, position: 0 },
+                { description: "Invoice 102", reference_number: "102", amount: 175.00, position: 1 }
+              ]
+            }
+          },
+          as: :json
+      }.to change(NonEmployeeCheckLineItem, :count).by(2)
+
+      expect(response).to have_http_status(:created)
+      json = response.parsed_body["non_employee_check"]
+      expect(json["line_items"].length).to eq(2)
+      expect(json["line_items"].sum { |item| item["amount"].to_d }).to eq(300.to_d)
+    end
+
+    it "rejects voucher detail lines that do not total the check amount" do
+      expect {
+        post "/api/v1/admin/non_employee_checks",
+          params: {
+            non_employee_check: {
+              payable_to: "Island Vendor",
+              amount: 300.00,
+              check_type: "vendor",
+              line_items_attributes: [
+                { description: "Invoice 101", amount: 125.00, position: 0 }
+              ]
+            }
+          },
+          as: :json
+      }.not_to change(NonEmployeeCheck, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join(", ")).to match(/Line items/)
+    end
+
     it "rejects a pay period from another company on create" do
       expect {
         post "/api/v1/admin/non_employee_checks",
@@ -489,6 +533,30 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
         .and change(NonEmployeeCheckEdit, :count).by(-1)
 
       expect(response).to have_http_status(:ok)
+    end
+  end
+
+  describe "GET /api/v1/admin/non_employee_checks/:id/voucher_pdf" do
+    let!(:check) do
+      NonEmployeeCheck.create!(
+        company: company,
+        created_by: admin_user,
+        payable_to: "Treasurer of Guam",
+        amount: 425.75,
+        check_type: "grt",
+        payment_period_type: "month",
+        tax_year: 2026,
+        tax_month: 3,
+        memo: "March GRT"
+      )
+    end
+
+    it "returns a payment voucher PDF" do
+      get "/api/v1/admin/non_employee_checks/#{check.id}/voucher_pdf"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.media_type).to eq("application/pdf")
+      expect(response.body.byteslice(0, 4)).to eq("%PDF")
     end
   end
 

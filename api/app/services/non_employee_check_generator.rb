@@ -271,8 +271,13 @@ class NonEmployeeCheckGenerator
   # Data row builders
   # ---------------------------------------------------------------------------
   def payment_detail_rows
-    rows = []
-    rows << [check_type_label, fd(check.amount)]
+    rows = check.voucher_line_items.map do |item|
+      label = item.description.to_s
+      details = [ item.reference_number, item.service_period ].compact_blank.join(" · ")
+      label = "#{label} (#{details})" if details.present?
+      [ label, fd(item.amount) ]
+    end
+
     rows << [
       { content: "TOTAL", font_style: :bold },
       { content: fd(check.amount), font_style: :bold }

@@ -1985,6 +1985,10 @@ export const nonEmployeeChecksApi = {
     payment_period_type?: string; tax_year?: number | null; tax_quarter?: number | null;
     tax_month?: number | null; due_date?: string | null; payment_date?: string | null;
     confirmation_number?: string | null;
+    line_items_attributes?: Array<{
+      description: string; reference_number?: string | null; service_period?: string | null;
+      amount: number; position: number;
+    }>;
   }) =>
     api.post<{ non_employee_check: NonEmployeeCheck }>('/admin/non_employee_checks', { non_employee_check: data }),
   update: (id: number, data: Partial<{
@@ -1993,6 +1997,10 @@ export const nonEmployeeChecksApi = {
     payment_period_type: string; tax_year: number | null; tax_quarter: number | null;
     tax_month: number | null; due_date: string | null; payment_date: string | null;
     confirmation_number: string | null;
+    line_items_attributes: Array<{
+      id?: number; description?: string; reference_number?: string | null;
+      service_period?: string | null; amount?: number; position?: number; _destroy?: boolean;
+    }>;
     // `check_number` is nullable so the modal can clear an existing one.
     // Sending `null` (or omitting the key) keeps the partial unique index
     // on (company_id, check_number) WHERE check_number IS NOT NULL from
@@ -2023,6 +2031,8 @@ export const nonEmployeeChecksApi = {
     api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`, {
       starting_slot: options?.startingSlot,
     }),
+  voucherPdf: (id: number) =>
+    api.getBlob(`/admin/non_employee_checks/${id}/voucher_pdf`),
 };
 
 // ============================================================
