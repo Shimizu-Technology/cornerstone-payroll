@@ -300,6 +300,9 @@ class NonEmployeeCheckGenerator
   def reference_rows
     rows = []
     rows << ["Reference #", check.reference_number] if check.reference_number.present?
+    rows << ["Confirmation #", check.confirmation_number] if check.respond_to?(:confirmation_number) && check.confirmation_number.present?
+    rows << ["Tax Period", tax_period_label] if tax_period_label.present?
+    rows << ["Due Date", format_date(check.due_date)] if check.respond_to?(:due_date) && check.due_date.present?
     if check.pay_period.present?
       rows << ["Pay Period", "#{format_date(check.pay_period.start_date)} - #{format_date(check.pay_period.end_date)}"]
     end
@@ -311,6 +314,10 @@ class NonEmployeeCheckGenerator
     {
       "contractor" => "Contractor Payment",
       "tax_deposit" => "Tax Deposit",
+      "grt" => "GRT Payment",
+      "estimated_tax" => "Estimated Tax",
+      "w1_balance" => "W-1 Balance",
+      "swica" => "SWICA",
       "child_support" => "Child Support",
       "garnishment" => "Garnishment",
       "vendor" => "Vendor Payment",
@@ -320,11 +327,24 @@ class NonEmployeeCheckGenerator
   end
 
   def check_date_str
-    (check.pay_period&.pay_date || check.created_at.to_date).strftime("%m/%d/%Y")
+    check.effective_payment_date.strftime("%m/%d/%Y")
   end
 
   def format_date(d)
     d&.strftime("%m/%d/%Y") || "N/A"
+  end
+
+  def tax_period_label
+    case check.payment_period_type
+    when "month"
+      return nil if check.tax_year.blank? || check.tax_month.blank?
+      "#{Date::MONTHNAMES[check.tax_month]} #{check.tax_year}"
+    when "quarter"
+      return nil if check.tax_year.blank? || check.tax_quarter.blank?
+      "Q#{check.tax_quarter} #{check.tax_year}"
+    when "year"
+      check.tax_year&.to_s
+    end
   end
 
   def fn(v)
