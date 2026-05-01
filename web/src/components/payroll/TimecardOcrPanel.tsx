@@ -58,16 +58,29 @@ function parseTimeMinutes(value: string): number | null {
 }
 
 function calculateEditableHours(entry: EditableEntry): number | null {
-  const punches = PUNCH_TIME_FIELDS
-    .map((field) => parseTimeMinutes(entry[field]))
-    .filter((value): value is number => value !== null);
+  const clockIn = parseTimeMinutes(entry.clock_in);
+  const lunchOut = parseTimeMinutes(entry.lunch_out);
+  const lunchIn = parseTimeMinutes(entry.lunch_in);
+  const clockOut = parseTimeMinutes(entry.clock_out);
+  const in3 = parseTimeMinutes(entry.in3);
+  const out3 = parseTimeMinutes(entry.out3);
+  const pairs: Array<[number, number]> = [];
 
-  if (punches.length < 2) return null;
+  if (lunchOut !== null && lunchIn !== null) {
+    if (clockIn !== null) pairs.push([clockIn, lunchOut]);
+    if (clockOut !== null) pairs.push([lunchIn, clockOut]);
+  } else if (clockIn !== null && clockOut !== null) {
+    pairs.push([clockIn, clockOut]);
+  } else if (clockIn !== null && lunchOut !== null) {
+    pairs.push([clockIn, lunchOut]);
+  }
+  if (in3 !== null && out3 !== null) pairs.push([in3, out3]);
+
+  if (pairs.length === 0) return null;
 
   let totalMinutes = 0;
-  for (let i = 0; i + 1 < punches.length; i += 2) {
-    const start = punches[i];
-    let end = punches[i + 1];
+  for (const [start, pairEnd] of pairs) {
+    let end = pairEnd;
     if (end < start) end += 24 * 60;
     totalMinutes += end - start;
   }
