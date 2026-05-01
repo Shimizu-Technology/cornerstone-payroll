@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
+import { CheckCircle2, Download, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -123,7 +123,9 @@ export function ChecksPayments() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
+  const [previewLoaded, setPreviewLoaded] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -258,6 +260,7 @@ export function ChecksPayments() {
 
   const handlePreview = async (check: NonEmployeeCheck) => {
     setBusyId(check.id);
+    setPreviewLoaded(false);
     try {
       const blob = await nonEmployeeChecksApi.checkPdf(
         check.id,
@@ -277,6 +280,64 @@ export function ChecksPayments() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(null);
     setPreviewCheck(null);
+    setPreviewLoaded(false);
+  };
+
+  const handlePrintPreview = () => {
+    const frameWindow = previewFrameRef.current?.contentWindow;
+    if (!frameWindow || !previewLoaded) return;
+    frameWindow.focus();
+    frameWindow.print();
+  };
+
+  const exportRegisterCsv = () => {
+    const headers = [
+      'Payee',
+      'Amount',
+      'Type',
+      'Status',
+      'Check Number',
+      'Payment Date',
+      'Due Date',
+      'Tax Period',
+      'Tax Year',
+      'Tax Quarter',
+      'Tax Month',
+      'Confirmation Number',
+      'Reference Number',
+      'Memo',
+      'Description',
+      'Created At',
+    ];
+    const rows = visibleChecks.map(check => [
+      check.payable_to,
+      Number(check.amount).toFixed(2),
+      CHECK_TYPE_LABELS[check.check_type],
+      check.check_status,
+      check.check_number || '',
+      check.payment_date || '',
+      check.due_date || '',
+      periodLabel(check),
+      check.tax_year || '',
+      check.tax_quarter || '',
+      check.tax_month || '',
+      check.confirmation_number || '',
+      check.reference_number || '',
+      check.memo || '',
+      check.description || '',
+      check.created_at,
+    ]);
+    const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `checks_payments_register_${date}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
   const toggleHistory = (id: number) => {
@@ -311,11 +372,13 @@ export function ChecksPayments() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
               <Input
                 label="Payable to"
+                placeholder="e.g., Treasurer of Guam"
                 value={form.payable_to}
                 onChange={e => setForm(p => ({ ...p, payable_to: e.target.value }))}
               />
               <FormField label="Amount">
                 <NumericInput
+                  placeholder="e.g., 256.78"
                   min={0.01}
                   fixedDecimalsOnBlur={2}
                   value={form.amount === '' ? null : Number(form.amount)}
@@ -332,6 +395,7 @@ export function ChecksPayments() {
               <Input
                 label="Check number"
                 helperText="Optional until printed."
+                placeholder="e.g., 1234"
                 value={form.check_number}
                 onChange={e => setForm(p => ({ ...p, check_number: e.target.value }))}
               />
@@ -345,6 +409,7 @@ export function ChecksPayments() {
               {form.payment_period_type !== 'none' && (
                 <Input
                   label="Tax year"
+                  placeholder="e.g., 2026"
                   inputMode="numeric"
                   value={form.tax_year}
                   onChange={e => setForm(p => ({ ...p, tax_year: e.target.value }))}
@@ -384,16 +449,19 @@ export function ChecksPayments() {
               />
               <Input
                 label="Confirmation number"
+                placeholder="e.g., GRT-2026-05"
                 value={form.confirmation_number}
                 onChange={e => setForm(p => ({ ...p, confirmation_number: e.target.value }))}
               />
               <Input
                 label="Reference number"
+                placeholder="e.g., invoice or tax voucher #"
                 value={form.reference_number}
                 onChange={e => setForm(p => ({ ...p, reference_number: e.target.value }))}
               />
               <Input
                 label="Memo"
+                placeholder="e.g., May GRT payment"
                 value={form.memo}
                 onChange={e => setForm(p => ({ ...p, memo: e.target.value }))}
               />
@@ -402,6 +470,7 @@ export function ChecksPayments() {
               <textarea
                 className={`${fieldClassName} min-h-[88px] w-full border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 shadow-sm transition-all duration-200 placeholder:text-neutral-400 focus-visible:border-primary-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-200`}
                 rows={2}
+                placeholder="e.g., Notes about what this payment covers or how it was calculated"
                 value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               />
@@ -450,6 +519,14 @@ export function ChecksPayments() {
               >
                 <Settings className="mr-1.5 h-4 w-4" /> Check Settings
               </Link>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={exportRegisterCsv}
+                disabled={visibleChecks.length === 0}
+              >
+                <Download className="mr-1.5 h-4 w-4" /> Export Register
+              </Button>
             </div>
           </div>
         </Card>
@@ -539,14 +616,20 @@ export function ChecksPayments() {
                 <p className="text-sm text-neutral-500">{formatCurrency(Number(previewCheck.amount))} · Check #{previewCheck.check_number || '-'}</p>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => window.open(previewUrl)?.print()}>
-                  <Printer className="mr-1.5 h-4 w-4" /> Print
+                <Button variant="outline" onClick={handlePrintPreview} disabled={!previewLoaded}>
+                  <Printer className="mr-1.5 h-4 w-4" /> {previewLoaded ? 'Print' : 'Loading...'}
                 </Button>
                 <Button onClick={closePreview}>Close</Button>
               </div>
             </div>
             <div className="flex-1 bg-neutral-100 p-4">
-              <iframe src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`} className="h-full w-full rounded-lg border bg-white" title="Check preview" />
+              <iframe
+                ref={previewFrameRef}
+                src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
+                className="h-full w-full rounded-lg border bg-white"
+                title="Check preview"
+                onLoad={() => setPreviewLoaded(true)}
+              />
             </div>
           </div>
         </div>,
@@ -571,6 +654,11 @@ function periodLabel(check: NonEmployeeCheck) {
   if (check.payment_period_type === 'quarter' && check.tax_year && check.tax_quarter) return `Q${check.tax_quarter} ${check.tax_year}`;
   if (check.payment_period_type === 'year' && check.tax_year) return String(check.tax_year);
   return PERIOD_LABELS[check.payment_period_type] || 'No tax period';
+}
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function FormField({
