@@ -85,7 +85,7 @@ function calculateEditableHours(entry: EditableEntry): number | null {
     totalMinutes += end - start;
   }
 
-  return Math.max(totalMinutes / 60, 0);
+  return Math.max(Math.round((totalMinutes / 60) * 100) / 100, 0);
 }
 
 function confidenceColor(c: number | null): string {
