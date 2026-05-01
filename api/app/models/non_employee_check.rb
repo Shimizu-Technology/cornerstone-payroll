@@ -25,6 +25,7 @@ class NonEmployeeCheck < ApplicationRecord
            class_name: "NonEmployeeCheckEdit",
            dependent: :delete_all
   has_many :line_items,
+           -> { ordered },
            class_name: "NonEmployeeCheckLineItem",
            dependent: :destroy,
            inverse_of: :non_employee_check

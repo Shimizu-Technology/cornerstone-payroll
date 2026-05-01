@@ -9,7 +9,7 @@ class NonEmployeeCheckLineItem < ApplicationRecord
   validates :amount, presence: true, numericality: { greater_than: 0 }
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
 
-  default_scope { order(:position, :id) }
+  scope :ordered, -> { order(:position, :id) }
 
   private
 
