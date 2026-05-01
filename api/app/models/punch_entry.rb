@@ -47,7 +47,7 @@ class PunchEntry < ApplicationRecord
   end
 
   def missing_core_punch?
-    punch_count.positive? && (first_in.blank? || last_out.blank?)
+    punch_count.positive? && (first_in.blank? || last_out.blank? || incomplete_lunch_break?)
   end
 
   def punch_count
@@ -83,9 +83,21 @@ class PunchEntry < ApplicationRecord
   end
 
   def punch_pairs
-    all_punch_fields.compact.each_slice(2).filter_map do |pin, pout|
-      [pin, pout] if pin.present? && pout.present?
+    pairs = []
+    if lunch_out.present? && lunch_in.present?
+      pairs << [clock_in, lunch_out] if clock_in.present?
+      pairs << [lunch_in, clock_out] if clock_out.present?
+    elsif clock_in.present? && clock_out.present?
+      pairs << [clock_in, clock_out]
+    elsif clock_in.present? && lunch_out.present?
+      pairs << [clock_in, lunch_out]
     end
+    pairs << [in3, out3] if in3.present? && out3.present?
+    pairs
+  end
+
+  def incomplete_lunch_break?
+    clock_out.present? && (lunch_out.present? != lunch_in.present?)
   end
 
   def reset_review_state_if_attention_changed

@@ -43,4 +43,18 @@ RSpec.describe PunchEntry, type: :model do
 
     expect(entry.reload.hours_worked).to be_nil
   end
+
+  it "falls back to clock-in through clock-out when one lunch punch is missing" do
+    entry = described_class.create!(
+      timecard: timecard,
+      card_day: 27,
+      date: Date.new(2026, 4, 27),
+      clock_in: "08:00",
+      lunch_out: "12:00",
+      clock_out: "17:00"
+    )
+
+    expect(entry.hours_worked).to eq(9.0)
+    expect(entry).to be_missing_core_punch
+  end
 end
