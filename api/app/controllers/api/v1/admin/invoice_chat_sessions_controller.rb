@@ -50,6 +50,7 @@ module Api
         end
 
         def message
+          image_urls = []
           content = params.require(:content).to_s.strip
           if content.blank?
             render json: { error: "Message cannot be blank" }, status: :unprocessable_entity
@@ -86,8 +87,10 @@ module Api
             assistant_message: message_payload(assistant_message)
           }
         rescue ArgumentError => e
+          cleanup_uploaded_attachments(image_urls)
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
+          cleanup_uploaded_attachments(image_urls)
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         end
 
@@ -214,13 +217,25 @@ module Api
         end
 
         def upload_message_attachments
-          files = Array(params[:images]).compact
-          files.map do |file|
-            InvoiceAiAttachmentStorageService.upload(
+          uploaded = []
+          Array(params[:images]).compact.each do |file|
+            uploaded << InvoiceAiAttachmentStorageService.upload(
               file,
               company_id: current_company_id,
               session_id: @session.id
             )
+          end
+          uploaded
+        rescue ArgumentError
+          cleanup_uploaded_attachments(uploaded)
+          raise
+        end
+
+        def cleanup_uploaded_attachments(image_urls)
+          Array(image_urls).compact_blank.each do |reference|
+            R2StorageService.new.delete(reference)
+          rescue R2StorageService::UploadError => e
+            Rails.logger.warn("Invoice AI attachment cleanup failed: #{e.class}: #{e.message}")
           end
         end
 

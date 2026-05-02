@@ -51,13 +51,26 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
     it "rolls back the user message when preview persistence fails" do
       session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
       service = instance_double(InvoiceAiPreviewService, call: { "status" => "clarification_needed", "message" => "More details needed.", "line_items" => [] })
+      file = Tempfile.new([ "invoice-chat", ".jpg" ])
+      file.binmode
+      file.write("\xFF\xD8\xFF\xE0fakejpeg")
+      file.rewind
+      upload = Rack::Test::UploadedFile.new(file.path, "image/jpeg")
+      storage = instance_double(R2StorageService, delete: true)
       allow(InvoiceAiPreviewService).to receive(:new).and_return(service)
+      allow(InvoiceAiAttachmentStorageService).to receive(:upload).and_return("invoice-assistant/company-1/session-1/upload.jpg")
+      allow(R2StorageService).to receive(:new).and_return(storage)
       allow_any_instance_of(InvoiceChatSession).to receive(:store_preview!).and_raise(ActiveRecord::RecordInvalid.new(session))
 
-      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message", params: { content: "Invoice Shimizu Technology" }
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message",
+        params: { content: "Invoice Shimizu Technology", images: [ upload ] }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(session.messages.reload).to be_empty
+      expect(storage).to have_received(:delete).with("invoice-assistant/company-1/session-1/upload.jpg")
+    ensure
+      file&.close
+      file&.unlink
     end
 
     it "returns a validation error for unsupported attachment types" do
