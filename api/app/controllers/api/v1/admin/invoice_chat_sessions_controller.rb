@@ -107,6 +107,8 @@ module Api
           created_invoice = false
           InvoiceChatSession.transaction do
             @session.lock!
+            raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
+
             if @session.status == "invoice_created" && @session.invoice_id.present?
               invoice = Invoice.find_by(id: @session.invoice_id, company_id: current_company_id)
               raise ArgumentError, "Invoice already created for this session but could not be found" unless invoice
