@@ -48,7 +48,7 @@ RSpec.describe InvoiceAiPreviewService do
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
     allow(HTTParty).to receive(:post).and_return(
-      instance_double("HTTParty::Response", success?: true, dig: response.to_json)
+      double("HTTParty::Response", success?: true, dig: response.to_json)
     )
 
     preview = described_class.new(
@@ -79,11 +79,11 @@ RSpec.describe InvoiceAiPreviewService do
 
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
-    storage = instance_double(R2StorageService, download: "fake image bytes")
+    storage = instance_double(R2StorageService, download_with_limit: "fake image bytes")
     allow(R2StorageService).to receive(:new).and_return(storage)
     allow(HTTParty).to receive(:post) do |_url, options|
       request_body = JSON.parse(options.fetch(:body))
-      instance_double("HTTParty::Response", success?: true, dig: response.to_json)
+      double("HTTParty::Response", success?: true, dig: response.to_json)
     end
 
     described_class.new(
@@ -116,7 +116,7 @@ RSpec.describe InvoiceAiPreviewService do
         { "description" => "Accounting service", "quantity" => 1, "rate" => 100 }
       ]
     }
-    image = Tempfile.new(["invoice-ai-rendered", ".jpg"])
+    image = Tempfile.new([ "invoice-ai-rendered", ".jpg" ])
     image.binmode
     image.write("rendered jpeg bytes")
     image.rewind
@@ -124,12 +124,12 @@ RSpec.describe InvoiceAiPreviewService do
 
     allow(ENV).to receive(:[]).and_call_original
     allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
-    storage = instance_double(R2StorageService, download: "%PDF fake")
+    storage = instance_double(R2StorageService, download_with_limit: "%PDF fake")
     allow(R2StorageService).to receive(:new).and_return(storage)
-    allow(TimecardOcr::CardSegmentationService).to receive(:segment).and_return([image])
+    allow(TimecardOcr::CardSegmentationService).to receive(:segment).and_return([ image ])
     allow(HTTParty).to receive(:post) do |_url, options|
       request_body = JSON.parse(options.fetch(:body))
-      instance_double("HTTParty::Response", success?: true, dig: response.to_json)
+      double("HTTParty::Response", success?: true, dig: response.to_json)
     end
 
     described_class.new(
@@ -149,5 +149,51 @@ RSpec.describe InvoiceAiPreviewService do
   ensure
     image&.close
     image&.unlink if image&.path && File.exist?(image.path)
+  end
+
+  it "normalizes a new recipient preview when the client is not already saved" do
+    company = create(:company)
+    user = create(:user, company: company)
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+    response = {
+      "status" => "preview",
+      "message" => "Ready for review.",
+      "invoice_recipient_name" => "Pacific Tech",
+      "new_recipient" => {
+        "name" => "Pacific Tech",
+        "email" => "billing@pacific.example",
+        "default_rate" => 125,
+        "payment_terms" => "Due on receipt",
+        "template_type" => "hourly"
+      },
+      "line_items" => [
+        { "description" => "Accounting service", "quantity" => 2, "rate" => 125 }
+      ]
+    }
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+    allow(HTTParty).to receive(:post).and_return(
+      double("HTTParty::Response", success?: true, dig: response.to_json)
+    )
+
+    preview = described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Create an invoice for Pacific Tech"
+    ).call
+
+    expect(preview["status"]).to eq("preview")
+    expect(preview["invoice_recipient_id"]).to be_nil
+    expect(preview["invoice_recipient_name"]).to eq("Pacific Tech")
+    expect(preview["new_recipient"]).to include(
+      "name" => "Pacific Tech",
+      "email" => "billing@pacific.example",
+      "default_rate" => 125.0,
+      "payment_terms" => "Due on receipt",
+      "template_type" => "hourly"
+    )
+    expect(preview["email_body"]).to include("Hi Pacific Tech")
   end
 end

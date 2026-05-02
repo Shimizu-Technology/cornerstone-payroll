@@ -199,6 +199,50 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(response.parsed_body["error"]).to eq("Invoice recipient not found")
     end
 
+    it "creates a recipient when the preview includes a new bill-to profile" do
+      session = create(
+        :invoice_chat_session,
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        current_preview_version: 1,
+        current_preview: {
+          "status" => "preview",
+          "invoice_recipient_id" => nil,
+          "invoice_recipient_name" => "Pacific Tech",
+          "new_recipient" => {
+            "name" => "Pacific Tech",
+            "email" => "billing@pacific.example",
+            "payment_terms" => "Due on receipt",
+            "template_type" => "hourly"
+          },
+          "invoice_date" => "2026-05-02",
+          "line_items" => [
+            { "description" => "Accounting service", "quantity" => 2, "rate" => 125 }
+          ]
+        }
+      )
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      }.to change(InvoiceRecipient, :count).by(1)
+        .and change(Invoice, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      recipient = InvoiceRecipient.last
+      invoice = Invoice.last
+      expect(recipient).to have_attributes(
+        company_id: company.id,
+        name: "Pacific Tech",
+        email: "billing@pacific.example",
+        payment_terms: "Due on receipt",
+        template_type: "hourly",
+        active: true
+      )
+      expect(invoice.invoice_recipient_id).to eq(recipient.id)
+      expect(invoice.total_amount).to eq(250)
+    end
+
     it "does not create an invoice from an archived session" do
       recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
       session = create(
