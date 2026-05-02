@@ -44,6 +44,11 @@ class CreateGeneralTransmittals < ActiveRecord::Migration[8.1]
     add_index :general_transmittal_items,
       [ :source_type, :source_id ],
       name: "idx_general_transmittal_items_on_source"
+    add_index :general_transmittal_items,
+      [ :general_transmittal_id, :source_type, :source_id ],
+      unique: true,
+      where: "source_type IS NOT NULL AND source_id IS NOT NULL",
+      name: "idx_general_transmittal_items_unique_source_per_transmittal"
     add_check_constraint :general_transmittal_items,
       "amount IS NULL OR amount >= 0",
       name: "general_transmittal_items_amount_nonnegative"

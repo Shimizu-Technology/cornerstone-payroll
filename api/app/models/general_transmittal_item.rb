@@ -12,6 +12,12 @@ class GeneralTransmittalItem < ApplicationRecord
   validates :title, presence: true
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :source_id,
+    uniqueness: {
+      scope: [ :general_transmittal_id, :source_type ],
+      message: "has already been added to this transmittal"
+    },
+    if: :source_reference?
 
   def self.from_non_employee_check(check, position:)
     new(
@@ -55,5 +61,9 @@ class GeneralTransmittalItem < ApplicationRecord
 
   def default_title
     self.title = "Transmittal item" if title.blank?
+  end
+
+  def source_reference?
+    source_type.present? && source_id.present?
   end
 end

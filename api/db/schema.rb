@@ -430,6 +430,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_120000) do
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.index ["general_transmittal_id", "position"], name: "idx_general_transmittal_items_on_transmittal_position"
+    t.index ["general_transmittal_id", "source_type", "source_id"], name: "idx_general_transmittal_items_unique_source_per_transmittal", unique: true, where: "((source_type IS NOT NULL) AND (source_id IS NOT NULL))"
     t.index ["general_transmittal_id"], name: "idx_general_transmittal_items_on_transmittal"
     t.index ["source_type", "source_id"], name: "idx_general_transmittal_items_on_source"
     t.check_constraint "amount IS NULL OR amount >= 0::numeric", name: "general_transmittal_items_amount_nonnegative"
