@@ -194,6 +194,35 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       expect(invoice.reload.invoice_recipient_id).to eq(recipient.id)
       expect(invoice.notes).to eq("Updated without repointing recipient")
     end
+
+    it "rejects mark_draft when the status lifecycle does not allow returning to draft" do
+      invoice = create(:invoice, :with_line_item, company: company, status: "voided", generated_at: 2.days.ago, voided_at: Time.current)
+
+      patch "/api/v1/admin/invoices/#{invoice.id}",
+        params: {
+          mark_draft: "true",
+          invoice: {
+            invoice_recipient_id: invoice.invoice_recipient_id,
+            invoice_number: invoice.invoice_number,
+            invoice_date: invoice.invoice_date.iso8601,
+            notes: "Should not be accepted",
+            line_items: [
+              {
+                id: invoice.line_items.first.id,
+                description: "Accounting service",
+                quantity: 1,
+                rate: 100,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot mark voided invoice as draft")
+      expect(invoice.reload.status).to eq("voided")
+      expect(invoice.notes).not_to eq("Should not be accepted")
+    end
   end
 
   describe "POST /api/v1/admin/invoices/:id/generate_pdf" do
