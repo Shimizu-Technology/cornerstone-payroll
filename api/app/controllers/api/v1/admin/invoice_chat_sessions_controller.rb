@@ -9,10 +9,18 @@ module Api
         def index
           sessions = InvoiceChatSession
             .where(company_id: current_company_id, archived: false)
-            .includes(:invoice_recipient, :invoice, :messages)
+            .includes(:invoice_recipient, :invoice)
             .recent
+          message_counts = InvoiceChatMessage
+            .where(invoice_chat_session_id: sessions.map(&:id))
+            .group(:invoice_chat_session_id)
+            .count
 
-          render json: { invoice_chat_sessions: sessions.map { |session| session_payload(session) } }
+          render json: {
+            invoice_chat_sessions: sessions.map do |session|
+              session_payload(session, message_count: message_counts[session.id].to_i)
+            end
+          }
         end
 
         def show
@@ -239,7 +247,7 @@ module Api
           end
         end
 
-        def session_payload(session, detailed: false)
+        def session_payload(session, detailed: false, message_count: nil)
           payload = {
             id: session.id,
             company_id: session.company_id,
@@ -252,7 +260,7 @@ module Api
             archived: session.archived,
             recipient_name: session.invoice_recipient&.name,
             invoice_number: session.invoice&.invoice_number,
-            message_count: session.messages.size,
+            message_count: message_count.nil? ? session.messages.size : message_count,
             created_at: session.created_at,
             updated_at: session.updated_at
           }

@@ -16,6 +16,6 @@ class InvoiceChatMessage < ApplicationRecord
     self.content = content.to_s.strip
     self.image_urls = Array(image_urls).compact_blank
     self.preview = preview.presence || {}
-    self.has_preview = preview.present? if has_preview.nil? || preview.present?
+    self.has_preview = preview["status"] == "preview"
   end
 end
