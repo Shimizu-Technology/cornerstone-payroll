@@ -215,6 +215,20 @@ RSpec.describe "General Transmittals Admin API", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/general_transmittals/:id/preview_pdf" do
+    it "returns an error when PDF preview generation fails" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      allow_any_instance_of(GeneralTransmittalPdfGenerator)
+        .to receive(:generate)
+        .and_raise(StandardError, "PDF failure")
+
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/preview_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Unable to generate transmittal PDF")
+    end
+  end
+
   describe "POST /api/v1/admin/general_transmittals/:id/generate_pdf" do
     it "marks the transmittal generated and returns a PDF" do
       transmittal = create(:general_transmittal, :with_item, company: company)
@@ -228,16 +242,16 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(transmittal.generated_at).to be_present
     end
 
-    it "leaves the transmittal as a draft when PDF generation fails" do
+    it "leaves the transmittal as a draft and returns an error when PDF generation fails" do
       transmittal = create(:general_transmittal, :with_item, company: company)
       allow_any_instance_of(GeneralTransmittalPdfGenerator)
         .to receive(:generate)
         .and_raise(StandardError, "PDF failure")
 
-      expect do
-        post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
-      end.to raise_error(StandardError, "PDF failure")
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
 
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Unable to generate transmittal PDF")
       expect(transmittal.reload.status).to eq("draft")
       expect(transmittal.generated_at).to be_nil
     end
