@@ -143,9 +143,19 @@ module Api
           if raw[:invoice_recipient_id].present?
             recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], company_id: current_company_id)
             raise ArgumentError, "Invoice recipient not found" unless recipient
+            if inactive_new_recipient?(recipient)
+              raise ArgumentError, "Invoice recipient is archived"
+            end
           end
 
           raw
+        end
+
+        def inactive_new_recipient?(recipient)
+          return false if recipient.active?
+          return false if defined?(@invoice) && @invoice&.invoice_recipient_id == recipient.id
+
+          true
         end
 
         def line_item_params
