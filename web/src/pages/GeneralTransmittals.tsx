@@ -30,10 +30,16 @@ interface FormState {
 
 interface SaveTransmittalOptions {
   markDraft?: boolean;
+  reloadAfterSave?: boolean;
   successMessage?: string;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+const padDatePart = (value: number) => String(value).padStart(2, '0');
+
+const today = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${padDatePart(now.getMonth() + 1)}-${padDatePart(now.getDate())}`;
+};
 
 const emptyForm = (): FormState => ({
   title: '',
@@ -51,6 +57,18 @@ const statusColors: Record<string, string> = {
 
 function currency(value?: number | null) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
+}
+
+function localDateFromDateOnly(value?: string | null) {
+  if (!value) return null;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatDateOnly(value?: string | null) {
+  const date = localDateFromDateOnly(value);
+  return date ? date.toLocaleDateString() : '';
 }
 
 function downloadBlob(blobData: BlobDownload, fallbackName: string) {
@@ -74,7 +92,7 @@ function detailsFromCheck(check: NonEmployeeCheck) {
     check.description ? `Description: ${check.description}` : '',
     check.reference_number ? `Reference: ${check.reference_number}` : '',
     check.confirmation_number ? `Confirmation: ${check.confirmation_number}` : '',
-    check.payment_date ? `Payment date: ${new Date(check.payment_date).toLocaleDateString()}` : '',
+    check.payment_date ? `Payment date: ${formatDateOnly(check.payment_date)}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -260,6 +278,7 @@ export function GeneralTransmittals() {
 
   const saveTransmittal = async ({
     markDraft = form.status === 'generated',
+    reloadAfterSave = true,
     successMessage = 'General transmittal saved.',
   }: SaveTransmittalOptions = {}) => {
     setSaving(true);
@@ -273,8 +292,11 @@ export function GeneralTransmittals() {
       const response = form.id
         ? await generalTransmittalsApi.update(form.id, payload, markDraft)
         : await generalTransmittalsApi.create(payload);
-      await loadData();
-      await loadTransmittal(response.general_transmittal.id);
+      savedPayloadSignatureRef.current = payloadSignature(payload);
+      if (reloadAfterSave) {
+        await loadData();
+        await loadTransmittal(response.general_transmittal.id);
+      }
       setSuccess(successMessage);
       window.setTimeout(() => setSuccess(null), 3500);
       return response.general_transmittal.id;
@@ -326,6 +348,7 @@ export function GeneralTransmittals() {
       ? form.id
       : await saveTransmittal({
         markDraft: shouldMarkDraft,
+        reloadAfterSave: false,
         successMessage: shouldMarkDraft ? 'Generated transmittal saved as draft before regeneration.' : undefined,
       });
     if (!id) return;
@@ -402,7 +425,7 @@ export function GeneralTransmittals() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-neutral-900">{transmittal.title}</p>
                         <p className="text-xs text-neutral-500">
-                          {new Date(transmittal.transmittal_date).toLocaleDateString()} · {transmittal.item_count} items
+                          {formatDateOnly(transmittal.transmittal_date)} · {transmittal.item_count} items
                         </p>
                       </div>
                       <Badge className={statusColors[transmittal.status] || 'bg-gray-100 text-gray-700'}>
