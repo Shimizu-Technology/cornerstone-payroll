@@ -15,6 +15,8 @@ class Company < ApplicationRecord
   has_many :user_invitations, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :general_transmittals, dependent: :destroy
+  has_many :invoice_recipients, dependent: :destroy
+  has_many :invoices, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
   has_many :client_documents, dependent: :destroy
   has_many :employee_change_requests, dependent: :destroy
