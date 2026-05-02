@@ -57,7 +57,6 @@ module Api
           end
 
           image_urls = upload_message_attachments
-          user_message = @session.messages.create!(role: "user", content: content, image_urls: image_urls)
           preview = InvoiceAiPreviewService.new(
             company: current_company,
             user: current_user,
@@ -65,45 +64,66 @@ module Api
             message: content,
             image_urls: image_urls
           ).call
-          version = @session.store_preview!(preview, actor: current_user)
-          assistant_message = @session.messages.create!(
-            role: "assistant",
-            content: preview["message"],
-            preview: preview,
-            preview_version: version,
-            has_preview: preview["status"] == "preview"
-          )
+          user_message = nil
+          assistant_message = nil
+
+          InvoiceChatSession.transaction do
+            @session.lock!
+            user_message = @session.messages.create!(role: "user", content: content, image_urls: image_urls)
+            version = @session.store_preview!(preview, actor: current_user)
+            assistant_message = @session.messages.create!(
+              role: "assistant",
+              content: preview["message"],
+              preview: preview,
+              preview_version: version,
+              has_preview: preview["status"] == "preview"
+            )
+          end
 
           render json: {
             invoice_chat_session: session_payload(@session.reload, detailed: true),
             user_message: message_payload(user_message),
             assistant_message: message_payload(assistant_message)
           }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         end
 
         def confirm
-          preview = @session.current_preview
-          invoice = invoice_from_preview!(preview)
-          @session.update!(
-            invoice: invoice,
-            invoice_recipient_id: invoice.invoice_recipient_id,
-            status: "invoice_created",
-            updated_by: current_user
-          )
-          @session.messages.create!(
-            role: "assistant",
-            content: "Created draft invoice #{invoice.invoice_number}.",
-            preview: preview,
-            preview_version: @session.current_preview_version,
-            has_preview: true
-          )
+          invoice = nil
+          created_invoice = false
+          InvoiceChatSession.transaction do
+            @session.lock!
+            if @session.status == "invoice_created" && @session.invoice_id.present?
+              invoice = Invoice.find_by(id: @session.invoice_id, company_id: current_company_id)
+              raise ArgumentError, "Invoice already created for this session but could not be found" unless invoice
+              next
+            end
+
+            preview = @session.current_preview
+            invoice = invoice_from_preview!(preview)
+            @session.update!(
+              invoice: invoice,
+              invoice_recipient_id: invoice.invoice_recipient_id,
+              status: "invoice_created",
+              updated_by: current_user
+            )
+            created_invoice = true
+            @session.messages.create!(
+              role: "assistant",
+              content: "Created draft invoice #{invoice.invoice_number}.",
+              preview: preview,
+              preview_version: @session.current_preview_version,
+              has_preview: true
+            )
+          end
 
           render json: {
             invoice: invoice_payload(invoice.reload),
             invoice_chat_session: session_payload(@session.reload, detailed: true)
-          }, status: :created
+          }, status: created_invoice ? :created : :ok
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -149,26 +169,24 @@ module Api
           line_items = Array(preview["line_items"]).filter_map { |item| line_item_attributes_from_preview(item) }
           raise ArgumentError, "Preview must include at least one line item" if line_items.empty?
 
-          Invoice.transaction do
-            invoice = Invoice.new(
-              company_id: current_company_id,
-              invoice_recipient: recipient,
-              invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
-              service_period_start: parse_preview_date(preview["service_period_start"]),
-              service_period_end: parse_preview_date(preview["service_period_end"]),
-              payment_terms: preview["payment_terms"].presence || recipient.payment_terms,
-              notes: preview["notes"].presence,
-              email_subject: preview["email_subject"].presence,
-              email_body: preview["email_body"].presence,
-              created_by: current_user,
-              updated_by: current_user
-            )
-            line_items.each_with_index do |attrs, index|
-              invoice.line_items.build(attrs.merge(position: index))
-            end
-            invoice.save!
-            invoice
+          invoice = Invoice.new(
+            company_id: current_company_id,
+            invoice_recipient: recipient,
+            invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
+            service_period_start: parse_preview_date(preview["service_period_start"]),
+            service_period_end: parse_preview_date(preview["service_period_end"]),
+            payment_terms: preview["payment_terms"].presence || recipient.payment_terms,
+            notes: preview["notes"].presence,
+            email_subject: preview["email_subject"].presence,
+            email_body: preview["email_body"].presence,
+            created_by: current_user,
+            updated_by: current_user
+          )
+          line_items.each_with_index do |attrs, index|
+            invoice.line_items.build(attrs.merge(position: index))
           end
+          invoice.save!
+          invoice
         end
 
         def line_item_attributes_from_preview(item)

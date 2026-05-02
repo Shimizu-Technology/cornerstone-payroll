@@ -47,6 +47,36 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(body["messages"].map { |message| message["role"] }).to eq(%w[user assistant])
       expect(session.reload.current_preview_version).to eq(1)
     end
+
+    it "rolls back the user message when preview persistence fails" do
+      session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
+      service = instance_double(InvoiceAiPreviewService, call: { "status" => "clarification_needed", "message" => "More details needed.", "line_items" => [] })
+      allow(InvoiceAiPreviewService).to receive(:new).and_return(service)
+      allow_any_instance_of(InvoiceChatSession).to receive(:store_preview!).and_raise(ActiveRecord::RecordInvalid.new(session))
+
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message", params: { content: "Invoice Shimizu Technology" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(session.messages.reload).to be_empty
+    end
+
+    it "returns a validation error for unsupported attachment types" do
+      session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
+      file = Tempfile.new([ "invoice-chat", ".txt" ])
+      file.write("not an image or pdf")
+      file.rewind
+      upload = Rack::Test::UploadedFile.new(file.path, "text/plain")
+
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message",
+        params: { content: "Use this attachment", images: [ upload ] }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Unsupported attachment type")
+      expect(session.messages.reload).to be_empty
+    ensure
+      file&.close
+      file&.unlink
+    end
   end
 
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/confirm" do
@@ -79,6 +109,36 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(invoice.total_amount).to eq(300)
       expect(invoice.status).to eq("draft")
       expect(session.reload.invoice_id).to eq(invoice.id)
+    end
+
+    it "returns the existing invoice when the same preview is confirmed twice" do
+      recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+      session = create(
+        :invoice_chat_session,
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        current_preview_version: 1,
+        current_preview: {
+          "status" => "preview",
+          "invoice_recipient_id" => recipient.id,
+          "invoice_date" => "2026-05-02",
+          "line_items" => [
+            { "description" => "Payroll service", "quantity" => 2, "rate" => 150 }
+          ]
+        }
+      )
+
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      expect(response).to have_http_status(:created)
+      invoice_id = response.parsed_body.dig("invoice", "id")
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      }.not_to change(Invoice, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("invoice", "id")).to eq(invoice_id)
     end
 
     it "rejects inactive recipients in a preview" do
