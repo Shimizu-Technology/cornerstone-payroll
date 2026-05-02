@@ -80,6 +80,8 @@ module Api
             filename: generator.filename,
             type: "application/pdf",
             disposition: "inline"
+        rescue StandardError
+          render json: { error: "Unable to generate transmittal PDF" }, status: :unprocessable_entity
         end
 
         def generate_pdf
@@ -93,6 +95,8 @@ module Api
             disposition: "attachment"
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [e.message] }, status: :unprocessable_entity
+        rescue StandardError
+          render json: { error: "Unable to generate transmittal PDF" }, status: :unprocessable_entity
         end
 
         private

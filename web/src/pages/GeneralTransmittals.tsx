@@ -114,7 +114,7 @@ export function GeneralTransmittals() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const savedPayloadSignatureRef = useRef('');
+  const savedPayloadSignatureRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -272,8 +272,17 @@ export function GeneralTransmittals() {
 
   const payloadSignature = (payload: ReturnType<typeof buildPayloadForForm>) => JSON.stringify(payload);
 
+  const hasUnsavedChanges = () => {
+    const savedSignature = savedPayloadSignatureRef.current || payloadSignature(buildPayloadForForm(emptyForm()));
+    return payloadSignature(buildPayload()) !== savedSignature;
+  };
+
+  const confirmDiscardChanges = () => (
+    !hasUnsavedChanges() || window.confirm('Discard unsaved changes?')
+  );
+
   const generatedFormHasUnsavedChanges = () => (
-    form.status === 'generated' && payloadSignature(buildPayload()) !== savedPayloadSignatureRef.current
+    form.status === 'generated' && hasUnsavedChanges()
   );
 
   const saveTransmittal = async ({
@@ -383,6 +392,16 @@ export function GeneralTransmittals() {
     }
   };
 
+  const handleNew = () => {
+    if (!confirmDiscardChanges()) return;
+    resetForm();
+  };
+
+  const handleSelectTransmittal = (id: number) => {
+    if (!confirmDiscardChanges()) return;
+    loadTransmittal(id);
+  };
+
   return (
     <div>
       <Header
@@ -398,7 +417,7 @@ export function GeneralTransmittals() {
                 <h2 className="text-base font-semibold text-neutral-900">History</h2>
                 <p className="text-sm text-neutral-500">Saved standalone transmittals</p>
               </div>
-              <Button size="sm" variant="outline" onClick={resetForm}>
+              <Button size="sm" variant="outline" onClick={handleNew}>
                 <Plus className="mr-1.5 h-4 w-4" />
                 New
               </Button>
@@ -416,7 +435,7 @@ export function GeneralTransmittals() {
                   <button
                     key={transmittal.id}
                     type="button"
-                    onClick={() => loadTransmittal(transmittal.id)}
+                    onClick={() => handleSelectTransmittal(transmittal.id)}
                     className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
                       form.id === transmittal.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
                     }`}
