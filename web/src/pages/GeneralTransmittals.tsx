@@ -276,7 +276,7 @@ export function GeneralTransmittals() {
   const handlePreview = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = form.id || await saveTransmittal();
+    const id = await saveTransmittal();
     if (!id) return;
     setPdfBusy(true);
     setError(null);
@@ -294,7 +294,7 @@ export function GeneralTransmittals() {
   const handleGenerate = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = form.id || await saveTransmittal();
+    const id = await saveTransmittal();
     if (!id) return;
     setPdfBusy(true);
     setError(null);
