@@ -560,11 +560,13 @@ export function InvoiceMaker() {
 
     setChatBusy(true);
     setError(null);
+    let createdSessionId: number | null = null;
     try {
       let session = activeChatSession;
       if (!session) {
         const createResponse = await invoiceChatSessionsApi.create({ title: content.slice(0, 60) });
         session = createResponse.invoice_chat_session;
+        createdSessionId = session.id;
       }
       setActiveChatSession(session);
       const response = await invoiceChatSessionsApi.message(session.id, content, chatImages);
@@ -576,6 +578,11 @@ export function InvoiceMaker() {
       setChatInput('');
       setChatImages([]);
     } catch (err) {
+      if (createdSessionId) {
+        await invoiceChatSessionsApi.delete(createdSessionId).catch(() => undefined);
+        setActiveChatSession(null);
+        setChatSessions((current) => current.filter((session) => session.id !== createdSessionId));
+      }
       setError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
     } finally {
       setChatBusy(false);
