@@ -40,9 +40,9 @@ module Api
         end
 
         def update
-          if generated_item_update_without_draft_mark?
+          if generated_update_without_draft_mark?
             render json: {
-              error: "Cannot modify items of a generated transmittal without marking it as draft"
+              error: "Cannot modify a generated transmittal without marking it as draft"
             }, status: :unprocessable_entity
             return
           end
@@ -141,10 +141,9 @@ module Api
           end
         end
 
-        def generated_item_update_without_draft_mark?
+        def generated_update_without_draft_mark?
           @transmittal.generated? &&
-            params[:mark_draft] != "true" &&
-            params.dig(:general_transmittal, :items).present?
+            params[:mark_draft] != "true"
         end
 
         def apply_items!(transmittal)

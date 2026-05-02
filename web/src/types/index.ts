@@ -846,6 +846,7 @@ export interface NonEmployeeCheck {
   tax_month?: number | null;
   due_date?: string | null;
   payment_date?: string | null;
+  effective_payment_date?: string | null;
   confirmation_number?: string | null;
   line_items: NonEmployeeCheckLineItem[];
   print_count: number;

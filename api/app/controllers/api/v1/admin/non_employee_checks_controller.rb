@@ -330,6 +330,7 @@ module Api
             tax_month: check.tax_month,
             due_date: check.due_date,
             payment_date: check.payment_date,
+            effective_payment_date: check.effective_payment_date,
             confirmation_number: check.confirmation_number,
             line_items: check.line_items.map { |line_item| line_item_payload(line_item) },
             print_count: check.print_count,
