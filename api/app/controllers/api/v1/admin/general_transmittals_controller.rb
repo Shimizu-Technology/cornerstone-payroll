@@ -80,11 +80,13 @@ module Api
             filename: generator.filename,
             type: "application/pdf",
             disposition: "inline"
-        rescue StandardError
-          render json: { error: "Unable to generate transmittal PDF" }, status: :unprocessable_entity
+        rescue Prawn::Errors::CannotFit => e
+          render_pdf_generation_error(e)
         end
 
         def generate_pdf
+          return unless ensure_items_for_generation!
+
           generator = GeneralTransmittalPdfGenerator.new(@transmittal)
           pdf_content = generator.generate
 
@@ -95,8 +97,8 @@ module Api
             disposition: "attachment"
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [e.message] }, status: :unprocessable_entity
-        rescue StandardError
-          render json: { error: "Unable to generate transmittal PDF" }, status: :unprocessable_entity
+        rescue Prawn::Errors::CannotFit => e
+          render_pdf_generation_error(e)
         end
 
         private
@@ -144,6 +146,20 @@ module Api
         def generated_update_without_draft_mark?
           @transmittal.generated? &&
             params[:mark_draft] != "true"
+        end
+
+        def ensure_items_for_generation!
+          return true if @transmittal.items.any?
+
+          render json: { errors: [ "Items must include at least one item" ] }, status: :unprocessable_entity
+          false
+        end
+
+        def render_pdf_generation_error(error)
+          Rails.logger.warn(
+            "General transmittal PDF generation failed: #{error.class}: #{error.message}"
+          )
+          render json: { error: "Unable to generate transmittal PDF" }, status: :unprocessable_entity
         end
 
         def apply_items!(transmittal)

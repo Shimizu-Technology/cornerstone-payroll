@@ -241,7 +241,7 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       transmittal = create(:general_transmittal, :with_item, company: company)
       allow_any_instance_of(GeneralTransmittalPdfGenerator)
         .to receive(:generate)
-        .and_raise(StandardError, "PDF failure")
+        .and_raise(Prawn::Errors::CannotFit, "PDF failure")
 
       post "/api/v1/admin/general_transmittals/#{transmittal.id}/preview_pdf"
 
@@ -263,11 +263,24 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(transmittal.generated_at).to be_present
     end
 
+    it "returns validation errors before rendering a PDF when there are no items" do
+      transmittal = create(:general_transmittal, company: company)
+
+      expect(GeneralTransmittalPdfGenerator).not_to receive(:new)
+
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"]).to include("Items must include at least one item")
+      expect(transmittal.reload.status).to eq("draft")
+      expect(transmittal.generated_at).to be_nil
+    end
+
     it "leaves the transmittal as a draft and returns an error when PDF generation fails" do
       transmittal = create(:general_transmittal, :with_item, company: company)
       allow_any_instance_of(GeneralTransmittalPdfGenerator)
         .to receive(:generate)
-        .and_raise(StandardError, "PDF failure")
+        .and_raise(Prawn::Errors::CannotFit, "PDF failure")
 
       post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
 
