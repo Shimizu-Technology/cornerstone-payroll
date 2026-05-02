@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckSquare, Download, Eye, FileText, Plus, Save, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -96,6 +96,7 @@ export function GeneralTransmittals() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const savedPayloadSignatureRef = useRef('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -128,7 +129,9 @@ export function GeneralTransmittals() {
   const totalAmount = useMemo(() => activeItems.reduce((sum, item) => sum + Number(item.amount || 0), 0), [activeItems]);
 
   const resetForm = () => {
-    setForm(emptyForm());
+    const nextForm = emptyForm();
+    setForm(nextForm);
+    savedPayloadSignatureRef.current = payloadSignature(buildPayloadForForm(nextForm));
     setSelectedCheckId('');
     setError(null);
     setSuccess(null);
@@ -139,7 +142,7 @@ export function GeneralTransmittals() {
     try {
       const response = await generalTransmittalsApi.get(id);
       const transmittal = response.general_transmittal;
-      setForm({
+      const nextForm = {
         id: transmittal.id,
         title: transmittal.title,
         transmittal_date: transmittal.transmittal_date,
@@ -153,7 +156,9 @@ export function GeneralTransmittals() {
           local_id: `existing-${item.id}`,
           details_text: (item.details || []).join('\n'),
         })),
-      });
+      };
+      setForm(nextForm);
+      savedPayloadSignatureRef.current = payloadSignature(buildPayloadForForm(nextForm));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load transmittal');
     }
@@ -224,13 +229,13 @@ export function GeneralTransmittals() {
     }));
   };
 
-  const buildPayload = () => ({
-    title: form.title.trim(),
-    transmittal_date: form.transmittal_date,
-    preparer_name: form.preparer_name.trim() || null,
-    recipient_name: form.recipient_name.trim() || null,
-    notes: form.notes_text.split('\n').map((note) => note.trim()).filter(Boolean),
-    items: form.items.map((item, index) => ({
+  const buildPayloadForForm = (state: FormState) => ({
+    title: state.title.trim(),
+    transmittal_date: state.transmittal_date,
+    preparer_name: state.preparer_name.trim() || null,
+    recipient_name: state.recipient_name.trim() || null,
+    notes: state.notes_text.split('\n').map((note) => note.trim()).filter(Boolean),
+    items: state.items.map((item, index) => ({
       id: item.id,
       source_type: item.source_type || null,
       source_id: item.source_id || null,
@@ -244,6 +249,14 @@ export function GeneralTransmittals() {
       _destroy: item._destroy,
     })),
   });
+
+  const buildPayload = () => buildPayloadForForm(form);
+
+  const payloadSignature = (payload: ReturnType<typeof buildPayloadForForm>) => JSON.stringify(payload);
+
+  const generatedFormHasUnsavedChanges = () => (
+    form.status === 'generated' && payloadSignature(buildPayload()) !== savedPayloadSignatureRef.current
+  );
 
   const saveTransmittal = async ({
     markDraft = form.status === 'generated',
@@ -284,7 +297,13 @@ export function GeneralTransmittals() {
   const handlePreview = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = await saveTransmittal({ markDraft: false });
+    const shouldMarkDraft = generatedFormHasUnsavedChanges();
+    const id = form.status === 'generated' && form.id && !shouldMarkDraft
+      ? form.id
+      : await saveTransmittal({
+        markDraft: shouldMarkDraft,
+        successMessage: shouldMarkDraft ? 'Generated transmittal saved as draft for preview.' : undefined,
+      });
     if (!id) return;
     setPdfBusy(true);
     setError(null);
@@ -302,7 +321,13 @@ export function GeneralTransmittals() {
   const handleGenerate = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = await saveTransmittal({ markDraft: false });
+    const shouldMarkDraft = generatedFormHasUnsavedChanges();
+    const id = form.status === 'generated' && form.id && !shouldMarkDraft
+      ? form.id
+      : await saveTransmittal({
+        markDraft: shouldMarkDraft,
+        successMessage: shouldMarkDraft ? 'Generated transmittal saved as draft before regeneration.' : undefined,
+      });
     if (!id) return;
     setPdfBusy(true);
     setError(null);
