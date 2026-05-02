@@ -545,7 +545,7 @@ export function GeneralTransmittals() {
               </label>
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={saveTransmittal} disabled={saving}>
+                <Button type="button" variant="outline" onClick={saveTransmittal} disabled={saving || pdfBusy}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>
