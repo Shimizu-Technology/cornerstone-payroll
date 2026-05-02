@@ -174,12 +174,7 @@ module Api
         def invoice_from_preview!(preview)
           raise ArgumentError, "No invoice preview is ready to confirm" if preview.blank?
 
-          recipient = InvoiceRecipient.find_by(
-            id: preview["invoice_recipient_id"],
-            company_id: current_company_id,
-            active: true
-          )
-          raise ArgumentError, "Invoice recipient not found" unless recipient
+          recipient = recipient_from_preview!(preview)
 
           line_items = Array(preview["line_items"]).filter_map { |item| line_item_attributes_from_preview(item) }
           raise ArgumentError, "Preview must include at least one line item" if line_items.empty?
@@ -204,6 +199,42 @@ module Api
           invoice
         end
 
+        def recipient_from_preview!(preview)
+          if preview["invoice_recipient_id"].present?
+            recipient = InvoiceRecipient.find_by(
+              id: preview["invoice_recipient_id"],
+              company_id: current_company_id,
+              active: true
+            )
+            raise ArgumentError, "Invoice recipient not found" unless recipient
+
+            return recipient
+          end
+
+          attrs = new_recipient_attributes_from_preview(preview["new_recipient"])
+          raise ArgumentError, "Invoice recipient not found" if attrs.blank?
+
+          InvoiceRecipient.create!(attrs.merge(company_id: current_company_id, active: true))
+        end
+
+        def new_recipient_attributes_from_preview(raw)
+          return nil if raw.blank?
+
+          name = raw["name"].to_s.strip.presence
+          return nil unless name
+
+          {
+            name: name,
+            email: raw["email"].to_s.strip.presence,
+            address: raw["address"].to_s.strip.presence,
+            default_rate: optional_decimal_from_preview(raw["default_rate"]),
+            invoice_prefix: raw["invoice_prefix"].to_s.strip.presence,
+            payment_terms: raw["payment_terms"].to_s.strip.presence,
+            template_type: %w[standard hourly project tuition].include?(raw["template_type"].to_s) ? raw["template_type"].to_s : "standard",
+            notes: raw["notes"].to_s.strip.presence
+          }
+        end
+
         def line_item_attributes_from_preview(item)
           description = item["description"].to_s.strip
           quantity = BigDecimal(item["quantity"].to_s)
@@ -216,6 +247,15 @@ module Api
             rate: rate,
             service_date: parse_preview_date(item["service_date"])
           }
+        rescue ArgumentError
+          nil
+        end
+
+        def optional_decimal_from_preview(value)
+          return nil if value.blank?
+
+          decimal = BigDecimal(value.to_s)
+          decimal.negative? ? nil : decimal
         rescue ArgumentError
           nil
         end

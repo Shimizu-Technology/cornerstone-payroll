@@ -21,4 +21,12 @@ RSpec.describe R2StorageService do
       service.download("../escape.txt")
     end.to raise_error(R2StorageService::DownloadError, "Invalid storage key")
   end
+
+  it "rejects local downloads that exceed the requested byte limit" do
+    service.upload("invoice-assistant/test.txt", "large payload", content_type: "text/plain")
+
+    expect do
+      service.download_with_limit("invoice-assistant/test.txt", max_bytes: 4)
+    end.to raise_error(R2StorageService::DownloadError, /exceeds 4 byte download limit/)
+  end
 end

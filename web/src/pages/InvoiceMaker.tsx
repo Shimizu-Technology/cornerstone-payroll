@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { Bot, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
@@ -551,6 +551,34 @@ export function InvoiceMaker() {
     }
   };
 
+  const appendChatAttachments = (files: File[]) => {
+    const supportedFiles = files.filter((file) => (
+      file.type.startsWith('image/') || file.type === 'application/pdf'
+    ));
+    if (supportedFiles.length === 0) return;
+
+    setChatImages((current) => [...current, ...supportedFiles].slice(0, 4));
+  };
+
+  const handleChatPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedFiles = [
+      ...Array.from(event.clipboardData.files || []),
+      ...Array.from(event.clipboardData.items || [])
+        .filter((item) => item.kind === 'file')
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file)),
+    ];
+    const files = pastedFiles.filter((file, index) => (
+      pastedFiles.findIndex((candidate) => (
+        candidate.name === file.name && candidate.size === file.size && candidate.type === file.type
+      )) === index
+    ));
+    if (files.length === 0) return;
+
+    appendChatAttachments(files);
+    event.preventDefault();
+  };
+
   const loadChatSession = async (sessionId: number) => {
     setChatBusy(true);
     setError(null);
@@ -565,7 +593,7 @@ export function InvoiceMaker() {
   };
 
   const sendChatMessage = async () => {
-    const content = chatInput.trim();
+    const content = chatInput.trim() || (chatImages.length > 0 ? 'Please create an invoice from the attached file.' : '');
     if (!content) return;
 
     setChatBusy(true);
@@ -1039,7 +1067,7 @@ export function InvoiceMaker() {
           </div>
         </div>
       ) : (
-        <div className="grid gap-6 p-6 lg:grid-cols-[320px_minmax(0,1fr)_340px] lg:p-8">
+        <div className="grid gap-6 p-4 sm:p-6 lg:p-8 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[300px_minmax(0,1fr)_340px]">
           <div className="space-y-6">
             {alertBanner}
             <Card className="overflow-hidden">
@@ -1092,9 +1120,10 @@ export function InvoiceMaker() {
                 )}
               </CardContent>
             </Card>
+            {recipientsPanel}
           </div>
 
-          <Card className="flex min-h-[680px] overflow-hidden">
+          <Card className="flex min-h-[min(760px,calc(100vh-260px))] overflow-hidden">
             <CardContent className="flex min-h-0 flex-1 flex-col p-0">
               <div className="border-b border-neutral-200 px-5 py-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1115,7 +1144,7 @@ export function InvoiceMaker() {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 overflow-y-auto bg-neutral-50/50 p-5">
+              <div className="min-h-0 flex-1 overflow-y-auto bg-neutral-50/50 p-4 sm:p-5">
                 {activeChatMessages.length === 0 ? (
                   <div className="flex h-full min-h-[420px] items-center justify-center">
                     <div className="max-w-lg text-center">
@@ -1201,7 +1230,7 @@ export function InvoiceMaker() {
                     This assistant session is complete. Start a new chat for another invoice.
                   </div>
                 )}
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
                     <input
@@ -1211,7 +1240,7 @@ export function InvoiceMaker() {
                       multiple
                       onChange={(event) => {
                         const files = Array.from(event.target.files || []);
-                        setChatImages((current) => [...current, ...files].slice(0, 4));
+                        appendChatAttachments(files);
                         event.target.value = '';
                       }}
                       disabled={chatBusy || !chatCanAcceptMessages}
@@ -1220,6 +1249,7 @@ export function InvoiceMaker() {
                   <Textarea
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
+                    onPaste={handleChatPaste}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
@@ -1235,7 +1265,7 @@ export function InvoiceMaker() {
                     type="button"
                     className="h-12 shrink-0 px-4"
                     onClick={sendChatMessage}
-                    disabled={chatBusy || !chatInput.trim() || !chatCanAcceptMessages}
+                    disabled={chatBusy || (!chatInput.trim() && chatImages.length === 0) || !chatCanAcceptMessages}
                   >
                     <Send className="mr-1.5 h-4 w-4" />
                     Send
@@ -1245,7 +1275,7 @@ export function InvoiceMaker() {
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
+          <div className="space-y-6 xl:col-span-2 2xl:col-span-1">
             <Card>
               <CardContent className="space-y-4">
                 <div>
@@ -1262,6 +1292,11 @@ export function InvoiceMaker() {
                       <p className="text-sm font-semibold text-neutral-900">
                         {activePreview.invoice_recipient_name || 'Recipient needed'}
                       </p>
+                      {activePreview.new_recipient && (
+                        <p className="mt-1 text-xs font-medium text-primary-700">
+                          New recipient will be created
+                        </p>
+                      )}
                       <p className="mt-1 text-2xl font-semibold text-neutral-900">{currency(previewTotal(activePreview))}</p>
                       <p className="mt-1 text-xs text-neutral-500">
                         Preview v{activeChatSession?.current_preview_version}

@@ -2144,6 +2144,16 @@ export interface InvoiceAiPreview {
   message?: string | null;
   invoice_recipient_id?: number | null;
   invoice_recipient_name?: string | null;
+  new_recipient?: {
+    name: string;
+    email?: string | null;
+    address?: string | null;
+    default_rate?: number | null;
+    invoice_prefix?: string | null;
+    payment_terms?: string | null;
+    template_type?: InvoiceTemplateType | null;
+    notes?: string | null;
+  } | null;
   invoice_date?: string | null;
   service_period_start?: string | null;
   service_period_end?: string | null;

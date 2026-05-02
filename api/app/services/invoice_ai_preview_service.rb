@@ -1,21 +1,12 @@
 # frozen_string_literal: true
 
 require "httparty"
-require "base64"
 require "json"
-require "tempfile"
 
 class InvoiceAiPreviewService
   OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
   OPEN_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_OPEN_TIMEOUT_SECONDS", "15"))
   READ_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_READ_TIMEOUT_SECONDS", "120"))
-  IMAGE_CONTENT_TYPES = {
-    ".jpg" => "image/jpeg",
-    ".jpeg" => "image/jpeg",
-    ".png" => "image/png",
-    ".webp" => "image/webp"
-  }.freeze
-  PDF_RENDER_LIMIT = Integer(ENV.fetch("INVOICE_AI_PDF_RENDER_LIMIT", "4"))
 
   def initialize(company:, user:, session:, message:, image_urls: [])
     @company = company
@@ -78,6 +69,16 @@ class InvoiceAiPreviewService
         "message": "short staff-facing summary or question",
         "invoice_recipient_id": number or null,
         "invoice_recipient_name": string or null,
+        "new_recipient": {
+          "name": string,
+          "email": string or null,
+          "address": string or null,
+          "default_rate": number or null,
+          "invoice_prefix": string or null,
+          "payment_terms": string or null,
+          "template_type": "standard" or "hourly" or "project" or "tuition",
+          "notes": string or null
+        } or null,
         "invoice_date": "YYYY-MM-DD",
         "service_period_start": "YYYY-MM-DD" or null,
         "service_period_end": "YYYY-MM-DD" or null,
@@ -95,7 +96,9 @@ class InvoiceAiPreviewService
         ]
       }
 
-      Use only recipient ids from the provided recipient list. If the recipient is unclear, set invoice_recipient_id to null and ask a clarification question.
+      Use recipient ids from the provided recipient list when one matches.
+      If the staff asks for a client that is not in the recipient list and gives enough bill-to information to create it, set invoice_recipient_id to null and fill new_recipient.
+      If the recipient is unclear or required recipient details are missing, set invoice_recipient_id and new_recipient to null and ask a clarification question.
       Use numeric quantity and rate values. Do not include currency symbols in numeric fields.
     PROMPT
   end
@@ -134,82 +137,7 @@ class InvoiceAiPreviewService
   end
 
   def image_content_parts
-    image_urls.flat_map do |reference|
-      if pdf_reference?(reference)
-        pdf_content_parts(reference)
-      else
-        image_content_part(reference)
-      end
-    end.compact
-  end
-
-  def image_content_part(reference)
-    content_type = image_content_type(reference)
-    return nil unless content_type
-
-    data = R2StorageService.new.download(reference)
-    return nil if data.blank?
-
-    {
-      type: "image_url",
-      image_url: {
-        url: "data:#{content_type};base64,#{Base64.strict_encode64(data)}"
-      }
-    }
-  rescue R2StorageService::DownloadError => e
-    Rails.logger.warn("Invoice AI attachment download failed: #{e.class}: #{e.message}")
-    nil
-  end
-
-  def pdf_content_parts(reference)
-    data = R2StorageService.new.download(reference)
-    return [] if data.blank?
-
-    rendered_images = []
-    with_temp_pdf(data) do |pdf|
-      rendered_images = TimecardOcr::CardSegmentationService.segment(pdf.path)
-      rendered_images.first(PDF_RENDER_LIMIT).map { |image| image_file_part(image) }
-    ensure
-      rendered_images.each do |image|
-        image&.close
-        image&.unlink
-      end
-    end
-  rescue R2StorageService::DownloadError => e
-    Rails.logger.warn("Invoice AI PDF attachment download failed: #{e.class}: #{e.message}")
-    []
-  rescue => e
-    Rails.logger.warn("Invoice AI PDF attachment render failed: #{e.class}: #{e.message}")
-    []
-  end
-
-  def with_temp_pdf(data)
-    Tempfile.create(["invoice-ai-attachment", ".pdf"]) do |pdf|
-      pdf.binmode
-      pdf.write(data)
-      pdf.flush
-      yield pdf
-    end
-  end
-
-  def image_file_part(file)
-    file.rewind if file.respond_to?(:rewind)
-    {
-      type: "image_url",
-      image_url: {
-        url: "data:image/jpeg;base64,#{Base64.strict_encode64(file.read)}"
-      }
-    }
-  ensure
-    file.rewind if file.respond_to?(:rewind)
-  end
-
-  def pdf_reference?(reference)
-    File.extname(reference.to_s).casecmp(".pdf").zero?
-  end
-
-  def image_content_type(reference)
-    IMAGE_CONTENT_TYPES[File.extname(reference.to_s).downcase]
+    InvoiceAiAttachmentContentService.new(references: image_urls).content_parts
   end
 
   def recipient_context
@@ -240,21 +168,24 @@ class InvoiceAiPreviewService
 
   def normalize_preview(raw)
     recipient = resolve_recipient(raw)
+    new_recipient = normalize_new_recipient(raw["new_recipient"], recipient)
+    recipient_name = recipient&.name || new_recipient&.fetch("name", nil) || raw["invoice_recipient_name"].presence
     line_items = Array(raw["line_items"]).filter_map { |item| normalize_line_item(item) }
-    status = line_items.any? && recipient ? "preview" : "clarification_needed"
+    status = line_items.any? && (recipient || new_recipient) ? "preview" : "clarification_needed"
 
     {
       "status" => status,
-      "message" => raw["message"].presence || default_message(recipient, line_items),
+      "message" => raw["message"].presence || default_message(recipient_name, line_items),
       "invoice_recipient_id" => recipient&.id,
-      "invoice_recipient_name" => recipient&.name || raw["invoice_recipient_name"].presence,
+      "invoice_recipient_name" => recipient_name,
+      "new_recipient" => new_recipient,
       "invoice_date" => normalize_date(raw["invoice_date"]) || Date.current.iso8601,
       "service_period_start" => normalize_date(raw["service_period_start"]),
       "service_period_end" => normalize_date(raw["service_period_end"]),
-      "payment_terms" => raw["payment_terms"].presence || recipient&.payment_terms,
+      "payment_terms" => raw["payment_terms"].presence || recipient&.payment_terms || new_recipient&.fetch("payment_terms", nil),
       "notes" => raw["notes"].presence,
-      "email_subject" => raw["email_subject"].presence || email_subject_for(recipient),
-      "email_body" => raw["email_body"].presence || email_body_for(recipient),
+      "email_subject" => raw["email_subject"].presence || email_subject_for(recipient_name),
+      "email_body" => raw["email_body"].presence || email_body_for(recipient_name),
       "line_items" => line_items
     }
   end
@@ -266,9 +197,10 @@ class InvoiceAiPreviewService
 
     {
       "status" => status,
-      "message" => default_message(recipient, line_items),
+      "message" => default_message(recipient&.name, line_items),
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient&.name,
+      "new_recipient" => nil,
       "invoice_date" => Date.current.iso8601,
       "service_period_start" => nil,
       "service_period_end" => nil,
@@ -284,6 +216,24 @@ class InvoiceAiPreviewService
     recipient_id = raw["invoice_recipient_id"].presence
     recipient = InvoiceRecipient.find_by(id: recipient_id, company_id: company.id, active: true) if recipient_id
     recipient || detect_recipient_from_name(raw["invoice_recipient_name"])
+  end
+
+  def normalize_new_recipient(raw, existing_recipient)
+    return nil if existing_recipient || raw.blank?
+
+    name = raw["name"].to_s.strip.presence
+    return nil unless name
+
+    {
+      "name" => name,
+      "email" => raw["email"].to_s.strip.presence,
+      "address" => raw["address"].to_s.strip.presence,
+      "default_rate" => normalize_optional_decimal(raw["default_rate"]),
+      "invoice_prefix" => raw["invoice_prefix"].to_s.strip.presence,
+      "payment_terms" => raw["payment_terms"].to_s.strip.presence,
+      "template_type" => normalize_template_type(raw["template_type"]),
+      "notes" => raw["notes"].to_s.strip.presence
+    }
   end
 
   def detect_recipient_from_message
@@ -339,6 +289,22 @@ class InvoiceAiPreviewService
     nil
   end
 
+  def normalize_optional_decimal(value)
+    return nil if value.blank?
+
+    decimal = BigDecimal(value.to_s)
+    return nil if decimal.negative?
+
+    decimal.to_f
+  rescue ArgumentError
+    nil
+  end
+
+  def normalize_template_type(value)
+    value = value.to_s
+    %w[standard hourly project tuition].include?(value) ? value : "standard"
+  end
+
   def normalize_date(value)
     return nil if value.blank?
 
@@ -347,23 +313,23 @@ class InvoiceAiPreviewService
     nil
   end
 
-  def default_message(recipient, line_items)
-    return "I found a draft invoice preview for #{recipient.name}." if recipient && line_items.any?
-    return "I found the recipient. Please add the service, quantity, and amount." if recipient
+  def default_message(recipient_name, line_items)
+    return "I found a draft invoice preview for #{recipient_name}." if recipient_name.present? && line_items.any?
+    return "I found the recipient. Please add the service, quantity, and amount." if recipient_name.present?
 
     "Which active invoice recipient should this be billed to?"
   end
 
-  def email_subject_for(recipient)
-    return nil unless recipient
+  def email_subject_for(recipient_name)
+    return nil if recipient_name.blank?
 
     "Invoice from #{company.name}"
   end
 
-  def email_body_for(recipient)
-    return nil unless recipient
+  def email_body_for(recipient_name)
+    return nil if recipient_name.blank?
 
-    "Hi #{recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{company.name}"
+    "Hi #{recipient_name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{company.name}"
   end
 
   def api_key
