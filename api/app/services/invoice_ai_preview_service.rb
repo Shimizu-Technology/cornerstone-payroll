@@ -187,7 +187,7 @@ class InvoiceAiPreviewService
     status = line_items.any? && recipient ? "preview" : "clarification_needed"
 
     {
-      "status" => raw["status"].presence || status,
+      "status" => status,
       "message" => raw["message"].presence || default_message(recipient, line_items),
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient&.name || raw["invoice_recipient_name"].presence,
