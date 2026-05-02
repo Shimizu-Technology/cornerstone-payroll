@@ -196,6 +196,7 @@ export function InvoiceMaker() {
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
     [invoiceForm.invoice_recipient_id, recipients]
   );
+  const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
 
   const buildPayloadForForm = (state: InvoiceFormState): InvoicePayload => ({
     invoice_recipient_id: Number(state.invoice_recipient_id),
@@ -234,6 +235,13 @@ export function InvoiceMaker() {
   };
 
   const hydrateInvoiceForm = (invoice: Invoice) => {
+    if (invoice.invoice_recipient) {
+      setRecipients((current) => {
+        if (current.some((recipient) => recipient.id === invoice.invoice_recipient!.id)) return current;
+        return [...current, invoice.invoice_recipient!].sort((a, b) => a.name.localeCompare(b.name));
+      });
+    }
+
     const nextForm: InvoiceFormState = {
       id: invoice.id,
       invoice_recipient_id: String(invoice.invoice_recipient_id),
@@ -629,7 +637,7 @@ export function InvoiceMaker() {
               )}
 
               <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                {recipients.map((recipient) => (
+                {activeRecipients.map((recipient) => (
                   <button
                     key={recipient.id}
                     type="button"
@@ -694,7 +702,9 @@ export function InvoiceMaker() {
                   >
                     <option value="">Select recipient...</option>
                     {recipients.map((recipient) => (
-                      <option key={recipient.id} value={recipient.id}>{recipient.name}</option>
+                      <option key={recipient.id} value={recipient.id}>
+                        {recipient.name}{recipient.active ? '' : ' (archived)'}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -792,9 +802,9 @@ export function InvoiceMaker() {
                   <div>
                     <h3 className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
                       <Mail className="h-4 w-4 text-primary-600" />
-                      Email Copy
+                      Email Draft
                     </h3>
-                    <p className="text-xs text-neutral-500">Copy into Gmail after attaching the PDF.</p>
+                    <p className="text-xs text-neutral-500">Draft text to copy into Gmail after attaching the PDF.</p>
                   </div>
                   <Button type="button" variant="outline" size="sm" onClick={copyEmail} disabled={!invoiceForm.email_subject && !invoiceForm.email_body}>
                     <Copy className="mr-1.5 h-4 w-4" />
@@ -802,8 +812,8 @@ export function InvoiceMaker() {
                   </Button>
                 </div>
                 <div className="space-y-3">
-                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Email subject" />
-                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Email body" rows={4} />
+                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" />
+                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} />
                 </div>
               </div>
 

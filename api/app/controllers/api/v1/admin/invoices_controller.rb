@@ -46,6 +46,10 @@ module Api
             render json: { error: "Cannot modify a finalized invoice without marking it as draft" }, status: :unprocessable_entity
             return
           end
+          if @invoice.generated_or_later? && params[:mark_draft] == "true" && !draft_transition_allowed?
+            render json: { error: "Cannot mark #{@invoice.status} invoice as draft" }, status: :unprocessable_entity
+            return
+          end
 
           @invoice.assign_attributes(invoice_attributes)
           @invoice.updated_by = current_user
@@ -156,6 +160,10 @@ module Api
           return false if defined?(@invoice) && @invoice&.invoice_recipient_id == recipient.id
 
           true
+        end
+
+        def draft_transition_allowed?
+          Invoice::ALLOWED_TRANSITIONS.fetch(@invoice.status, []).include?("draft")
         end
 
         def line_item_params
