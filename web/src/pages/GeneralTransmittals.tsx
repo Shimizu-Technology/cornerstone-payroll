@@ -276,7 +276,7 @@ export function GeneralTransmittals() {
   const handlePreview = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = await saveTransmittal();
+    const id = form.status === 'generated' && form.id ? form.id : await saveTransmittal();
     if (!id) return;
     setPdfBusy(true);
     setError(null);
@@ -408,7 +408,7 @@ export function GeneralTransmittals() {
                     {form.generated_at && ` · Last generated ${new Date(form.generated_at).toLocaleDateString()}`}
                   </p>
                 </div>
-                {form.id && (
+                {form.id && form.status !== 'generated' && (
                   <Button
                     variant="outline"
                     size="sm"

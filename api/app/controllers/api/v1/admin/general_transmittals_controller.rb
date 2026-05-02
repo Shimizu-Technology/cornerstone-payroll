@@ -54,6 +54,11 @@ module Api
         end
 
         def destroy
+          if @transmittal.generated?
+            render json: { error: "Generated transmittals cannot be deleted" }, status: :unprocessable_entity
+            return
+          end
+
           @transmittal.destroy!
           render json: { message: "General transmittal deleted" }
         end
@@ -75,6 +80,8 @@ module Api
             filename: generator.filename,
             type: "application/pdf",
             disposition: "attachment"
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages.presence || [e.message] }, status: :unprocessable_entity
         end
 
         private
