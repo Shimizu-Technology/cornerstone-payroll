@@ -101,6 +101,30 @@ RSpec.describe "General Transmittals Admin API", type: :request do
     end
   end
 
+  describe "DELETE /api/v1/admin/general_transmittals/:id" do
+    it "deletes draft transmittals" do
+      transmittal = create(:general_transmittal, company: company)
+
+      delete "/api/v1/admin/general_transmittals/#{transmittal.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(GeneralTransmittal.exists?(transmittal.id)).to be(false)
+    end
+
+    it "does not delete generated transmittals" do
+      transmittal = create(:general_transmittal, :with_item,
+        company: company,
+        status: "generated",
+        generated_at: Time.current)
+
+      delete "/api/v1/admin/general_transmittals/#{transmittal.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Generated transmittals cannot be deleted")
+      expect(GeneralTransmittal.exists?(transmittal.id)).to be(true)
+    end
+  end
+
   describe "POST /api/v1/admin/general_transmittals/:id/generate_pdf" do
     it "marks the transmittal generated and returns a PDF" do
       transmittal = create(:general_transmittal, :with_item, company: company)
@@ -126,6 +150,20 @@ RSpec.describe "General Transmittals Admin API", type: :request do
 
       expect(transmittal.reload.status).to eq("draft")
       expect(transmittal.generated_at).to be_nil
+    end
+
+    it "returns validation errors when the transmittal can no longer be marked generated" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      transmittal.errors.add(:items, "must include at least one item")
+      allow_any_instance_of(GeneralTransmittal)
+        .to receive(:mark_generated!)
+        .and_raise(ActiveRecord::RecordInvalid.new(transmittal))
+
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"]).to include("Items must include at least one item")
+      expect(transmittal.reload.status).to eq("draft")
     end
   end
 end
