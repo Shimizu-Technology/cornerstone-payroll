@@ -2,6 +2,14 @@
 
 class Invoice < ApplicationRecord
   STATUSES = %w[draft generated sent paid voided archived].freeze
+  ALLOWED_TRANSITIONS = {
+    "draft" => %w[generated archived],
+    "generated" => %w[draft sent voided archived],
+    "sent" => %w[draft paid voided archived],
+    "paid" => %w[voided archived],
+    "voided" => %w[archived],
+    "archived" => []
+  }.freeze
 
   belongs_to :company
   belongs_to :invoice_recipient
@@ -66,6 +74,12 @@ class Invoice < ApplicationRecord
   end
 
   def update_status!(next_status, actor:)
+    next_status = next_status.to_s
+    unless ALLOWED_TRANSITIONS.fetch(status, []).include?(next_status)
+      errors.add(:status, "cannot transition from #{status} to #{next_status}")
+      raise ActiveRecord::RecordInvalid, self
+    end
+
     case next_status
     when "draft"
       update!(status: "draft", generated_at: nil, sent_at: nil, paid_at: nil, voided_at: nil, archived_at: nil, updated_by: actor)
@@ -98,18 +112,20 @@ class Invoice < ApplicationRecord
 
   def assign_invoice_number
     return if invoice_number.present?
-    return unless company
+    return unless company&.persisted?
 
-    prefix = invoice_recipient&.invoice_prefix.presence || "INV"
-    next_number = self.class.where(company_id: company_id).count + 1
+    company.with_lock do
+      prefix = invoice_recipient&.invoice_prefix.presence || "INV"
+      next_number = self.class.where(company_id: company_id).count + 1
 
-    loop do
-      candidate = "#{prefix}-#{Time.current.year}-#{next_number.to_s.rjust(4, '0')}"
-      unless self.class.exists?(company_id: company_id, invoice_number: candidate)
-        self.invoice_number = candidate
-        break
+      loop do
+        candidate = "#{prefix}-#{Time.current.year}-#{next_number.to_s.rjust(4, '0')}"
+        unless self.class.exists?(company_id: company_id, invoice_number: candidate)
+          self.invoice_number = candidate
+          break
+        end
+        next_number += 1
       end
-      next_number += 1
     end
   end
 

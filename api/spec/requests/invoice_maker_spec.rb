@@ -171,13 +171,23 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
 
   describe "PATCH /api/v1/admin/invoices/:id/update_status" do
     it "marks an invoice paid" do
-      invoice = create(:invoice, :with_line_item, :generated, company: company)
+      invoice = create(:invoice, :with_line_item, company: company, status: "sent", generated_at: 1.day.ago, sent_at: Time.current)
 
       patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "paid" }
 
       expect(response).to have_http_status(:ok)
       expect(invoice.reload.status).to eq("paid")
       expect(invoice.paid_at).to be_present
+    end
+
+    it "rejects invalid backward transitions" do
+      invoice = create(:invoice, :with_line_item, company: company, status: "paid", paid_at: Time.current)
+
+      patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "sent" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join(" ")).to include("cannot transition from paid to sent")
+      expect(invoice.reload.status).to eq("paid")
     end
   end
 end
