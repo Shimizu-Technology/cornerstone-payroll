@@ -16,6 +16,8 @@ class User < ApplicationRecord
   has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
   has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify
+  has_many :created_general_transmittals, class_name: "GeneralTransmittal", foreign_key: :created_by_id, dependent: :nullify
+  has_many :updated_general_transmittals, class_name: "GeneralTransmittal", foreign_key: :updated_by_id, dependent: :nullify
 
   enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4 }
 
