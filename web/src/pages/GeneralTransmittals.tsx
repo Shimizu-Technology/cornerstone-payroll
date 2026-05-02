@@ -248,7 +248,6 @@ export function GeneralTransmittals() {
       const payload = buildPayload();
       if (!payload.title) throw new Error('Title is required');
       if (!payload.transmittal_date) throw new Error('Date is required');
-      if (activeItems.length === 0) throw new Error('Add at least one check or manual item');
 
       const response = form.id
         ? await generalTransmittalsApi.update(form.id, payload, form.status === 'generated')
@@ -266,7 +265,17 @@ export function GeneralTransmittals() {
     }
   };
 
+  const ensureReadyForPdf = () => {
+    if (activeItems.length > 0) return true;
+
+    setError('Add at least one check or manual item before generating a PDF.');
+    setSuccess(null);
+    return false;
+  };
+
   const handlePreview = async () => {
+    if (!ensureReadyForPdf()) return;
+
     const id = form.id || await saveTransmittal();
     if (!id) return;
     setPdfBusy(true);
@@ -283,6 +292,8 @@ export function GeneralTransmittals() {
   };
 
   const handleGenerate = async () => {
+    if (!ensureReadyForPdf()) return;
+
     const id = form.id || await saveTransmittal();
     if (!id) return;
     setPdfBusy(true);
