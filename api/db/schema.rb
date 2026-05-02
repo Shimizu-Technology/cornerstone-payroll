@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_02_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -454,6 +454,69 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_120000) do
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying]::text[])", name: "general_transmittals_status_check"
+  end
+
+  create_table "invoice_line_items", force: :cascade do |t|
+    t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.bigint "invoice_id", null: false
+    t.integer "position", default: 0, null: false
+    t.decimal "quantity", precision: 12, scale: 2, default: "1.0", null: false
+    t.decimal "rate", precision: 12, scale: 2, default: "0.0", null: false
+    t.date "service_date"
+    t.datetime "updated_at", null: false
+    t.index ["invoice_id", "position"], name: "index_invoice_line_items_on_invoice_id_and_position"
+    t.index ["invoice_id"], name: "index_invoice_line_items_on_invoice_id"
+  end
+
+  create_table "invoice_recipients", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.text "address"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.decimal "default_rate", precision: 12, scale: 2
+    t.string "email"
+    t.string "invoice_prefix"
+    t.string "name", null: false
+    t.text "notes"
+    t.text "payment_terms"
+    t.string "template_type", default: "standard", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_invoice_recipients_on_company_id_and_name"
+    t.index ["company_id"], name: "index_invoice_recipients_on_company_id"
+  end
+
+  create_table "invoices", force: :cascade do |t|
+    t.datetime "archived_at"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "email_subject"
+    t.text "email_body"
+    t.datetime "generated_at"
+    t.date "invoice_date", null: false
+    t.string "invoice_number", null: false
+    t.bigint "invoice_recipient_id", null: false
+    t.text "notes"
+    t.datetime "paid_at"
+    t.text "payment_terms"
+    t.date "service_period_end"
+    t.date "service_period_start"
+    t.datetime "sent_at"
+    t.string "status", default: "draft", null: false
+    t.decimal "total_amount", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.datetime "voided_at"
+    t.index ["company_id", "invoice_date"], name: "index_invoices_on_company_id_and_invoice_date"
+    t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
+    t.index ["company_id", "status"], name: "index_invoices_on_company_id_and_status"
+    t.index ["company_id"], name: "index_invoices_on_company_id"
+    t.index ["created_by_id"], name: "index_invoices_on_created_by_id"
+    t.index ["invoice_recipient_id"], name: "index_invoices_on_invoice_recipient_id"
+    t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying, 'sent'::character varying, 'paid'::character varying, 'voided'::character varying, 'archived'::character varying]::text[])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -1004,6 +1067,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_120000) do
   add_foreign_key "general_transmittals", "companies"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
+  add_foreign_key "invoice_line_items", "invoices"
+  add_foreign_key "invoice_recipients", "companies"
+  add_foreign_key "invoices", "companies"
+  add_foreign_key "invoices", "invoice_recipients"
+  add_foreign_key "invoices", "users", column: "created_by_id"
+  add_foreign_key "invoices", "users", column: "updated_by_id"
   add_foreign_key "loan_transactions", "employee_loans"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"

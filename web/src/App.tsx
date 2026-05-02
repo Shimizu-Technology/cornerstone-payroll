@@ -28,6 +28,7 @@ import EmployeeLoans from '@/pages/EmployeeLoans';
 import { Clients } from '@/pages/Clients';
 import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
 import { GeneralTransmittals } from '@/pages/GeneralTransmittals';
+import { InvoiceMaker } from '@/pages/InvoiceMaker';
 import PayrollReminders from '@/pages/PayrollReminders';
 import { Login } from '@/pages/Login';
 import { Invite } from '@/pages/Invite';
@@ -204,6 +205,7 @@ function AppRoutes() {
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
+        <Route path="tools/invoices" element={<StaffOnlyRoute><InvoiceMaker /></StaffOnlyRoute>} />
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
