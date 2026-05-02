@@ -125,10 +125,31 @@ RSpec.describe "General Transmittals Admin API", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to eq(
-        "Cannot modify items of a generated transmittal without marking it as draft"
+        "Cannot modify a generated transmittal without marking it as draft"
       )
       expect(transmittal.reload.status).to eq("generated")
       expect(item.reload.title).not_to eq("Changed after generation")
+    end
+
+    it "rejects metadata changes on generated transmittals without marking draft" do
+      transmittal = create(:general_transmittal, :with_item,
+        company: company,
+        status: "generated",
+        generated_at: Time.current)
+
+      patch "/api/v1/admin/general_transmittals/#{transmittal.id}",
+        params: {
+          general_transmittal: {
+            title: "Changed generated title",
+            transmittal_date: transmittal.transmittal_date.iso8601
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq(
+        "Cannot modify a generated transmittal without marking it as draft"
+      )
+      expect(transmittal.reload.title).not_to eq("Changed generated title")
     end
 
     it "allows item changes on generated transmittals when marking draft" do

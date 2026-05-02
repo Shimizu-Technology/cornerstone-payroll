@@ -87,12 +87,14 @@ function previewBlob(blobData: BlobDownload) {
 }
 
 function detailsFromCheck(check: NonEmployeeCheck) {
+  const paymentDate = check.effective_payment_date || check.payment_date;
+
   return [
     check.memo ? `For: ${check.memo}` : '',
     check.description ? `Description: ${check.description}` : '',
     check.reference_number ? `Reference: ${check.reference_number}` : '',
     check.confirmation_number ? `Confirmation: ${check.confirmation_number}` : '',
-    check.payment_date ? `Payment date: ${formatDateOnly(check.payment_date)}` : '',
+    paymentDate ? `Payment date: ${formatDateOnly(paymentDate)}` : '',
   ].filter(Boolean).join('\n');
 }
 
