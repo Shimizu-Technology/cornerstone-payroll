@@ -99,6 +99,69 @@ RSpec.describe "General Transmittals Admin API", type: :request do
   end
 
   describe "PATCH /api/v1/admin/general_transmittals/:id" do
+    it "rejects item changes on generated transmittals without marking draft" do
+      transmittal = create(:general_transmittal, :with_item,
+        company: company,
+        status: "generated",
+        generated_at: Time.current)
+      item = transmittal.items.first
+
+      patch "/api/v1/admin/general_transmittals/#{transmittal.id}",
+        params: {
+          general_transmittal: {
+            title: transmittal.title,
+            transmittal_date: transmittal.transmittal_date.iso8601,
+            items: [
+              {
+                id: item.id,
+                item_type: "manual",
+                title: "Changed after generation",
+                amount: 999.99,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq(
+        "Cannot modify items of a generated transmittal without marking it as draft"
+      )
+      expect(transmittal.reload.status).to eq("generated")
+      expect(item.reload.title).not_to eq("Changed after generation")
+    end
+
+    it "allows item changes on generated transmittals when marking draft" do
+      transmittal = create(:general_transmittal, :with_item,
+        company: company,
+        status: "generated",
+        generated_at: Time.current)
+      item = transmittal.items.first
+
+      patch "/api/v1/admin/general_transmittals/#{transmittal.id}",
+        params: {
+          mark_draft: "true",
+          general_transmittal: {
+            title: transmittal.title,
+            transmittal_date: transmittal.transmittal_date.iso8601,
+            items: [
+              {
+                id: item.id,
+                item_type: "manual",
+                title: "Changed as draft",
+                amount: 999.99,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(transmittal.reload.status).to eq("draft")
+      expect(transmittal.generated_at).to be_nil
+      expect(item.reload.title).to eq("Changed as draft")
+    end
+
     it "rejects changing an existing item to a check from another company" do
       transmittal = create(:general_transmittal, :with_item, company: company)
       item = transmittal.items.first
