@@ -3,6 +3,7 @@
 require "httparty"
 require "base64"
 require "json"
+require "tempfile"
 
 class InvoiceAiPreviewService
   OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -14,6 +15,7 @@ class InvoiceAiPreviewService
     ".png" => "image/png",
     ".webp" => "image/webp"
   }.freeze
+  PDF_RENDER_LIMIT = Integer(ENV.fetch("INVOICE_AI_PDF_RENDER_LIMIT", "4"))
 
   def initialize(company:, user:, session:, message:, image_urls: [])
     @company = company
@@ -132,23 +134,78 @@ class InvoiceAiPreviewService
   end
 
   def image_content_parts
-    image_urls.filter_map do |reference|
-      content_type = image_content_type(reference)
-      next unless content_type
+    image_urls.flat_map do |reference|
+      if pdf_reference?(reference)
+        pdf_content_parts(reference)
+      else
+        image_content_part(reference)
+      end
+    end.compact
+  end
 
-      data = R2StorageService.new.download(reference)
-      next if data.blank?
+  def image_content_part(reference)
+    content_type = image_content_type(reference)
+    return nil unless content_type
 
-      {
-        type: "image_url",
-        image_url: {
-          url: "data:#{content_type};base64,#{Base64.strict_encode64(data)}"
-        }
+    data = R2StorageService.new.download(reference)
+    return nil if data.blank?
+
+    {
+      type: "image_url",
+      image_url: {
+        url: "data:#{content_type};base64,#{Base64.strict_encode64(data)}"
       }
-    rescue R2StorageService::DownloadError => e
-      Rails.logger.warn("Invoice AI attachment download failed: #{e.class}: #{e.message}")
-      nil
+    }
+  rescue R2StorageService::DownloadError => e
+    Rails.logger.warn("Invoice AI attachment download failed: #{e.class}: #{e.message}")
+    nil
+  end
+
+  def pdf_content_parts(reference)
+    data = R2StorageService.new.download(reference)
+    return [] if data.blank?
+
+    rendered_images = []
+    with_temp_pdf(data) do |pdf|
+      rendered_images = TimecardOcr::CardSegmentationService.segment(pdf.path)
+      rendered_images.first(PDF_RENDER_LIMIT).map { |image| image_file_part(image) }
+    ensure
+      rendered_images.each do |image|
+        image&.close
+        image&.unlink
+      end
     end
+  rescue R2StorageService::DownloadError => e
+    Rails.logger.warn("Invoice AI PDF attachment download failed: #{e.class}: #{e.message}")
+    []
+  rescue => e
+    Rails.logger.warn("Invoice AI PDF attachment render failed: #{e.class}: #{e.message}")
+    []
+  end
+
+  def with_temp_pdf(data)
+    Tempfile.create(["invoice-ai-attachment", ".pdf"]) do |pdf|
+      pdf.binmode
+      pdf.write(data)
+      pdf.flush
+      yield pdf
+    end
+  end
+
+  def image_file_part(file)
+    file.rewind if file.respond_to?(:rewind)
+    {
+      type: "image_url",
+      image_url: {
+        url: "data:image/jpeg;base64,#{Base64.strict_encode64(file.read)}"
+      }
+    }
+  ensure
+    file.rewind if file.respond_to?(:rewind)
+  end
+
+  def pdf_reference?(reference)
+    File.extname(reference.to_s).casecmp(".pdf").zero?
   end
 
   def image_content_type(reference)
@@ -300,13 +357,13 @@ class InvoiceAiPreviewService
   def email_subject_for(recipient)
     return nil unless recipient
 
-    "Invoice from Cornerstone Payroll"
+    "Invoice from #{company.name}"
   end
 
   def email_body_for(recipient)
     return nil unless recipient
 
-    "Hi #{recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,"
+    "Hi #{recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{company.name}"
   end
 
   def api_key

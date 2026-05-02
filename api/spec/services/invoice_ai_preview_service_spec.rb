@@ -27,6 +27,8 @@ RSpec.describe InvoiceAiPreviewService do
       "rate" => 1000.0
     )
     expect(preview["payment_terms"]).to eq("Due on receipt")
+    expect(preview["email_subject"]).to eq("Invoice from #{company.name}")
+    expect(preview["email_body"]).to end_with(company.name)
   end
 
   it "drops zero-quantity AI line items before marking a preview ready" do
@@ -99,5 +101,53 @@ RSpec.describe InvoiceAiPreviewService do
       "type" => "image_url",
       "image_url" => include("url" => a_string_starting_with("data:image/jpeg;base64,"))
     )
+  end
+
+  it "renders PDF attachments into multimodal image_url content" do
+    company = create(:company)
+    user = create(:user, company: company)
+    recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+    response = {
+      "status" => "preview",
+      "message" => "Ready for review.",
+      "invoice_recipient_id" => recipient.id,
+      "line_items" => [
+        { "description" => "Accounting service", "quantity" => 1, "rate" => 100 }
+      ]
+    }
+    image = Tempfile.new(["invoice-ai-rendered", ".jpg"])
+    image.binmode
+    image.write("rendered jpeg bytes")
+    image.rewind
+    request_body = nil
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+    storage = instance_double(R2StorageService, download: "%PDF fake")
+    allow(R2StorageService).to receive(:new).and_return(storage)
+    allow(TimecardOcr::CardSegmentationService).to receive(:segment).and_return([image])
+    allow(HTTParty).to receive(:post) do |_url, options|
+      request_body = JSON.parse(options.fetch(:body))
+      instance_double("HTTParty::Response", success?: true, dig: response.to_json)
+    end
+
+    described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Invoice from the attached PDF",
+      image_urls: [ "invoice-assistant/company-1/session-1/upload.pdf" ]
+    ).call
+
+    user_content = request_body.dig("messages", 1, "content")
+    expect(user_content).to be_an(Array)
+    expect(user_content.second).to include(
+      "type" => "image_url",
+      "image_url" => include("url" => a_string_starting_with("data:image/jpeg;base64,"))
+    )
+  ensure
+    image&.close
+    image&.unlink if image&.path && File.exist?(image.path)
   end
 end
