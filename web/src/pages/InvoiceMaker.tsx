@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Copy, Download, Eye, FileText, ImagePlus, Mail, Plus, ReceiptText, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Bot, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -169,7 +169,9 @@ export function InvoiceMaker() {
   const [chatInput, setChatInput] = useState('');
   const [chatImages, setChatImages] = useState<File[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
+  const [invoiceMode, setInvoiceMode] = useState<'manual' | 'ai'>('manual');
   const savedInvoiceSignatureRef = useRef<string | null>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -199,6 +201,11 @@ export function InvoiceMaker() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (invoiceMode !== 'ai') return;
+    chatMessagesEndRef.current?.scrollIntoView({ block: 'end' });
+  }, [activeChatSession?.id, activeChatSession?.messages?.length, invoiceMode]);
 
   const activeLineItems = useMemo(
     () => invoiceForm.line_items.filter((item) => !item._destroy),
@@ -324,11 +331,13 @@ export function InvoiceMaker() {
 
   const handleSelectInvoice = (id: number) => {
     if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    setInvoiceMode('manual');
     loadInvoice(id);
   };
 
   const handleNewInvoice = () => {
     if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+    setInvoiceMode('manual');
     resetInvoiceForm();
   };
 
@@ -532,6 +541,7 @@ export function InvoiceMaker() {
       const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => [response.invoice_chat_session, ...current]);
+      setInvoiceMode('ai');
       return response.invoice_chat_session;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
@@ -601,6 +611,7 @@ export function InvoiceMaker() {
       setActiveChatSession(response.invoice_chat_session);
       await loadData();
       setSuccess('Invoice created from AI preview.');
+      setInvoiceMode('manual');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
@@ -616,6 +627,7 @@ export function InvoiceMaker() {
 
     applyPreviewToForm(preview);
     setSuccess('AI preview loaded as an unsaved draft.');
+    setInvoiceMode('manual');
     window.setTimeout(() => setSuccess(null), 3500);
   };
 
@@ -682,274 +694,164 @@ export function InvoiceMaker() {
     }
   };
 
+  const invoiceHistoryPanel = (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
+            <p className="text-sm text-neutral-500">Saved invoices for the active company</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={handleNewInvoice}>
+            <Plus className="mr-1.5 h-4 w-4" />
+            New
+          </Button>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-neutral-500">Loading...</p>
+        ) : invoices.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+            No invoices yet.
+          </div>
+        ) : (
+          <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
+            {invoices.map((invoice) => (
+              <button
+                key={invoice.id}
+                type="button"
+                onClick={() => handleSelectInvoice(invoice.id)}
+                className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
+                  invoiceForm.id === invoice.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
+                    <p className="truncate text-xs text-neutral-500">{invoice.recipient_name || 'No recipient'}</p>
+                  </div>
+                  <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
+                  <span>{formatDateOnly(invoice.invoice_date)}</span>
+                  <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const recipientsPanel = (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">Recipients</h2>
+            <p className="text-sm text-neutral-500">Bill-to profiles and defaults</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setRecipientForm(emptyRecipientForm());
+              setShowRecipientForm((value) => !value);
+            }}
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add
+          </Button>
+        </div>
+
+        {showRecipientForm && (
+          <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+            <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
+            <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
+            <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input type="number" step="0.01" value={recipientForm.default_rate} onChange={(event) => setRecipientForm((current) => ({ ...current, default_rate: event.target.value }))} placeholder="Default rate" />
+              <Input value={recipientForm.invoice_prefix} onChange={(event) => setRecipientForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Prefix" />
+            </div>
+            <Textarea value={recipientForm.payment_terms} onChange={(event) => setRecipientForm((current) => ({ ...current, payment_terms: event.target.value }))} placeholder="Payment terms" rows={2} />
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setShowRecipientForm(false)}>Cancel</Button>
+              <Button size="sm" onClick={saveRecipient} disabled={recipientSaving}>
+                {recipientSaving ? 'Saving...' : 'Save Recipient'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+          {activeRecipients.map((recipient) => (
+            <button
+              key={recipient.id}
+              type="button"
+              onClick={() => editRecipient(recipient)}
+              className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
+            >
+              <span className="font-medium text-neutral-900">{recipient.name}</span>
+              <span className="block truncate text-xs text-neutral-500">{recipient.email || recipient.payment_terms || 'No defaults set'}</span>
+            </button>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const alertBanner = (error || success) ? (
+    <div className={`rounded-xl border px-4 py-3 text-sm ${
+      error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
+    }`}>
+      {error || success}
+    </div>
+  ) : null;
+  const activeChatMessages = activeChatSession?.messages || [];
+  const chatCanAcceptMessages = !activeChatSession || activeChatSession.status === 'active';
+
   return (
     <div>
       <Header
         title="Invoice Maker"
-        description="Create standalone invoices with recipients, line items, PDF output, email copy, and status tracking."
+        description="Create standalone invoices manually or with AI-assisted drafts for staff approval."
       />
 
-      <div className="grid gap-6 p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
-        <div className="space-y-6">
-          <Card>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
-                  <p className="text-sm text-neutral-500">Saved invoices for the active company</p>
-                </div>
-                <Button size="sm" variant="outline" onClick={handleNewInvoice}>
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  New
-                </Button>
-              </div>
-
-              {loading ? (
-                <p className="text-sm text-neutral-500">Loading...</p>
-              ) : invoices.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
-                  No invoices yet.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {invoices.map((invoice) => (
-                    <button
-                      key={invoice.id}
-                      type="button"
-                      onClick={() => handleSelectInvoice(invoice.id)}
-                      className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
-                        invoiceForm.id === invoice.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
-                          <p className="truncate text-xs text-neutral-500">{invoice.recipient_name || 'No recipient'}</p>
-                        </div>
-                        <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
-                      </div>
-                      <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
-                        <span>{formatDateOnly(invoice.invoice_date)}</span>
-                        <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-base font-semibold text-neutral-900">Recipients</h2>
-                  <p className="text-sm text-neutral-500">Bill-to profiles and defaults</p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setRecipientForm(emptyRecipientForm());
-                    setShowRecipientForm((value) => !value);
-                  }}
-                >
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  Add
-                </Button>
-              </div>
-
-              {showRecipientForm && (
-                <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-                  <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
-                  <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
-                  <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input type="number" step="0.01" value={recipientForm.default_rate} onChange={(event) => setRecipientForm((current) => ({ ...current, default_rate: event.target.value }))} placeholder="Default rate" />
-                    <Input value={recipientForm.invoice_prefix} onChange={(event) => setRecipientForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Prefix" />
-                  </div>
-                  <Textarea value={recipientForm.payment_terms} onChange={(event) => setRecipientForm((current) => ({ ...current, payment_terms: event.target.value }))} placeholder="Payment terms" rows={2} />
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" onClick={() => setShowRecipientForm(false)}>Cancel</Button>
-                    <Button size="sm" onClick={saveRecipient} disabled={recipientSaving}>
-                      {recipientSaving ? 'Saving...' : 'Save Recipient'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
-                {activeRecipients.map((recipient) => (
-                  <button
-                    key={recipient.id}
-                    type="button"
-                    onClick={() => editRecipient(recipient)}
-                    className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
-                  >
-                    <span className="font-medium text-neutral-900">{recipient.name}</span>
-                    <span className="block truncate text-xs text-neutral-500">{recipient.email || recipient.payment_terms || 'No defaults set'}</span>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="flex items-center gap-2 text-base font-semibold text-neutral-900">
-                    <Bot className="h-4 w-4 text-primary-600" />
-                    AI Invoice Assistant
-                  </h2>
-                  <p className="text-sm text-neutral-500">Structured invoice drafts for staff approval</p>
-                </div>
-                <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  New
-                </Button>
-              </div>
-
-              {chatSessions.length > 0 && (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {chatSessions.slice(0, 6).map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      onClick={() => loadChatSession(session.id)}
-                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                        activeChatSession?.id === session.id
-                          ? 'border-primary-300 bg-primary-50 text-primary-700'
-                          : 'border-neutral-200 bg-white text-neutral-600 hover:border-primary-200'
-                      }`}
-                    >
-                      {session.invoice_number || session.recipient_name || session.title}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
-                <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-                  {(activeChatSession?.messages || []).length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-3 text-sm text-neutral-500">
-                      Ask for an invoice draft by recipient, service, and amount.
-                    </div>
-                  ) : (
-                    activeChatSession?.messages?.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`rounded-lg px-3 py-2 text-sm ${
-                          message.role === 'user'
-                            ? 'bg-primary-600 text-white'
-                            : 'border border-neutral-200 bg-white text-neutral-700'
-                        }`}
-                      >
-                        {message.content}
-                        {message.image_urls.length > 0 && (
-                          <span className={`mt-1 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
-                            {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
-                          </span>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-                {chatImages.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {chatImages.map((image) => (
-                      <span key={`${image.name}-${image.size}`} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs text-neutral-600">
-                        {image.name}
-                        <button
-                          type="button"
-                          onClick={() => setChatImages((current) => current.filter((candidate) => candidate !== image))}
-                          className="rounded-full p-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
-                          aria-label={`Remove ${image.name}`}
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <label className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
-                    <ImagePlus className="h-4 w-4" />
-                    <input
-                      type="file"
-                      className="sr-only"
-                      accept="image/png,image/jpeg,image/webp,application/pdf"
-                      multiple
-                      onChange={(event) => {
-                        const files = Array.from(event.target.files || []);
-                        setChatImages((current) => [...current, ...files].slice(0, 4));
-                        event.target.value = '';
-                      }}
-                      disabled={chatBusy}
-                    />
-                  </label>
-                  <Input
-                    value={chatInput}
-                    onChange={(event) => setChatInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        sendChatMessage();
-                      }
-                    }}
-                    placeholder="Invoice Shimizu Technology $1,000 for accounting service"
-                    disabled={chatBusy}
-                  />
-                  <Button type="button" size="sm" className="h-10 w-10 px-0 py-0" onClick={sendChatMessage} disabled={chatBusy || !chatInput.trim()} aria-label="Send invoice assistant message">
-                    <Send className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {activePreview?.status === 'preview' && (
-                <div className="space-y-3 rounded-xl border border-primary-200 bg-primary-50/40 p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
-                        <Sparkles className="h-4 w-4 text-primary-600" />
-                        Preview v{activeChatSession?.current_preview_version}
-                      </h3>
-                      <p className="text-xs text-neutral-500">
-                        {activePreview.invoice_recipient_name || 'Recipient needed'} · {currency(previewTotal(activePreview))}
-                      </p>
-                    </div>
-                    <Badge className="bg-blue-100 text-blue-700">AI draft</Badge>
-                  </div>
-                  <div className="space-y-1 text-xs text-neutral-600">
-                    {previewLineItems.map((item, index) => (
-                      <div key={`${item.description}-${index}`} className="flex justify-between gap-3">
-                        <span className="truncate">{item.description}</span>
-                        <span className="shrink-0 font-medium">{currency(Number(item.quantity || 0) * Number(item.rate || 0))}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button type="button" variant="outline" size="sm" onClick={usePreviewAsDraft} disabled={chatBusy}>
-                      Load Draft
-                    </Button>
-                    <Button type="button" size="sm" onClick={createInvoiceFromPreview} disabled={chatBusy}>
-                      Create Invoice
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      <div className="px-6 pt-6 lg:px-8">
+        <div className="inline-flex w-full rounded-2xl border border-neutral-200 bg-neutral-100 p-1 sm:w-auto">
+          <button
+            type="button"
+            onClick={() => setInvoiceMode('manual')}
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors sm:flex-none ${
+              invoiceMode === 'manual' ? 'bg-white text-primary-700 shadow-sm' : 'text-neutral-600 hover:text-neutral-900'
+            }`}
+          >
+            <PencilLine className="h-4 w-4" />
+            Manual Invoice
+          </button>
+          <button
+            type="button"
+            onClick={() => setInvoiceMode('ai')}
+            className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors sm:flex-none ${
+              invoiceMode === 'ai' ? 'bg-white text-primary-700 shadow-sm' : 'text-neutral-600 hover:text-neutral-900'
+            }`}
+          >
+            <MessageSquare className="h-4 w-4" />
+            AI Assistant
+          </button>
         </div>
+      </div>
 
-        <div className="space-y-6">
-          {(error || success) && (
-            <div className={`rounded-xl border px-4 py-3 text-sm ${
-              error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
-            }`}>
-              {error || success}
-            </div>
-          )}
+      {invoiceMode === 'manual' ? (
+        <div className="grid gap-6 p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
+          <div className="space-y-6">
+            {invoiceHistoryPanel}
+            {recipientsPanel}
+          </div>
+
+          <div className="space-y-6">
+            {alertBanner}
 
           <Card>
             <CardContent className="space-y-6">
@@ -1071,6 +973,7 @@ export function InvoiceMaker() {
                         </p>
                       </div>
                     ))}
+                    <div ref={chatMessagesEndRef} />
                   </div>
                 )}
               </div>
@@ -1133,8 +1036,288 @@ export function InvoiceMaker() {
               </div>
             </CardContent>
           </Card>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="grid gap-6 p-6 lg:grid-cols-[320px_minmax(0,1fr)_340px] lg:p-8">
+          <div className="space-y-6">
+            {alertBanner}
+            <Card className="overflow-hidden">
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-base font-semibold text-neutral-900">Assistant Sessions</h2>
+                    <p className="text-sm text-neutral-500">Draft invoices from chat</p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    New
+                  </Button>
+                </div>
+
+                {loading ? (
+                  <p className="text-sm text-neutral-500">Loading...</p>
+                ) : chatSessions.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+                    Start a chat to create an AI-assisted invoice draft.
+                  </div>
+                ) : (
+                  <div className="max-h-[calc(100vh-360px)] min-h-[360px] space-y-2 overflow-y-auto pr-1">
+                    {chatSessions.map((session) => (
+                      <button
+                        key={session.id}
+                        type="button"
+                        onClick={() => loadChatSession(session.id)}
+                        className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
+                          activeChatSession?.id === session.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-neutral-900">
+                              {session.invoice_number || session.recipient_name || session.title}
+                            </p>
+                            <p className="truncate text-xs text-neutral-500">
+                              {session.message_count} message{session.message_count === 1 ? '' : 's'}
+                            </p>
+                          </div>
+                          <Badge className={session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
+                            {session.status === 'invoice_created' ? 'created' : session.status}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-xs text-neutral-500">{new Date(session.updated_at).toLocaleDateString()}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="flex min-h-[680px] overflow-hidden">
+            <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+              <div className="border-b border-neutral-200 px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="flex items-center gap-2 text-lg font-semibold text-neutral-900">
+                      <Bot className="h-5 w-5 text-primary-600" />
+                      Invoice Assistant
+                    </h2>
+                    <p className="truncate text-sm text-neutral-500">
+                      {activeChatSession ? activeChatSession.title : 'Tell the assistant what invoice you need'}
+                    </p>
+                  </div>
+                  {activeChatSession && (
+                    <Badge className={activeChatSession.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
+                      {activeChatSession.status === 'invoice_created' ? 'created' : activeChatSession.status}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto bg-neutral-50/50 p-5">
+                {activeChatMessages.length === 0 ? (
+                  <div className="flex h-full min-h-[420px] items-center justify-center">
+                    <div className="max-w-lg text-center">
+                      <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                        <MessageSquare className="h-6 w-6" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-neutral-900">Start with the invoice request</h3>
+                      <p className="mt-2 text-sm text-neutral-500">
+                        Ask for a draft by naming the recipient, work performed, amount, and any dates. Attach screenshots or PDFs when helpful.
+                      </p>
+                      <div className="mt-5 grid gap-2 text-left text-sm text-neutral-600">
+                        {[
+                          'Create an invoice for Shimizu Technology for $1,000 for accounting service.',
+                          'Bill Marianas Open for 12 hours at $85/hr for April support.',
+                          'Use this attached receipt and draft the invoice details.',
+                        ].map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            onClick={() => setChatInput(prompt)}
+                            className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/50"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {activeChatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                            message.role === 'user'
+                              ? 'bg-primary-600 text-white'
+                              : 'border border-neutral-200 bg-white text-neutral-700'
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                          {message.image_urls.length > 0 && (
+                            <span className={`mt-2 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
+                              {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
+                            </span>
+                          )}
+                          {message.has_preview && (
+                            <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                              message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
+                            }`}>
+                              Invoice preview ready
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-neutral-200 bg-white p-4">
+                {chatImages.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {chatImages.map((image) => (
+                      <span key={`${image.name}-${image.size}`} className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-600">
+                        {image.name}
+                        <button
+                          type="button"
+                          onClick={() => setChatImages((current) => current.filter((candidate) => candidate !== image))}
+                          className="rounded-full p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"
+                          aria-label={`Remove ${image.name}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {!chatCanAcceptMessages && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    This assistant session is complete. Start a new chat for another invoice.
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
+                    <ImagePlus className="h-5 w-5" />
+                    <input
+                      type="file"
+                      className="sr-only"
+                      accept="image/png,image/jpeg,image/webp,application/pdf"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        setChatImages((current) => [...current, ...files].slice(0, 4));
+                        event.target.value = '';
+                      }}
+                      disabled={chatBusy || !chatCanAcceptMessages}
+                    />
+                  </label>
+                  <Textarea
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        sendChatMessage();
+                      }
+                    }}
+                    placeholder="Type the invoice request..."
+                    rows={2}
+                    disabled={chatBusy || !chatCanAcceptMessages}
+                    className="min-h-12 resize-none"
+                  />
+                  <Button
+                    type="button"
+                    className="h-12 shrink-0 px-4"
+                    onClick={sendChatMessage}
+                    disabled={chatBusy || !chatInput.trim() || !chatCanAcceptMessages}
+                  >
+                    <Send className="mr-1.5 h-4 w-4" />
+                    Send
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-6">
+            <Card>
+              <CardContent className="space-y-4">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-neutral-900">
+                    <Sparkles className="h-4 w-4 text-primary-600" />
+                    AI Draft Preview
+                  </h2>
+                  <p className="text-sm text-neutral-500">Review before creating or editing manually</p>
+                </div>
+
+                {activePreview?.status === 'preview' ? (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4">
+                      <p className="text-sm font-semibold text-neutral-900">
+                        {activePreview.invoice_recipient_name || 'Recipient needed'}
+                      </p>
+                      <p className="mt-1 text-2xl font-semibold text-neutral-900">{currency(previewTotal(activePreview))}</p>
+                      <p className="mt-1 text-xs text-neutral-500">
+                        Preview v{activeChatSession?.current_preview_version}
+                        {activePreview.invoice_date ? ` · ${formatDateOnly(activePreview.invoice_date)}` : ''}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {previewLineItems.map((item, index) => (
+                        <div key={`${item.description}-${index}`} className="rounded-lg border border-neutral-200 bg-white p-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-neutral-900">{item.description}</p>
+                              <p className="text-xs text-neutral-500">
+                                {Number(item.quantity || 0)} x {currency(Number(item.rate || 0))}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-sm font-semibold text-neutral-900">
+                              {currency(Number(item.quantity || 0) * Number(item.rate || 0))}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {(activePreview.email_subject || activePreview.email_body) && (
+                      <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">Email draft</p>
+                        {activePreview.email_subject && <p className="mt-2 text-sm font-medium text-neutral-900">{activePreview.email_subject}</p>}
+                        {activePreview.email_body && <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-sm text-neutral-600">{activePreview.email_body}</p>}
+                      </div>
+                    )}
+
+                    <div className="grid gap-2">
+                      <Button type="button" onClick={createInvoiceFromPreview} disabled={chatBusy}>
+                        <ReceiptText className="mr-1.5 h-4 w-4" />
+                        Create Invoice
+                      </Button>
+                      <Button type="button" variant="outline" onClick={usePreviewAsDraft} disabled={chatBusy}>
+                        <PencilLine className="mr-1.5 h-4 w-4" />
+                        Edit Manually
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+                    A structured draft will appear here when the assistant has enough details.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {invoiceHistoryPanel}
+          </div>
+        </div>
+      )}
 
       {previewUrl && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
