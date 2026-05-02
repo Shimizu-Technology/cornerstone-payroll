@@ -23,4 +23,19 @@ RSpec.describe GeneralTransmittal, type: :model do
 
     expect(transmittal).to be_valid
   end
+
+  it "rejects duplicate source items before nested items are saved" do
+    check = create(:non_employee_check, :standalone)
+    transmittal = build(:general_transmittal)
+    2.times do |index|
+      transmittal.items << build(:general_transmittal_item,
+        general_transmittal: transmittal,
+        source_type: "NonEmployeeCheck",
+        source_id: check.id,
+        position: index)
+    end
+
+    expect(transmittal).not_to be_valid
+    expect(transmittal.errors[:items].join(" ")).to include("already been added")
+  end
 end

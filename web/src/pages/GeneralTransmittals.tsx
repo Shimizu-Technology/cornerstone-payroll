@@ -28,6 +28,11 @@ interface FormState {
   items: DraftItem[];
 }
 
+interface SaveTransmittalOptions {
+  markDraft?: boolean;
+  successMessage?: string;
+}
+
 const today = () => new Date().toISOString().slice(0, 10);
 
 const emptyForm = (): FormState => ({
@@ -240,7 +245,10 @@ export function GeneralTransmittals() {
     })),
   });
 
-  const saveTransmittal = async () => {
+  const saveTransmittal = async ({
+    markDraft = form.status === 'generated',
+    successMessage = 'General transmittal saved.',
+  }: SaveTransmittalOptions = {}) => {
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -250,11 +258,11 @@ export function GeneralTransmittals() {
       if (!payload.transmittal_date) throw new Error('Date is required');
 
       const response = form.id
-        ? await generalTransmittalsApi.update(form.id, payload, form.status === 'generated')
+        ? await generalTransmittalsApi.update(form.id, payload, markDraft)
         : await generalTransmittalsApi.create(payload);
       await loadData();
       await loadTransmittal(response.general_transmittal.id);
-      setSuccess('General transmittal saved.');
+      setSuccess(successMessage);
       window.setTimeout(() => setSuccess(null), 3500);
       return response.general_transmittal.id;
     } catch (err) {
@@ -276,7 +284,7 @@ export function GeneralTransmittals() {
   const handlePreview = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = form.status === 'generated' && form.id ? form.id : await saveTransmittal();
+    const id = await saveTransmittal({ markDraft: false });
     if (!id) return;
     setPdfBusy(true);
     setError(null);
@@ -294,7 +302,7 @@ export function GeneralTransmittals() {
   const handleGenerate = async () => {
     if (!ensureReadyForPdf()) return;
 
-    const id = await saveTransmittal();
+    const id = await saveTransmittal({ markDraft: false });
     if (!id) return;
     setPdfBusy(true);
     setError(null);
@@ -545,7 +553,7 @@ export function GeneralTransmittals() {
               </label>
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={saveTransmittal} disabled={saving || pdfBusy}>
+                <Button type="button" variant="outline" onClick={() => saveTransmittal()} disabled={saving || pdfBusy}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>

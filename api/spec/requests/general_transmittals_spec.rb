@@ -69,6 +69,33 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(item["amount"]).to eq(222.33)
       expect(item["details"]).to include("For: GRT payment")
     end
+
+    it "rejects duplicate linked checks in the same transmittal" do
+      check = create(:non_employee_check, :standalone, company: company)
+
+      post "/api/v1/admin/general_transmittals",
+        params: {
+          general_transmittal: {
+            title: "Duplicate check packet",
+            transmittal_date: "2026-05-02",
+            items: [
+              {
+                source_type: "NonEmployeeCheck",
+                source_id: check.id,
+                position: 0
+              },
+              {
+                source_type: "NonEmployeeCheck",
+                source_id: check.id,
+                position: 1
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join(" ")).to include("already been added to this transmittal")
+    end
   end
 
   describe "PATCH /api/v1/admin/general_transmittals/:id" do

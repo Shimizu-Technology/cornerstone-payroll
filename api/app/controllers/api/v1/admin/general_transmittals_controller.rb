@@ -35,6 +35,8 @@ module Api
           end
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: ["Source item has already been added to this transmittal"] }, status: :unprocessable_entity
         end
 
         def update
@@ -51,6 +53,8 @@ module Api
           end
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: ["Source item has already been added to this transmittal"] }, status: :unprocessable_entity
         end
 
         def destroy
