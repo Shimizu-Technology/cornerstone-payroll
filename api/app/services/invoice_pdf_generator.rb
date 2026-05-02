@@ -93,7 +93,7 @@ class InvoicePdfGenerator
       ]
     end
 
-    pdf.table(rows, header: true, width: pdf.bounds.width, cell_style: { size: 9, padding: [ 8, 7 ], border_color: "E5E7EB" }) do
+    pdf.table(rows, header: true, width: line_items_table_width, cell_style: { size: 9, padding: [ 8, 7 ], border_color: "E5E7EB" }) do
       row(0).background_color = "F3F4F6"
       row(0).text_color = "111827"
       columns(0).width = 206
@@ -142,6 +142,10 @@ class InvoicePdfGenerator
         pdf.fill_color "000000"
       end
     end
+  end
+
+  def line_items_table_width
+    490
   end
 
   def company_lines
