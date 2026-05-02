@@ -173,5 +173,32 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to eq("Invoice recipient not found")
     end
+
+    it "does not create an invoice from an archived session" do
+      recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+      session = create(
+        :invoice_chat_session,
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        current_preview_version: 1,
+        current_preview: {
+          "status" => "preview",
+          "invoice_recipient_id" => recipient.id,
+          "invoice_date" => "2026-05-02",
+          "line_items" => [
+            { "description" => "Payroll service", "quantity" => 1, "rate" => 150 }
+          ]
+        }
+      )
+      session.archive!(actor: admin_user)
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      }.not_to change(Invoice, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Cannot confirm an archived session")
+    end
   end
 end
