@@ -248,6 +248,12 @@ Rails.application.routes.draw do
             post :generate_pdf
           end
         end
+        resources :invoice_chat_sessions, except: [:new, :edit] do
+          member do
+            post :message
+            post :confirm
+          end
+        end
 
         # Timecard OCR
         resources :timecards, only: [:index, :show, :create, :update, :destroy] do
