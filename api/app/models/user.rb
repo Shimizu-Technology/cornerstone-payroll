@@ -18,6 +18,8 @@ class User < ApplicationRecord
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify
   has_many :created_general_transmittals, class_name: "GeneralTransmittal", foreign_key: :created_by_id, dependent: :nullify
   has_many :updated_general_transmittals, class_name: "GeneralTransmittal", foreign_key: :updated_by_id, dependent: :nullify
+  has_many :created_invoice_chat_sessions, class_name: "InvoiceChatSession", foreign_key: :created_by_id, dependent: :nullify
+  has_many :updated_invoice_chat_sessions, class_name: "InvoiceChatSession", foreign_key: :updated_by_id, dependent: :nullify
 
   enum :role, { admin: 0, manager: 1, employee: 2, accountant: 3, client: 4 }
 

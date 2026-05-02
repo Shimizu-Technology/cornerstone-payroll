@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Copy, Download, Eye, FileText, Mail, Plus, ReceiptText, Save, Trash2, X } from 'lucide-react';
+import { Bot, Copy, Download, Eye, FileText, ImagePlus, Mail, Plus, ReceiptText, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,8 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   invoiceRecipientsApi,
+  invoiceChatSessionsApi,
   invoicesApi,
   type BlobDownload,
+  type InvoiceAiPreview,
+  type InvoiceChatSession,
   type Invoice,
   type InvoiceLineItem,
   type InvoicePayload,
@@ -106,6 +109,14 @@ function currency(value?: number | null) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
 
+function previewTotal(preview?: InvoiceAiPreview | Record<string, never> | null) {
+  const lineItems = (preview as InvoiceAiPreview | null | undefined)?.line_items || [];
+  return lineItems.reduce(
+    (sum, item) => sum + Number(item.quantity || 0) * Number(item.rate || 0),
+    0
+  );
+}
+
 function localDateFromDateOnly(value?: string | null) {
   if (!value) return null;
   const [year, month, day] = value.slice(0, 10).split('-').map(Number);
@@ -153,18 +164,25 @@ export function InvoiceMaker() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [chatSessions, setChatSessions] = useState<InvoiceChatSession[]>([]);
+  const [activeChatSession, setActiveChatSession] = useState<InvoiceChatSession | null>(null);
+  const [chatInput, setChatInput] = useState('');
+  const [chatImages, setChatImages] = useState<File[]>([]);
+  const [chatBusy, setChatBusy] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [invoiceResponse, recipientResponse] = await Promise.all([
+      const [invoiceResponse, recipientResponse, chatResponse] = await Promise.all([
         invoicesApi.list(),
         invoiceRecipientsApi.list({ active: true }),
+        invoiceChatSessionsApi.list(),
       ]);
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
+      setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load invoices');
     } finally {
@@ -197,6 +215,8 @@ export function InvoiceMaker() {
     [invoiceForm.invoice_recipient_id, recipients]
   );
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
+  const activePreview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
+  const previewLineItems = activePreview?.line_items || [];
 
   const buildPayloadForForm = (state: InvoiceFormState): InvoicePayload => ({
     invoice_recipient_id: Number(state.invoice_recipient_id),
@@ -262,6 +282,34 @@ export function InvoiceMaker() {
     };
     setInvoiceForm(nextForm);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
+  };
+
+  const applyPreviewToForm = (preview: InvoiceAiPreview) => {
+    const recipientId = preview.invoice_recipient_id ? String(preview.invoice_recipient_id) : '';
+    const nextForm: InvoiceFormState = {
+      invoice_recipient_id: recipientId,
+      invoice_number: '',
+      invoice_date: preview.invoice_date || today(),
+      service_period_start: preview.service_period_start || '',
+      service_period_end: preview.service_period_end || '',
+      notes: preview.notes || '',
+      payment_terms: preview.payment_terms || '',
+      email_subject: preview.email_subject || '',
+      email_body: preview.email_body || '',
+      status: 'draft',
+      generated_at: null,
+      line_items: (preview.line_items || []).map((item, index) => ({
+        local_id: `ai-${Date.now()}-${index}`,
+        description: item.description,
+        quantity: Number(item.quantity || 0),
+        rate: Number(item.rate || 0),
+        amount: Number(item.quantity || 0) * Number(item.rate || 0),
+        service_date: item.service_date || '',
+        position: index,
+      })),
+    };
+    setInvoiceForm(nextForm);
+    savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(emptyInvoiceForm()));
   };
 
   const loadInvoice = async (id: number) => {
@@ -477,6 +525,93 @@ export function InvoiceMaker() {
     }
   };
 
+  const startChatSession = async () => {
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
+      setActiveChatSession(response.invoice_chat_session);
+      setChatSessions((current) => [response.invoice_chat_session, ...current]);
+      return response.invoice_chat_session;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start invoice assistant');
+      return null;
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const loadChatSession = async (sessionId: number) => {
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.get(sessionId);
+      setActiveChatSession(response.invoice_chat_session);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load assistant session');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const sendChatMessage = async () => {
+    const content = chatInput.trim();
+    if (!content) return;
+
+    setChatBusy(true);
+    setError(null);
+    try {
+      let session = activeChatSession;
+      if (!session) {
+        const createResponse = await invoiceChatSessionsApi.create({ title: content.slice(0, 60) });
+        session = createResponse.invoice_chat_session;
+      }
+      setActiveChatSession(session);
+      const response = await invoiceChatSessionsApi.message(session.id, content, chatImages);
+      setActiveChatSession(response.invoice_chat_session);
+      setChatSessions((current) => {
+        const withoutSession = current.filter((candidate) => candidate.id !== response.invoice_chat_session.id);
+        return [response.invoice_chat_session, ...withoutSession];
+      });
+      setChatInput('');
+      setChatImages([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const createInvoiceFromPreview = async () => {
+    if (!activeChatSession) return;
+    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
+      hydrateInvoiceForm(response.invoice);
+      setActiveChatSession(response.invoice_chat_session);
+      await loadData();
+      setSuccess('Invoice created from AI preview.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const usePreviewAsDraft = () => {
+    const preview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
+    if (!preview || preview.status !== 'preview') return;
+    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+
+    applyPreviewToForm(preview);
+    setSuccess('AI preview loaded as an unsaved draft.');
+    window.setTimeout(() => setSuccess(null), 3500);
+  };
+
   const copyEmail = async () => {
     const content = [invoiceForm.email_subject, '', invoiceForm.email_body].join('\n');
     try {
@@ -649,6 +784,153 @@ export function InvoiceMaker() {
                   </button>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-neutral-900">
+                    <Bot className="h-4 w-4 text-primary-600" />
+                    AI Invoice Assistant
+                  </h2>
+                  <p className="text-sm text-neutral-500">Structured invoice drafts for staff approval</p>
+                </div>
+                <Button size="sm" variant="outline" onClick={startChatSession} disabled={chatBusy}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  New
+                </Button>
+              </div>
+
+              {chatSessions.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {chatSessions.slice(0, 6).map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => loadChatSession(session.id)}
+                      className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                        activeChatSession?.id === session.id
+                          ? 'border-primary-300 bg-primary-50 text-primary-700'
+                          : 'border-neutral-200 bg-white text-neutral-600 hover:border-primary-200'
+                      }`}
+                    >
+                      {session.invoice_number || session.recipient_name || session.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+                <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+                  {(activeChatSession?.messages || []).length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-neutral-300 bg-white p-3 text-sm text-neutral-500">
+                      Ask for an invoice draft by recipient, service, and amount.
+                    </div>
+                  ) : (
+                    activeChatSession?.messages?.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`rounded-lg px-3 py-2 text-sm ${
+                          message.role === 'user'
+                            ? 'bg-primary-600 text-white'
+                            : 'border border-neutral-200 bg-white text-neutral-700'
+                        }`}
+                      >
+                        {message.content}
+                        {message.image_urls.length > 0 && (
+                          <span className={`mt-1 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
+                            {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+                {chatImages.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {chatImages.map((image) => (
+                      <span key={`${image.name}-${image.size}`} className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs text-neutral-600">
+                        {image.name}
+                        <button
+                          type="button"
+                          onClick={() => setChatImages((current) => current.filter((candidate) => candidate !== image))}
+                          className="rounded-full p-0.5 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+                          aria-label={`Remove ${image.name}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <label className="inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
+                    <ImagePlus className="h-4 w-4" />
+                    <input
+                      type="file"
+                      className="sr-only"
+                      accept="image/png,image/jpeg,image/webp,application/pdf"
+                      multiple
+                      onChange={(event) => {
+                        const files = Array.from(event.target.files || []);
+                        setChatImages((current) => [...current, ...files].slice(0, 4));
+                        event.target.value = '';
+                      }}
+                      disabled={chatBusy}
+                    />
+                  </label>
+                  <Input
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        sendChatMessage();
+                      }
+                    }}
+                    placeholder="Invoice Shimizu Technology $1,000 for accounting service"
+                    disabled={chatBusy}
+                  />
+                  <Button type="button" size="sm" className="h-10 w-10 px-0 py-0" onClick={sendChatMessage} disabled={chatBusy || !chatInput.trim()} aria-label="Send invoice assistant message">
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {activePreview?.status === 'preview' && (
+                <div className="space-y-3 rounded-xl border border-primary-200 bg-primary-50/40 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                        <Sparkles className="h-4 w-4 text-primary-600" />
+                        Preview v{activeChatSession?.current_preview_version}
+                      </h3>
+                      <p className="text-xs text-neutral-500">
+                        {activePreview.invoice_recipient_name || 'Recipient needed'} · {currency(previewTotal(activePreview))}
+                      </p>
+                    </div>
+                    <Badge className="bg-blue-100 text-blue-700">AI draft</Badge>
+                  </div>
+                  <div className="space-y-1 text-xs text-neutral-600">
+                    {previewLineItems.map((item, index) => (
+                      <div key={`${item.description}-${index}`} className="flex justify-between gap-3">
+                        <span className="truncate">{item.description}</span>
+                        <span className="shrink-0 font-medium">{currency(Number(item.quantity || 0) * Number(item.rate || 0))}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button type="button" variant="outline" size="sm" onClick={usePreviewAsDraft} disabled={chatBusy}>
+                      Load Draft
+                    </Button>
+                    <Button type="button" size="sm" onClick={createInvoiceFromPreview} disabled={chatBusy}>
+                      Create Invoice
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>

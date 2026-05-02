@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_02_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -468,6 +468,43 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_190000) do
     t.datetime "updated_at", null: false
     t.index ["invoice_id", "position"], name: "index_invoice_line_items_on_invoice_id_and_position"
     t.index ["invoice_id"], name: "index_invoice_line_items_on_invoice_id"
+  end
+
+  create_table "invoice_chat_messages", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.boolean "has_preview", default: false, null: false
+    t.jsonb "image_urls", default: [], null: false
+    t.bigint "invoice_chat_session_id", null: false
+    t.jsonb "preview", default: {}, null: false
+    t.integer "preview_version"
+    t.string "role", null: false
+    t.text "content", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_chat_session_id", "created_at"], name: "idx_invoice_chat_messages_on_session_created"
+    t.index ["invoice_chat_session_id"], name: "index_invoice_chat_messages_on_invoice_chat_session_id"
+    t.check_constraint "role::text = ANY (ARRAY['user'::character varying, 'assistant'::character varying]::text[])", name: "check_invoice_chat_messages_role"
+  end
+
+  create_table "invoice_chat_sessions", force: :cascade do |t|
+    t.boolean "archived", default: false, null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.jsonb "current_preview", default: {}, null: false
+    t.integer "current_preview_version", default: 0, null: false
+    t.bigint "invoice_id"
+    t.bigint "invoice_recipient_id"
+    t.string "status", default: "active", null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["company_id", "archived", "updated_at"], name: "idx_invoice_chat_sessions_on_company_archive_updated"
+    t.index ["company_id"], name: "index_invoice_chat_sessions_on_company_id"
+    t.index ["created_by_id"], name: "index_invoice_chat_sessions_on_created_by_id"
+    t.index ["invoice_id"], name: "index_invoice_chat_sessions_on_invoice_id"
+    t.index ["invoice_recipient_id"], name: "index_invoice_chat_sessions_on_invoice_recipient_id"
+    t.index ["updated_by_id"], name: "index_invoice_chat_sessions_on_updated_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying, 'invoice_created'::character varying, 'archived'::character varying]::text[])", name: "check_invoice_chat_sessions_status"
   end
 
   create_table "invoice_recipients", force: :cascade do |t|
@@ -1067,6 +1104,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_190000) do
   add_foreign_key "general_transmittals", "companies"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
+  add_foreign_key "invoice_chat_messages", "invoice_chat_sessions", on_delete: :cascade
+  add_foreign_key "invoice_chat_sessions", "companies"
+  add_foreign_key "invoice_chat_sessions", "invoice_recipients"
+  add_foreign_key "invoice_chat_sessions", "invoices"
+  add_foreign_key "invoice_chat_sessions", "users", column: "created_by_id"
+  add_foreign_key "invoice_chat_sessions", "users", column: "updated_by_id"
   add_foreign_key "invoice_line_items", "invoices"
   add_foreign_key "invoice_recipients", "companies"
   add_foreign_key "invoices", "companies"
