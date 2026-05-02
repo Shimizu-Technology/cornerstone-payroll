@@ -67,9 +67,11 @@ module Api
         end
 
         def generate_pdf
+          generator = GeneralTransmittalPdfGenerator.new(@transmittal)
+          pdf_content = generator.generate
+
           @transmittal.mark_generated!(actor: current_user)
-          generator = GeneralTransmittalPdfGenerator.new(@transmittal.reload)
-          send_data generator.generate,
+          send_data pdf_content,
             filename: generator.filename,
             type: "application/pdf",
             disposition: "attachment"
@@ -149,21 +151,53 @@ module Api
         end
 
         def hydrate_item!(item, attrs, index)
-          if attrs[:source_type] == "NonEmployeeCheck" && attrs[:source_id].present? && attrs[:id].blank?
-            check = NonEmployeeCheck.find_by(id: attrs[:source_id], company_id: current_company_id)
-            raise ArgumentError, "Standalone check not found" unless check
-            raise ArgumentError, "Only standalone checks can be added to general transmittals" if check.pay_period_id.present?
-            raise ArgumentError, "Voided checks cannot be added to general transmittals" if check.voided?
-
-            snapshot = GeneralTransmittalItem.from_non_employee_check(check, position: item_position(attrs, index))
-            item.assign_attributes(snapshot.attributes.except("id", "created_at", "updated_at", "general_transmittal_id"))
+          if attrs[:source_type] == "NonEmployeeCheck" && attrs[:source_id].present?
+            check = standalone_check!(attrs[:source_id])
+            if resnapshot_item?(item, check)
+              assign_check_snapshot!(item, check, attrs, index)
+            else
+              assign_item_attributes!(
+                item,
+                attrs,
+                index,
+                source_type: "NonEmployeeCheck",
+                source_id: check.id,
+                item_type: "check"
+              )
+            end
             return
           end
 
+          assign_item_attributes!(item, attrs, index)
+        end
+
+        def standalone_check!(source_id)
+          check = NonEmployeeCheck.find_by(id: source_id, company_id: current_company_id)
+          raise ArgumentError, "Standalone check not found" unless check
+          if check.pay_period_id.present?
+            raise ArgumentError, "Only standalone checks can be added to general transmittals"
+          end
+          raise ArgumentError, "Voided checks cannot be added to general transmittals" if check.voided?
+
+          check
+        end
+
+        def resnapshot_item?(item, check)
+          !item.persisted? || item.source_type != "NonEmployeeCheck" || item.source_id.to_i != check.id
+        end
+
+        def assign_check_snapshot!(item, check, attrs, index)
+          snapshot = GeneralTransmittalItem.from_non_employee_check(check, position: item_position(attrs, index))
           item.assign_attributes(
-            source_type: attrs[:source_type].presence,
-            source_id: attrs[:source_id].presence,
-            item_type: attrs[:item_type].presence || "manual",
+            snapshot.attributes.except("id", "created_at", "updated_at", "general_transmittal_id")
+          )
+        end
+
+        def assign_item_attributes!(item, attrs, index, source_type: nil, source_id: nil, item_type: nil)
+          item.assign_attributes(
+            source_type: source_type || attrs[:source_type].presence,
+            source_id: source_id || attrs[:source_id].presence,
+            item_type: item_type || attrs[:item_type].presence || "manual",
             title: attrs[:title],
             payable_to: attrs[:payable_to].presence,
             check_number: attrs[:check_number].presence,

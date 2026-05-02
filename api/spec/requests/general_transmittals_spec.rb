@@ -71,6 +71,36 @@ RSpec.describe "General Transmittals Admin API", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/general_transmittals/:id" do
+    it "rejects changing an existing item to a check from another company" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      item = transmittal.items.first
+      other_company = create(:company, name: "Other Client")
+      other_check = create(:non_employee_check, :standalone, company: other_company)
+
+      patch "/api/v1/admin/general_transmittals/#{transmittal.id}",
+        params: {
+          general_transmittal: {
+            title: transmittal.title,
+            transmittal_date: transmittal.transmittal_date.iso8601,
+            items: [
+              {
+                id: item.id,
+                source_type: "NonEmployeeCheck",
+                source_id: other_check.id,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Standalone check not found")
+      expect(item.reload.source_type).to be_nil
+      expect(item.source_id).to be_nil
+    end
+  end
+
   describe "POST /api/v1/admin/general_transmittals/:id/generate_pdf" do
     it "marks the transmittal generated and returns a PDF" do
       transmittal = create(:general_transmittal, :with_item, company: company)
@@ -82,6 +112,20 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(response.body).to start_with("%PDF")
       expect(transmittal.reload.status).to eq("generated")
       expect(transmittal.generated_at).to be_present
+    end
+
+    it "leaves the transmittal as a draft when PDF generation fails" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      allow_any_instance_of(GeneralTransmittalPdfGenerator)
+        .to receive(:generate)
+        .and_raise(StandardError, "PDF failure")
+
+      expect do
+        post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
+      end.to raise_error(StandardError, "PDF failure")
+
+      expect(transmittal.reload.status).to eq("draft")
+      expect(transmittal.generated_at).to be_nil
     end
   end
 end
