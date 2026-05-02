@@ -37,6 +37,8 @@ module Api
           end
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         end
 
         def update
@@ -64,6 +66,8 @@ module Api
           end
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         end
 
         def destroy

@@ -95,6 +95,13 @@ const statusColors: Record<InvoiceStatus, string> = {
   archived: 'bg-neutral-200 text-neutral-700',
 };
 
+const statusActions: Partial<Record<InvoiceStatus, InvoiceStatus[]>> = {
+  generated: ['sent', 'voided', 'archived'],
+  sent: ['paid', 'voided', 'archived'],
+  paid: ['voided', 'archived'],
+  voided: ['archived'],
+};
+
 function currency(value?: number | null) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 }
@@ -154,7 +161,7 @@ export function InvoiceMaker() {
     try {
       const [invoiceResponse, recipientResponse] = await Promise.all([
         invoicesApi.list(),
-        invoiceRecipientsApi.list(),
+        invoiceRecipientsApi.list({ active: true }),
       ]);
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
@@ -794,10 +801,10 @@ export function InvoiceMaker() {
                 </div>
               </div>
 
-              {invoiceForm.id && invoiceForm.status !== 'draft' && (
+              {invoiceForm.id && invoiceForm.status && invoiceForm.status !== 'draft' && (
                 <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white p-3">
                   <span className="mr-2 text-sm font-medium text-neutral-700">Status:</span>
-                  {(['sent', 'paid', 'voided', 'archived'] as InvoiceStatus[]).map((status) => (
+                  {(statusActions[invoiceForm.status] || []).map((status) => (
                     <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
                       Mark {status}
                     </Button>
