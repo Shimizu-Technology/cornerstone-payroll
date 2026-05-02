@@ -1973,6 +1973,80 @@ export const form500Api = {
 };
 
 // ============================================================
+// General Transmittals API
+// ============================================================
+export type GeneralTransmittalStatus = 'draft' | 'generated';
+export type GeneralTransmittalItemType = 'check' | 'payment' | 'document' | 'manual' | 'other';
+
+export interface GeneralTransmittalItem {
+  id?: number;
+  source_type?: string | null;
+  source_id?: number | null;
+  item_type: GeneralTransmittalItemType;
+  title: string;
+  payable_to?: string | null;
+  check_number?: string | null;
+  amount?: number | null;
+  details: string[];
+  position: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface GeneralTransmittal {
+  id: number;
+  company_id: number;
+  title: string;
+  transmittal_date: string;
+  preparer_name?: string | null;
+  recipient_name?: string | null;
+  notes: string[];
+  status: GeneralTransmittalStatus;
+  generated_at?: string | null;
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+  updated_by_id?: number | null;
+  updated_by_name?: string | null;
+  item_count: number;
+  total_amount: number;
+  items?: GeneralTransmittalItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GeneralTransmittalPayload {
+  title: string;
+  transmittal_date: string;
+  preparer_name?: string | null;
+  recipient_name?: string | null;
+  notes?: string[];
+  items?: Array<Partial<GeneralTransmittalItem> & {
+    id?: number;
+    _destroy?: boolean;
+  }>;
+}
+
+export const generalTransmittalsApi = {
+  list: () =>
+    api.get<{ general_transmittals: GeneralTransmittal[] }>('/admin/general_transmittals'),
+  get: (id: number) =>
+    api.get<{ general_transmittal: GeneralTransmittal }>(`/admin/general_transmittals/${id}`),
+  create: (data: GeneralTransmittalPayload) =>
+    api.post<{ general_transmittal: GeneralTransmittal }>('/admin/general_transmittals', { general_transmittal: data }),
+  update: (id: number, data: GeneralTransmittalPayload, markDraft = false) =>
+    api.patch<{ general_transmittal: GeneralTransmittal }>(
+      `/admin/general_transmittals/${id}`,
+      { general_transmittal: data, ...(markDraft ? { mark_draft: 'true' } : {}) }
+    ),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/general_transmittals/${id}`),
+  previewPdf: (id: number) =>
+    api.postBlob(`/admin/general_transmittals/${id}/preview_pdf`, {}),
+  generatePdf: (id: number) =>
+    api.postBlob(`/admin/general_transmittals/${id}/generate_pdf`, {}),
+};
+
+// ============================================================
 // Non-Employee Checks API
 // ============================================================
 export const nonEmployeeChecksApi = {

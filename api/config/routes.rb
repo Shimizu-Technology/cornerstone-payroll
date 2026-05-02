@@ -231,6 +231,14 @@ Rails.application.routes.draw do
           end
         end
 
+        # General Transmittals (standalone, non-pay-period delivery packets)
+        resources :general_transmittals, except: [:new, :edit] do
+          member do
+            post :preview_pdf
+            post :generate_pdf
+          end
+        end
+
         # Timecard OCR
         resources :timecards, only: [:index, :show, :create, :update, :destroy] do
           member do
