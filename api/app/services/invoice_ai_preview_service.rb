@@ -1,12 +1,19 @@
 # frozen_string_literal: true
 
 require "httparty"
+require "base64"
 require "json"
 
 class InvoiceAiPreviewService
   OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
   OPEN_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_OPEN_TIMEOUT_SECONDS", "15"))
   READ_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_READ_TIMEOUT_SECONDS", "120"))
+  IMAGE_CONTENT_TYPES = {
+    ".jpg" => "image/jpeg",
+    ".jpeg" => "image/jpeg",
+    ".png" => "image/png",
+    ".webp" => "image/webp"
+  }.freeze
 
   def initialize(company:, user:, session:, message:, image_urls: [])
     @company = company
@@ -43,7 +50,7 @@ class InvoiceAiPreviewService
         model: model,
         messages: [
           { role: "system", content: system_prompt },
-          { role: "user", content: user_prompt }
+          { role: "user", content: user_content }
         ],
         temperature: 0.1,
         response_format: { type: "json_object" }
@@ -103,7 +110,7 @@ class InvoiceAiPreviewService
       Current session preview:
       #{JSON.generate(session.current_preview.presence || {})}
 
-      Attached file references:
+      Attached file references for audit trail:
       #{JSON.generate(image_urls)}
 
       Recent chat:
@@ -112,6 +119,40 @@ class InvoiceAiPreviewService
       Staff message:
       #{message}
     PROMPT
+  end
+
+  def user_content
+    image_parts = image_content_parts
+    return user_prompt if image_parts.empty?
+
+    [
+      { type: "text", text: user_prompt },
+      *image_parts
+    ]
+  end
+
+  def image_content_parts
+    image_urls.filter_map do |reference|
+      content_type = image_content_type(reference)
+      next unless content_type
+
+      data = R2StorageService.new.download(reference)
+      next if data.blank?
+
+      {
+        type: "image_url",
+        image_url: {
+          url: "data:#{content_type};base64,#{Base64.strict_encode64(data)}"
+        }
+      }
+    rescue R2StorageService::DownloadError => e
+      Rails.logger.warn("Invoice AI attachment download failed: #{e.class}: #{e.message}")
+      nil
+    end
+  end
+
+  def image_content_type(reference)
+    IMAGE_CONTENT_TYPES[File.extname(reference.to_s).downcase]
   end
 
   def recipient_context
