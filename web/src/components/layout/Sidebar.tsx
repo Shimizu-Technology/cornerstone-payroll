@@ -22,6 +22,7 @@ import {
   Wrench,
   ScanLine,
   ClipboardCheck,
+  ReceiptText,
   PanelLeftClose,
   PanelLeftOpen,
   Files,
@@ -68,6 +69,7 @@ const portalNavigation: NavItem[] = [
 const toolsNavigation: NavItem[] = [
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'General Transmittals', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Invoice Maker', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const clientSettingsNavigation: NavItem[] = [

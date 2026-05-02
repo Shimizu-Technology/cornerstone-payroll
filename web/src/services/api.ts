@@ -110,7 +110,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
+        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
         response.status,
         errorData.details,
         errorData
@@ -155,7 +155,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
+        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
         response.status,
         errorData.details,
         errorData
@@ -180,7 +180,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
+        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
         response.status,
         errorData.details,
         errorData
@@ -206,7 +206,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
+        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
         response.status,
         errorData.details,
         errorData
@@ -236,7 +236,7 @@ class ApiClient {
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new ApiError(
-        errorData.error || `HTTP ${response.status}`,
+        errorData.error || (Array.isArray(errorData.errors) ? errorData.errors.join(', ') : undefined) || `HTTP ${response.status}`,
         response.status,
         errorData.details,
         errorData
@@ -2044,6 +2044,134 @@ export const generalTransmittalsApi = {
     api.postBlob(`/admin/general_transmittals/${id}/preview_pdf`, {}),
   generatePdf: (id: number) =>
     api.postBlob(`/admin/general_transmittals/${id}/generate_pdf`, {}),
+};
+
+// ============================================================
+// Invoice Maker API
+// ============================================================
+export type InvoiceStatus = 'draft' | 'generated' | 'sent' | 'paid' | 'voided' | 'archived';
+export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
+
+export interface InvoiceRecipient {
+  id: number;
+  company_id: number;
+  name: string;
+  email?: string | null;
+  address?: string | null;
+  default_rate?: number | null;
+  invoice_prefix?: string | null;
+  payment_terms?: string | null;
+  template_type: InvoiceTemplateType;
+  notes?: string | null;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InvoiceLineItem {
+  id?: number;
+  description: string;
+  quantity: number;
+  rate: number;
+  amount?: number;
+  service_date?: string | null;
+  position: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Invoice {
+  id: number;
+  company_id: number;
+  invoice_recipient_id: number;
+  recipient_name?: string | null;
+  invoice_number: string;
+  invoice_date: string;
+  service_period_start?: string | null;
+  service_period_end?: string | null;
+  total_amount: number;
+  status: InvoiceStatus;
+  notes?: string | null;
+  payment_terms?: string | null;
+  email_subject?: string | null;
+  email_body?: string | null;
+  generated_at?: string | null;
+  sent_at?: string | null;
+  paid_at?: string | null;
+  voided_at?: string | null;
+  archived_at?: string | null;
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+  updated_by_id?: number | null;
+  updated_by_name?: string | null;
+  line_item_count: number;
+  invoice_recipient?: InvoiceRecipient | null;
+  line_items?: InvoiceLineItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceRecipientPayload {
+  name: string;
+  email?: string | null;
+  address?: string | null;
+  default_rate?: number | null;
+  invoice_prefix?: string | null;
+  payment_terms?: string | null;
+  template_type?: InvoiceTemplateType;
+  notes?: string | null;
+  active?: boolean;
+}
+
+export interface InvoicePayload {
+  invoice_recipient_id: number;
+  invoice_number?: string | null;
+  invoice_date: string;
+  service_period_start?: string | null;
+  service_period_end?: string | null;
+  notes?: string | null;
+  payment_terms?: string | null;
+  email_subject?: string | null;
+  email_body?: string | null;
+  line_items?: Array<Partial<InvoiceLineItem> & {
+    id?: number;
+    _destroy?: boolean;
+  }>;
+}
+
+export const invoiceRecipientsApi = {
+  list: (params?: { active?: boolean }) =>
+    api.get<{ invoice_recipients: InvoiceRecipient[] }>('/admin/invoice_recipients', params),
+  get: (id: number) =>
+    api.get<{ invoice_recipient: InvoiceRecipient }>(`/admin/invoice_recipients/${id}`),
+  create: (data: InvoiceRecipientPayload) =>
+    api.post<{ invoice_recipient: InvoiceRecipient }>('/admin/invoice_recipients', { invoice_recipient: data }),
+  update: (id: number, data: InvoiceRecipientPayload) =>
+    api.patch<{ invoice_recipient: InvoiceRecipient }>(`/admin/invoice_recipients/${id}`, { invoice_recipient: data }),
+  delete: (id: number) =>
+    api.delete<{ message: string; invoice_recipient?: InvoiceRecipient }>(`/admin/invoice_recipients/${id}`),
+};
+
+export const invoicesApi = {
+  list: (params?: { status?: InvoiceStatus }) =>
+    api.get<{ invoices: Invoice[] }>('/admin/invoices', params),
+  get: (id: number) =>
+    api.get<{ invoice: Invoice }>(`/admin/invoices/${id}`),
+  create: (data: InvoicePayload) =>
+    api.post<{ invoice: Invoice }>('/admin/invoices', { invoice: data }),
+  update: (id: number, data: InvoicePayload, markDraft = false) =>
+    api.patch<{ invoice: Invoice }>(
+      `/admin/invoices/${id}`,
+      { invoice: data, ...(markDraft ? { mark_draft: 'true' } : {}) }
+    ),
+  delete: (id: number) =>
+    api.delete<{ message: string }>(`/admin/invoices/${id}`),
+  updateStatus: (id: number, status: InvoiceStatus) =>
+    api.patch<{ invoice: Invoice }>(`/admin/invoices/${id}/update_status`, { status }),
+  previewPdf: (id: number) =>
+    api.postBlob(`/admin/invoices/${id}/preview_pdf`, {}),
+  generatePdf: (id: number) =>
+    api.postBlob(`/admin/invoices/${id}/generate_pdf`, {}),
 };
 
 // ============================================================

@@ -239,6 +239,16 @@ Rails.application.routes.draw do
           end
         end
 
+        # Invoice Maker (standalone firm tool)
+        resources :invoice_recipients, except: [:new, :edit]
+        resources :invoices, except: [:new, :edit] do
+          member do
+            patch :update_status
+            post :preview_pdf
+            post :generate_pdf
+          end
+        end
+
         # Timecard OCR
         resources :timecards, only: [:index, :show, :create, :update, :destroy] do
           member do
