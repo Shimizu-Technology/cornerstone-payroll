@@ -78,6 +78,8 @@ module Api
 
           InvoiceChatSession.transaction do
             @session.lock!
+            raise ArgumentError, "Cannot send messages to a non-active session" unless @session.status == "active"
+
             user_message = @session.messages.create!(role: "user", content: content, image_urls: image_urls)
             version = @session.store_preview!(preview, actor: current_user)
             assistant_message = @session.messages.create!(
