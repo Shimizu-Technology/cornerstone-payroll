@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_02_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -414,6 +414,45 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_01_120000) do
     t.index ["created_by_id"], name: "index_form500_filings_on_created_by_id"
     t.index ["pay_period_id"], name: "index_form500_filings_on_pay_period_id", unique: true
     t.index ["updated_by_id"], name: "index_form500_filings_on_updated_by_id"
+  end
+
+  create_table "general_transmittal_items", force: :cascade do |t|
+    t.decimal "amount", precision: 10, scale: 2
+    t.string "check_number"
+    t.datetime "created_at", null: false
+    t.jsonb "details", default: [], null: false
+    t.bigint "general_transmittal_id", null: false
+    t.string "item_type", default: "manual", null: false
+    t.string "payable_to"
+    t.integer "position", default: 0, null: false
+    t.bigint "source_id"
+    t.string "source_type"
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.index ["general_transmittal_id", "position"], name: "idx_general_transmittal_items_on_transmittal_position"
+    t.index ["general_transmittal_id"], name: "idx_general_transmittal_items_on_transmittal"
+    t.index ["source_type", "source_id"], name: "idx_general_transmittal_items_on_source"
+    t.check_constraint "amount IS NULL OR amount >= 0::numeric", name: "general_transmittal_items_amount_nonnegative"
+  end
+
+  create_table "general_transmittals", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.datetime "generated_at"
+    t.jsonb "notes", default: [], null: false
+    t.string "preparer_name"
+    t.string "recipient_name"
+    t.string "status", default: "draft", null: false
+    t.string "title", null: false
+    t.date "transmittal_date", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "updated_by_id"
+    t.index ["company_id", "transmittal_date"], name: "idx_general_transmittals_on_company_date"
+    t.index ["company_id"], name: "index_general_transmittals_on_company_id"
+    t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
+    t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying]::text[])", name: "general_transmittals_status_check"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -960,6 +999,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_01_120000) do
   add_foreign_key "form500_filings", "pay_periods"
   add_foreign_key "form500_filings", "users", column: "created_by_id"
   add_foreign_key "form500_filings", "users", column: "updated_by_id"
+  add_foreign_key "general_transmittal_items", "general_transmittals", on_delete: :cascade
+  add_foreign_key "general_transmittals", "companies"
+  add_foreign_key "general_transmittals", "users", column: "created_by_id"
+  add_foreign_key "general_transmittals", "users", column: "updated_by_id"
   add_foreign_key "loan_transactions", "employee_loans"
   add_foreign_key "loan_transactions", "pay_periods"
   add_foreign_key "loan_transactions", "payroll_items"
