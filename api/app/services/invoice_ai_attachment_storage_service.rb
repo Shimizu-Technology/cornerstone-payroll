@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "marcel"
+
 class InvoiceAiAttachmentStorageService
   ALLOWED_CONTENT_TYPES = %w[image/jpeg image/png image/webp application/pdf].freeze
 
@@ -14,21 +16,26 @@ class InvoiceAiAttachmentStorageService
   end
 
   def upload
-    raise ArgumentError, "Unsupported attachment type" unless ALLOWED_CONTENT_TYPES.include?(content_type)
+    raise ArgumentError, "Unsupported attachment type" unless ALLOWED_CONTENT_TYPES.include?(detected_content_type)
 
     key = "invoice-assistant/company-#{@company_id}/session-#{@session_id}/#{SecureRandom.uuid}#{extension}"
-    R2StorageService.new.upload(key, @file.tempfile, content_type: content_type)
+    R2StorageService.new.upload(key, @file.tempfile, content_type: detected_content_type)
     key
   end
 
   private
 
-  def content_type
-    @file.content_type.to_s
+  def detected_content_type
+    @detected_content_type ||= begin
+      @file.tempfile.rewind if @file.tempfile.respond_to?(:rewind)
+      Marcel::MimeType.for(@file.tempfile, name: @file.original_filename)
+    ensure
+      @file.tempfile.rewind if @file.tempfile.respond_to?(:rewind)
+    end
   end
 
   def extension
-    File.extname(@file.original_filename.to_s).presence || extension_for_content_type
+    extension_for_content_type
   end
 
   def extension_for_content_type
@@ -37,6 +44,6 @@ class InvoiceAiAttachmentStorageService
       "image/png" => ".png",
       "image/webp" => ".webp",
       "application/pdf" => ".pdf"
-    }.fetch(content_type, "")
+    }.fetch(detected_content_type, "")
   end
 end

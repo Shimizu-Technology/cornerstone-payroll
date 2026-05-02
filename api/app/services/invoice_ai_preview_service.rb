@@ -229,7 +229,7 @@ class InvoiceAiPreviewService
     description = item["description"].to_s.strip.presence
     quantity = BigDecimal(item["quantity"].to_s)
     rate = BigDecimal(item["rate"].to_s)
-    return nil if description.blank? || quantity.negative? || rate.negative?
+    return nil if description.blank? || quantity <= 0 || rate.negative?
 
     {
       "description" => description,

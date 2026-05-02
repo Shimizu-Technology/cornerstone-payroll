@@ -28,4 +28,35 @@ RSpec.describe InvoiceAiPreviewService do
     )
     expect(preview["payment_terms"]).to eq("Due on receipt")
   end
+
+  it "drops zero-quantity AI line items before marking a preview ready" do
+    company = create(:company)
+    user = create(:user, company: company)
+    recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+    response = {
+      "status" => "preview",
+      "message" => "Ready for review.",
+      "invoice_recipient_id" => recipient.id,
+      "line_items" => [
+        { "description" => "Accounting service", "quantity" => 0, "rate" => 100 }
+      ]
+    }
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+    allow(HTTParty).to receive(:post).and_return(
+      instance_double("HTTParty::Response", success?: true, dig: response.to_json)
+    )
+
+    preview = described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Invoice Shimizu Technology"
+    ).call
+
+    expect(preview["status"]).to eq("clarification_needed")
+    expect(preview["line_items"]).to be_empty
+  end
 end
