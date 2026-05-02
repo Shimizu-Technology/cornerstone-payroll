@@ -86,6 +86,30 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to eq("Invoice recipient not found")
     end
+
+    it "rejects archived recipients for new invoices" do
+      recipient = create(:invoice_recipient, company: company, active: false)
+
+      post "/api/v1/admin/invoices",
+        params: {
+          invoice: {
+            invoice_recipient_id: recipient.id,
+            invoice_number: "INV-1003",
+            invoice_date: "2026-05-02",
+            line_items: [
+              {
+                description: "Accounting service",
+                quantity: 1,
+                rate: 100,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Invoice recipient is archived")
+    end
   end
 
   describe "PATCH /api/v1/admin/invoices/:id" do
@@ -141,6 +165,34 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       expect(invoice.reload.status).to eq("draft")
       expect(invoice.generated_at).to be_nil
       expect(invoice.line_items.first.reload.description).to eq("Changed as draft")
+    end
+
+    it "allows an invoice to keep its existing archived recipient" do
+      recipient = create(:invoice_recipient, company: company, active: false)
+      invoice = create(:invoice, :with_line_item, company: company, invoice_recipient: recipient)
+
+      patch "/api/v1/admin/invoices/#{invoice.id}",
+        params: {
+          invoice: {
+            invoice_recipient_id: recipient.id,
+            invoice_number: invoice.invoice_number,
+            invoice_date: invoice.invoice_date.iso8601,
+            notes: "Updated without repointing recipient",
+            line_items: [
+              {
+                id: invoice.line_items.first.id,
+                description: "Accounting service",
+                quantity: 1,
+                rate: 100,
+                position: 0
+              }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(invoice.reload.invoice_recipient_id).to eq(recipient.id)
+      expect(invoice.notes).to eq("Updated without repointing recipient")
     end
   end
 

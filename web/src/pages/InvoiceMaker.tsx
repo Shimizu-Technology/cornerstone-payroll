@@ -471,9 +471,15 @@ export function InvoiceMaker() {
 
   const copyEmail = async () => {
     const content = [invoiceForm.email_subject, '', invoiceForm.email_body].join('\n');
-    await navigator.clipboard.writeText(content.trim());
-    setSuccess('Email copy copied to clipboard.');
-    window.setTimeout(() => setSuccess(null), 3500);
+    try {
+      await navigator.clipboard.writeText(content.trim());
+      setError(null);
+      setSuccess('Email copy copied to clipboard.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch {
+      setSuccess(null);
+      setError('Unable to copy email text. Please select and copy it manually.');
+    }
   };
 
   const buildRecipientPayload = (): InvoiceRecipientPayload => ({
@@ -622,8 +628,8 @@ export function InvoiceMaker() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                {recipients.slice(0, 8).map((recipient) => (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {recipients.map((recipient) => (
                   <button
                     key={recipient.id}
                     type="button"
