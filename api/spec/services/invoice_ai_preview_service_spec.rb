@@ -231,4 +231,27 @@ RSpec.describe InvoiceAiPreviewService do
 
     expect(request_body["model"]).to eq("openai/gpt-5.5")
   end
+
+  it "bounds deterministic recipient matching to avoid scanning every recipient" do
+    company = create(:company)
+    user = create(:user, company: company)
+    205.times do |index|
+      create(:invoice_recipient, company: company, name: "A Client #{index.to_s.rjust(3, '0')}")
+    end
+    create(:invoice_recipient, company: company, name: "ZZZ Late Match")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return(nil)
+
+    preview = described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Invoice ZZZ Late Match for $100"
+    ).call
+
+    expect(preview["status"]).to eq("clarification_needed")
+    expect(preview["invoice_recipient_id"]).to be_nil
+  end
 end

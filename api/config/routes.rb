@@ -252,6 +252,8 @@ Rails.application.routes.draw do
           member do
             post :message
             post :confirm
+            post :restore
+            post :restore_preview
           end
         end
 

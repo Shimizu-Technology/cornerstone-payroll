@@ -115,6 +115,74 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(session.reload.current_preview).to eq(original_preview)
       expect(session.current_preview_version).to eq(1)
     end
+
+    it "cleans up uploaded attachments on unexpected failures before persistence" do
+      session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
+      file = Tempfile.new([ "invoice-chat", ".jpg" ])
+      file.binmode
+      file.write("\xFF\xD8\xFF\xE0fakejpeg")
+      file.rewind
+      upload = Rack::Test::UploadedFile.new(file.path, "image/jpeg")
+      storage = instance_double(R2StorageService, delete: true)
+      allow(InvoiceAiAttachmentStorageService).to receive(:upload).and_return("invoice-assistant/company-1/session-1/upload.jpg")
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      allow(InvoiceAiPreviewService).to receive(:new).and_raise(StandardError, "unexpected")
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message",
+          params: { content: "Invoice Shimizu Technology", images: [ upload ] }
+      }.to raise_error(StandardError, "unexpected")
+
+      expect(storage).to have_received(:delete).with("invoice-assistant/company-1/session-1/upload.jpg")
+      expect(session.messages.reload).to be_empty
+    ensure
+      file&.close
+      file&.unlink
+    end
+  end
+
+  describe "POST /api/v1/admin/invoice_chat_sessions/:id/restore_preview" do
+    it "restores a prior assistant preview onto an active session" do
+      recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+      preview = {
+        "status" => "preview",
+        "message" => "Ready for review.",
+        "invoice_recipient_id" => recipient.id,
+        "invoice_recipient_name" => recipient.name,
+        "line_items" => [
+          { "description" => "Payroll service", "quantity" => 1, "rate" => 150 }
+        ]
+      }
+      session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
+      message = create(
+        :invoice_chat_message,
+        invoice_chat_session: session,
+        role: "assistant",
+        preview: preview,
+        preview_version: 1,
+        has_preview: true
+      )
+
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/restore_preview",
+        params: { message_id: message.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(session.reload.current_preview).to include("invoice_recipient_id" => recipient.id)
+      expect(session.current_preview_version).to eq(1)
+      expect(session.messages.where(role: "assistant").last.content).to eq("Restored invoice preview version 1.")
+    end
+  end
+
+  describe "POST /api/v1/admin/invoice_chat_sessions/:id/restore" do
+    it "restores an archived assistant session to active" do
+      session = create(:invoice_chat_session, company: company, created_by: admin_user, updated_by: admin_user)
+      session.archive!(actor: admin_user)
+
+      post "/api/v1/admin/invoice_chat_sessions/#{session.id}/restore"
+
+      expect(response).to have_http_status(:ok)
+      expect(session.reload).to have_attributes(archived: false, status: "active")
+    end
   end
 
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/confirm" do

@@ -4,13 +4,14 @@ module Api
   module V1
     module Admin
       class InvoiceChatSessionsController < BaseController
-        before_action :set_session, only: [ :show, :update, :destroy, :message, :confirm ]
+        before_action :set_session, only: [ :show, :update, :destroy, :message, :confirm, :restore, :restore_preview ]
 
         def index
           sessions = InvoiceChatSession
-            .where(company_id: current_company_id, archived: false)
+            .where(company_id: current_company_id)
             .includes(:invoice_recipient, :invoice)
             .recent
+          sessions = sessions.where(archived: false) unless include_archived_sessions?
           message_counts = InvoiceChatMessage
             .where(invoice_chat_session_id: sessions.map(&:id))
             .group(:invoice_chat_session_id)
@@ -57,8 +58,15 @@ module Api
           render json: { invoice_chat_session: session_payload(@session.reload, detailed: true) }
         end
 
+        def restore
+          restored_status = @session.invoice_id.present? ? "invoice_created" : "active"
+          @session.update!(archived: false, status: restored_status, updated_by: current_user)
+          render json: { invoice_chat_session: session_payload(@session.reload, detailed: true) }
+        end
+
         def message
           image_urls = []
+          attachments_persisted = false
           content = params.require(:content).to_s.strip
           if content.blank?
             render json: { error: "Message cannot be blank" }, status: :unprocessable_entity
@@ -90,6 +98,7 @@ module Api
               has_preview: preview["status"] == "preview"
             )
           end
+          attachments_persisted = true
 
           render json: {
             invoice_chat_session: session_payload(@session.reload, detailed: true),
@@ -102,6 +111,9 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           cleanup_uploaded_attachments(image_urls)
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
+        rescue StandardError
+          cleanup_uploaded_attachments(image_urls) unless attachments_persisted
+          raise
         end
 
         def confirm
@@ -147,7 +159,36 @@ module Api
           render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         end
 
+        def restore_preview
+          message = @session.messages.find_by(id: params[:message_id])
+          raise ArgumentError, "Preview message not found" unless message&.has_preview? && message.preview.present?
+
+          InvoiceChatSession.transaction do
+            @session.lock!
+            raise ArgumentError, "Cannot restore previews on a non-active session" unless @session.status == "active"
+
+            version = @session.store_preview!(message.preview, actor: current_user)
+            @session.messages.create!(
+              role: "assistant",
+              content: "Restored invoice preview version #{message.preview_version || version}.",
+              preview: message.preview,
+              preview_version: version,
+              has_preview: true
+            )
+          end
+
+          render json: { invoice_chat_session: session_payload(@session.reload, detailed: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
+        end
+
         private
+
+        def include_archived_sessions?
+          ActiveModel::Type::Boolean.new.cast(params[:include_archived])
+        end
 
         def set_session
           @session = InvoiceChatSession
