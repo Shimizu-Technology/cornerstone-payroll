@@ -2139,6 +2139,65 @@ export interface InvoicePayload {
   }>;
 }
 
+export interface InvoiceAiPreview {
+  status: 'preview' | 'clarification_needed';
+  message?: string | null;
+  invoice_recipient_id?: number | null;
+  invoice_recipient_name?: string | null;
+  new_recipient?: {
+    name: string;
+    email?: string | null;
+    address?: string | null;
+    default_rate?: number | null;
+    invoice_prefix?: string | null;
+    payment_terms?: string | null;
+    template_type?: InvoiceTemplateType | null;
+    notes?: string | null;
+  } | null;
+  invoice_date?: string | null;
+  service_period_start?: string | null;
+  service_period_end?: string | null;
+  payment_terms?: string | null;
+  notes?: string | null;
+  email_subject?: string | null;
+  email_body?: string | null;
+  line_items?: Array<{
+    description: string;
+    quantity: number;
+    rate: number;
+    service_date?: string | null;
+  }>;
+}
+
+export interface InvoiceChatMessage {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  image_urls: string[];
+  preview: InvoiceAiPreview | Record<string, never>;
+  preview_version?: number | null;
+  has_preview: boolean;
+  created_at: string;
+}
+
+export interface InvoiceChatSession {
+  id: number;
+  company_id: number;
+  invoice_recipient_id?: number | null;
+  invoice_id?: number | null;
+  title: string;
+  status: 'active' | 'invoice_created' | 'archived';
+  current_preview: InvoiceAiPreview | Record<string, never>;
+  current_preview_version: number;
+  archived: boolean;
+  recipient_name?: string | null;
+  invoice_number?: string | null;
+  message_count: number;
+  messages?: InvoiceChatMessage[];
+  created_at: string;
+  updated_at: string;
+}
+
 export const invoiceRecipientsApi = {
   list: (params?: { active?: boolean }) =>
     api.get<{ invoice_recipients: InvoiceRecipient[] }>('/admin/invoice_recipients', params),
@@ -2172,6 +2231,43 @@ export const invoicesApi = {
     api.postBlob(`/admin/invoices/${id}/preview_pdf`, {}),
   generatePdf: (id: number) =>
     api.postBlob(`/admin/invoices/${id}/generate_pdf`, {}),
+};
+
+export const invoiceChatSessionsApi = {
+  list: (params?: { include_archived?: boolean }) =>
+    api.get<{ invoice_chat_sessions: InvoiceChatSession[] }>('/admin/invoice_chat_sessions', params),
+  get: (id: number) =>
+    api.get<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`),
+  create: (data?: { title?: string; invoice_recipient_id?: number | null }) =>
+    api.post<{ invoice_chat_session: InvoiceChatSession }>('/admin/invoice_chat_sessions', { invoice_chat_session: data || {} }),
+  update: (id: number, data: { title?: string; invoice_recipient_id?: number | null }) =>
+    api.patch<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`, { invoice_chat_session: data }),
+  delete: (id: number) =>
+    api.delete<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`),
+  restore: (id: number) =>
+    api.post<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}/restore`, {}),
+  restorePreview: (id: number, messageId: number) =>
+    api.post<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}/restore_preview`, { message_id: messageId }),
+  message: (id: number, content: string, images?: File[]) => {
+    if (images?.length) {
+      const formData = new FormData();
+      formData.append('content', content);
+      images.forEach((image) => formData.append('images[]', image));
+      return api.postForm<{
+        invoice_chat_session: InvoiceChatSession;
+        user_message: InvoiceChatMessage;
+        assistant_message: InvoiceChatMessage;
+      }>(`/admin/invoice_chat_sessions/${id}/message`, formData);
+    }
+
+    return api.post<{
+      invoice_chat_session: InvoiceChatSession;
+      user_message: InvoiceChatMessage;
+      assistant_message: InvoiceChatMessage;
+    }>(`/admin/invoice_chat_sessions/${id}/message`, { content });
+  },
+  confirm: (id: number) =>
+    api.post<{ invoice: Invoice; invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}/confirm`, {}),
 };
 
 // ============================================================

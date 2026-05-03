@@ -79,6 +79,27 @@ class R2StorageService
     raise DownloadError, "Failed to download from R2: #{e.message}"
   end
 
+  # Download a file only when the object is small enough to inline safely.
+  #
+  # @param key [String] The object key
+  # @param max_bytes [Integer] Maximum allowed object size
+  # @return [String, nil] Binary data
+  def download_with_limit(key, max_bytes:)
+    return download_locally_with_limit(key, max_bytes: max_bytes) unless configured?
+
+    metadata = client.head_object(bucket: bucket_name, key: key)
+    if metadata.content_length.to_i > max_bytes
+      raise DownloadError, "Object exceeds #{max_bytes} byte download limit"
+    end
+
+    download(key)
+  rescue Aws::S3::Errors::NoSuchKey, Aws::S3::Errors::NotFound
+    nil
+  rescue Aws::S3::Errors::ServiceError => e
+    Rails.logger.error("R2 metadata lookup failed: #{e.message}")
+    raise DownloadError, "Failed to inspect R2 object: #{e.message}"
+  end
+
   # Check if an object exists
   #
   # @param key [String] The object key
@@ -241,6 +262,19 @@ class R2StorageService
     raise DownloadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 download failed: #{e.message}")
+    raise DownloadError, "Failed to download locally: #{e.message}"
+  end
+
+  def download_locally_with_limit(key, max_bytes:)
+    path = local_path_for(key)
+    return nil unless File.exist?(path)
+    raise DownloadError, "Object exceeds #{max_bytes} byte download limit" if File.size(path) > max_bytes
+
+    File.binread(path)
+  rescue InvalidKeyError => e
+    raise DownloadError, e.message
+  rescue StandardError => e
+    Rails.logger.error("Local R2 limited download failed: #{e.message}")
     raise DownloadError, "Failed to download locally: #{e.message}"
   end
 
