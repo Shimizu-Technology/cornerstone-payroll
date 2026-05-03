@@ -1001,7 +1001,6 @@ export function InvoiceMaker() {
                         </p>
                       </div>
                     ))}
-                    <div ref={chatMessagesEndRef} />
                   </div>
                 )}
               </div>
@@ -1203,6 +1202,7 @@ export function InvoiceMaker() {
                         </div>
                       </div>
                     ))}
+                    <div ref={chatMessagesEndRef} />
                   </div>
                 )}
               </div>

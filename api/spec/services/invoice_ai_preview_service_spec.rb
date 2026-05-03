@@ -28,6 +28,7 @@ RSpec.describe InvoiceAiPreviewService do
     )
     expect(preview["payment_terms"]).to eq("Due on receipt")
     expect(preview["email_subject"]).to eq("Invoice from #{company.name}")
+    expect(preview["email_body"]).to include("Hi Shimizu Technology")
     expect(preview["email_body"]).to end_with(company.name)
   end
 

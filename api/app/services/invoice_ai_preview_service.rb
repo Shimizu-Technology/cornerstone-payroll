@@ -206,8 +206,8 @@ class InvoiceAiPreviewService
       "service_period_end" => nil,
       "payment_terms" => recipient&.payment_terms,
       "notes" => nil,
-      "email_subject" => email_subject_for(recipient),
-      "email_body" => email_body_for(recipient),
+      "email_subject" => email_subject_for(recipient&.name),
+      "email_body" => email_body_for(recipient&.name),
       "line_items" => line_items
     }
   end
