@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { Bot, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,12 @@ type DraftLineItem = InvoiceLineItem & {
 type OptimisticChatMessage = InvoiceChatMessage & {
   session_id: number;
 };
+
+interface ChatAttachmentPreview {
+  key: string;
+  file: File;
+  url: string | null;
+}
 
 interface InvoiceFormState {
   id?: number;
@@ -173,9 +179,13 @@ export function InvoiceMaker() {
   const [activeChatSession, setActiveChatSession] = useState<InvoiceChatSession | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatImages, setChatImages] = useState<File[]>([]);
+  const [chatAttachmentPreviews, setChatAttachmentPreviews] = useState<ChatAttachmentPreview[]>([]);
   const [optimisticChatMessages, setOptimisticChatMessages] = useState<OptimisticChatMessage[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [invoiceMode, setInvoiceMode] = useState<'manual' | 'ai'>('manual');
+  const [showArchivedChatSessions, setShowArchivedChatSessions] = useState(false);
+  const [createdChatInvoice, setCreatedChatInvoice] = useState<Invoice | null>(null);
+  const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -186,7 +196,7 @@ export function InvoiceMaker() {
       const [invoiceResponse, recipientResponse, chatResponse] = await Promise.all([
         invoicesApi.list(),
         invoiceRecipientsApi.list({ active: true }),
-        invoiceChatSessionsApi.list(),
+        invoiceChatSessionsApi.list({ include_archived: showArchivedChatSessions }),
       ]);
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
@@ -196,7 +206,7 @@ export function InvoiceMaker() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showArchivedChatSessions]);
 
   useEffect(() => {
     loadData();
@@ -212,6 +222,20 @@ export function InvoiceMaker() {
     if (invoiceMode !== 'ai') return;
     chatMessagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [activeChatSession?.id, activeChatSession?.messages?.length, invoiceMode, optimisticChatMessages.length]);
+
+  useEffect(() => {
+    const previews = chatImages.map((file) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}`,
+      file,
+      url: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+    }));
+    setChatAttachmentPreviews(previews);
+    return () => {
+      previews.forEach((preview) => {
+        if (preview.url) URL.revokeObjectURL(preview.url);
+      });
+    };
+  }, [chatImages]);
 
   const activeLineItems = useMemo(
     () => invoiceForm.line_items.filter((item) => !item._destroy),
@@ -543,6 +567,7 @@ export function InvoiceMaker() {
   const startChatSession = async () => {
     setChatBusy(true);
     setError(null);
+    setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.create({ title: 'Invoice Assistant' });
       setActiveChatSession(response.invoice_chat_session);
@@ -585,14 +610,81 @@ export function InvoiceMaker() {
     event.preventDefault();
   };
 
+  const handleChatDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!chatCanAcceptMessages || chatBusy) return;
+    appendChatAttachments(Array.from(event.dataTransfer.files || []));
+  };
+
+  const handleChatDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!chatCanAcceptMessages || chatBusy) return;
+    event.preventDefault();
+  };
+
   const loadChatSession = async (sessionId: number) => {
     setChatBusy(true);
     setError(null);
+    setCreatedChatInvoice(null);
     try {
       const response = await invoiceChatSessionsApi.get(sessionId);
       setActiveChatSession(response.invoice_chat_session);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load assistant session');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const archiveChatSession = async (sessionId: number) => {
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.delete(sessionId);
+      setChatSessions((current) => {
+        const next = current.map((session) => session.id === sessionId ? response.invoice_chat_session : session);
+        return showArchivedChatSessions ? next : next.filter((session) => !session.archived);
+      });
+      if (activeChatSession?.id === sessionId) {
+        setActiveChatSession(showArchivedChatSessions ? response.invoice_chat_session : null);
+        setCreatedChatInvoice(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive assistant session');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const restoreChatSession = async (sessionId: number) => {
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.restore(sessionId);
+      setChatSessions((current) => current.map((session) => session.id === sessionId ? response.invoice_chat_session : session));
+      setActiveChatSession(response.invoice_chat_session);
+      setCreatedChatInvoice(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore assistant session');
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const restoreChatPreview = async (messageId: number) => {
+    if (!activeChatSession) return;
+    setChatBusy(true);
+    setError(null);
+    try {
+      const response = await invoiceChatSessionsApi.restorePreview(activeChatSession.id, messageId);
+      setActiveChatSession(response.invoice_chat_session);
+      setChatSessions((current) => current.map((session) => (
+        session.id === response.invoice_chat_session.id ? response.invoice_chat_session : session
+      )));
+      setCreatedChatInvoice(null);
+      setSuccess('AI preview restored.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore preview');
     } finally {
       setChatBusy(false);
     }
@@ -650,6 +742,7 @@ export function InvoiceMaker() {
 
     setChatInput('');
     setChatImages([]);
+    setCreatedChatInvoice(null);
     setOptimisticChatMessages((current) => [...current, ...pendingMessages]);
     if (!currentSessionId) {
       setActiveChatSession(optimisticSession);
@@ -709,10 +802,10 @@ export function InvoiceMaker() {
     try {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
       hydrateInvoiceForm(response.invoice);
+      setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
       await loadData();
       setSuccess('Invoice created from AI preview.');
-      setInvoiceMode('manual');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create invoice from preview');
@@ -733,16 +826,60 @@ export function InvoiceMaker() {
   };
 
   const copyEmail = async () => {
-    const content = [invoiceForm.email_subject, '', invoiceForm.email_body].join('\n');
+    const source = invoiceMode === 'ai' && createdChatInvoice ? createdChatInvoice : invoiceForm;
+    const content = [source.email_subject, '', source.email_body].join('\n');
     try {
       await navigator.clipboard.writeText(content.trim());
       setError(null);
+      setChatEmailCopied(true);
       setSuccess('Email copy copied to clipboard.');
       window.setTimeout(() => setSuccess(null), 3500);
+      window.setTimeout(() => setChatEmailCopied(false), 1600);
     } catch {
       setSuccess(null);
       setError('Unable to copy email text. Please select and copy it manually.');
     }
+  };
+
+  const previewCreatedChatInvoice = async () => {
+    if (!createdChatInvoice) return;
+    setPdfBusy(true);
+    setError(null);
+    try {
+      const blob = await invoicesApi.previewPdf(createdChatInvoice.id);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(previewBlob(blob));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to preview PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const generateCreatedChatInvoice = async () => {
+    if (!createdChatInvoice) return;
+    setPdfBusy(true);
+    setError(null);
+    try {
+      const blob = await invoicesApi.generatePdf(createdChatInvoice.id);
+      downloadBlob(blob, 'invoice.pdf');
+      const refreshed = await invoicesApi.get(createdChatInvoice.id);
+      setCreatedChatInvoice(refreshed.invoice);
+      hydrateInvoiceForm(refreshed.invoice);
+      await loadData();
+      setSuccess('Invoice generated.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate PDF');
+    } finally {
+      setPdfBusy(false);
+    }
+  };
+
+  const editCreatedChatInvoiceManually = () => {
+    if (!createdChatInvoice) return;
+    hydrateInvoiceForm(createdChatInvoice);
+    setInvoiceMode('manual');
   };
 
   const buildRecipientPayload = (): InvoiceRecipientPayload => ({
@@ -875,6 +1012,16 @@ export function InvoiceMaker() {
               <Input type="number" step="0.01" value={recipientForm.default_rate} onChange={(event) => setRecipientForm((current) => ({ ...current, default_rate: event.target.value }))} placeholder="Default rate" />
               <Input value={recipientForm.invoice_prefix} onChange={(event) => setRecipientForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Prefix" />
             </div>
+            <select
+              value={recipientForm.template_type}
+              onChange={(event) => setRecipientForm((current) => ({ ...current, template_type: event.target.value as InvoiceTemplateType }))}
+              className="h-10 w-full rounded-md border border-neutral-300 bg-white px-3 text-sm text-neutral-900 shadow-sm"
+            >
+              <option value="standard">Standard invoice</option>
+              <option value="hourly">Hourly services</option>
+              <option value="project">Project invoice</option>
+              <option value="tuition">Tuition invoice</option>
+            </select>
             <Textarea value={recipientForm.payment_terms} onChange={(event) => setRecipientForm((current) => ({ ...current, payment_terms: event.target.value }))} placeholder="Payment terms" rows={2} />
             <div className="flex justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setShowRecipientForm(false)}>Cancel</Button>
@@ -1160,6 +1307,15 @@ export function InvoiceMaker() {
                     New
                   </Button>
                 </div>
+                <label className="flex items-center gap-2 text-sm text-neutral-600">
+                  <input
+                    type="checkbox"
+                    checked={showArchivedChatSessions}
+                    onChange={(event) => setShowArchivedChatSessions(event.target.checked)}
+                    className="h-4 w-4 rounded border-neutral-300"
+                  />
+                  Show archived sessions
+                </label>
 
                 {loading ? (
                   <p className="text-sm text-neutral-500">Loading...</p>
@@ -1170,29 +1326,50 @@ export function InvoiceMaker() {
                 ) : (
                   <div className="max-h-[calc(100vh-360px)] min-h-[360px] space-y-2 overflow-y-auto pr-1">
                     {chatSessions.map((session) => (
-                      <button
+                      <div
                         key={session.id}
-                        type="button"
-                        onClick={() => loadChatSession(session.id)}
-                        className={`w-full rounded-lg border p-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
+                        className={`rounded-lg border p-3 transition-colors hover:border-primary-300 hover:bg-primary-50/40 ${
                           activeChatSession?.id === session.id ? 'border-primary-300 bg-primary-50' : 'border-neutral-200 bg-white'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-neutral-900">
-                              {session.invoice_number || session.recipient_name || session.title}
-                            </p>
-                            <p className="truncate text-xs text-neutral-500">
-                              {session.message_count} message{session.message_count === 1 ? '' : 's'}
-                            </p>
+                        <button type="button" onClick={() => loadChatSession(session.id)} className="w-full text-left">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-neutral-900">
+                                {session.invoice_number || session.recipient_name || session.title}
+                              </p>
+                              <p className="truncate text-xs text-neutral-500">
+                                {session.message_count} message{session.message_count === 1 ? '' : 's'}
+                              </p>
+                            </div>
+                            <Badge className={session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
+                              {session.status === 'invoice_created' ? 'created' : session.status}
+                            </Badge>
                           </div>
-                          <Badge className={session.status === 'active' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-100 text-neutral-700'}>
-                            {session.status === 'invoice_created' ? 'created' : session.status}
-                          </Badge>
+                        </button>
+                        <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500">
+                          <span>{new Date(session.updated_at).toLocaleDateString()}</span>
+                          {session.archived ? (
+                            <button
+                              type="button"
+                              onClick={() => restoreChatSession(session.id)}
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-primary-700 hover:bg-primary-50"
+                            >
+                              <RotateCcw className="h-3 w-3" />
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => archiveChatSession(session.id)}
+                              className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
+                            >
+                              <Archive className="h-3 w-3" />
+                              Archive
+                            </button>
+                          )}
                         </div>
-                        <p className="mt-2 text-xs text-neutral-500">{new Date(session.updated_at).toLocaleDateString()}</p>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1201,7 +1378,11 @@ export function InvoiceMaker() {
             {recipientsPanel}
           </div>
 
-          <Card className="flex min-h-[min(760px,calc(100vh-260px))] overflow-hidden">
+          <Card
+            className="flex min-h-[min(760px,calc(100vh-260px))] overflow-hidden"
+            onDrop={handleChatDrop}
+            onDragOver={handleChatDragOver}
+          >
             <CardContent className="flex min-h-0 flex-1 flex-col p-0">
               <div className="border-b border-neutral-200 px-5 py-4">
                 <div className="flex items-center justify-between gap-3">
@@ -1272,11 +1453,23 @@ export function InvoiceMaker() {
                             </span>
                           )}
                           {message.has_preview && (
-                            <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                              message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
-                            }`}>
-                              Invoice preview ready
-                            </span>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                                message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
+                              }`}>
+                                Invoice preview ready
+                              </span>
+                              {message.role === 'assistant' && chatCanAcceptMessages && (
+                                <button
+                                  type="button"
+                                  onClick={() => restoreChatPreview(message.id)}
+                                  className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  Use version
+                                </button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1287,16 +1480,21 @@ export function InvoiceMaker() {
               </div>
 
               <div className="border-t border-neutral-200 bg-white p-4">
-                {chatImages.length > 0 && (
+                {chatAttachmentPreviews.length > 0 && (
                   <div className="mb-3 flex flex-wrap gap-2">
-                    {chatImages.map((image) => (
-                      <span key={`${image.name}-${image.size}`} className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-600">
-                        {image.name}
+                    {chatAttachmentPreviews.map((attachment) => (
+                      <span key={attachment.key} className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-xs text-neutral-600">
+                        {attachment.url ? (
+                          <img src={attachment.url} alt="" className="h-8 w-8 rounded object-cover" />
+                        ) : (
+                          <FileText className="h-4 w-4 text-neutral-500" />
+                        )}
+                        <span className="max-w-[180px] truncate">{attachment.file.name}</span>
                         <button
                           type="button"
-                          onClick={() => setChatImages((current) => current.filter((candidate) => candidate !== image))}
+                          onClick={() => setChatImages((current) => current.filter((candidate) => candidate !== attachment.file))}
                           className="rounded-full p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700"
-                          aria-label={`Remove ${image.name}`}
+                          aria-label={`Remove ${attachment.file.name}`}
                         >
                           <X className="h-3 w-3" />
                         </button>
@@ -1365,7 +1563,40 @@ export function InvoiceMaker() {
                   <p className="text-sm text-neutral-500">Review before creating or editing manually</p>
                 </div>
 
-                {activePreview?.status === 'preview' ? (
+                {createdChatInvoice ? (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-green-200 bg-green-50/70 p-4">
+                      <div className="flex items-start gap-3">
+                        <CheckCircle className="mt-0.5 h-5 w-5 text-green-700" />
+                        <div>
+                          <p className="text-sm font-semibold text-neutral-900">Draft invoice created</p>
+                          <p className="mt-1 text-sm text-neutral-600">
+                            {createdChatInvoice.invoice_number} for {createdChatInvoice.recipient_name || 'the selected recipient'} · {currency(createdChatInvoice.total_amount)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-1">
+                      <Button type="button" variant="outline" onClick={previewCreatedChatInvoice} disabled={pdfBusy}>
+                        <Eye className="mr-1.5 h-4 w-4" />
+                        Preview PDF
+                      </Button>
+                      <Button type="button" onClick={generateCreatedChatInvoice} disabled={pdfBusy}>
+                        <Download className="mr-1.5 h-4 w-4" />
+                        Generate PDF
+                      </Button>
+                      <Button type="button" variant="outline" onClick={copyEmail} disabled={!createdChatInvoice.email_subject && !createdChatInvoice.email_body}>
+                        <Copy className="mr-1.5 h-4 w-4" />
+                        {chatEmailCopied ? 'Copied' : 'Copy Email Draft'}
+                      </Button>
+                      <Button type="button" variant="secondary" onClick={editCreatedChatInvoiceManually}>
+                        <PencilLine className="mr-1.5 h-4 w-4" />
+                        Edit Manually
+                      </Button>
+                    </div>
+                  </div>
+                ) : activePreview?.status === 'preview' ? (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4">
                       <p className="text-sm font-semibold text-neutral-900">

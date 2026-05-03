@@ -2234,8 +2234,8 @@ export const invoicesApi = {
 };
 
 export const invoiceChatSessionsApi = {
-  list: () =>
-    api.get<{ invoice_chat_sessions: InvoiceChatSession[] }>('/admin/invoice_chat_sessions'),
+  list: (params?: { include_archived?: boolean }) =>
+    api.get<{ invoice_chat_sessions: InvoiceChatSession[] }>('/admin/invoice_chat_sessions', params),
   get: (id: number) =>
     api.get<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`),
   create: (data?: { title?: string; invoice_recipient_id?: number | null }) =>
@@ -2244,6 +2244,10 @@ export const invoiceChatSessionsApi = {
     api.patch<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`, { invoice_chat_session: data }),
   delete: (id: number) =>
     api.delete<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}`),
+  restore: (id: number) =>
+    api.post<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}/restore`, {}),
+  restorePreview: (id: number, messageId: number) =>
+    api.post<{ invoice_chat_session: InvoiceChatSession }>(`/admin/invoice_chat_sessions/${id}/restore_preview`, { message_id: messageId }),
   message: (id: number, content: string, images?: File[]) => {
     if (images?.length) {
       const formData = new FormData();

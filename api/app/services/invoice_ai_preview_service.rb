@@ -7,6 +7,8 @@ class InvoiceAiPreviewService
   OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
   OPEN_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_OPEN_TIMEOUT_SECONDS", "15"))
   READ_TIMEOUT_SECONDS = Integer(ENV.fetch("OPENROUTER_READ_TIMEOUT_SECONDS", "120"))
+  RECIPIENT_CONTEXT_LIMIT = 50
+  RECIPIENT_MATCH_LIMIT = 200
 
   def initialize(company:, user:, session:, message:, image_urls: [])
     @company = company
@@ -100,6 +102,12 @@ class InvoiceAiPreviewService
       If the staff asks for a client that is not in the recipient list and gives enough bill-to information to create it, set invoice_recipient_id to null and fill new_recipient.
       If the recipient is unclear or required recipient details are missing, set invoice_recipient_id and new_recipient to null and ask a clarification question.
       Use numeric quantity and rate values. Do not include currency symbols in numeric fields.
+      If the staff is modifying an existing preview, preserve fields they did not ask to change.
+      For hourly invoices, use quantity as hours and rate as the hourly rate. If an attachment shows total hours and total/net pay, derive the rate from total divided by hours when no explicit rate is supplied.
+      Preserve service dates when supplied. For a date range with daily hourly entries, include each billable date as its own line item when the details are available.
+      Put ticket numbers, project labels, or short work descriptors into the line item description.
+      Do not invent missing bill-to details, rates, or services. Ask a concise clarification question instead.
+      Do not generate an invoice number; the application assigns invoice numbers.
     PROMPT
   end
 
@@ -141,10 +149,9 @@ class InvoiceAiPreviewService
   end
 
   def recipient_context
-    InvoiceRecipient
-      .where(company_id: company.id, active: true)
+    active_recipients
       .order(:name)
-      .limit(50)
+      .limit(RECIPIENT_CONTEXT_LIMIT)
       .map do |recipient|
         {
           id: recipient.id,
@@ -244,9 +251,13 @@ class InvoiceAiPreviewService
     return nil if text.blank?
 
     normalized = text.downcase
-    InvoiceRecipient.where(company_id: company.id, active: true).find do |recipient|
+    active_recipients.order(:name).limit(RECIPIENT_MATCH_LIMIT).find do |recipient|
       normalized.include?(recipient.name.downcase)
     end
+  end
+
+  def active_recipients
+    InvoiceRecipient.where(company_id: company.id, active: true)
   end
 
   def detect_line_items_from_message(recipient)
