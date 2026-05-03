@@ -67,6 +67,7 @@ class ReplaceCheckService
     additional_withholding_override
     withholding_tax_adjustment
     custom_earnings
+    custom_deductions
     non_taxable_pay
     wage_rate_hours
   ].freeze
@@ -80,6 +81,7 @@ class ReplaceCheckService
     pay_rate
     bonus
     tips_paid_out
+    custom_deductions_total
     gross_pay
     withholding_tax
     social_security_tax
@@ -352,7 +354,11 @@ class ReplaceCheckService
   # ---------------------------------------------------------------------
   def snapshot(item)
     AUDIT_SNAPSHOT_FIELDS.each_with_object({}) do |field, h|
-      h[field] = item.public_send(field).to_f.round(4)
+      h[field] = if field == :custom_deductions_total
+        item.custom_deductions_total.to_f.round(4)
+      else
+        item.public_send(field).to_f.round(4)
+      end
     end
   end
 

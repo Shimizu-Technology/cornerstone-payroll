@@ -966,6 +966,7 @@ module Api
               total_bonus: w2_items.sum(&:bonus),
               total_non_taxable_pay: w2_items.sum(&:non_taxable_pay),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
+              total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
               total_withholding: w2_items.sum(&:withholding_tax),
               total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
@@ -1147,6 +1148,8 @@ module Api
             total_additions: item.total_additions,
             custom_earnings: item.custom_earnings || [],
             custom_earnings_total: custom_earnings_total(item),
+            custom_deductions: item.custom_deductions || [],
+            custom_deductions_total: custom_deductions_total(item),
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             additional_withholding: item.additional_withholding.to_f,
@@ -1171,7 +1174,7 @@ module Api
             check_number: item.check_number,
             check_date: item.check_date,
             earnings_breakdown: item.payroll_item_earnings.map { |earning| earning_row(earning) },
-            deductions_breakdown: item.payroll_item_deductions.map { |deduction| deduction_row(deduction) }
+            deductions_breakdown: deductions_breakdown(item)
           }
         end
 
@@ -1188,6 +1191,7 @@ module Api
             tips_paid_out: item.tips_paid_out,
             bonus: item.bonus,
             custom_earnings_total: custom_earnings_total(item),
+            custom_deductions_total: custom_deductions_total(item),
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
@@ -1292,6 +1296,7 @@ module Api
               total_tips_paid_out: w2_items.sum(&:tips_paid_out),
               total_bonus: w2_items.sum(&:bonus),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
+              total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
               total_withholding: w2_items.sum(&:withholding_tax),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
@@ -1313,6 +1318,10 @@ module Api
           Array(item.custom_earnings).sum { |entry| entry["amount"].to_f }
         end
 
+        def custom_deductions_total(item)
+          Array(item.custom_deductions).sum { |entry| entry["amount"].to_f }
+        end
+
         def earning_row(earning)
           {
             category: earning.category,
@@ -1330,6 +1339,23 @@ module Api
             deduction_type: deduction.deduction_type&.name,
             amount: deduction.amount
           }
+        end
+
+        def custom_deduction_row(deduction)
+          {
+            category: "post_tax",
+            label: deduction["label"].presence || "Other Deduction",
+            deduction_type: "One-time deduction",
+            amount: deduction["amount"].to_f
+          }
+        end
+
+        def deductions_breakdown(item)
+          item.payroll_item_deductions.map { |deduction| deduction_row(deduction) } +
+            Array(item.custom_deductions).filter_map do |deduction|
+              amount = deduction["amount"].to_f
+              amount.positive? ? custom_deduction_row(deduction) : nil
+            end
         end
 
         def send_spreadsheet!(filename:, sheets:)
@@ -1393,7 +1419,7 @@ module Api
           "Gross Pay", "FIT", "Additional W/H", "SS Tax", "Medicare Tax",
           "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
           "Employer Match", "Employer Roth Match", "Loan Deduction", "Loan Payment",
-          "Insurance", "Total Deductions", "Net Pay", "Check Number", "Check Date"
+          "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
         ].freeze
 
         def payroll_register_sheets(report)
@@ -1413,7 +1439,7 @@ module Api
           "Last Name", "First Name", "Employee Name", "Type", "Gross Pay",
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings",
           "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
-          "Loan Deduction", "Insurance", "Total Deductions", "Net Pay",
+          "Loan Deduction", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay",
           "Employer SS", "Employer Medicare", "Employer Match",
           "Employer Roth Match", "Total Payroll Cost"
         ].freeze
@@ -1453,7 +1479,7 @@ module Api
             emp[:bonus], emp[:custom_earnings_total], emp[:withholding_tax],
             emp[:social_security_tax], emp[:medicare_tax], emp[:retirement_payment],
             emp[:roth_retirement_payment], emp[:loan_deduction], emp[:insurance_payment],
-            emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
+            emp[:custom_deductions_total], emp[:total_deductions], emp[:net_pay], emp[:employer_social_security_tax],
             emp[:employer_medicare_tax], emp[:employer_retirement_match],
             emp[:employer_roth_retirement_match], total_payroll_cost
           ]
@@ -1468,6 +1494,7 @@ module Api
             [ "Tips Paid Out", summary[:total_tips_paid_out] ],
             [ "Bonus", summary[:total_bonus] ],
             [ "Custom Earnings", summary[:total_custom_earnings] ],
+            [ "Custom Deductions", summary[:total_custom_deductions] ],
             [ "FIT", summary[:total_withholding] ],
             [ "SS Tax", summary[:total_social_security] ],
             [ "Medicare Tax", summary[:total_medicare] ],
@@ -1489,6 +1516,7 @@ module Api
             total_tips_paid_out: items.sum { |item| item[:tips_paid_out].to_f },
             total_bonus: items.sum { |item| item[:bonus].to_f },
             total_custom_earnings: items.sum { |item| item[:custom_earnings_total].to_f },
+            total_custom_deductions: items.sum { |item| item[:custom_deductions_total].to_f },
             total_withholding: items.sum { |item| item[:withholding_tax].to_f },
             total_social_security: items.sum { |item| item[:social_security_tax].to_f },
             total_medicare: items.sum { |item| item[:medicare_tax].to_f },
@@ -1511,7 +1539,7 @@ module Api
             emp[:social_security_tax], emp[:medicare_tax], emp[:employer_social_security_tax],
             emp[:employer_medicare_tax], emp[:retirement_payment], emp[:roth_retirement_payment],
             emp[:employer_retirement_match], emp[:employer_roth_retirement_match],
-            emp[:loan_deduction], emp[:loan_payment], emp[:insurance_payment], emp[:total_deductions],
+            emp[:loan_deduction], emp[:loan_payment], emp[:insurance_payment], emp[:custom_deductions_total], emp[:total_deductions],
             emp[:net_pay], emp[:check_number], emp[:check_date]
           ]
         end

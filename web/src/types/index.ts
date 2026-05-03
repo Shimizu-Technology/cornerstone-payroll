@@ -85,6 +85,11 @@ export interface CustomEarning {
   amount: number;
 }
 
+export interface CustomDeduction {
+  label: string;
+  amount: number;
+}
+
 export interface Employee {
   id: number;
   company_id: number;
@@ -311,6 +316,7 @@ export interface PayrollItem {
   loan_payment?: number;
   insurance_payment?: number;
   total_deductions?: number;
+  custom_deductions?: CustomDeduction[];
   // Import fields (MoSa)
   tips?: number;
   loan_deduction?: number;
@@ -370,6 +376,7 @@ export interface CorrectivePaycheckInputs {
   additional_withholding_override?: number | null;
   withholding_tax_adjustment?: number | null;
   custom_earnings?: { label: string; amount: number }[];
+  custom_deductions?: CustomDeduction[];
   custom_columns_data?: Record<string, number>;
   non_taxable_pay?: number;
 }
@@ -398,6 +405,7 @@ export interface CorrectivePaycheckSnapshot {
   tips_paid_out: number;
   pay_rate: number;
   custom_earnings: { label: string; amount: number }[];
+  custom_deductions: CustomDeduction[];
   custom_columns_data: Record<string, number>;
 }
 
