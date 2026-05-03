@@ -43,6 +43,7 @@ class PayrollRegisterCsvExporter
     "Loan Deduction",
     "Loan Payment",
     "Insurance",
+    "Custom Deductions",
     "Total Deductions",
     "Net Pay",
     "Check Number"
@@ -111,6 +112,7 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:loan_deduction]),
       format_currency(emp[:loan_payment]),
       format_currency(emp[:insurance_payment]),
+      format_currency(emp[:custom_deductions_total]),
       format_currency(emp[:total_deductions]),
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
@@ -152,6 +154,7 @@ class PayrollRegisterCsvExporter
       "",
       format_currency(s[:total_loan_payments]),
       "",
+      format_currency(s[:total_custom_deductions]),
       format_currency(s[:total_deductions]),
       format_currency(s[:total_net]),
       ""

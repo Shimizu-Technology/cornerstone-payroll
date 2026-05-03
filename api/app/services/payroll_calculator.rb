@@ -205,6 +205,10 @@ class PayrollCalculator
     Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
   end
 
+  def custom_deductions_total
+    payroll_item.custom_deductions_total
+  end
+
   def calculate_totals
     payroll_item.total_additions = (
       payroll_item.reported_tips.to_f +
@@ -258,6 +262,7 @@ class PayrollCalculator
       payroll_item.roth_retirement_payment.to_f +
       itemized_pre_tax +
       post_tax_deductions +
+      custom_deductions_total +
       payroll_item.tips_paid_out.to_f
     ).round(2)
   end

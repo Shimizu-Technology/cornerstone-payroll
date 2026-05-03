@@ -19,6 +19,11 @@ interface CustomEarningField {
   amount: string;
 }
 
+interface CustomDeductionField {
+  label: string;
+  amount: string;
+}
+
 interface PayrollItemEditModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -47,6 +52,7 @@ interface EditableFields {
   check_date: string;
   check_memo: string;
   custom_earnings: CustomEarningField[];
+  custom_deductions: CustomDeductionField[];
 }
 
 export function PayrollItemEditModal({
@@ -76,6 +82,7 @@ export function PayrollItemEditModal({
     check_date: '',
     check_memo: '',
     custom_earnings: [],
+    custom_deductions: [],
   });
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -116,6 +123,9 @@ export function PayrollItemEditModal({
         check_memo: item.check_memo || '',
         custom_earnings: (item.custom_earnings && item.custom_earnings.length > 0)
           ? item.custom_earnings.map(ce => ({ label: ce.label, amount: String(ce.amount) }))
+          : [],
+        custom_deductions: (item.custom_deductions && item.custom_deductions.length > 0)
+          ? item.custom_deductions.map(deduction => ({ label: deduction.label, amount: String(deduction.amount) }))
           : [],
       });
       setError(null);
@@ -195,6 +205,28 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const handleCustomDeductionChange = (index: number, field: 'label' | 'amount', value: string) => {
+    setFields((prev) => {
+      const updated = [...prev.custom_deductions];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, custom_deductions: updated };
+    });
+  };
+
+  const addCustomDeduction = () => {
+    setFields((prev) => ({
+      ...prev,
+      custom_deductions: [...prev.custom_deductions, { label: '', amount: '0' }],
+    }));
+  };
+
+  const removeCustomDeduction = (index: number) => {
+    setFields((prev) => ({
+      ...prev,
+      custom_deductions: prev.custom_deductions.filter((_, i) => i !== index),
+    }));
+  };
+
   const handleSaveAndRecalculate = async () => {
     setSaving(true);
     setError(null);
@@ -216,6 +248,9 @@ export function PayrollItemEditModal({
         custom_earnings: fields.custom_earnings
           .filter(ce => ce.label.trim() && parseFloat(ce.amount) > 0)
           .map(ce => ({ label: ce.label.trim(), amount: parseFloat(ce.amount) || 0 })),
+        custom_deductions: fields.custom_deductions
+          .filter(deduction => deduction.label.trim() && parseFloat(deduction.amount) > 0)
+          .map(deduction => ({ label: deduction.label.trim(), amount: parseFloat(deduction.amount) || 0 })),
       };
 
       if (hasMultiRate) {
@@ -522,6 +557,52 @@ export function PayrollItemEditModal({
                 <button
                   type="button"
                   onClick={() => removeCustomEarning(idx)}
+                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* One-Time Deductions */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-medium text-gray-700">One-Time Deductions</h4>
+              <button
+                type="button"
+                onClick={addCustomDeduction}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                + Add Deduction
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 mb-2">
+              Post-tax deductions for this check only, such as a cash advance already paid. Shows on the pay stub by name.
+            </p>
+            {fields.custom_deductions.length === 0 && (
+              <p className="text-xs text-gray-400 italic">No one-time deductions added.</p>
+            )}
+            {fields.custom_deductions.map((deduction, idx) => (
+              <div key={idx} className="flex items-center gap-2 mb-2">
+                <Input
+                  placeholder="Label (e.g. Cash Advance)"
+                  value={deduction.label}
+                  onChange={(e) => handleCustomDeductionChange(idx, 'label', e.target.value)}
+                  className="flex-1"
+                />
+                <NumericInput
+                  placeholder="Amount"
+                  value={deduction.amount === '' ? null : Number(deduction.amount)}
+                  onValueChange={(value) => handleCustomDeductionChange(idx, 'amount', value == null ? '' : String(value))}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
+                  className="w-28"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeCustomDeduction(idx)}
                   className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
                   title="Remove"
                 >

@@ -413,6 +413,7 @@ module Api
             withholding_tax_adjustment: item.withholding_tax_adjustment,
             withholding_tax_override: item.withholding_tax_override,
             custom_earnings: item.custom_earnings || [],
+            custom_deductions: item.custom_deductions || [],
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,

@@ -559,11 +559,12 @@ module Api
 
           raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
 
-          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings wage_rate_hours]
+          scalar_fields = ReplaceCheckService::REPLACEABLE_INPUT_FIELDS - %i[custom_earnings custom_deductions wage_rate_hours]
 
           raw.permit(
             *scalar_fields,
-            custom_earnings: [:label, :amount],
+            custom_earnings: [ :label, :amount ],
+            custom_deductions: [ :label, :amount ],
             wage_rate_hours: [
               :employee_wage_rate_id, :label, :rate, :regular_hours,
               :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active

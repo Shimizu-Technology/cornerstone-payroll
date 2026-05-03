@@ -154,5 +154,23 @@ RSpec.describe PayrollCalculator do
       )
       expect(payroll_item.net_pay).to eq(payroll_item.gross_pay - payroll_item.total_deductions)
     end
+
+    it "treats custom deductions as post-tax check reductions" do
+      payroll_item.custom_deductions = [
+        { "label" => "Cash Advance", "amount" => 75.0 }
+      ]
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(1000.0)
+      expect(payroll_item.total_deductions).to eq(
+        payroll_item.withholding_tax +
+        payroll_item.additional_withholding +
+        payroll_item.social_security_tax +
+        payroll_item.medicare_tax +
+        75.0
+      )
+      expect(payroll_item.net_pay).to eq(payroll_item.gross_pay - payroll_item.total_deductions)
+    end
   end
 end
