@@ -295,7 +295,7 @@ export function PayrollItemEditModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent className="dialog-wide w-full max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Payroll Item</DialogTitle>
           <DialogDescription>
@@ -616,10 +616,10 @@ export function PayrollItemEditModal({
           {!isContractor && (
             <div>
               <h4 className="text-sm font-medium text-gray-700 mb-2">Tax Adjustments</h4>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    W-4 4(c) Extra Withholding This Pay Period
+                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
+                    W-4 4(c) Extra W/H
                   </label>
                   <NumericInput
                     placeholder={employeeAdditionalWithholding > 0 ? employeeAdditionalWithholding.toFixed(2) : 'Use employee default'}
@@ -629,11 +629,11 @@ export function PayrollItemEditModal({
                     fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Blank uses the employee's W-4 default of {formatCurrency(employeeAdditionalWithholding)}. Set to 0.00 here to skip the normal extra withholding for just this pay period.
+                    Blank uses the employee default of {formatCurrency(employeeAdditionalWithholding)}. Set 0.00 to skip it for this pay period.
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">
+                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
                     FIT Adjustment
                   </label>
                   <NumericInput
@@ -647,7 +647,7 @@ export function PayrollItemEditModal({
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">
+                  <label className="block text-xs text-gray-500 mb-1 min-h-4">
                     Final FIT Override
                   </label>
                   <NumericInput

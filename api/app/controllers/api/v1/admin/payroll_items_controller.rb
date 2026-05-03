@@ -135,7 +135,7 @@ module Api
           attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
-          attrs[:custom_deductions] = normalize_custom_deductions(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
+          attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs
         end
 
@@ -216,19 +216,6 @@ module Api
           return if payroll_item.wage_rate_hours.present?
 
           payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
-        end
-
-        def normalize_custom_deductions(entries)
-          Array(entries).filter_map do |entry|
-            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
-            label = data["label"].to_s.strip
-            amount = BigDecimal(data["amount"].to_s)
-            next if label.blank? || amount <= 0 || !amount.finite?
-
-            { "label" => label, "amount" => amount.round(2).to_f }
-          rescue ArgumentError, FloatDomainError
-            nil
-          end
         end
       end
     end

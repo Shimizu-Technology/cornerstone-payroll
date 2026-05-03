@@ -151,6 +151,26 @@ class PayrollItem < ApplicationRecord
     Array(custom_deductions).sum { |deduction| deduction["amount"].to_f }
   end
 
+  def self.normalize_custom_deduction_entries(entries)
+    Array(entries).filter_map do |entry|
+      data = normalize_json_entry(entry)
+      label = data["label"].to_s.strip
+      amount = BigDecimal(data["amount"].to_s)
+      next if label.blank? || amount <= 0 || !amount.finite?
+
+      { "label" => label, "amount" => amount.round(2).to_f }
+    rescue ArgumentError, FloatDomainError
+      nil
+    end
+  end
+
+  def self.normalize_json_entry(entry)
+    return entry.to_unsafe_h if entry.respond_to?(:to_unsafe_h)
+    return entry.to_h if entry.respond_to?(:to_h)
+
+    {}
+  end
+
   def overtime_pay
     return 0 unless hourly?
 
@@ -240,7 +260,7 @@ class PayrollItem < ApplicationRecord
     self.reported_tips = round_currency_value(reported_tips)
     self.tips_paid_out = round_currency_value(tips_paid_out)
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
-    self.custom_deductions = normalize_custom_deduction_entries(custom_deductions)
+    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
 
     return unless custom_columns_data.is_a?(Hash)
 
@@ -272,26 +292,6 @@ class PayrollItem < ApplicationRecord
     return if company_id == pay_period.company_id
 
     errors.add(:company_id, "must match the pay period company")
-  end
-
-  def normalize_custom_deduction_entries(entries)
-    Array(entries).filter_map do |entry|
-      data = normalize_json_entry(entry)
-      label = data["label"].to_s.strip
-      amount = BigDecimal(data["amount"].to_s)
-      next if label.blank? || amount <= 0 || !amount.finite?
-
-      { "label" => label, "amount" => amount.round(2).to_f }
-    rescue ArgumentError, FloatDomainError
-      nil
-    end
-  end
-
-  def normalize_json_entry(entry)
-    return entry.to_unsafe_h if entry.respond_to?(:to_unsafe_h)
-    return entry.to_h if entry.respond_to?(:to_h)
-
-    {}
   end
 
   def custom_deductions_are_valid
