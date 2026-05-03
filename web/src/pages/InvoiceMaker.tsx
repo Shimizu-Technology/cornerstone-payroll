@@ -12,6 +12,7 @@ import {
   invoicesApi,
   type BlobDownload,
   type InvoiceAiPreview,
+  type InvoiceChatMessage,
   type InvoiceChatSession,
   type Invoice,
   type InvoiceLineItem,
@@ -26,6 +27,10 @@ import { useCompany } from '@/contexts/CompanyContext';
 type DraftLineItem = InvoiceLineItem & {
   local_id: string;
   _destroy?: boolean;
+};
+
+type OptimisticChatMessage = InvoiceChatMessage & {
+  session_id: number;
 };
 
 interface InvoiceFormState {
@@ -168,6 +173,7 @@ export function InvoiceMaker() {
   const [activeChatSession, setActiveChatSession] = useState<InvoiceChatSession | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatImages, setChatImages] = useState<File[]>([]);
+  const [optimisticChatMessages, setOptimisticChatMessages] = useState<OptimisticChatMessage[]>([]);
   const [chatBusy, setChatBusy] = useState(false);
   const [invoiceMode, setInvoiceMode] = useState<'manual' | 'ai'>('manual');
   const savedInvoiceSignatureRef = useRef<string | null>(null);
@@ -205,7 +211,7 @@ export function InvoiceMaker() {
   useEffect(() => {
     if (invoiceMode !== 'ai') return;
     chatMessagesEndRef.current?.scrollIntoView({ block: 'end' });
-  }, [activeChatSession?.id, activeChatSession?.messages?.length, invoiceMode]);
+  }, [activeChatSession?.id, activeChatSession?.messages?.length, invoiceMode, optimisticChatMessages.length]);
 
   const activeLineItems = useMemo(
     () => invoiceForm.line_items.filter((item) => !item._destroy),
@@ -599,6 +605,57 @@ export function InvoiceMaker() {
     setChatBusy(true);
     setError(null);
     let createdSessionId: number | null = null;
+    const attachments = chatImages;
+    const optimisticId = -Date.now();
+    const startedAt = new Date().toISOString();
+    const currentSessionId = activeChatSession?.id;
+    const optimisticSessionId = currentSessionId || optimisticId;
+    const optimisticMessage = (sessionId: number): OptimisticChatMessage => ({
+      session_id: sessionId,
+      id: optimisticId,
+      role: 'user',
+      content,
+      image_urls: attachments.map((file) => file.name),
+      preview: {},
+      has_preview: false,
+      created_at: startedAt,
+    });
+    const pendingAssistantMessage = (sessionId: number): OptimisticChatMessage => ({
+      session_id: sessionId,
+      id: optimisticId - 1,
+      role: 'assistant',
+      content: 'Drafting invoice details...',
+      image_urls: [],
+      preview: {},
+      has_preview: false,
+      created_at: startedAt,
+    });
+    const pendingMessages = [optimisticMessage(optimisticSessionId), pendingAssistantMessage(optimisticSessionId)];
+    const removePendingMessages = () => setOptimisticChatMessages((current) => current.filter((message) => (
+      message.id !== optimisticId && message.id !== optimisticId - 1
+    )));
+    const optimisticSession: InvoiceChatSession = {
+      id: optimisticSessionId,
+      company_id: activeCompanyId || 0,
+      title: content.slice(0, 60) || 'Invoice Assistant',
+      status: 'active',
+      current_preview: {},
+      current_preview_version: 0,
+      archived: false,
+      message_count: 1,
+      messages: [],
+      created_at: startedAt,
+      updated_at: startedAt,
+    };
+
+    setChatInput('');
+    setChatImages([]);
+    setOptimisticChatMessages((current) => [...current, ...pendingMessages]);
+    if (!currentSessionId) {
+      setActiveChatSession(optimisticSession);
+      setChatSessions((current) => [optimisticSession, ...current]);
+    }
+
     try {
       let session = activeChatSession;
       if (!session) {
@@ -607,22 +664,38 @@ export function InvoiceMaker() {
         createdSessionId = session.id;
       }
       setActiveChatSession(session);
-      const response = await invoiceChatSessionsApi.message(session.id, content, chatImages);
+      if (!currentSessionId) {
+        setChatSessions((current) => [
+          session,
+          ...current.filter((candidate) => candidate.id !== optimisticSessionId && candidate.id !== session.id),
+        ]);
+        setOptimisticChatMessages((current) => current.map((message) => (
+          message.session_id === optimisticSessionId ? { ...message, session_id: session.id } : message
+        )));
+      }
+      const response = await invoiceChatSessionsApi.message(session.id, content, attachments);
+      removePendingMessages();
       setActiveChatSession(response.invoice_chat_session);
       setChatSessions((current) => {
         const withoutSession = current.filter((candidate) => candidate.id !== response.invoice_chat_session.id);
         return [response.invoice_chat_session, ...withoutSession];
       });
-      setChatInput('');
-      setChatImages([]);
     } catch (err) {
       if (createdSessionId) {
         await invoiceChatSessionsApi.delete(createdSessionId).catch(() => undefined);
         setActiveChatSession(null);
         setChatSessions((current) => current.filter((session) => session.id !== createdSessionId));
       }
+      removePendingMessages();
+      if (!currentSessionId) {
+        setChatSessions((current) => current.filter((session) => session.id !== optimisticSessionId));
+        setActiveChatSession(null);
+      }
+      setChatInput(content);
+      setChatImages(attachments);
       setError(err instanceof Error ? err.message : 'Failed to ask invoice assistant');
     } finally {
+      removePendingMessages();
       setChatBusy(false);
     }
   };
@@ -836,7 +909,13 @@ export function InvoiceMaker() {
       {error || success}
     </div>
   ) : null;
-  const activeChatMessages = activeChatSession?.messages || [];
+  const activeChatMessages = useMemo(
+    () => [
+      ...(activeChatSession?.messages || []),
+      ...optimisticChatMessages.filter((message) => message.session_id === activeChatSession?.id),
+    ],
+    [activeChatSession?.id, activeChatSession?.messages, optimisticChatMessages]
+  );
   const chatCanAcceptMessages = !activeChatSession || activeChatSession.status === 'active';
 
   return (

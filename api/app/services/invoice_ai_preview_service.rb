@@ -337,6 +337,6 @@ class InvoiceAiPreviewService
   end
 
   def model
-    ENV["INVOICE_AI_MODEL"].presence || ENV["OPENROUTER_MODEL"].presence || "google/gemini-3.1-pro-preview"
+    ENV["INVOICE_AI_MODEL"].presence || ENV["OPENROUTER_MODEL"].presence || "openai/gpt-5.5"
   end
 end
