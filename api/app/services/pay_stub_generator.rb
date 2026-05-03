@@ -345,7 +345,7 @@ class PayStubGenerator
       deductions_data << [
         label,
         format_currency(amount),
-        format_currency(employee_ytd_custom_deduction(label))
+        format_currency(employee_ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)
       ]
     end
 
@@ -437,22 +437,38 @@ class PayStubGenerator
     )[:tips_paid_out].to_f
   end
 
-  def employee_ytd_custom_deduction(label)
+  def employee_ytd_custom_deductions_by_label
+    @employee_ytd_custom_deductions_by_label ||= begin
+      labels = Array(payroll_item.custom_deductions)
+        .filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence }
+        .uniq
+      if labels.empty?
+        {}
+      else
+        custom_deduction_items.each_with_object(Hash.new(0.0)) do |item, totals|
+          Array(item.custom_deductions).each do |deduction|
+            label = deduction["label"].to_s.strip.downcase
+            next unless labels.include?(label)
+
+            totals[label] += deduction["amount"].to_f
+          end
+        end
+      end
+    end
+  end
+
+  def custom_deduction_items
     year = payroll_item.pay_period.pay_date&.year || Date.current.year
-    target_label = label.to_s.strip.downcase
 
     payroll_item.employee.payroll_items
       .joins(:pay_period)
+      .select(:id, :custom_deductions)
       .where(voided: false)
       .where(pay_periods: {
         company_id: payroll_item.company_id,
         pay_date: Date.new(year, 1, 1)..payroll_item.pay_period.pay_date
       })
-      .sum do |item|
-        Array(item.custom_deductions).sum do |deduction|
-          deduction["label"].to_s.strip.downcase == target_label ? deduction["amount"].to_f : 0.0
-        end
-      end
+      .to_a
   end
 
   def format_currency(amount)

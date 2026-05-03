@@ -310,7 +310,7 @@ module Api
               end
 
               if params[:custom_deductions] && params[:custom_deductions][employee_id.to_s]
-                payroll_item.custom_deductions = normalize_custom_deductions(params[:custom_deductions][employee_id.to_s])
+                payroll_item.custom_deductions = PayrollItem.normalize_custom_deduction_entries(params[:custom_deductions][employee_id.to_s])
               end
 
               # Calculate payroll
@@ -982,19 +982,6 @@ module Api
         end
 
         def normalize_custom_earnings(entries)
-          Array(entries).filter_map do |entry|
-            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
-            label = data["label"].to_s.strip
-            amount = BigDecimal(data["amount"].to_s)
-            next if label.blank? || amount <= 0 || !amount.finite?
-
-            { "label" => label, "amount" => amount.round(2).to_f }
-          rescue ArgumentError, FloatDomainError
-            nil
-          end
-        end
-
-        def normalize_custom_deductions(entries)
           Array(entries).filter_map do |entry|
             data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
             label = data["label"].to_s.strip

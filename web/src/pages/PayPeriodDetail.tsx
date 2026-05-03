@@ -608,6 +608,10 @@ export function PayPeriodDetail() {
     (sum, item) => sum + (item.custom_earnings || []).reduce((itemSum, earning) => itemSum + toNumber(earning.amount), 0),
     0
   );
+  const totalCustomDeductions = payrollItems.reduce(
+    (sum, item) => sum + (item.custom_deductions || []).reduce((itemSum, deduction) => itemSum + toNumber(deduction.amount), 0),
+    0
+  );
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
@@ -1384,7 +1388,8 @@ export function PayPeriodDetail() {
           const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
           const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
           const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
-          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
+          const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
+          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
@@ -1462,7 +1467,8 @@ export function PayPeriodDetail() {
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Hours</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
-                    {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom</TableHead>}
+                    {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Earn.</TableHead>}
+                    {hasCustomDeductions && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Ded.</TableHead>}
                     {hasTips && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
                     {hasLoans && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
@@ -1649,6 +1655,22 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           )}
+                          {hasCustomDeductions && (
+                          <TableCell className={`text-right ${rowTone}`}>
+                            {(item.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0) ? (
+                              <div className="space-y-1">
+                                {(item.custom_deductions || []).filter((deduction) => toNumber(deduction.amount) > 0).map((deduction) => (
+                                  <div key={`${item.id}-${deduction.label}`} className="text-xs">
+                                    <span className="text-gray-500">{deduction.label}</span>{' '}
+                                    <span className="font-medium text-red-600">{formatCurrency(toNumber(deduction.amount))}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
+                          )}
                           {hasTips && (
                           <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.reported_tips) > 0 ? (
@@ -1770,6 +1792,7 @@ export function PayPeriodDetail() {
                         <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({payrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
+                        {hasCustomDeductions && <TableCell className="text-right text-red-600">{totalCustomDeductions > 0 ? formatCurrency(totalCustomDeductions) : '—'}</TableCell>}
                         {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
                         {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
                         {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
