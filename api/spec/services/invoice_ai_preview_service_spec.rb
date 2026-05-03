@@ -197,4 +197,38 @@ RSpec.describe InvoiceAiPreviewService do
     )
     expect(preview["email_body"]).to include("Hi Pacific Tech")
   end
+
+  it "uses the smart invoice model default unless an environment override is present" do
+    company = create(:company)
+    user = create(:user, company: company)
+    recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+    response = {
+      "status" => "preview",
+      "message" => "Ready for review.",
+      "invoice_recipient_id" => recipient.id,
+      "line_items" => [
+        { "description" => "Accounting service", "quantity" => 1, "rate" => 100 }
+      ]
+    }
+    request_body = nil
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+    allow(ENV).to receive(:[]).with("INVOICE_AI_MODEL").and_return(nil)
+    allow(ENV).to receive(:[]).with("OPENROUTER_MODEL").and_return(nil)
+    allow(HTTParty).to receive(:post) do |_url, options|
+      request_body = JSON.parse(options.fetch(:body))
+      double("HTTParty::Response", success?: true, dig: response.to_json)
+    end
+
+    described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Invoice Shimizu Technology"
+    ).call
+
+    expect(request_body["model"]).to eq("openai/gpt-5.5")
+  end
 end
