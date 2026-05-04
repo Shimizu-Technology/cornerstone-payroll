@@ -125,10 +125,12 @@ class PayrollRegisterPdfGenerator
     rows = [
       [ "Employee Count",       s[:employee_count].to_s ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
+      [ "Custom Earnings",      fmt(s[:total_custom_earnings]) ],
       [ "Total Withholding",    fmt(s[:total_withholding]) ],
       [ "Total Social Security", fmt(s[:total_social_security]) ],
       [ "Total Medicare",       fmt(s[:total_medicare]) ],
       [ "Total Retirement",     fmt(s[:total_retirement]) ],
+      [ "Custom Deductions",    fmt(s[:total_custom_deductions]) ],
       [ "Total Deductions",     fmt(s[:total_deductions]) ],
       [ "Total Net Pay",        fmt(s[:total_net]) ]
     ]
@@ -171,11 +173,13 @@ class PayrollRegisterPdfGenerator
       { content: "Hours",        background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "OT Hrs",       background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Gross Pay",    background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
+      { content: "Custom Earn",  background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Withholding",  background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Addtl W/H",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Soc Sec",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Medicare",     background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Retirement",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
+      { content: "Custom Ded",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Deductions",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Net Pay",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Check #",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold }
@@ -191,11 +195,13 @@ class PayrollRegisterPdfGenerator
       { content: "", background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG },
       { content: fmt(s[:total_gross]),                  align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_custom_earnings]),        align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_withholding]),             align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_additional_withholding]),  align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_social_security]),         align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_medicare]),                align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_retirement]),              align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(s[:total_custom_deductions]),       align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_deductions]),              align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(s[:total_net]),                     align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: "", background_color: SECTION_BG }
@@ -205,19 +211,21 @@ class PayrollRegisterPdfGenerator
 
     page_width = pdf.bounds.width
     width_fractions = [
-      0.13,      # Employee
+      0.12,      # Employee
       0.05,      # Type
       0.05,      # Hours
       0.05,      # OT Hrs
-      0.08,      # Gross
-      0.075,     # Withholding
-      0.065,     # Addtl W/H
-      0.075,     # Soc Sec
-      0.07,      # Medicare
-      0.07,      # Retirement
-      0.075,     # Deductions
-      0.085,     # Net Pay
-      0.085      # Check #
+      0.075,     # Gross
+      0.065,     # Custom Earn
+      0.07,      # Withholding
+      0.06,      # Addtl W/H
+      0.07,      # Soc Sec
+      0.065,     # Medicare
+      0.065,     # Retirement
+      0.065,     # Custom Ded
+      0.07,      # Deductions
+      0.075,     # Net Pay
+      0.065      # Check #
     ]
     col_widths = width_fractions.map { |fraction| page_width * fraction }
     # Ensure widths sum to exactly page_width (float drift safety)
@@ -247,11 +255,13 @@ class PayrollRegisterPdfGenerator
       { content: emp[:hours_worked].to_f.to_s, align: :right },
       { content: emp[:overtime_hours].to_f.to_s, align: :right },
       { content: fmt(emp[:gross_pay]),               align: :right },
+      { content: fmt(emp[:custom_earnings_total]),   align: :right },
       { content: fmt(emp[:withholding_tax]),          align: :right },
       { content: fmt(emp[:additional_withholding]),   align: :right },
       { content: fmt(emp[:social_security_tax]),      align: :right },
       { content: fmt(emp[:medicare_tax]),             align: :right },
       { content: fmt(emp[:retirement_payment]),       align: :right },
+      { content: fmt(emp[:custom_deductions_total]),  align: :right },
       { content: fmt(emp[:total_deductions]),         align: :right },
       { content: fmt(emp[:net_pay]),                  align: :right },
       { content: emp[:check_number].to_s }

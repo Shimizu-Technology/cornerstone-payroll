@@ -35,7 +35,10 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       social_security_tax: 89.9,
       employer_social_security_tax: 89.9,
       medicare_tax: 20.3,
-      employer_medicare_tax: 20.3)
+      employer_medicare_tax: 20.3,
+      total_deductions: 280.0,
+      custom_earnings: [ { "label" => "Certification Pay", "amount" => 50.0 } ],
+      custom_deductions: [ { "label" => "Cash Advance", "amount" => 30.0 } ])
 
     create(:payroll_item,
       pay_period: draft_pay_period,
@@ -61,6 +64,8 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     get "/api/v1/client/reports/payroll_register", params: { pay_period_id: pay_period.id }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("report", "summary", "employee_count")).to eq(1)
+    expect(response.parsed_body.dig("report", "summary", "total_custom_earnings").to_f).to eq(50.0)
+    expect(response.parsed_body.dig("report", "summary", "total_custom_deductions").to_f).to eq(30.0)
     expect(response.parsed_body.dig("report", "employees", 0)).not_to have_key("check_number")
 
     get "/api/v1/client/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
@@ -75,6 +80,10 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response).to have_http_status(:ok)
     report = response.parsed_body.fetch("report")
     expect(report.dig("company_totals", "gross_pay").to_f).to eq(1450.0)
+    expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.0)
+    expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(30.0)
     expect(report.fetch("employees").first.fetch("gross_pay").to_f).to eq(1450.0)
+    expect(report.fetch("employees").first.fetch("custom_earnings_total").to_f).to eq(50.0)
+    expect(report.fetch("employees").first.fetch("custom_deductions_total").to_f).to eq(30.0)
   end
 end

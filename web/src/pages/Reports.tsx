@@ -264,7 +264,9 @@ function PayrollRegisterPanel() {
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Total Gross Pay" value={report.summary.total_gross} />
+                <TotalBox label="Custom Earnings" value={report.summary.total_custom_earnings ?? 0} />
                 <TotalBox label="Total Withholding" value={report.summary.total_withholding} />
+                <TotalBox label="Custom Deductions" value={report.summary.total_custom_deductions ?? 0} />
                 <TotalBox label="Total Deductions" value={report.summary.total_deductions} />
                 <TotalBox label="Total Net Pay" value={report.summary.total_net} />
               </div>
@@ -283,11 +285,13 @@ function PayrollRegisterPanel() {
                     <th className="pb-2 pr-4 font-medium">Type</th>
                     <th className="pb-2 pr-4 font-medium text-right">Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
                     <th className="pb-2 pr-4 font-medium text-right">Addtl W/H</th>
                     <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
                     <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
                     <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Custom Ded.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
                     <th className="pb-2 font-medium">Check #</th>
                   </tr>
@@ -299,6 +303,7 @@ function PayrollRegisterPanel() {
                       <td className="py-2 pr-4 capitalize text-gray-500">{emp.employment_type}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{emp.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.additional_withholding ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax ?? 0)}</td>
@@ -306,13 +311,14 @@ function PayrollRegisterPanel() {
                       <td className="py-2 pr-4 text-right tabular-nums">
                         {fmt(emp.total_retirement_payment ?? ((emp.retirement_payment ?? 0) + (emp.roth_retirement_payment ?? 0)))}
                       </td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(emp.net_pay ?? 0)}</td>
                       <td className="py-2 font-mono text-gray-500">{emp.check_number ?? '—'}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="py-6 text-center text-gray-400">
+                      <td colSpan={13} className="py-6 text-center text-gray-400">
                         No payroll items found for this pay period.
                       </td>
                     </tr>
@@ -1003,7 +1009,9 @@ function EmployeePayHistoryPanel() {
       period_description: string;
       hours_worked: number | null;
       overtime_hours: number | null;
+      custom_earnings_total?: number;
       gross_pay: number;
+      custom_deductions_total?: number;
       total_deductions: number;
       net_pay: number;
       check_number: string | null;
@@ -1126,10 +1134,13 @@ function EmployeePayHistoryPanel() {
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="YTD Gross Pay" value={report.ytd.gross_pay ?? 0} />
+                <TotalBox label="YTD Custom Earnings" value={report.ytd.custom_earnings_total ?? 0} />
                 <TotalBox label="YTD Withholding" value={report.ytd.withholding_tax ?? 0} />
                 <TotalBox label="YTD SS Tax" value={report.ytd.social_security_tax ?? 0} />
                 <TotalBox label="YTD Medicare" value={report.ytd.medicare_tax ?? 0} />
                 <TotalBox label="YTD Retirement" value={report.ytd.retirement ?? 0} />
+                <TotalBox label="YTD Custom Deductions" value={report.ytd.custom_deductions_total ?? 0} />
+                <TotalBox label="YTD Deductions" value={report.ytd.total_deductions ?? 0} />
                 <TotalBox label="YTD Net Pay" value={report.ytd.net_pay ?? 0} />
               </div>
             </CardContent>
@@ -1148,7 +1159,9 @@ function EmployeePayHistoryPanel() {
                     <th className="pb-2 pr-4 font-medium">Period</th>
                     <th className="pb-2 pr-4 font-medium text-right">Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Custom Ded.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
                     <th className="pb-2 font-medium">Check #</th>
@@ -1161,7 +1174,9 @@ function EmployeePayHistoryPanel() {
                       <td className="py-2 pr-4 text-gray-500">{h.period_description}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
                       <td className="py-2 font-mono text-gray-500">{h.check_number ?? '—'}</td>
@@ -1169,7 +1184,7 @@ function EmployeePayHistoryPanel() {
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-6 text-center text-gray-400">
+                      <td colSpan={10} className="py-6 text-center text-gray-400">
                         No pay history found.
                       </td>
                     </tr>
@@ -1354,10 +1369,13 @@ function YtdSummaryPanel() {
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
+                  <TotalBox label="Custom Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
                   <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
                   <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
                   <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
                   <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
+                  <TotalBox label="Custom Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                  <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
                   <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
                 </div>
               )}
@@ -1376,10 +1394,13 @@ function YtdSummaryPanel() {
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
+                    <SortableTh label="Custom Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
                     <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
                     <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
                     <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
                     <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
+                    <SortableTh label="Custom Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
+                    <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                   </tr>
                 </thead>
@@ -1394,16 +1415,19 @@ function YtdSummaryPanel() {
                         </Badge>
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="py-6 text-center text-gray-400">
+                      <td colSpan={12} className="py-6 text-center text-gray-400">
                         No employee data found for {report.year}.
                       </td>
                     </tr>
