@@ -468,6 +468,11 @@ class PayStubGenerator
         company_id: payroll_item.company_id,
         pay_date: Date.new(year, 1, 1)..payroll_item.pay_period.pay_date
       })
+      .where(
+        "pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+        pay_date: payroll_item.pay_period.pay_date,
+        pay_period_id: payroll_item.pay_period.id
+      )
       .to_a
   end
 
