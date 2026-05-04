@@ -196,8 +196,7 @@ class PayrollSummaryByEmployeePdfGenerator
 
     all_labels.each do |label|
       render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        ded = item.payroll_item_deductions.find { |d| d.label == label && d.category == category }
-        amount = ded ? ded.amount.to_f : custom_deduction_amount(item, label, category)
+        amount = deduction_amount_for_label(item, label, category)
         amount.positive? ? fmt(-amount) : "—"
       }
     end
@@ -209,10 +208,14 @@ class PayrollSummaryByEmployeePdfGenerator
     }
   end
 
-  def custom_deduction_amount(item, label, category)
-    return 0 unless category == "post_tax"
+  def deduction_amount_for_label(item, label, category)
+    amount = item.payroll_item_deductions
+      .select { |deduction| deduction.label == label && deduction.category == category }
+      .sum(&:amount)
+      .to_f
+    return amount unless category == "post_tax"
 
-    Array(item.custom_deductions).sum do |deduction|
+    amount + Array(item.custom_deductions).sum do |deduction|
       deduction_label = deduction["label"].presence || "Other Deduction"
       deduction_label == label ? deduction["amount"].to_f : 0
     end
