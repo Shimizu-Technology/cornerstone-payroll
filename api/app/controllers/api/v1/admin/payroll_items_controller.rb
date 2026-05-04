@@ -128,12 +128,14 @@ module Api
               :employee_wage_rate_id, :label, :rate, :regular_hours,
               :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
             ],
-            custom_earnings: [ :label, :amount ]
+            custom_earnings: [ :label, :amount ],
+            custom_deductions: [ :label, :amount ]
           )
 
-          attrs = permitted.except(:wage_rate_hours, :custom_earnings).to_h.symbolize_keys
+          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
+          attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs
         end
 
@@ -177,6 +179,7 @@ module Api
             check_date: item.check_date,
             check_memo: item.check_memo,
             custom_earnings: item.custom_earnings || [],
+            custom_deductions: item.custom_deductions || [],
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours

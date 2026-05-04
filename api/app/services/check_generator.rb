@@ -127,13 +127,14 @@ class CheckGenerator
       ins     = totals[:insurance].to_f
       loan    = totals[:loans].to_f
       tips_paid_out = totals[:tips_paid_out].to_f
+      custom_deds = ytd_custom_deductions_total
 
       taxes = fit + ss + med + addl_wh
-      deds  = retire + roth + ins + loan + tips_paid_out
+      deds  = retire + roth + ins + loan + tips_paid_out + custom_deds
 
       { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
         retire: retire, roth: roth, ins: ins, loan: loan, tips_paid_out: tips_paid_out,
-        taxes: taxes, deds: deds, net: totals[:net_pay].to_f }
+        custom_deds: custom_deds, taxes: taxes, deds: deds, net: totals[:net_pay].to_f }
     end
   end
 
@@ -145,7 +146,7 @@ class CheckGenerator
   def cur_deds
     payroll_item.retirement_payment.to_f + payroll_item.roth_retirement_payment.to_f +
       payroll_item.insurance_payment.to_f + payroll_item.loan_payment.to_f +
-      payroll_item.tips_paid_out.to_f
+      payroll_item.tips_paid_out.to_f + payroll_item.custom_deductions_total.to_f
   end
 
   # -----------------------------------------------------------------------
@@ -479,6 +480,13 @@ class CheckGenerator
     rows << ["Health Insurance", fn(payroll_item.insurance_payment), fn(ytd[:ins])] if payroll_item.insurance_payment.to_f > 0
     rows << ["Loan", fn(payroll_item.loan_payment), fn(ytd[:loan])] if payroll_item.loan_payment.to_f > 0
     rows << ["Tips Paid Out", fn(payroll_item.tips_paid_out), fn(ytd[:tips_paid_out])] if payroll_item.tips_paid_out.to_f > 0
+    Array(payroll_item.custom_deductions).each do |deduction|
+      amount = deduction["amount"].to_f
+      next unless amount.positive?
+
+      label = deduction["label"].presence || "Other Deduction"
+      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
+    end
 
     if rows.any?
       rows << [
@@ -488,6 +496,47 @@ class CheckGenerator
       ]
     end
     rows
+  end
+
+  def ytd_custom_deductions_by_label
+    @ytd_custom_deductions_by_label ||= begin
+      labels = Array(payroll_item.custom_deductions)
+        .filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence }
+        .uniq
+      if labels.empty?
+        {}
+      else
+        custom_deduction_items.each_with_object(Hash.new(0.0)) do |item, totals|
+          Array(item.custom_deductions).each do |deduction|
+            label = deduction["label"].to_s.strip.downcase
+            next unless labels.include?(label)
+
+            totals[label] += deduction["amount"].to_f
+          end
+        end
+      end
+    end
+  end
+
+  def ytd_custom_deductions_total
+    @ytd_custom_deductions_total ||= custom_deduction_items.sum { |item| item.custom_deductions_total.to_f }
+  end
+
+  def custom_deduction_items
+    year = pay_period.pay_date&.year || Date.current.year
+
+    employee.payroll_items
+      .joins(:pay_period)
+      .select(:id, :custom_deductions)
+      .where(voided: false)
+      .where(pay_periods: {
+        company_id: company.id,
+        pay_date: Date.new(year, 1, 1)..pay_period.pay_date
+      })
+      .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+        pay_date: pay_period.pay_date,
+        pay_period_id: pay_period.id)
+      .to_a
   end
 
   # -----------------------------------------------------------------------

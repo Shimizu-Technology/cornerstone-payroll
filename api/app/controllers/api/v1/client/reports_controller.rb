@@ -117,6 +117,8 @@ module Api
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
               total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
+              total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
+              total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay),
               contractor_total_gross: contractor_items.sum(&:gross_pay),
@@ -139,6 +141,7 @@ module Api
           items = employee.payroll_items
                           .joins(:pay_period)
                           .where(pay_periods: { id: reportable_period_ids })
+          ytd_items = items.to_a
 
           {
             employee_id: employee.id,
@@ -146,10 +149,13 @@ module Api
             employment_type: employee.employment_type,
             status: employee.status,
             gross_pay: items.sum(:gross_pay),
+            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
             withholding_tax: items.sum(:withholding_tax),
             social_security_tax: items.sum(:social_security_tax),
             medicare_tax: items.sum(:medicare_tax),
             retirement: items.sum(:retirement_payment),
+            total_deductions: items.sum(:total_deductions),
+            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
             net_pay: items.sum(:net_pay)
           }
         end

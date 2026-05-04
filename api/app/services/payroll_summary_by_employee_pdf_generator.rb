@@ -176,23 +176,49 @@ class PayrollSummaryByEmployeePdfGenerator
     deduction_labels = group.flat_map { |item|
       item.payroll_item_deductions.select { |d| d.category == category }.map(&:label)
     }.uniq
+    custom_labels = if category == "post_tax"
+      group.flat_map { |item|
+        Array(item.custom_deductions).filter_map do |deduction|
+          next unless deduction["amount"].to_f.positive?
 
-    if deduction_labels.empty?
+          deduction["label"].presence || "Other Deduction"
+        end
+      }.uniq
+    else
+      []
+    end
+    all_labels = (deduction_labels + custom_labels).uniq
+
+    if all_labels.empty?
       render_labeled_row(pdf, "(none)", group, label_width, col_width) { |_| "—" }
       return
     end
 
-    deduction_labels.each do |label|
+    all_labels.each do |label|
       render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        ded = item.payroll_item_deductions.find { |d| d.label == label && d.category == category }
-        ded ? fmt(-ded.amount) : "—"
+        amount = deduction_amount_for_label(item, label, category)
+        amount.positive? ? fmt(-amount) : "—"
       }
     end
 
     render_labeled_row(pdf, "Subtotal", group, label_width, col_width, bold: true) { |item|
       total = item.payroll_item_deductions.select { |d| d.category == category }.sum(&:amount)
+      total += item.custom_deductions_total.to_f if category == "post_tax"
       total > 0 ? fmt(-total) : "—"
     }
+  end
+
+  def deduction_amount_for_label(item, label, category)
+    amount = item.payroll_item_deductions
+      .select { |deduction| deduction.label == label && deduction.category == category }
+      .sum(&:amount)
+      .to_f
+    return amount unless category == "post_tax"
+
+    amount + Array(item.custom_deductions).sum do |deduction|
+      deduction_label = deduction["label"].presence || "Other Deduction"
+      deduction_label == label ? deduction["amount"].to_f : 0
+    end
   end
 
   def render_tax_rows(pdf, group, label_width, col_width)

@@ -73,6 +73,7 @@ class IssueCorrectivePaycheckService
     additional_withholding_override
     withholding_tax_adjustment
     custom_earnings
+    custom_deductions
     custom_columns_data
     non_taxable_pay
   ].freeze
@@ -314,6 +315,7 @@ class IssueCorrectivePaycheckService
       withholding_tax_adjustment: corrected_input(:withholding_tax_adjustment, original_item.withholding_tax_adjustment),
       withholding_tax_override: original_item.withholding_tax_override, # not currently overridable
       custom_earnings:          corrected_input(:custom_earnings, original_item.custom_earnings),
+      custom_deductions:        corrected_input(:custom_deductions, original_item.custom_deductions),
       custom_columns_data:      corrected_input(:custom_columns_data, original_item.custom_columns_data),
       loan_deduction:           original_item.loan_deduction,
       import_source:            original_item.import_source
@@ -410,6 +412,7 @@ class IssueCorrectivePaycheckService
       tips_paid_out:  item.tips_paid_out.to_f,
       pay_rate:       item.pay_rate.to_f,
       custom_earnings: Array(item.custom_earnings),
+      custom_deductions: Array(item.custom_deductions),
       custom_columns_data: item.custom_columns_data || {}
     )
   end
