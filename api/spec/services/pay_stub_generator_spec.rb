@@ -30,6 +30,7 @@ RSpec.describe PayStubGenerator do
       bonus: 50,
       reported_tips: 25,
       custom_earnings: [ { "label" => "Chief Stipend", "amount" => 75 } ],
+      custom_deductions: [ { "label" => "Cash Advance", "amount" => 40 } ],
       gross_pay: 310,
       net_pay: 250,
       ytd_gross: 310,
@@ -53,6 +54,40 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Bonus")
     expect(text).to include("Reported Tips")
     expect(text).to include("Chief Stipend")
+  end
+
+  it "prints custom deductions by label" do
+    pdf = described_class.new(payroll_item).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Cash Advance")
+  end
+
+  it "does not include later same-pay-date custom deductions in YTD custom deduction totals" do
+    later_period = create(
+      :pay_period,
+      :committed,
+      company: company,
+      pay_date: pay_period.pay_date
+    )
+    create(
+      :payroll_item,
+      pay_period: later_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8,
+      custom_deductions: [ { "label" => "Cash Advance", "amount" => 60 } ],
+      total_deductions: 60,
+      gross_pay: 160,
+      net_pay: 100
+    )
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Cash Advance")
+    expect(text).to include("$40.00")
+    expect(text).not_to include("$100.00")
   end
 
   it "keeps a standard earnings statement to one page" do

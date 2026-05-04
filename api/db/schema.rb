@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_02_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_04_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -769,6 +769,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_02_200000) do
     t.text "correction_reason"
     t.datetime "created_at", null: false
     t.jsonb "custom_columns_data", default: {}
+    t.jsonb "custom_deductions", default: [], null: false
     t.jsonb "custom_earnings", default: []
     t.bigint "employee_id", null: false
     t.decimal "employer_medicare_tax", precision: 10, scale: 2, default: "0.0", null: false

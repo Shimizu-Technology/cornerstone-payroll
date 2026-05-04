@@ -24,6 +24,7 @@ RSpec.describe PayrollRegisterCsvExporter do
         total_tips_paid_out: 80.00,
         total_bonus: 25.00,
         total_custom_earnings: 60.00,
+        total_custom_deductions: 30.00,
         total_non_taxable_pay: 40.00,
         total_additional_withholding: 15.00,
         total_employer_social_security: 310.00,
@@ -124,6 +125,7 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(totals["Roth 401(k)"]).to eq("75.00")
       expect(totals["Employer Match"]).to eq("30.00")
       expect(totals["Employer Roth Match"]).to eq("20.00")
+      expect(totals["Custom Deductions"]).to eq("30.00")
       expect(totals["Total Deductions"]).to eq("932.50")
       expect(totals["Net Pay"]).to eq("4067.50")
       expect(totals["Check Number"]).to eq("")

@@ -48,6 +48,7 @@ class PayrollItem < ApplicationRecord
   validates :additional_withholding_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }
   validate :company_matches_pay_period
+  validate :custom_deductions_are_valid
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }
@@ -146,6 +147,30 @@ class PayrollItem < ApplicationRecord
     hours_worked.to_f + overtime_hours.to_f + holiday_hours.to_f + pto_hours.to_f
   end
 
+  def custom_deductions_total
+    Array(custom_deductions).sum { |deduction| deduction["amount"].to_f }
+  end
+
+  def self.normalize_custom_deduction_entries(entries)
+    Array(entries).filter_map do |entry|
+      data = normalize_json_entry(entry)
+      label = data["label"].to_s.strip
+      amount = BigDecimal(data["amount"].to_s)
+      next if label.blank? || amount <= 0 || !amount.finite?
+
+      { "label" => label, "amount" => amount.round(2).to_f }
+    rescue ArgumentError, FloatDomainError
+      nil
+    end
+  end
+
+  def self.normalize_json_entry(entry)
+    return entry.to_unsafe_h if entry.respond_to?(:to_unsafe_h)
+    return entry.to_h if entry.respond_to?(:to_h)
+
+    {}
+  end
+
   def overtime_pay
     return 0 unless hourly?
 
@@ -235,6 +260,7 @@ class PayrollItem < ApplicationRecord
     self.reported_tips = round_currency_value(reported_tips)
     self.tips_paid_out = round_currency_value(tips_paid_out)
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
+    self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
 
     return unless custom_columns_data.is_a?(Hash)
 
@@ -266,5 +292,20 @@ class PayrollItem < ApplicationRecord
     return if company_id == pay_period.company_id
 
     errors.add(:company_id, "must match the pay period company")
+  end
+
+  def custom_deductions_are_valid
+    return if custom_deductions.blank?
+
+    unless custom_deductions.is_a?(Array)
+      errors.add(:custom_deductions, "must be a list")
+      return
+    end
+
+    custom_deductions.each do |deduction|
+      unless deduction.is_a?(Hash) && deduction["label"].present? && deduction["amount"].to_f.positive?
+        errors.add(:custom_deductions, "must include a label and positive amount")
+      end
+    end
   end
 end

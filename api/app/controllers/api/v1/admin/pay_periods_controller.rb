@@ -309,6 +309,10 @@ module Api
                 payroll_item.custom_earnings = normalize_custom_earnings(params[:custom_earnings][employee_id.to_s])
               end
 
+              if params[:custom_deductions] && params[:custom_deductions][employee_id.to_s]
+                payroll_item.custom_deductions = PayrollItem.normalize_custom_deduction_entries(params[:custom_deductions][employee_id.to_s])
+              end
+
               # Calculate payroll
               payroll_item.calculate!
               results[:success] << { employee_id: employee.id, name: employee.full_name }
@@ -709,11 +713,12 @@ module Api
           raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
 
           scalar_fields = IssueCorrectivePaycheckService::CORRECTABLE_INPUT_FIELDS -
-                          %i[custom_earnings custom_columns_data]
+                          %i[custom_earnings custom_deductions custom_columns_data]
 
           permitted = raw.permit(
             *scalar_fields,
-            custom_earnings: [ :label, :amount ]
+            custom_earnings: [ :label, :amount ],
+            custom_deductions: [ :label, :amount ]
           ).to_h
 
           if raw[:custom_columns_data].present?
@@ -913,6 +918,7 @@ module Api
             roth_retirement_payment: item.roth_retirement_payment,
             loan_payment: item.loan_payment,
             insurance_payment: item.insurance_payment,
+            custom_deductions: item.custom_deductions || [],
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             employer_social_security_tax: item.employer_social_security_tax,
@@ -946,7 +952,7 @@ module Api
         end
 
         def submitted_payroll_employee_ids
-          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings].flat_map do |key|
+          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings custom_deductions].flat_map do |key|
             params[key].respond_to?(:keys) ? params[key].keys : []
           end
 

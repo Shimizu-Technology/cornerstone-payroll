@@ -675,7 +675,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
@@ -1077,10 +1077,12 @@ export interface PayrollRegisterReport {
     summary: {
       employee_count: number;
       total_gross: number;
+      total_custom_earnings?: number;
       total_withholding: number;
       total_social_security: number;
       total_medicare: number;
       total_retirement: number;
+      total_custom_deductions?: number;
       total_deductions: number;
       total_net: number;
     };
@@ -1123,19 +1125,25 @@ export interface YtdSummaryReport {
       employment_type: string;
       status: string;
       gross_pay: number;
+      custom_earnings_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      total_deductions?: number;
+      custom_deductions_total?: number;
       net_pay: number;
     }[];
     company_totals: null | {
       year: number;
       gross_pay: number;
+      custom_earnings_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;
       retirement: number;
+      total_deductions?: number;
+      custom_deductions_total?: number;
       net_pay: number;
       payroll_count: number;
     };
@@ -1148,7 +1156,7 @@ export interface YtdSummaryParams {
   search?: string;
   employment_type?: string;
   status?: string;
-  sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'net_pay';
+  sort_by?: 'name' | 'employment_type' | 'status' | 'gross_pay' | 'custom_earnings_total' | 'withholding_tax' | 'social_security_tax' | 'medicare_tax' | 'retirement' | 'total_deductions' | 'custom_deductions_total' | 'net_pay';
   sort_direction?: 'asc' | 'desc';
 }
 
@@ -1244,7 +1252,9 @@ export const reportsApi = {
         period_description: string;
         hours_worked: number | null;
         overtime_hours: number | null;
+        custom_earnings_total?: number;
         gross_pay: number;
+        custom_deductions_total?: number;
         total_deductions: number;
         net_pay: number;
         check_number: string | null;

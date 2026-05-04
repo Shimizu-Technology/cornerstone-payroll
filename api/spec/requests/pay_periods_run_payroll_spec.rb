@@ -165,6 +165,12 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
                  { label: "Training Stipend", amount: "Infinity" },
                  { label: "Safe Bonus", amount: "12.345" }
                ]
+             },
+             custom_deductions: {
+               employee.id.to_s => [
+                 { label: "Cash Advance", amount: "Infinity" },
+                 { label: "Uniform Repayment", amount: "5.555" }
+               ]
              }
            },
            headers: { "X-Company-Id" => company.id.to_s }
@@ -175,6 +181,9 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(submitted_item.hours_worked.to_f).to eq(6.0)
       expect(submitted_item.custom_earnings).to eq([
         { "label" => "Safe Bonus", "amount" => 12.35 }
+      ])
+      expect(submitted_item.custom_deductions).to eq([
+        { "label" => "Uniform Repayment", "amount" => 5.56 }
       ])
       expect(submitted_item.gross_pay.to_f).to eq(72.35)
     end

@@ -337,6 +337,18 @@ class PayStubGenerator
       ]
     end
 
+    Array(payroll_item.custom_deductions).each do |deduction|
+      amount = deduction["amount"].to_f
+      next unless amount.positive?
+
+      label = deduction["label"].presence || "Other Deduction"
+      deductions_data << [
+        label,
+        format_currency(amount),
+        format_currency(employee_ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)
+      ]
+    end
+
     # Total deductions
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
@@ -423,6 +435,45 @@ class PayStubGenerator
       pay_date: payroll_item.pay_period.pay_date,
       pay_period_id: payroll_item.pay_period_id
     )[:tips_paid_out].to_f
+  end
+
+  def employee_ytd_custom_deductions_by_label
+    @employee_ytd_custom_deductions_by_label ||= begin
+      labels = Array(payroll_item.custom_deductions)
+        .filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence }
+        .uniq
+      if labels.empty?
+        {}
+      else
+        custom_deduction_items.each_with_object(Hash.new(0.0)) do |item, totals|
+          Array(item.custom_deductions).each do |deduction|
+            label = deduction["label"].to_s.strip.downcase
+            next unless labels.include?(label)
+
+            totals[label] += deduction["amount"].to_f
+          end
+        end
+      end
+    end
+  end
+
+  def custom_deduction_items
+    year = payroll_item.pay_period.pay_date&.year || Date.current.year
+
+    payroll_item.employee.payroll_items
+      .joins(:pay_period)
+      .select(:id, :custom_deductions)
+      .where(voided: false)
+      .where(pay_periods: {
+        company_id: payroll_item.company_id,
+        pay_date: Date.new(year, 1, 1)..payroll_item.pay_period.pay_date
+      })
+      .where(
+        "pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+        pay_date: payroll_item.pay_period.pay_date,
+        pay_period_id: payroll_item.pay_period.id
+      )
+      .to_a
   end
 
   def format_currency(amount)

@@ -898,6 +898,69 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "custom earning and deduction report visibility" do
+    let!(:pay_period) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 18))
+    end
+
+    before do
+      EmployeeYtdTotal.create!(
+        employee: employee,
+        year: 2026,
+        gross_pay: 1_250.00,
+        withholding_tax: 100.00,
+        social_security_tax: 77.50,
+        medicare_tax: 18.13,
+        retirement: 40.00,
+        net_pay: 974.37)
+
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        gross_pay: 1_250.00,
+        net_pay: 974.37,
+        withholding_tax: 100.00,
+        social_security_tax: 77.50,
+        medicare_tax: 18.13,
+        retirement_payment: 40.00,
+        total_deductions: 275.63,
+        custom_earnings: [ { "label" => "Certification Pay", "amount" => 50.00 } ],
+        custom_deductions: [ { "label" => "Cash Advance", "amount" => 40.00 } ])
+    end
+
+    it "surfaces custom totals in YTD summary reports" do
+      get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+      employee_row = report.fetch("employees").find { |row| row.fetch("employee_id") == employee.id }
+
+      expect(employee_row.fetch("custom_earnings_total").to_f).to eq(50.00)
+      expect(employee_row.fetch("custom_deductions_total").to_f).to eq(40.00)
+      expect(employee_row.fetch("total_deductions").to_f).to eq(275.63)
+      expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.00)
+      expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(40.00)
+    end
+
+    it "surfaces custom totals in employee pay history reports" do
+      get "/api/v1/admin/reports/employee_pay_history", params: { employee_id: employee.id }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+
+      expect(report.dig("history", 0, "custom_earnings_total").to_f).to eq(50.00)
+      expect(report.dig("history", 0, "custom_deductions_total").to_f).to eq(40.00)
+      expect(report.dig("ytd", "custom_earnings_total").to_f).to eq(50.00)
+      expect(report.dig("ytd", "custom_deductions_total").to_f).to eq(40.00)
+      expect(report.dig("ytd", "total_deductions").to_f).to eq(275.63)
+    end
+  end
+
   # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
 
   describe "GET /api/v1/admin/reports/payroll_register_csv" do
@@ -1288,6 +1351,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           total_tips_paid_out: 25.00,
           total_bonus: 10.00,
           total_custom_earnings: 20.00,
+          total_custom_deductions: 12.00,
           total_withholding: 100.00,
           total_social_security: 62.00,
           total_medicare: 14.50,
@@ -1309,6 +1373,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
             tips_paid_out: 25.00,
             bonus: 10.00,
             custom_earnings_total: 20.00,
+            custom_deductions_total: 12.00,
             withholding_tax: 100.00,
             social_security_tax: 62.00,
             medicare_tax: 14.50,
@@ -1335,6 +1400,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
             tips_paid_out: 0.00,
             bonus: 0.00,
             custom_earnings_total: 75.00,
+            custom_deductions_total: 0.00,
             withholding_tax: 0.00,
             social_security_tax: 0.00,
             medicare_tax: 0.00,
@@ -1426,15 +1492,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
           tips: 20.00,
           tips_paid_out: 15.00,
           bonus: 10.00,
+          custom_earnings_total: 20.00,
+          total_deductions: 261.50,
+          custom_deductions_total: 15.00,
           net_pay: 738.50
         }
       })
 
+      history_header = sheets.first.fetch(:rows).first
+      expect(history_header).to include("Custom Earnings", "Custom Deductions")
+
       ytd_rows = sheets.fetch(1).fetch(:rows)
       expect(ytd_rows).to include([ "Metric", "Amount" ])
       expect(ytd_rows).to include([ "Gross Pay", 1_000.00 ])
+      expect(ytd_rows).to include([ "Custom Earnings", 20.00 ])
       expect(ytd_rows).to include([ "401(k)", 50.00 ])
       expect(ytd_rows).to include([ "Roth 401(k)", 25.00 ])
+      expect(ytd_rows).to include([ "Total Deductions", 261.50 ])
+      expect(ytd_rows).to include([ "Custom Deductions", 15.00 ])
       expect(ytd_rows.flatten).not_to include(:gross_pay, :roth_retirement)
     end
   end

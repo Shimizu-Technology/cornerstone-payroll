@@ -91,6 +91,16 @@ class DeductionsContributionsReportPdfGenerator
     all_labels = items.flat_map { |item|
       item.payroll_item_deductions.select { |d| d.category == category }.map(&:label)
     }.uniq.sort
+    if category == "post_tax"
+      custom_labels = items.flat_map { |item|
+        Array(item.custom_deductions).filter_map do |deduction|
+          next unless deduction["amount"].to_f.positive?
+
+          deduction["label"].presence || "Other Deduction"
+        end
+      }
+      all_labels = (all_labels + custom_labels).uniq.sort
+    end
 
     return if all_labels.empty?
 
@@ -100,8 +110,7 @@ class DeductionsContributionsReportPdfGenerator
     header = build_header(["Employee"] + all_labels + ["Total"])
     rows = items.map do |item|
       amounts = all_labels.map do |label|
-        ded = item.payroll_item_deductions.find { |d| d.label == label && d.category == category }
-        ded&.amount.to_f
+        deduction_amount_for_label(item, label, category)
       end
       employee_row(item.employee_full_name, amounts + [amounts.sum])
     end
@@ -147,7 +156,7 @@ class DeductionsContributionsReportPdfGenerator
     pdf.move_down 6
 
     total_emp_taxes = items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }
-    total_deductions = items.sum { |i| i.payroll_item_deductions.sum(&:amount) }
+    total_deductions = items.sum { |i| i.payroll_item_deductions.sum(&:amount) + i.custom_deductions_total.to_f }
     total_employer = items.sum { |i|
       i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f
@@ -183,6 +192,19 @@ class DeductionsContributionsReportPdfGenerator
   def totals_row(label, amounts)
     [{ content: label, font_style: :bold, background_color: SECTION_BG }] +
       amounts.map { |a| { content: fmt(a), align: :right, font_style: :bold, background_color: SECTION_BG } }
+  end
+
+  def deduction_amount_for_label(item, label, category)
+    amount = item.payroll_item_deductions
+      .select { |deduction| deduction.label == label && deduction.category == category }
+      .sum(&:amount)
+      .to_f
+    return amount unless category == "post_tax"
+
+    amount + Array(item.custom_deductions).sum do |deduction|
+      deduction_label = deduction["label"].presence || "Other Deduction"
+      deduction_label == label ? deduction["amount"].to_f : 0
+    end
   end
 
   def render_table(pdf, data)

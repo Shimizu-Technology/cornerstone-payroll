@@ -97,6 +97,19 @@ RSpec.describe CheckGenerator do
       expect(text).to include("Tips Paid Out")
       expect(text).to include("45.00")
     end
+
+    it "prints custom deductions as labeled deductions on the check stubs" do
+      payroll_item.update!(
+        custom_deductions: [ { "label" => "Cash Advance", "amount" => 40.0 } ],
+        total_deductions: payroll_item.total_deductions + 40.0,
+        net_pay: payroll_item.net_pay - 40.0
+      )
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Cash Advance")
+      expect(text).to include("40.00")
+    end
   end
 
   describe "#generate_voided" do
