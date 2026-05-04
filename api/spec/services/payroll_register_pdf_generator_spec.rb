@@ -74,6 +74,23 @@ RSpec.describe PayrollRegisterPdfGenerator do
       report_data[:summary] = nil
       expect { generator.generate }.not_to raise_error
     end
+
+    it "hides custom adjustment columns when the report has no custom adjustments" do
+      labels = generator.send(:employee_table_columns).map { |column| column[:label] }
+
+      expect(labels).not_to include("Custom Earn", "Custom Ded")
+    end
+
+    it "shows custom adjustment columns when the report has custom adjustments" do
+      report_data[:summary][:total_custom_earnings] = 25.00
+      report_data[:summary][:total_custom_deductions] = 10.00
+      report_data[:employees].first[:custom_earnings_total] = 25.00
+      report_data[:employees].first[:custom_deductions_total] = 10.00
+
+      labels = generator.send(:employee_table_columns).map { |column| column[:label] }
+
+      expect(labels).to include("Custom Earn", "Custom Ded")
+    end
   end
 
   describe "#filename" do
