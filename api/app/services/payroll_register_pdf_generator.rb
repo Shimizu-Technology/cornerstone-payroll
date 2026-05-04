@@ -125,15 +125,15 @@ class PayrollRegisterPdfGenerator
     rows = [
       [ "Employee Count",       s[:employee_count].to_s ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
-      [ "Custom Earnings",      fmt(s[:total_custom_earnings]) ],
       [ "Total Withholding",    fmt(s[:total_withholding]) ],
       [ "Total Social Security", fmt(s[:total_social_security]) ],
       [ "Total Medicare",       fmt(s[:total_medicare]) ],
       [ "Total Retirement",     fmt(s[:total_retirement]) ],
-      [ "Custom Deductions",    fmt(s[:total_custom_deductions]) ],
       [ "Total Deductions",     fmt(s[:total_deductions]) ],
       [ "Total Net Pay",        fmt(s[:total_net]) ]
     ]
+    rows.insert(2, [ "Custom Earnings", fmt(s[:total_custom_earnings]) ]) if custom_earnings_column?
+    rows.insert(-3, [ "Custom Deductions", fmt(s[:total_custom_deductions]) ]) if custom_deductions_column?
 
     table_data = rows.map { |k, v|
       [ { content: k, font_style: :bold }, { content: v, align: :right } ]
@@ -167,67 +167,28 @@ class PayrollRegisterPdfGenerator
       return
     end
 
-    header = [
-      { content: "Employee",     background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold },
-      { content: "Type",         background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold },
-      { content: "Hours",        background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "OT Hrs",       background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Gross Pay",    background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Custom Earn",  background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Withholding",  background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Addtl W/H",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Soc Sec",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Medicare",     background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Retirement",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Custom Ded",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Deductions",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Net Pay",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Check #",      background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold }
-    ]
+    columns = employee_table_columns
+    header = columns.map do |column|
+      {
+        content: column[:label],
+        background_color: HEADER_BG,
+        text_color: "FFFFFF",
+        font_style: :bold,
+        align: column[:align]
+      }.compact
+    end
 
-    rows = employees.map { |emp| employee_table_row(emp) }
+    rows = employees.map { |emp| employee_table_row(emp, columns) }
 
     # Totals footer
     s = report[:summary] || {}
-    totals_row = [
-      { content: "TOTALS", font_style: :bold, background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG },
-      { content: fmt(s[:total_gross]),                  align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_custom_earnings]),        align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_withholding]),             align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_additional_withholding]),  align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_social_security]),         align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_medicare]),                align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_retirement]),              align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_custom_deductions]),       align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_deductions]),              align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(s[:total_net]),                     align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG }
-    ]
+    totals_row = columns.map { |column| total_table_cell(column, s) }
 
     table_data = [ header ] + rows + [ totals_row ]
 
     page_width = pdf.bounds.width
-    width_fractions = [
-      0.115,     # Employee
-      0.05,      # Type
-      0.05,      # Hours
-      0.05,      # OT Hrs
-      0.07,      # Gross
-      0.065,     # Custom Earn
-      0.07,      # Withholding
-      0.06,      # Addtl W/H
-      0.07,      # Soc Sec
-      0.065,     # Medicare
-      0.065,     # Retirement
-      0.065,     # Custom Ded
-      0.07,      # Deductions
-      0.07,      # Net Pay
-      0.065      # Check #
-    ]
-    col_widths = width_fractions.map { |fraction| page_width * fraction }
+    total_weight = columns.sum { |column| column[:weight] }
+    col_widths = columns.map { |column| page_width * (column[:weight] / total_weight.to_f) }
     # Ensure widths sum to exactly page_width (float drift safety)
     col_widths[-1] = page_width - col_widths[0..-2].sum
 
@@ -248,24 +209,93 @@ class PayrollRegisterPdfGenerator
     pdf.fill_color TEXT_DARK
   end
 
-  def employee_table_row(emp)
-    [
-      { content: emp[:employee_name].to_s },
-      { content: emp[:employment_type].to_s },
-      { content: emp[:hours_worked].to_f.to_s, align: :right },
-      { content: emp[:overtime_hours].to_f.to_s, align: :right },
-      { content: fmt(emp[:gross_pay]),               align: :right },
-      { content: fmt(emp[:custom_earnings_total]),   align: :right },
-      { content: fmt(emp[:withholding_tax]),          align: :right },
-      { content: fmt(emp[:additional_withholding]),   align: :right },
-      { content: fmt(emp[:social_security_tax]),      align: :right },
-      { content: fmt(emp[:medicare_tax]),             align: :right },
-      { content: fmt(emp[:retirement_payment]),       align: :right },
-      { content: fmt(emp[:custom_deductions_total]),  align: :right },
-      { content: fmt(emp[:total_deductions]),         align: :right },
-      { content: fmt(emp[:net_pay]),                  align: :right },
-      { content: emp[:check_number].to_s }
+  def employee_table_row(emp, columns)
+    columns.map do |column|
+      {
+        content: employee_table_value(emp, column[:key]),
+        align: column[:align]
+      }.compact
+    end
+  end
+
+  def employee_table_columns
+    columns = [
+      { key: :employee_name, label: "Employee", weight: 13 },
+      { key: :employment_type, label: "Type", weight: 5 },
+      { key: :hours_worked, label: "Hours", weight: 5, align: :right },
+      { key: :overtime_hours, label: "OT Hrs", weight: 5, align: :right },
+      { key: :gross_pay, label: "Gross Pay", weight: 8, align: :right },
+      { key: :withholding_tax, label: "Withholding", weight: 8, align: :right },
+      { key: :additional_withholding, label: "Addtl W/H", weight: 7, align: :right },
+      { key: :social_security_tax, label: "Soc Sec", weight: 7, align: :right },
+      { key: :medicare_tax, label: "Medicare", weight: 7, align: :right },
+      { key: :retirement_payment, label: "Retirement", weight: 7, align: :right },
+      { key: :total_deductions, label: "Deductions", weight: 8, align: :right },
+      { key: :net_pay, label: "Net Pay", weight: 8, align: :right },
+      { key: :check_number, label: "Check #", weight: 8 }
     ]
+    columns.insert(5, { key: :custom_earnings_total, label: "Custom Earn", weight: 7, align: :right }) if custom_earnings_column?
+    columns.insert(-4, { key: :custom_deductions_total, label: "Custom Ded", weight: 7, align: :right }) if custom_deductions_column?
+    columns
+  end
+
+  def employee_table_value(emp, key)
+    case key
+    when :employee_name, :employment_type, :check_number
+      emp[key].to_s
+    when :hours_worked, :overtime_hours
+      emp[key].to_f.to_s
+    else
+      fmt(emp[key])
+    end
+  end
+
+  def total_table_cell(column, summary)
+    content = case column[:key]
+    when :employee_name
+      "TOTALS"
+    when :gross_pay
+      fmt(summary[:total_gross])
+    when :custom_earnings_total
+      fmt(summary[:total_custom_earnings])
+    when :withholding_tax
+      fmt(summary[:total_withholding])
+    when :additional_withholding
+      fmt(summary[:total_additional_withholding])
+    when :social_security_tax
+      fmt(summary[:total_social_security])
+    when :medicare_tax
+      fmt(summary[:total_medicare])
+    when :retirement_payment
+      fmt(summary[:total_retirement])
+    when :custom_deductions_total
+      fmt(summary[:total_custom_deductions])
+    when :total_deductions
+      fmt(summary[:total_deductions])
+    when :net_pay
+      fmt(summary[:total_net])
+    else
+      ""
+    end
+
+    {
+      content: content,
+      align: column[:align],
+      font_style: content.present? ? :bold : nil,
+      background_color: SECTION_BG
+    }.compact
+  end
+
+  def custom_earnings_column?
+    summary = report[:summary] || {}
+    summary[:total_custom_earnings].to_f.positive? ||
+      Array(report[:employees]).any? { |emp| emp[:custom_earnings_total].to_f.positive? }
+  end
+
+  def custom_deductions_column?
+    summary = report[:summary] || {}
+    summary[:total_custom_deductions].to_f.positive? ||
+      Array(report[:employees]).any? { |emp| emp[:custom_deductions_total].to_f.positive? }
   end
 
   # ─── Helpers ────────────────────────────────────────────────────────────────
