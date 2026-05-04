@@ -110,8 +110,7 @@ class DeductionsContributionsReportPdfGenerator
     header = build_header(["Employee"] + all_labels + ["Total"])
     rows = items.map do |item|
       amounts = all_labels.map do |label|
-        ded = item.payroll_item_deductions.find { |d| d.label == label && d.category == category }
-        ded ? ded.amount.to_f : custom_deduction_amount(item, label, category)
+        deduction_amount_for_label(item, label, category)
       end
       employee_row(item.employee_full_name, amounts + [amounts.sum])
     end
@@ -195,10 +194,14 @@ class DeductionsContributionsReportPdfGenerator
       amounts.map { |a| { content: fmt(a), align: :right, font_style: :bold, background_color: SECTION_BG } }
   end
 
-  def custom_deduction_amount(item, label, category)
-    return 0 unless category == "post_tax"
+  def deduction_amount_for_label(item, label, category)
+    amount = item.payroll_item_deductions
+      .select { |deduction| deduction.label == label && deduction.category == category }
+      .sum(&:amount)
+      .to_f
+    return amount unless category == "post_tax"
 
-    Array(item.custom_deductions).sum do |deduction|
+    amount + Array(item.custom_deductions).sum do |deduction|
       deduction_label = deduction["label"].presence || "Other Deduction"
       deduction_label == label ? deduction["amount"].to_f : 0
     end
