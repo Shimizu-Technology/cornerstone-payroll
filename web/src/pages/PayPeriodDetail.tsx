@@ -1643,8 +1643,8 @@ export function PayPeriodDetail() {
                           <TableCell className={`text-right ${rowTone}`}>
                             {(item.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0) ? (
                               <div className="space-y-1">
-                                {(item.custom_earnings || []).filter((earning) => toNumber(earning.amount) > 0).map((earning) => (
-                                  <div key={`${item.id}-${earning.label}`} className="text-xs">
+                                {(item.custom_earnings || []).filter((earning) => toNumber(earning.amount) > 0).map((earning, index) => (
+                                  <div key={`${item.id}-custom-earning-${index}-${earning.label}-${earning.amount}`} className="text-xs">
                                     <span className="text-gray-500">{earning.label}</span>{' '}
                                     <span className="font-medium text-gray-900">{formatCurrency(toNumber(earning.amount))}</span>
                                   </div>
@@ -1659,8 +1659,8 @@ export function PayPeriodDetail() {
                           <TableCell className={`text-right ${rowTone}`}>
                             {(item.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0) ? (
                               <div className="space-y-1">
-                                {(item.custom_deductions || []).filter((deduction) => toNumber(deduction.amount) > 0).map((deduction) => (
-                                  <div key={`${item.id}-${deduction.label}`} className="text-xs">
+                                {(item.custom_deductions || []).filter((deduction) => toNumber(deduction.amount) > 0).map((deduction, index) => (
+                                  <div key={`${item.id}-custom-deduction-${index}-${deduction.label}-${deduction.amount}`} className="text-xs">
                                     <span className="text-gray-500">{deduction.label}</span>{' '}
                                     <span className="font-medium text-red-600">{formatCurrency(toNumber(deduction.amount))}</span>
                                   </div>
