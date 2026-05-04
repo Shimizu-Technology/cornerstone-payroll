@@ -317,6 +317,7 @@ export interface PayrollItem {
   insurance_payment?: number;
   total_deductions?: number;
   custom_deductions?: CustomDeduction[];
+  custom_deductions_total?: number;
   // Import fields (MoSa)
   tips?: number;
   loan_deduction?: number;
@@ -333,6 +334,7 @@ export interface PayrollItem {
   ytd_retirement?: number;
   // Custom earnings (e.g., Chief Stipend, Asst Chief Stipend)
   custom_earnings?: { label: string; amount: number }[];
+  custom_earnings_total?: number;
   department_id?: number | null;
   department_name?: string | null;
   // Check info

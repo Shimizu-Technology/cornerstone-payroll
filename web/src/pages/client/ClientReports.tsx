@@ -121,6 +121,8 @@ export function ClientReports() {
                   <Metric label="Employees" value={String(payrollRegister.summary.employee_count)} />
                   <Metric label="Net Pay" value={formatCurrency(payrollRegister.summary.total_net)} />
                   <Metric label="Gross Pay" value={formatCurrency(payrollRegister.summary.total_gross)} />
+                  <Metric label="Custom Earnings" value={formatCurrency(payrollRegister.summary.total_custom_earnings ?? 0)} />
+                  <Metric label="Custom Deductions" value={formatCurrency(payrollRegister.summary.total_custom_deductions ?? 0)} />
                   <Metric label="Total Deductions" value={formatCurrency(payrollRegister.summary.total_deductions)} />
                 </div>
               )}
@@ -137,6 +139,9 @@ export function ClientReports() {
                   <TableRow>
                     <TableHead>Employee</TableHead>
                     <TableHead>Gross Pay</TableHead>
+                    <TableHead>Custom Earn.</TableHead>
+                    <TableHead>Custom Ded.</TableHead>
+                    <TableHead>Total Ded.</TableHead>
                     <TableHead>FIT</TableHead>
                     <TableHead>Net Pay</TableHead>
                   </TableRow>
@@ -146,6 +151,9 @@ export function ClientReports() {
                     <TableRow key={employee.employee_id}>
                       <TableCell className="font-medium text-gray-900">{employee.name}</TableCell>
                       <TableCell>{formatCurrency(employee.gross_pay)}</TableCell>
+                      <TableCell>{formatCurrency(employee.custom_earnings_total ?? 0)}</TableCell>
+                      <TableCell>{formatCurrency(employee.custom_deductions_total ?? 0)}</TableCell>
+                      <TableCell>{formatCurrency(employee.total_deductions ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.withholding_tax)}</TableCell>
                       <TableCell>{formatCurrency(employee.net_pay)}</TableCell>
                     </TableRow>

@@ -770,13 +770,14 @@ module Api
           year = params[:year]&.to_i || Date.current.year
 
           employees = filtered_ytd_employees
+          custom_totals_by_employee = ytd_custom_totals_by_employee(year)
 
           render json: {
             report: {
               type: "ytd_summary",
               meta: report_meta(Company.find(current_company_id), :ytd_summary),
               year: year,
-              employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year) }),
+              employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year, custom_totals_by_employee[emp.id]) }),
               company_totals: ytd_company_totals(year)
             }
           }
@@ -785,11 +786,12 @@ module Api
         def ytd_summary_xlsx
           year = params[:year]&.to_i || Date.current.year
           employees = filtered_ytd_employees
+          custom_totals_by_employee = ytd_custom_totals_by_employee(year)
           report = {
             type: "ytd_summary",
             meta: report_meta(Company.find(current_company_id), :ytd_summary),
             year: year,
-            employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year) }),
+            employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year, custom_totals_by_employee[emp.id]) }),
             company_totals: ytd_company_totals(year)
           }
 
@@ -803,7 +805,7 @@ module Api
 
         YTD_SORT_FIELDS = %w[
           name employment_type status gross_pay withholding_tax social_security_tax
-          medicare_tax retirement net_pay
+          medicare_tax retirement total_deductions custom_earnings_total custom_deductions_total net_pay
         ].freeze
 
         def filtered_ytd_employees
@@ -1099,13 +1101,18 @@ module Api
                               id: reportable_period_ids
                             })
 
+          ytd_items = items.to_a
+
           {
             year: year,
             gross_pay: items.sum(:gross_pay),
+            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
             withholding_tax: items.sum(:withholding_tax),
             social_security_tax: items.sum(:social_security_tax),
             medicare_tax: items.sum(:medicare_tax),
             retirement: items.sum(:retirement_payment),
+            total_deductions: items.sum(:total_deductions),
+            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
             net_pay: items.sum(:net_pay),
             payroll_count: items.select("DISTINCT pay_period_id").count
           }
@@ -1204,9 +1211,11 @@ module Api
 
         def employee_ytd_summary(employee, year = Date.current.year)
           ytd = employee.ytd_totals_for(year)
+          ytd_items = employee_reportable_ytd_items(employee, year)
           {
             year: year,
             gross_pay: ytd.gross_pay,
+            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
             withholding_tax: ytd.withholding_tax,
             social_security_tax: ytd.social_security_tax,
             medicare_tax: ytd.medicare_tax,
@@ -1215,12 +1224,15 @@ module Api
             tips: ytd.tips,
             tips_paid_out: ytd.tips_paid_out,
             bonus: ytd.bonus,
+            total_deductions: ytd_items.sum { |item| item.total_deductions.to_f },
+            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
             net_pay: ytd.net_pay
           }
         end
 
-        def employee_ytd_row(employee, year)
+        def employee_ytd_row(employee, year, custom_totals = nil)
           ytd = employee.employee_ytd_totals.find_by(year: year)
+          custom_totals ||= custom_ytd_totals_for_items(employee_reportable_ytd_items(employee, year))
 
           {
             employee_id: employee.id,
@@ -1230,6 +1242,7 @@ module Api
             employment_type: employee.employment_type,
             status: employee.status,
             gross_pay: ytd&.gross_pay || 0,
+            custom_earnings_total: custom_totals[:custom_earnings_total],
             withholding_tax: ytd&.withholding_tax || 0,
             social_security_tax: ytd&.social_security_tax || 0,
             medicare_tax: ytd&.medicare_tax || 0,
@@ -1238,6 +1251,8 @@ module Api
             tips: ytd&.tips || 0,
             tips_paid_out: ytd&.tips_paid_out || 0,
             bonus: ytd&.bonus || 0,
+            total_deductions: custom_totals[:total_deductions],
+            custom_deductions_total: custom_totals[:custom_deductions_total],
             net_pay: ytd&.net_pay || 0
           }
         end
@@ -1320,6 +1335,42 @@ module Api
 
         def custom_deductions_total(item)
           Array(item.custom_deductions).sum { |entry| entry["amount"].to_f }
+        end
+
+        def employee_reportable_ytd_items(employee, year)
+          reportable_period_ids = PayPeriod.reportable_committed
+                                           .where(company_id: current_company_id)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
+          employee.payroll_items
+                  .joins(:pay_period)
+                  .where(voided: false, company_id: current_company_id)
+                  .where(pay_periods: { id: reportable_period_ids })
+                  .to_a
+        end
+
+        def ytd_custom_totals_by_employee(year)
+          reportable_period_ids = PayPeriod.reportable_committed
+                                           .where(company_id: current_company_id)
+                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
+                                           .select(:id)
+
+          PayrollItem.joins(:pay_period)
+                     .where(voided: false, company_id: current_company_id)
+                     .where(pay_periods: { id: reportable_period_ids })
+                     .select(:employee_id, :total_deductions, :custom_earnings, :custom_deductions)
+                     .to_a
+                     .group_by(&:employee_id)
+                     .transform_values { |items| custom_ytd_totals_for_items(items) }
+        end
+
+        def custom_ytd_totals_for_items(items)
+          {
+            custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
+            custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
+            total_deductions: items.sum { |item| item.total_deductions.to_f }
+          }
         end
 
         def earning_row(earning)
@@ -1573,14 +1624,14 @@ module Api
         def employee_pay_history_sheets(report)
           rows = [ [
             "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
-            "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Gross Pay",
+            "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
             "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
               item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
               item[:holiday_hours], item[:pto_hours], item[:reported_tips], item[:tips_paid_out],
-              item[:bonus], item[:custom_earnings_total], item[:gross_pay], item[:withholding_tax],
+              item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
               item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
               item[:check_number]
             ]
@@ -1598,6 +1649,7 @@ module Api
             [ "Metric", "Amount" ],
             [ "Tax Year", ytd[:year] ],
             [ "Gross Pay", ytd[:gross_pay] ],
+            [ "Custom Earnings", ytd[:custom_earnings_total] ],
             [ "FIT", ytd[:withholding_tax] ],
             [ "SS Tax", ytd[:social_security_tax] ],
             [ "Medicare Tax", ytd[:medicare_tax] ],
@@ -1606,6 +1658,8 @@ module Api
             [ "Tips", ytd[:tips] ],
             [ "Tips Paid Out", ytd[:tips_paid_out] ],
             [ "Bonus", ytd[:bonus] ],
+            [ "Total Deductions", ytd[:total_deductions] ],
+            [ "Custom Deductions", ytd[:custom_deductions_total] ],
             [ "Net Pay", ytd[:net_pay] ]
           ]
         end
@@ -1624,15 +1678,15 @@ module Api
         def ytd_summary_sheets(report)
           rows = [ [
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Gross Pay",
-            "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
-            "401(k)", "Roth 401(k)", "Net Pay"
+            "Custom Earnings", "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
+            "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
           ] ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
-              emp[:gross_pay], emp[:tips], emp[:tips_paid_out], emp[:bonus],
+              emp[:gross_pay], emp[:custom_earnings_total], emp[:tips], emp[:tips_paid_out], emp[:bonus],
               emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
-              emp[:retirement], emp[:roth_retirement], emp[:net_pay]
+              emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay]
             ]
           end
           [
