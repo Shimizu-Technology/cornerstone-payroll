@@ -573,7 +573,9 @@ export function PayPeriodDetail() {
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const canImportMosa = isDraft;
+  const canEditPayPeriod = !isCommitted && !isVoided;
+  const canImportMosa = isDraft && canEditPayPeriod;
+  const canImportTimeTracking = isDraft && canEditPayPeriod;
 
   // Summaries
   const contractorItems = payrollItems.filter(i => i.employment_type === 'contractor');
@@ -761,9 +763,11 @@ export function PayPeriodDetail() {
                     Import (MoSa)
                   </Button>
                 )}
-                <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
-                  Import Time Tracking
-                </Button>
+                {canImportTimeTracking && (
+                  <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+                    Import Time Tracking
+                  </Button>
+                )}
                 <Button onClick={handleRunPayroll} disabled={processing}>
                   {processing ? 'Calculating...' : 'Calculate Payroll'}
                 </Button>

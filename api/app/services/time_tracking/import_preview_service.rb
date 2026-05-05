@@ -23,30 +23,54 @@ module TimeTracking
       warnings = processed[:rows].flat_map { |row| row[:warnings].map { |warning| warning.merge(source_user_id: row[:source_user_id], display_name: row[:source_display_name]) } }
       payload_hash = Digest::SHA256.hexdigest(JSON.generate(raw))
 
-      import = TimeTrackingImport.find_or_initialize_by(
-        pay_period: pay_period,
-        time_tracking_source: source,
-        start_date: start_date,
-        end_date: end_date,
-        source_payload_hash: payload_hash
+      import = save_preview_import!(
+        lookup_attrs: {
+          pay_period: pay_period,
+          time_tracking_source: source,
+          start_date: start_date,
+          end_date: end_date,
+          source_payload_hash: payload_hash
+        },
+        import_attrs: {
+          status: "previewed",
+          fetch_start_date: fetch_start,
+          fetch_end_date: fetch_end,
+          raw_payload: raw,
+          processed_payload: processed,
+          warnings: warnings
+        }
       )
-      raise ArgumentError, "This exact time tracking payload has already been applied" if import.persisted? && import.status == "applied"
-
-      import.assign_attributes(
-        status: "previewed",
-        fetch_start_date: fetch_start,
-        fetch_end_date: fetch_end,
-        raw_payload: raw,
-        processed_payload: processed,
-        warnings: warnings
-      )
-      import.save!
       source.update!(last_synced_at: Time.current)
 
       import
     end
 
     private
+
+    def save_preview_import!(lookup_attrs:, import_attrs:)
+      import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
+      persist_preview_import!(import, import_attrs)
+    rescue ActiveRecord::RecordNotUnique
+      import = TimeTrackingImport.find_by!(lookup_attrs)
+      persist_preview_import!(import, import_attrs)
+    end
+
+    def persist_preview_import!(import, import_attrs)
+      if import.persisted?
+        import.with_lock { assign_and_save_preview!(import, import_attrs) }
+      else
+        assign_and_save_preview!(import, import_attrs)
+      end
+
+      import
+    end
+
+    def assign_and_save_preview!(import, import_attrs)
+      raise ArgumentError, "This exact time tracking payload has already been applied" if import.status == "applied"
+
+      import.assign_attributes(import_attrs)
+      import.save!
+    end
 
     def parse_date(value, name)
       return value if value.is_a?(Date)

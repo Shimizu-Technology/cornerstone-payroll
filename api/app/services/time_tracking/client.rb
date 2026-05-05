@@ -13,8 +13,7 @@ module TimeTracking
     end
 
     def time_summary(start_date:, end_date:)
-      uri = URI.join(normalized_base_url, "/api/v1/payroll/time_summary")
-      uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
+      uri = time_summary_uri(start_date: start_date, end_date: end_date)
 
       request = Net::HTTP::Get.new(uri)
       request["Accept"] = "application/json"
@@ -40,9 +39,13 @@ module TimeTracking
 
     private
 
-    def normalized_base_url
-      base = @source.base_url.to_s.strip
-      base.end_with?("/") ? base : "#{base}/"
+    def time_summary_uri(start_date:, end_date:)
+      uri = URI.parse(@source.base_url.to_s.strip)
+      base_path = uri.path.to_s.chomp("/")
+      uri.path = "#{base_path}/api/v1/payroll/time_summary"
+      uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
+      uri.fragment = nil
+      uri
     end
   end
 end

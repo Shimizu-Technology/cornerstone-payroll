@@ -92,15 +92,28 @@ module TimeTracking
     private
 
     def persist_mapping!(row, employee)
-      TimeTrackingEmployeeMapping.find_or_initialize_by(
+      lookup_attrs = {
         company: @company,
         time_tracking_source: @source,
         source_user_id: row["source_user_id"].to_s
-      ).tap do |mapping|
-        mapping.employee = employee
-        mapping.source_email = row["source_email"]
-        mapping.source_display_name = row["source_display_name"]
-        mapping.save!
+      }
+      mapping = find_or_create_mapping!(lookup_attrs, employee)
+      mapping.update!(
+        employee: employee,
+        source_email: row["source_email"],
+        source_display_name: row["source_display_name"]
+      )
+    end
+
+    def find_or_create_mapping!(lookup_attrs, employee)
+      TimeTrackingEmployeeMapping.find_by(lookup_attrs) || create_mapping!(lookup_attrs, employee)
+    rescue ActiveRecord::RecordNotUnique
+      TimeTrackingEmployeeMapping.find_by!(lookup_attrs)
+    end
+
+    def create_mapping!(lookup_attrs, employee)
+      TimeTrackingEmployeeMapping.transaction(requires_new: true) do
+        TimeTrackingEmployeeMapping.create!(lookup_attrs.merge(employee: employee))
       end
     end
   end
