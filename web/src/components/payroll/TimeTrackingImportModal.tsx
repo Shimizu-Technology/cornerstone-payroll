@@ -24,6 +24,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const [mappings, setMappings] = useState<Map<string, number | null>>(new Map());
   const [includedRows, setIncludedRows] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
 
@@ -38,6 +39,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setStartDate(payPeriod.start_date);
     setEndDate(payPeriod.end_date);
     setAppliedCount(0);
+    setSources([]);
+    setSourceId('');
+    setSourcesLoading(true);
 
     timeTrackingSourcesApi.list()
       .then((res) => {
@@ -45,7 +49,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         setSources(active);
         setSourceId(active[0]?.id || '');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load time tracking sources'));
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load time tracking sources'))
+      .finally(() => setSourcesLoading(false));
   }, [open, payPeriod.start_date, payPeriod.end_date]);
 
   const rows: TimeTrackingPreviewRow[] = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
@@ -63,10 +68,14 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const mappedIncludedCount = mappedIncludedRows.length;
   const unmappedIncludedCount = includedPreviewRows.length - mappedIncludedCount;
   const canApply = mappedIncludedCount > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
+  const selectedSource = useMemo(
+    () => sources.find((source) => source.id === sourceId) || null,
+    [sources, sourceId]
+  );
 
   const handlePreview = async () => {
-    if (!sourceId) {
-      setError('Choose a time tracking source first.');
+    if (!selectedSource) {
+      setError('Configure an active time tracking source for this client first.');
       return;
     }
 
@@ -74,7 +83,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setError(null);
     try {
       const res = await payPeriodsApi.previewTimeTrackingImport(payPeriod.id, {
-        source_id: Number(sourceId),
+        source_id: selectedSource.id,
         start_date: startDate,
         end_date: endDate,
       });
@@ -140,7 +149,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Import Time Tracking</h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              Pull approved hours from AIRE, Cornerstone Tax, or another connected source.
+              Pull approved hours from this client’s configured time tracking source.
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">✕</button>
@@ -151,24 +160,22 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
           {step === 'select' && (
             <div className="space-y-4">
-              {sources.length === 0 ? (
+              {sourcesLoading ? (
+                <div className="rounded-lg border bg-gray-50 p-4 text-sm text-gray-600">
+                  Loading this client’s time tracking source...
+                </div>
+              ) : sources.length === 0 ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                  No active time tracking sources are configured for this company yet.
+                  No active time tracking source is configured for this client yet. Add one from Time Tracking Source settings, then come back to this pay period.
                 </div>
               ) : (
                 <>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Time tracking source
-                    <select
-                      value={sourceId}
-                      onChange={(e) => setSourceId(e.target.value ? Number(e.target.value) : '')}
-                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-                    >
-                      {sources.map((source) => (
-                        <option key={source.id} value={source.id}>{source.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  {selectedSource && (
+                    <div className="rounded-lg border bg-gray-50 p-3 text-sm">
+                      <div className="font-medium text-gray-900">Using source: {selectedSource.name}</div>
+                      <div className="mt-1 text-gray-600">This is the active source configured for this pay period’s client.</div>
+                    </div>
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block text-sm font-medium text-gray-700">
                       Start date

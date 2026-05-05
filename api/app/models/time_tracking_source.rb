@@ -12,6 +12,7 @@ class TimeTrackingSource < ApplicationRecord
   validates :name, :source_type, :base_url, :shared_secret, presence: true
   validates :source_type, inclusion: { in: SOURCE_TYPES }
   validates :name, uniqueness: { scope: :company_id }
+  validates :company_id, uniqueness: { conditions: -> { where(active: true) }, message: "can only have one active time tracking source" }, if: :active?
   validate :base_url_must_be_http_url
   validate :source_type_must_not_change, on: :update
 

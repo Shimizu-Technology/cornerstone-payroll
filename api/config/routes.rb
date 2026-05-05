@@ -112,7 +112,11 @@ Rails.application.routes.draw do
         post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
         resources :departments, only: [ :index, :create, :update ]
 
-        resources :time_tracking_sources, except: [:new, :edit]
+        resources :time_tracking_sources, except: [:new, :edit] do
+          member do
+            post :test_connection
+          end
+        end
 
         resources :pay_periods do
           member do
