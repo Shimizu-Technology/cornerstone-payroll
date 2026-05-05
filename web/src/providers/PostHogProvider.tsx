@@ -13,8 +13,11 @@ if (isPostHogEnabled && typeof window !== 'undefined') {
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
     capture_pageview: false,
-    capture_pageleave: true,
+    capture_pageleave: false,
     autocapture: false,
+    disable_session_recording: true,
+    disable_surveys: true,
+    advanced_disable_decide: true,
     loaded: (ph) => {
       if (import.meta.env.DEV) {
         ph.opt_out_capturing();
