@@ -632,14 +632,31 @@ export const taxConfigsApi = {
 
 
 // Time tracking source integrations
+export type TimeTrackingSourceType = 'aire_services' | 'cornerstone_tax' | 'custom';
+
 export interface TimeTrackingSource {
   id: number;
   company_id: number;
   name: string;
-  source_type: 'aire_services' | 'cornerstone_tax' | 'custom';
+  source_type: TimeTrackingSourceType;
   base_url: string;
   active: boolean;
   last_synced_at: string | null;
+}
+
+export interface TimeTrackingSourceCreatePayload {
+  name: string;
+  source_type: TimeTrackingSourceType;
+  base_url: string;
+  shared_secret: string;
+  active: boolean;
+}
+
+export interface TimeTrackingSourceUpdatePayload {
+  name: string;
+  base_url: string;
+  shared_secret?: string;
+  active: boolean;
 }
 
 export interface TimeTrackingWarning {
@@ -684,6 +701,11 @@ export interface TimeTrackingImportData {
 
 export const timeTrackingSourcesApi = {
   list: () => api.get<{ time_tracking_sources: TimeTrackingSource[] }>('/admin/time_tracking_sources'),
+  create: (data: TimeTrackingSourceCreatePayload) =>
+    api.post<{ time_tracking_source: TimeTrackingSource }>('/admin/time_tracking_sources', { time_tracking_source: data }),
+  update: (id: number, data: TimeTrackingSourceUpdatePayload) =>
+    api.patch<{ time_tracking_source: TimeTrackingSource }>(`/admin/time_tracking_sources/${id}`, { time_tracking_source: data }),
+  deactivate: (id: number) => api.delete<void>(`/admin/time_tracking_sources/${id}`),
 };
 
 // Pay Periods (Admin API)

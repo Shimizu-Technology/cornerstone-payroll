@@ -30,6 +30,7 @@ import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
 import { GeneralTransmittals } from '@/pages/GeneralTransmittals';
 import { InvoiceMaker } from '@/pages/InvoiceMaker';
 import PayrollReminders from '@/pages/PayrollReminders';
+import { TimeTrackingSources } from '@/pages/TimeTrackingSources';
 import { Login } from '@/pages/Login';
 import { Invite } from '@/pages/Invite';
 
@@ -212,6 +213,7 @@ function AppRoutes() {
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
         <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
+        <Route path="time-tracking-sources" element={<StaffOnlyRoute><TimeTrackingSources /></StaffOnlyRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>
 
