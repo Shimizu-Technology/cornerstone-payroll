@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -453,24 +453,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["company_id"], name: "index_general_transmittals_on_company_id"
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying]::text[])", name: "general_transmittals_status_check"
-  end
-
-  create_table "invoice_line_items", force: :cascade do |t|
-    t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
-    t.datetime "created_at", null: false
-    t.text "description", null: false
-    t.bigint "invoice_id", null: false
-    t.integer "position", default: 0, null: false
-    t.decimal "quantity", precision: 12, scale: 2, default: "1.0", null: false
-    t.decimal "rate", precision: 12, scale: 2, default: "0.0", null: false
-    t.date "service_date"
-    t.datetime "updated_at", null: false
-    t.index ["invoice_id", "position"], name: "index_invoice_line_items_on_invoice_id_and_position"
-    t.index ["invoice_id"], name: "index_invoice_line_items_on_invoice_id"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
   end
 
   create_table "invoice_chat_messages", force: :cascade do |t|
+    t.text "content", null: false
     t.datetime "created_at", null: false
     t.boolean "has_preview", default: false, null: false
     t.jsonb "image_urls", default: [], null: false
@@ -478,11 +465,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.jsonb "preview", default: {}, null: false
     t.integer "preview_version"
     t.string "role", null: false
-    t.text "content", null: false
     t.datetime "updated_at", null: false
     t.index ["invoice_chat_session_id", "created_at"], name: "idx_invoice_chat_messages_on_session_created"
     t.index ["invoice_chat_session_id"], name: "index_invoice_chat_messages_on_invoice_chat_session_id"
-    t.check_constraint "role::text = ANY (ARRAY['user'::character varying, 'assistant'::character varying]::text[])", name: "check_invoice_chat_messages_role"
+    t.check_constraint "role::text = ANY (ARRAY['user'::character varying::text, 'assistant'::character varying::text])", name: "check_invoice_chat_messages_role"
   end
 
   create_table "invoice_chat_sessions", force: :cascade do |t|
@@ -504,7 +490,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["invoice_id"], name: "index_invoice_chat_sessions_on_invoice_id"
     t.index ["invoice_recipient_id"], name: "index_invoice_chat_sessions_on_invoice_recipient_id"
     t.index ["updated_by_id"], name: "index_invoice_chat_sessions_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['active'::character varying, 'invoice_created'::character varying, 'archived'::character varying]::text[])", name: "check_invoice_chat_sessions_status"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'invoice_created'::character varying::text, 'archived'::character varying::text])", name: "check_invoice_chat_sessions_status"
+  end
+
+  create_table "invoice_line_items", force: :cascade do |t|
+    t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.bigint "invoice_id", null: false
+    t.integer "position", default: 0, null: false
+    t.decimal "quantity", precision: 12, scale: 2, default: "1.0", null: false
+    t.decimal "rate", precision: 12, scale: 2, default: "0.0", null: false
+    t.date "service_date"
+    t.datetime "updated_at", null: false
+    t.index ["invoice_id", "position"], name: "index_invoice_line_items_on_invoice_id_and_position"
+    t.index ["invoice_id"], name: "index_invoice_line_items_on_invoice_id"
   end
 
   create_table "invoice_recipients", force: :cascade do |t|
@@ -529,8 +529,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
-    t.string "email_subject"
     t.text "email_body"
+    t.string "email_subject"
     t.datetime "generated_at"
     t.date "invoice_date", null: false
     t.string "invoice_number", null: false
@@ -538,9 +538,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.text "notes"
     t.datetime "paid_at"
     t.text "payment_terms"
+    t.datetime "sent_at"
     t.date "service_period_end"
     t.date "service_period_start"
-    t.datetime "sent_at"
     t.string "status", default: "draft", null: false
     t.decimal "total_amount", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
@@ -553,7 +553,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["created_by_id"], name: "index_invoices_on_created_by_id"
     t.index ["invoice_recipient_id"], name: "index_invoices_on_invoice_recipient_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying, 'sent'::character varying, 'paid'::character varying, 'voided'::character varying, 'archived'::character varying]::text[])", name: "check_invoices_status"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text, 'sent'::character varying::text, 'paid'::character varying::text, 'voided'::character varying::text, 'archived'::character varying::text])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -638,7 +638,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
     t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
-    t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying, 'pay_period'::character varying, 'month'::character varying, 'quarter'::character varying, 'year'::character varying]::text[])", name: "non_employee_checks_payment_period_type_check"
+    t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying::text, 'pay_period'::character varying::text, 'month'::character varying::text, 'quarter'::character varying::text, 'year'::character varying::text])", name: "non_employee_checks_payment_period_type_check"
     t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
     t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
   end
@@ -711,7 +711,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
-    t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying, 'supplemental'::character varying]::text[])", name: "pay_periods_cycle_check"
+    t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
   end
 
   create_table "payroll_imports", force: :cascade do |t|
@@ -939,22 +939,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
-  create_table "time_tracking_sources", force: :cascade do |t|
-    t.boolean "active", default: true, null: false
-    t.string "base_url", null: false
-    t.bigint "company_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "last_synced_at"
-    t.string "name", null: false
-    t.string "shared_secret_ciphertext"
-    t.string "source_type", null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id", "name"], name: "index_time_tracking_sources_on_company_id_and_name", unique: true
-    t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
-    t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
-    t.index ["company_id"], name: "index_time_tracking_sources_one_active_per_company", unique: true, where: "(active = true)"
-  end
-
   create_table "time_tracking_employee_mappings", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -992,6 +976,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
     t.index ["time_tracking_source_id"], name: "index_time_tracking_imports_on_time_tracking_source_id"
   end
 
+  create_table "time_tracking_sources", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.string "base_url", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "last_synced_at"
+    t.string "name", null: false
+    t.text "shared_secret"
+    t.string "source_type", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_time_tracking_sources_on_company_id_and_name", unique: true
+    t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
+    t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
+    t.index ["company_id"], name: "index_time_tracking_sources_one_active_per_company", unique: true, where: "(active = true)"
+  end
 
   create_table "timecards", force: :cascade do |t|
     t.bigint "applied_employee_id"
