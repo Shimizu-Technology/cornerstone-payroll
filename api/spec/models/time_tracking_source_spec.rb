@@ -44,5 +44,49 @@ RSpec.describe TimeTrackingSource do
       expect(source).not_to be_valid
       expect(source.errors[:source_type]).to include("cannot be changed after creation")
     end
+
+    it "allows only one active source per company" do
+      company = create(:company)
+      described_class.create!(
+        company: company,
+        name: "Primary Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+
+      duplicate = described_class.new(
+        company: company,
+        name: "Second Source",
+        source_type: "custom",
+        base_url: "https://other.example.com",
+        shared_secret: "secret"
+      )
+
+      expect(duplicate).not_to be_valid
+      expect(duplicate.errors[:company_id]).to include("can only have one active time tracking source")
+    end
+
+    it "allows inactive source history for the same company" do
+      company = create(:company)
+      described_class.create!(
+        company: company,
+        name: "Primary Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+
+      inactive = described_class.new(
+        company: company,
+        name: "Old Source",
+        source_type: "custom",
+        base_url: "https://old.example.com",
+        shared_secret: "secret",
+        active: false
+      )
+
+      expect(inactive).to be_valid
+    end
   end
 end
