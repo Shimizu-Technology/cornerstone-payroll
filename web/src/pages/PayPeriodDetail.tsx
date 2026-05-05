@@ -24,6 +24,7 @@ import { CorrectivePaycheckModal } from '@/components/payroll/CorrectivePaycheck
 import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
+import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary } from '@/types';
@@ -198,6 +199,7 @@ export function PayPeriodDetail() {
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
@@ -759,6 +761,9 @@ export function PayPeriodDetail() {
                     Import (MoSa)
                   </Button>
                 )}
+                <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+                  Import Time Tracking
+                </Button>
                 <Button onClick={handleRunPayroll} disabled={processing}>
                   {processing ? 'Calculating...' : 'Calculate Payroll'}
                 </Button>
@@ -2079,6 +2084,14 @@ export function PayPeriodDetail() {
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
         onImportComplete={handleImportComplete}
+      />
+
+      <TimeTrackingImportModal
+        open={timeTrackingImportOpen}
+        onClose={() => setTimeTrackingImportOpen(false)}
+        payPeriod={payPeriod}
+        employees={employees}
+        onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
       />
 
       {/* Per-employee Corrective Paycheck Modal — only relevant on
