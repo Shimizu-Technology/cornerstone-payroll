@@ -53,11 +53,13 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     return !(warning.code === 'unmatched_employee' && mappings.get(row.source_user_id));
   });
   const includedPreviewRows = rows.filter((row) => includedRows.has(row.source_user_id));
-  const readyRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id) && effectiveWarningsFor(row).length === 0).length;
-  const warningCount = includedPreviewRows.reduce((sum, row) => sum + effectiveWarningsFor(row).length, 0);
+  const mappedIncludedRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id));
+  const readyRows = mappedIncludedRows.filter((row) => effectiveWarningsFor(row).length === 0).length;
+  const warningCount = mappedIncludedRows.reduce((sum, row) => sum + effectiveWarningsFor(row).length, 0);
   const excludedCount = rows.length - includedPreviewRows.length;
-  const mappedIncludedCount = includedPreviewRows.filter((row) => mappings.get(row.source_user_id)).length;
-  const canApply = mappedIncludedCount > 0 && warningCount === 0 && includedPreviewRows.every((row) => mappings.get(row.source_user_id));
+  const mappedIncludedCount = mappedIncludedRows.length;
+  const unmappedIncludedCount = includedPreviewRows.length - mappedIncludedCount;
+  const canApply = mappedIncludedCount > 0 && warningCount === 0;
 
   const handlePreview = async () => {
     if (!sourceId) {
@@ -95,11 +97,15 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setLoading(true);
     setError(null);
     try {
-      const applyMappings = rows.map((row) => ({
-        source_user_id: row.source_user_id,
-        employee_id: mappings.get(row.source_user_id) || null,
-        include: includedRows.has(row.source_user_id),
-      }));
+      const applyMappings = rows.map((row) => {
+        const employeeId = mappings.get(row.source_user_id) || null;
+
+        return {
+          source_user_id: row.source_user_id,
+          employee_id: employeeId,
+          include: includedRows.has(row.source_user_id) && Boolean(employeeId),
+        };
+      });
 
       const res = await payPeriodsApi.applyTimeTrackingImport(payPeriod.id, {
         import_id: preview.id,
@@ -182,7 +188,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="text-gray-600">
-                  {includedPreviewRows.length} included · {excludedCount} excluded · {readyRows} ready · {warningCount} warning{warningCount === 1 ? '' : 's'}
+                  {includedPreviewRows.length} included · {excludedCount} excluded · {readyRows} ready · {unmappedIncludedCount} unmapped · {warningCount} warning{warningCount === 1 ? '' : 's'}
                 </span>
                 <span className="text-xs text-gray-500">
                   OT window: {preview.fetch_start_date} → {preview.fetch_end_date}
@@ -191,7 +197,13 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
               {warningCount > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Resolve pending/open time entries or exclude rows that should not be imported. Included rows must be mapped and warning-free.
+                  Resolve pending/open time entries or exclude rows that should not be imported. Mapped rows must be warning-free.
+                </div>
+              )}
+
+              {unmappedIncludedCount > 0 && (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                  {unmappedIncludedCount} included row{unmappedIncludedCount === 1 ? '' : 's'} have no payroll employee mapping. Map them to import hours, or uncheck Include so the skip is explicit.
                 </div>
               )}
 
@@ -210,10 +222,11 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {rows.map((row) => {
                       const included = includedRows.has(row.source_user_id);
+                      const mapped = Boolean(mappings.get(row.source_user_id));
                       const effectiveWarnings = effectiveWarningsFor(row);
 
                       return (
-                      <tr key={row.source_user_id} className={!included ? 'bg-gray-50 opacity-70' : effectiveWarnings.length ? 'bg-amber-50' : ''}>
+                      <tr key={row.source_user_id} className={!included ? 'bg-gray-50 opacity-70' : (!mapped || effectiveWarnings.length) ? 'bg-amber-50' : ''}>
                         <td className="px-4 py-2 align-top">
                           <label className="inline-flex items-center gap-2 text-xs font-medium text-gray-700">
                             <input
@@ -258,6 +271,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                         <td className="px-4 py-2">
                           {!included ? (
                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">Skipped</span>
+                          ) : !mapped ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Needs mapping or will be skipped</span>
                           ) : effectiveWarnings.length ? (
                             <ul className="list-disc pl-4 text-xs text-amber-800">
                               {effectiveWarnings.map((warning, idx) => <li key={idx}>{warning.message}</li>)}

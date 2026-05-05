@@ -104,6 +104,58 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect(pay_period.payroll_items.find_by!(employee: employee).hours_worked).to eq(40.0)
     end
 
+    it "recovers when a concurrent apply creates the employee mapping first" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("concurrent-mapping-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+      lookup_attrs = {
+        company: company,
+        time_tracking_source: source,
+        source_user_id: "source-1"
+      }
+
+      mapping = TimeTrackingEmployeeMapping.create!(lookup_attrs.merge(employee: employee))
+      allow(TimeTrackingEmployeeMapping).to receive(:find_by).and_call_original
+      allow(TimeTrackingEmployeeMapping).to receive(:find_by).with(lookup_attrs).and_return(nil, mapping)
+      allow_any_instance_of(described_class).to receive(:create_mapping!).with(lookup_attrs, employee)
+        .and_raise(ActiveRecord::RecordNotUnique, "duplicate key value")
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).hours_worked).to eq(40.0)
+    end
+
     it "does not apply an import that is already applied" do
       company = create(:company)
       source = TimeTrackingSource.create!(
