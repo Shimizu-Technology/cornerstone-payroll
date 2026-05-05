@@ -88,5 +88,18 @@ RSpec.describe TimeTrackingSource do
 
       expect(inactive).to be_valid
     end
+
+    it "stores long shared secrets without truncating encrypted ciphertext" do
+      source = described_class.create!(
+        company: create(:company),
+        name: "Long Secret Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "s" * 512
+      )
+
+      expect(source.reload.shared_secret).to eq("s" * 512)
+      expect(source.shared_secret_configured?).to be(true)
+    end
   end
 end

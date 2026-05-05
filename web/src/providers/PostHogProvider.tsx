@@ -7,7 +7,8 @@ import { useLocation } from 'react-router-dom';
 const POSTHOG_KEY = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
 const POSTHOG_HOST =
   import.meta.env.VITE_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
-const isPostHogEnabled = Boolean(POSTHOG_KEY && POSTHOG_KEY !== 'YOUR_POSTHOG_KEY');
+const isPostHogExplicitlyEnabled = import.meta.env.VITE_PUBLIC_POSTHOG_ENABLED === 'true';
+const isPostHogEnabled = Boolean(isPostHogExplicitlyEnabled && POSTHOG_KEY && POSTHOG_KEY !== 'YOUR_POSTHOG_KEY');
 
 if (isPostHogEnabled && typeof window !== 'undefined') {
   posthog.init(POSTHOG_KEY, {

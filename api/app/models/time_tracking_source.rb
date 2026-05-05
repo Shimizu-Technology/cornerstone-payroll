@@ -18,6 +18,10 @@ class TimeTrackingSource < ApplicationRecord
 
   scope :active, -> { where(active: true) }
 
+  def shared_secret_configured?
+    shared_secret.present?
+  end
+
   private
 
   def base_url_must_be_http_url
