@@ -105,7 +105,10 @@ export function TimeTrackingSources() {
   const validateForm = () => {
     if (!form.name.trim()) return 'Name is required.';
     if (!form.base_url.trim()) return 'Backend base URL is required.';
-    if (!editing && !form.shared_secret.trim()) return 'Shared secret is required when creating a source.';
+    const existingSource = form.id ? sources.find((source) => source.id === form.id) : null;
+    if ((!editing || !existingSource?.shared_secret_configured) && !form.shared_secret.trim()) {
+      return 'Shared secret is required before this source can be tested or used.';
+    }
     try {
       const url = new URL(form.base_url.trim());
       if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) {
@@ -180,6 +183,11 @@ export function TimeTrackingSources() {
     setError(null);
     setSuccess(null);
     try {
+      if (!source.shared_secret_configured) {
+        setError('Shared secret is not configured in Payroll. Paste the source app PAYROLL_SHARED_SECRET, save, then test again.');
+        return;
+      }
+
       const result = await timeTrackingSourcesApi.testConnection(source.id);
       showSuccess(summarizeTestResult(result));
     } catch (err) {
@@ -258,7 +266,7 @@ export function TimeTrackingSources() {
               </label>
 
               <label className="block text-sm font-medium text-gray-700">
-                Shared secret {editing && <span className="font-normal text-gray-500">(leave blank to keep current)</span>}
+                Shared secret {editing && <span className="font-normal text-gray-500">({sources.find((source) => source.id === form.id)?.shared_secret_configured ? 'leave blank to keep current' : 'required — none saved yet'})</span>}
                 <input
                   type="password"
                   value={form.shared_secret}
@@ -318,7 +326,10 @@ export function TimeTrackingSources() {
                         <td className="px-4 py-3 font-medium text-gray-900">{source.name}</td>
                         <td className="max-w-md truncate px-4 py-3 text-gray-600">{source.base_url}</td>
                         <td className="px-4 py-3">
-                          <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
+                            {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-gray-600">{source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}</td>
                         <td className="px-4 py-3 text-right">
