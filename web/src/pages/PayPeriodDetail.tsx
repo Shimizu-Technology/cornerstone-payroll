@@ -24,6 +24,7 @@ import { CorrectivePaycheckModal } from '@/components/payroll/CorrectivePaycheck
 import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
+import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary } from '@/types';
@@ -198,6 +199,7 @@ export function PayPeriodDetail() {
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
@@ -571,7 +573,9 @@ export function PayPeriodDetail() {
   const syncConfig = syncStatus ? taxSyncStatusConfig[syncStatus] : null;
   const MAX_SYNC_ATTEMPTS = 5;
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
-  const canImportMosa = isDraft;
+  const canEditPayPeriod = !isCommitted && !isVoided;
+  const canImportMosa = isDraft && canEditPayPeriod;
+  const canImportTimeTracking = isDraft && canEditPayPeriod;
 
   // Summaries
   const contractorItems = payrollItems.filter(i => i.employment_type === 'contractor');
@@ -757,6 +761,11 @@ export function PayPeriodDetail() {
                 {canImportMosa && (
                   <Button variant="outline" onClick={() => setImportModalOpen(true)}>
                     Import (MoSa)
+                  </Button>
+                )}
+                {canImportTimeTracking && (
+                  <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
+                    Import Time Tracking
                   </Button>
                 )}
                 <Button onClick={handleRunPayroll} disabled={processing}>
@@ -2079,6 +2088,14 @@ export function PayPeriodDetail() {
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
         onImportComplete={handleImportComplete}
+      />
+
+      <TimeTrackingImportModal
+        open={timeTrackingImportOpen}
+        onClose={() => setTimeTrackingImportOpen(false)}
+        payPeriod={payPeriod}
+        employees={employees}
+        onImportComplete={() => loadPayPeriod(payPeriod.id, true)}
       />
 
       {/* Per-employee Corrective Paycheck Modal — only relevant on

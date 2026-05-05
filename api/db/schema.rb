@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_04_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_05_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -939,6 +939,59 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_04_090000) do
     t.index ["tax_year", "filing_status", "pay_frequency"], name: "idx_tax_tables_year_status_frequency", unique: true
   end
 
+  create_table "time_tracking_sources", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.string "base_url", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "last_synced_at"
+    t.string "name", null: false
+    t.string "shared_secret_ciphertext"
+    t.string "source_type", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "name"], name: "index_time_tracking_sources_on_company_id_and_name", unique: true
+    t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
+    t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
+  end
+
+  create_table "time_tracking_employee_mappings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.string "source_display_name"
+    t.string "source_email"
+    t.string "source_user_id", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "time_tracking_source_id", "source_user_id"], name: "idx_time_tracking_mappings_unique_source_user", unique: true
+    t.index ["company_id"], name: "index_time_tracking_employee_mappings_on_company_id"
+    t.index ["employee_id"], name: "index_time_tracking_employee_mappings_on_employee_id"
+    t.index ["time_tracking_source_id"], name: "idx_on_time_tracking_source_id_27610db0b2"
+  end
+
+  create_table "time_tracking_imports", force: :cascade do |t|
+    t.datetime "applied_at"
+    t.bigint "applied_by_id"
+    t.datetime "created_at", null: false
+    t.date "end_date", null: false
+    t.date "fetch_end_date", null: false
+    t.date "fetch_start_date", null: false
+    t.bigint "pay_period_id", null: false
+    t.jsonb "processed_payload", default: {}, null: false
+    t.jsonb "raw_payload", default: {}, null: false
+    t.string "source_payload_hash", null: false
+    t.date "start_date", null: false
+    t.string "status", default: "previewed", null: false
+    t.bigint "time_tracking_source_id", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["applied_by_id"], name: "index_time_tracking_imports_on_applied_by_id"
+    t.index ["pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash"], name: "idx_time_tracking_imports_idempotency", unique: true
+    t.index ["pay_period_id"], name: "index_time_tracking_imports_on_pay_period_id"
+    t.index ["time_tracking_source_id"], name: "index_time_tracking_imports_on_time_tracking_source_id"
+  end
+
+
   create_table "timecards", force: :cascade do |t|
     t.bigint "applied_employee_id"
     t.bigint "applied_payroll_item_id"
@@ -1151,6 +1204,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_04_090000) do
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
+  add_foreign_key "time_tracking_employee_mappings", "companies"
+  add_foreign_key "time_tracking_employee_mappings", "employees"
+  add_foreign_key "time_tracking_employee_mappings", "time_tracking_sources"
+  add_foreign_key "time_tracking_imports", "pay_periods"
+  add_foreign_key "time_tracking_imports", "time_tracking_sources"
+  add_foreign_key "time_tracking_imports", "users", column: "applied_by_id"
   add_foreign_key "timecards", "companies"
   add_foreign_key "timecards", "employees", column: "applied_employee_id"
   add_foreign_key "timecards", "pay_periods"

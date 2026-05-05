@@ -630,6 +630,62 @@ export const taxConfigsApi = {
     api.delete<{ message: string }>(`/admin/tax_configs/${id}`),
 };
 
+
+// Time tracking source integrations
+export interface TimeTrackingSource {
+  id: number;
+  company_id: number;
+  name: string;
+  source_type: 'aire_services' | 'cornerstone_tax' | 'custom';
+  base_url: string;
+  active: boolean;
+  last_synced_at: string | null;
+}
+
+export interface TimeTrackingWarning {
+  code: string;
+  message: string;
+  source_user_id?: string;
+  display_name?: string;
+}
+
+export interface TimeTrackingPreviewRow {
+  source_user_id: string;
+  source_email: string | null;
+  source_display_name: string;
+  employee_id: number | null;
+  employee_name: string | null;
+  match_method: string;
+  match_score: number;
+  regular_hours: number;
+  overtime_hours: number;
+  total_hours: number;
+  issues: Record<string, unknown>;
+  warnings: TimeTrackingWarning[];
+  ready: boolean;
+}
+
+export interface TimeTrackingImportData {
+  id: number;
+  status: string;
+  time_tracking_source_id: number;
+  source_name: string;
+  start_date: string;
+  end_date: string;
+  fetch_start_date: string;
+  fetch_end_date: string;
+  warnings: TimeTrackingWarning[];
+  processed_payload: {
+    ready: boolean;
+    rows: TimeTrackingPreviewRow[];
+  };
+  applied_at: string | null;
+}
+
+export const timeTrackingSourcesApi = {
+  list: () => api.get<{ time_tracking_sources: TimeTrackingSource[] }>('/admin/time_tracking_sources'),
+};
+
 // Pay Periods (Admin API)
 export interface PayPeriodListResponse {
   pay_periods: PayPeriod[];
@@ -754,6 +810,10 @@ export const payPeriodsApi = {
   },
   applyTimecardImport: (id: number, mappings: TimecardImportMapping[]) =>
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
+  previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
+    api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
+  applyTimeTrackingImport: (id: number, data: { import_id: number; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean }> }) =>
+    api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
 };
 
 export const clientPayPeriodsApi = {
