@@ -3,12 +3,13 @@
 module TimeTracking
   class EmployeeMatcher
     THRESHOLD = 0.6
+    MAX_FUZZY_CANDIDATES = 100
 
     def initialize(company:, source:)
       @company = company
       @source = source
-      @employees = Employee.active.where(company_id: company.id).to_a
-      @mappings = TimeTrackingEmployeeMapping.where(company: company, time_tracking_source: source).index_by(&:source_user_id)
+      @employee_scope = Employee.active.where(company_id: company.id)
+      @mappings = TimeTrackingEmployeeMapping.includes(:employee).where(company: company, time_tracking_source: source).index_by(&:source_user_id)
     end
 
     def match(source_employee)
@@ -18,14 +19,14 @@ module TimeTracking
 
       email = source_employee["email"].to_s.downcase.strip
       if email.present?
-        employee = @employees.find { |emp| emp.email.to_s.downcase.strip == email }
+        employee = @employee_scope.find_by("LOWER(email) = ?", email)
         return matched(employee, "email", 1.0) if employee
       end
 
       source_name = source_employee["display_name"].to_s.presence || [ source_employee["first_name"], source_employee["last_name"] ].compact.join(" ")
       best = nil
       best_score = 0.0
-      @employees.each do |employee|
+      fuzzy_candidates(source_name).each do |employee|
         score = trigram_similarity(source_name, employee.full_name)
         if score > best_score
           best_score = score
@@ -39,6 +40,26 @@ module TimeTracking
     end
 
     private
+
+    def fuzzy_candidates(name)
+      tokens = normalize(name).split.uniq
+      scope = @employee_scope.order(:last_name, :first_name).limit(MAX_FUZZY_CANDIDATES)
+      return scope.to_a if tokens.empty?
+
+      clauses = []
+      values = []
+      tokens.first(3).each do |token|
+        pattern = "%#{ActiveRecord::Base.sanitize_sql_like(token)}%"
+        clauses << "first_name ILIKE ? OR last_name ILIKE ? OR email ILIKE ?"
+        values.concat([ pattern, pattern, pattern ])
+      end
+
+      matches = @employee_scope.where(clauses.map { |clause| "(#{clause})" }.join(" OR "), *values)
+        .order(:last_name, :first_name)
+        .limit(MAX_FUZZY_CANDIDATES)
+        .to_a
+      matches.presence || scope.to_a
+    end
 
     def matched(employee, method, score)
       { employee_id: employee.id, employee_name: employee.full_name, match_method: method, match_score: score }

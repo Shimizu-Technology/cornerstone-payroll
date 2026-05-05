@@ -21,10 +21,11 @@ module Api
         end
 
         def apply
-          import = @pay_period.time_tracking_imports.find(params[:import_id])
+          permitted = apply_params
+          import = @pay_period.time_tracking_imports.find(permitted[:import_id])
           results = TimeTracking::ApplyImportService.new(
             import: import,
-            mappings: params[:mappings],
+            mappings: permitted[:mappings] || [],
             applied_by: current_user
           ).call
 
@@ -32,6 +33,8 @@ module Api
           render json: { results: results, import: import_json(import.reload) }, status: status
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Time tracking import not found" }, status: :not_found
         end
 
         private
@@ -41,6 +44,10 @@ module Api
           return if @pay_period.company_id == current_company_id
 
           render json: { error: "Pay period not found" }, status: :not_found
+        end
+
+        def apply_params
+          params.permit(:import_id, mappings: [ :source_user_id, :employee_id, :include ])
         end
 
         def import_json(import)

@@ -54,12 +54,15 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   });
   const includedPreviewRows = rows.filter((row) => includedRows.has(row.source_user_id));
   const mappedIncludedRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id));
-  const readyRows = mappedIncludedRows.filter((row) => effectiveWarningsFor(row).length === 0).length;
+  const includedEmployeeIds = mappedIncludedRows.map((row) => mappings.get(row.source_user_id)).filter((id): id is number => Boolean(id));
+  const duplicateEmployeeIds = new Set(includedEmployeeIds.filter((id, idx) => includedEmployeeIds.indexOf(id) !== idx));
+  const readyRows = mappedIncludedRows.filter((row) => effectiveWarningsFor(row).length === 0 && !duplicateEmployeeIds.has(mappings.get(row.source_user_id) as number)).length;
   const warningCount = mappedIncludedRows.reduce((sum, row) => sum + effectiveWarningsFor(row).length, 0);
+  const duplicateMappingCount = mappedIncludedRows.filter((row) => duplicateEmployeeIds.has(mappings.get(row.source_user_id) as number)).length;
   const excludedCount = rows.length - includedPreviewRows.length;
   const mappedIncludedCount = mappedIncludedRows.length;
   const unmappedIncludedCount = includedPreviewRows.length - mappedIncludedCount;
-  const canApply = mappedIncludedCount > 0 && warningCount === 0;
+  const canApply = mappedIncludedCount > 0 && warningCount === 0 && duplicateEmployeeIds.size === 0;
 
   const handlePreview = async () => {
     if (!sourceId) {
@@ -207,6 +210,12 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 </div>
               )}
 
+              {duplicateMappingCount > 0 && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {duplicateMappingCount} included row{duplicateMappingCount === 1 ? '' : 's'} map to a payroll employee that is already selected. Each payroll employee can only be imported once per preview.
+                </div>
+              )}
+
               <div className="overflow-hidden rounded-lg border">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
@@ -222,7 +231,9 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {rows.map((row) => {
                       const included = includedRows.has(row.source_user_id);
-                      const mapped = Boolean(mappings.get(row.source_user_id));
+                      const mappedEmployeeId = mappings.get(row.source_user_id);
+                      const mapped = Boolean(mappedEmployeeId);
+                      const duplicateMapping = mappedEmployeeId != null && duplicateEmployeeIds.has(mappedEmployeeId);
                       const effectiveWarnings = effectiveWarningsFor(row);
 
                       return (
@@ -273,6 +284,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                             <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">Skipped</span>
                           ) : !mapped ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Needs mapping or will be skipped</span>
+                          ) : duplicateMapping ? (
+                            <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Duplicate payroll employee</span>
                           ) : effectiveWarnings.length ? (
                             <ul className="list-disc pl-4 text-xs text-amber-800">
                               {effectiveWarnings.map((warning, idx) => <li key={idx}>{warning.message}</li>)}
