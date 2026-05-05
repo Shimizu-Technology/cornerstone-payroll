@@ -44,7 +44,9 @@ module Api
         end
 
         def source_params
-          params.require(:time_tracking_source).permit(:name, :source_type, :base_url, :shared_secret, :active)
+          permitted = [ :name, :base_url, :shared_secret, :active ]
+          permitted << :source_type if action_name == "create"
+          params.require(:time_tracking_source).permit(*permitted)
         end
 
         def source_json(source)

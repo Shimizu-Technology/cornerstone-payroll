@@ -17,6 +17,8 @@ module TimeTracking
       rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
       mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
       results = { applied: [], skipped: [], errors: [] }
+      seen_employee_ids = Set.new
+      current_import_source = import_source_key
 
       @import.with_lock do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
@@ -52,8 +54,19 @@ module TimeTracking
             next
           end
 
+          if seen_employee_ids.include?(employee.id)
+            results[:errors] << { source_user_id: source_user_id, employee_id: employee.id, error: "Duplicate payroll employee mapping" }
+            next
+          end
+          seen_employee_ids.add(employee.id)
+
           persist_mapping!(row, employee)
           item = @pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
+          if item.persisted? && item.import_source.to_s.start_with?("time_tracking:")
+            results[:errors] << { source_user_id: source_user_id, employee_id: employee.id, error: "Employee already has imported time tracking hours in this pay period" }
+            next
+          end
+
           if item.new_record?
             item.company_id = @company.id
             item.employment_type = employee.employment_type
@@ -68,7 +81,7 @@ module TimeTracking
           item.overtime_hours = row["overtime_hours"].to_f
           item.holiday_hours = preserved_holiday_hours
           item.pto_hours = preserved_pto_hours
-          item.import_source = "time_tracking:#{@source.source_type}:#{@source.id}"
+          item.import_source = current_import_source
           item.save!
 
           results[:applied] << {
@@ -90,6 +103,10 @@ module TimeTracking
     end
 
     private
+
+    def import_source_key
+      "time_tracking:#{@source.source_type}:#{@source.id}"
+    end
 
     def persist_mapping!(row, employee)
       lookup_attrs = {

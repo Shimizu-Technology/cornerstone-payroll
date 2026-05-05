@@ -156,6 +156,113 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect(pay_period.payroll_items.find_by!(employee: employee).hours_worked).to eq(40.0)
     end
 
+    it "rejects duplicate source rows mapped to the same payroll employee" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("duplicate-employee-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            },
+            {
+              "source_user_id" => "source-2",
+              "source_email" => "worker-alias@example.com",
+              "source_display_name" => "Worker Alias",
+              "employee_id" => employee.id,
+              "regular_hours" => 8.0,
+              "overtime_hours" => 2.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(source_user_id: "source-2", employee_id: employee.id, error: "Duplicate payroll employee mapping")
+      )
+      expect(import.reload.status).to eq("previewed")
+      expect(pay_period.payroll_items.find_by(employee: employee)).to be_nil
+    end
+
+    it "does not overwrite payroll items imported from another time tracking import" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("cross-import-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+      item = create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        hours_worked: 32.0,
+        overtime_hours: 2.0,
+        import_source: "time_tracking:cornerstone_tax:999"
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(source_user_id: "source-1", employee_id: employee.id, error: "Employee already has imported time tracking hours in this pay period")
+      )
+      expect(import.reload.status).to eq("previewed")
+      expect(item.reload.hours_worked).to eq(32.0)
+      expect(item.overtime_hours).to eq(2.0)
+    end
+
     it "does not apply an import that is already applied" do
       company = create(:company)
       source = TimeTrackingSource.create!(
