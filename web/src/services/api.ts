@@ -641,6 +641,7 @@ export interface TimeTrackingSource {
   source_type: TimeTrackingSourceType;
   base_url: string;
   active: boolean;
+  shared_secret_configured: boolean;
   last_synced_at: string | null;
 }
 

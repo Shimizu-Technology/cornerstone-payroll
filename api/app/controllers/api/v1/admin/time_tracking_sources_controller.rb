@@ -42,6 +42,14 @@ module Api
         end
 
         def test_connection
+          unless @source.shared_secret.present?
+            render json: {
+              ok: false,
+              error: "Shared secret is not configured in Payroll. Paste the source app's PAYROLL_SHARED_SECRET, save the source, then test again."
+            }, status: :unprocessable_entity
+            return
+          end
+
           payload = TimeTracking::Client.new(@source).time_summary(
             start_date: test_connection_date,
             end_date: test_connection_date
@@ -99,6 +107,7 @@ module Api
             source_type: source.source_type,
             base_url: source.base_url,
             active: source.active,
+            shared_secret_configured: source.shared_secret.present?,
             last_synced_at: source.last_synced_at,
             created_at: source.created_at,
             updated_at: source.updated_at
