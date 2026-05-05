@@ -112,6 +112,8 @@ Rails.application.routes.draw do
         post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
         resources :departments, only: [ :index, :create, :update ]
 
+        resources :time_tracking_sources, except: [:new, :edit]
+
         resources :pay_periods do
           member do
             post :run_payroll
@@ -134,6 +136,8 @@ Rails.application.routes.draw do
             # Timecard OCR CSV import
             post :preview_timecard_import, to: "timecard_imports#preview"
             post :apply_timecard_import, to: "timecard_imports#apply"
+            post :preview_time_tracking_import, to: "time_tracking_imports#preview"
+            post :apply_time_tracking_import, to: "time_tracking_imports#apply"
           end
 
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
