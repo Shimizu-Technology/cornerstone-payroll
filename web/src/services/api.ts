@@ -652,6 +652,16 @@ export interface TimeTrackingSourceCreatePayload {
   active: boolean;
 }
 
+export interface TimeTrackingSourceTestResponse {
+  ok: boolean;
+  message?: string;
+  source?: string;
+  generated_at?: string;
+  employee_count?: number;
+  summary?: Record<string, unknown>;
+  error?: string;
+}
+
 export interface TimeTrackingSourceUpdatePayload {
   name: string;
   base_url: string;
@@ -706,6 +716,8 @@ export const timeTrackingSourcesApi = {
   update: (id: number, data: TimeTrackingSourceUpdatePayload) =>
     api.patch<{ time_tracking_source: TimeTrackingSource }>(`/admin/time_tracking_sources/${id}`, { time_tracking_source: data }),
   deactivate: (id: number) => api.delete<void>(`/admin/time_tracking_sources/${id}`),
+  testConnection: (id: number) =>
+    api.post<TimeTrackingSourceTestResponse>(`/admin/time_tracking_sources/${id}/test_connection`),
 };
 
 // Pay Periods (Admin API)

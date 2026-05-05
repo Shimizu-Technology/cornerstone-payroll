@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_05_123000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_05_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -952,6 +952,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_05_123000) do
     t.index ["company_id", "name"], name: "index_time_tracking_sources_on_company_id_and_name", unique: true
     t.index ["company_id", "source_type"], name: "index_time_tracking_sources_on_company_id_and_source_type"
     t.index ["company_id"], name: "index_time_tracking_sources_on_company_id"
+    t.index ["company_id"], name: "index_time_tracking_sources_one_active_per_company", unique: true, where: "(active = true)"
   end
 
   create_table "time_tracking_employee_mappings", force: :cascade do |t|
