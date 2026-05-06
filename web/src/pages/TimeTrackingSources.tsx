@@ -11,6 +11,7 @@ import type { TimeTrackingSource, TimeTrackingSourceCreatePayload, TimeTrackingS
 interface FormState {
   id?: number;
   name: string;
+  source_type: TimeTrackingSource['source_type'];
   base_url: string;
   shared_secret: string;
   active: boolean;
@@ -18,10 +19,25 @@ interface FormState {
 
 const blankForm: FormState = {
   name: '',
+  source_type: 'aire_services',
   base_url: '',
   shared_secret: '',
   active: true,
 };
+
+const sourceTypeOptions: Array<{ value: TimeTrackingSource['source_type']; label: string; hint: string }> = [
+  { value: 'aire_services', label: 'AIRE Services Guam', hint: 'Use for the AIRE time clock.' },
+  { value: 'cornerstone_tax', label: 'Cornerstone Tax', hint: 'Use for Cornerstone Tax staff time.' },
+  { value: 'custom', label: 'Custom compatible source', hint: 'Use only for another app that implements the payroll time summary API.' },
+];
+
+function reconcileSavedSource(sources: TimeTrackingSource[], source: TimeTrackingSource) {
+  const next = sources
+    .filter((item) => item.id !== source.id)
+    .map((item) => source.active ? { ...item, active: false } : item);
+  next.push(source);
+  return next.sort((a, b) => a.name.localeCompare(b.name));
+}
 
 function normalizeForm(source?: TimeTrackingSource): FormState {
   if (!source) return { ...blankForm };
@@ -29,6 +45,7 @@ function normalizeForm(source?: TimeTrackingSource): FormState {
   return {
     id: source.id,
     name: source.name,
+    source_type: source.source_type,
     base_url: source.base_url,
     shared_secret: '',
     active: source.active,
@@ -140,19 +157,21 @@ export function TimeTrackingSources() {
       if (editing && form.id) {
         const payload: TimeTrackingSourceUpdatePayload = { ...basePayload };
         if (form.shared_secret.trim()) payload.shared_secret = form.shared_secret.trim();
-        await timeTrackingSourcesApi.update(form.id, payload);
+        const res = await timeTrackingSourcesApi.update(form.id, payload);
+        setSources((prev) => reconcileSavedSource(prev, res.time_tracking_source));
+        setForm(normalizeForm(res.time_tracking_source));
         showSuccess('Time tracking source updated for this client.');
       } else {
         const payload: TimeTrackingSourceCreatePayload = {
           ...basePayload,
-          source_type: 'custom',
+          source_type: form.source_type,
           shared_secret: form.shared_secret.trim(),
         };
-        await timeTrackingSourcesApi.create(payload);
+        const res = await timeTrackingSourcesApi.create(payload);
+        setSources((prev) => reconcileSavedSource(prev, res.time_tracking_source));
+        setForm(normalizeForm(res.time_tracking_source));
         showSuccess('Time tracking source created for this client.');
       }
-
-      await loadSources();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save time tracking source');
     } finally {
@@ -183,11 +202,6 @@ export function TimeTrackingSources() {
     setError(null);
     setSuccess(null);
     try {
-      if (!source.shared_secret_configured) {
-        setError('Shared secret is not configured in Payroll. Paste the source app PAYROLL_SHARED_SECRET, save, then test again.');
-        return;
-      }
-
       const result = await timeTrackingSourcesApi.testConnection(source.id);
       showSuccess(summarizeTestResult(result));
     } catch (err) {
@@ -253,6 +267,25 @@ export function TimeTrackingSources() {
               </label>
 
               <label className="block text-sm font-medium text-gray-700">
+                Source system
+                <select
+                  value={form.source_type}
+                  onChange={(e) => setForm((prev) => ({ ...prev, source_type: e.target.value as TimeTrackingSource['source_type'] }))}
+                  disabled={editing}
+                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
+                >
+                  {sourceTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-gray-500">
+                  {editing
+                    ? 'Create a new source if this client needs a different source system.'
+                    : sourceTypeOptions.find((option) => option.value === form.source_type)?.hint}
+                </span>
+              </label>
+
+              <label className="block text-sm font-medium text-gray-700">
                 Backend base URL
                 <input
                   value={form.base_url}
@@ -314,6 +347,7 @@ export function TimeTrackingSources() {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500">Name</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500">System</th>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500">Backend URL</th>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500">Status</th>
                       <th className="px-4 py-2 text-left text-xs font-medium uppercase text-gray-500">Last sync</th>
@@ -324,6 +358,9 @@ export function TimeTrackingSources() {
                     {sources.map((source) => (
                       <tr key={source.id}>
                         <td className="px-4 py-3 font-medium text-gray-900">{source.name}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {sourceTypeOptions.find((option) => option.value === source.source_type)?.label || source.source_type}
+                        </td>
                         <td className="max-w-md truncate px-4 py-3 text-gray-600">{source.base_url}</td>
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">

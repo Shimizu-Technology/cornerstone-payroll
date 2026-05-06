@@ -5,6 +5,7 @@ module Api
     module Admin
       class TimeTrackingSourcesController < BaseController
         before_action :set_source, only: [ :show, :update, :destroy, :test_connection ]
+        before_action :disable_http_caching
 
         def index
           sources = TimeTrackingSource.where(company_id: current_company_id).order(:name)
@@ -74,6 +75,11 @@ module Api
         end
 
         private
+
+        def disable_http_caching
+          response.headers["Cache-Control"] = "no-store"
+          response.headers["Pragma"] = "no-cache"
+        end
 
         def set_source
           @source = TimeTrackingSource.find_by!(id: params[:id], company_id: current_company_id)
