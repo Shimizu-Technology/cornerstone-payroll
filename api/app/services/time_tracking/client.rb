@@ -28,7 +28,9 @@ module TimeTracking
         raise Error, "#{@source.name} returned #{response.code}: #{response.body.to_s.truncate(300)}"
       end
 
-      JSON.parse(response.body)
+      payload = JSON.parse(response.body)
+      validate_source_identity!(payload)
+      payload
     rescue JSON::ParserError => e
       raise Error, "#{@source.name} returned invalid JSON: #{e.message}"
     rescue Timeout::Error, Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout => e
@@ -46,6 +48,20 @@ module TimeTracking
       uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
       uri.fragment = nil
       uri
+    end
+
+    def validate_source_identity!(payload)
+      return if @source.source_type == "custom"
+
+      if payload["source"].blank?
+        Rails.logger.warn("#{@source.name} time tracking response omitted source identity; accepting for rollout compatibility")
+        return
+      end
+
+      returned_source = payload["source"].to_s
+      return if returned_source == @source.source_type
+
+      raise Error, "#{@source.name} responded as #{returned_source.presence || 'an unknown source'}, expected #{@source.source_type}"
     end
   end
 end
