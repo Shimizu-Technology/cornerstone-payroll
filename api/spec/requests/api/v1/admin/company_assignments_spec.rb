@@ -148,7 +148,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
       }.not_to change { managed_user.company_assignments.reload.map(&:company_id) }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include("Company must belong to the user's organization")
+      expect(response.parsed_body.fetch("error")).to eq("Company must belong to the user's organization")
     end
   end
 end

@@ -26,5 +26,15 @@ RSpec.describe CompanyAssignment, type: :model do
       expect(assignment).not_to be_valid
       expect(assignment.errors[:company]).to include("must belong to the user's organization")
     end
+
+    it "does not treat two missing organization ids as a valid tenant match" do
+      company = build(:company, organization: nil)
+      user = build(:user, company: company, organization: nil, role: "accountant")
+
+      assignment = described_class.new(user: user, company: company)
+
+      expect(assignment).not_to be_valid
+      expect(assignment.errors[:company]).to include("must belong to the user's organization")
+    end
   end
 end

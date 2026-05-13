@@ -11,7 +11,7 @@ class CompanyAssignment < ApplicationRecord
 
   def company_must_belong_to_user_organization
     return if user.blank? || company.blank?
-    return if user.organization_id == company.organization_id
+    return if user.organization_id.present? && user.organization_id == company.organization_id
 
     errors.add(:company, "must belong to the user's organization")
   end
