@@ -15,7 +15,11 @@ class ApplicationController < ActionController::API
   def current_user
     return super unless auth_disabled?
 
-    @current_user ||= User.find_by(role: "admin") || User.first
+    @current_user ||= User.where(role: %w[super_admin admin org_admin]).first || User.first
+  end
+
+  def current_organization
+    current_user&.organization
   end
 
   def current_company
@@ -31,13 +35,19 @@ class ApplicationController < ActionController::API
   end
 
   def require_admin!
-    unless current_user&.admin?
+    unless current_user&.organization_admin?
       render json: { error: "Admin access required" }, status: :forbidden
     end
   end
 
+  def require_super_admin!
+    unless current_user&.super_admin?
+      render json: { error: "Super admin access required" }, status: :forbidden
+    end
+  end
+
   def require_manager_or_admin!
-    unless current_user&.admin? || current_user&.manager?
+    unless current_user&.organization_admin? || current_user&.manager?
       render json: { error: "Manager or admin access required" }, status: :forbidden
     end
   end

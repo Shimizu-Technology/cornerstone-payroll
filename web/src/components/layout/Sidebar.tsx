@@ -210,7 +210,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const { user, signOut } = useAuth();
   const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);

@@ -19,19 +19,59 @@ RSpec.describe User, type: :model do
   end
 
   describe "#accessible_company_ids" do
-    it "memoizes the admin company lookup" do
-      company = create(:company)
+    it "scopes legacy admins to companies in their organization" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      sibling_company = create(:company, organization: organization)
+      foreign_company = create(:company)
       user = User.create!(
         company: company,
+        organization: organization,
         email: "admin-access@example.com",
         name: "Admin",
         role: "admin",
         active: true
       )
 
-      expect(Company).to receive(:ids).once.and_return([company.id])
+      expect(user.accessible_company_ids).to match_array([company.id, sibling_company.id])
+      expect(user.accessible_company_ids).not_to include(foreign_company.id)
+    end
 
-      2.times { expect(user.accessible_company_ids).to eq([company.id]) }
+    it "allows super admins to access all companies" do
+      company = create(:company)
+      foreign_company = create(:company)
+      user = User.create!(
+        company: company,
+        organization: company.organization,
+        email: "super-admin-access@example.com",
+        name: "Super Admin",
+        role: "super_admin",
+        active: true
+      )
+
+      expect(user.accessible_company_ids).to match_array([company.id, foreign_company.id])
+    end
+
+    it "ignores stale assignments to companies outside the user's organization" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      assigned_company = create(:company, organization: organization)
+      foreign_company = create(:company)
+      user = create(:user, company: company, organization: organization, role: "accountant")
+      CompanyAssignment.create!(user: user, company: assigned_company)
+      CompanyAssignment.create!(user: user, company: foreign_company)
+
+      expect(user.accessible_company_ids).to eq([assigned_company.id])
+    end
+
+    it "rejects users whose home company belongs to another organization" do
+      company = create(:company)
+      other_org = create(:organization)
+
+      user = build(:user, company: company, organization: other_org)
+
+      expect(user).not_to be_valid
+      expect(user.errors[:company]).to include("must belong to the user's organization")
     end
   end
 end

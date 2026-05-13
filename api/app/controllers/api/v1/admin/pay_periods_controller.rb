@@ -1196,9 +1196,10 @@ module Api
           User.left_outer_joins(:company_assignments)
               .where(id: user_ids)
               .where(
-                "users.company_id = :company_id OR users.role = :admin_role OR company_assignments.company_id = :company_id",
+                "(users.organization_id = :organization_id AND users.role IN (:admin_roles)) OR users.company_id = :company_id OR company_assignments.company_id = :company_id",
                 company_id: current_company_id,
-                admin_role: User.roles.fetch("admin")
+                organization_id: current_user&.organization_id,
+                admin_roles: User.roles.values_at("admin", "org_admin", "super_admin").compact
               )
               .distinct
               .pluck("users.id", "users.name")

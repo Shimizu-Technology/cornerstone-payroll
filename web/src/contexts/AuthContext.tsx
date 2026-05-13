@@ -8,6 +8,8 @@ interface User {
   email: string;
   name: string;
   role: string;
+  organization_id?: number;
+  organization_name?: string;
   company_id: number;
   company_name: string;
   assigned_company_ids: number[];
@@ -34,6 +36,8 @@ function mapAuthUser(user: AuthResponseUser): User {
     email: user.email,
     name: user.name,
     role: user.role,
+    organization_id: user.organization_id,
+    organization_name: user.organization_name,
     company_id: user.company_id,
     company_name: user.company_name,
     assigned_company_ids: user.assigned_company_ids || [],
@@ -43,6 +47,10 @@ function mapAuthUser(user: AuthResponseUser): User {
 // Dev mode bypass — when VITE_CLERK_PUBLISHABLE_KEY is not set
 const isDevMode = !import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const authEnabled = import.meta.env.VITE_AUTH_ENABLED === 'true';
+
+function isAdminRole(role?: string) {
+  return role === 'admin' || role === 'org_admin' || role === 'super_admin';
+}
 
 function DevAuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -74,8 +82,8 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
-        isAdmin: user?.role === 'admin',
-        isManager: user?.role === 'manager' || user?.role === 'admin',
+        isAdmin: isAdminRole(user?.role),
+        isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
         signOut: async () => setUser(null),
@@ -172,8 +180,8 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading: !isLoaded || isLoading,
         isAuthenticated: !!user && isSignedIn === true,
-        isAdmin: user?.role === 'admin',
-        isManager: user?.role === 'manager' || user?.role === 'admin',
+        isAdmin: isAdminRole(user?.role),
+        isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
         signOut: async () => {

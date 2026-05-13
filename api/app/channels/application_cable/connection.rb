@@ -12,7 +12,7 @@ module ApplicationCable
     private
 
     def find_verified_user
-      return User.find_by(role: "admin") || User.first if auth_disabled?
+      return User.where(role: %w[super_admin admin org_admin]).first || User.first if auth_disabled?
 
       payload = cable_ticket_payload
       user = User.find_by(id: payload&.dig("user_id"))

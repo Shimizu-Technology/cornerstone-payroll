@@ -96,6 +96,6 @@ class ClientDocumentUploadService
   end
 
   def shared_by_staff?
-    @current_user&.admin? || @current_user&.manager? || @current_user&.accountant?
+    @current_user&.staff_member?
   end
 end

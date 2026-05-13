@@ -18,7 +18,7 @@ module Api
         skip_before_action :enforce_company_access!, only: [ :index ]
 
         # GET /api/v1/admin/companies
-        # Admins see all companies; non-admin staff see only accessible ones.
+        # Organization admins see their firm's companies; non-admin staff see assigned clients.
         def index
           accessible_ids = current_user&.accessible_company_ids || []
           companies = Company.where(id: accessible_ids).order(:name)
@@ -36,9 +36,9 @@ module Api
                 active_employee_counts: active_employee_counts
               )
             end,
-            can_manage_clients: current_user&.admin? || false,
+            can_manage_clients: current_user&.organization_admin? || false,
             can_view_client_management: staff_client_access?,
-            can_switch_company: current_user&.admin? || company_ids.length > 1,
+            can_switch_company: current_user&.organization_admin? || company_ids.length > 1,
             current_company_id: current_company_id
           }
         end
@@ -55,11 +55,12 @@ module Api
 
         # POST /api/v1/admin/companies
         def create
-          unless current_user&.admin?
+          unless current_user&.organization_admin?
             return render json: { error: "Only admins can create companies" }, status: :forbidden
           end
 
           company = Company.new(company_params)
+          company.organization = current_user.organization unless current_user.super_admin? && company.organization.present?
           company.check_stock_type ||= "top_check"
           company.check_offset_x ||= 0.0
           company.check_offset_y ||= 0.0
@@ -77,11 +78,15 @@ module Api
         # PATCH/PUT /api/v1/admin/companies/:id
         def update
           company = Company.find(params[:id])
-          unless current_user&.admin? || staff_can_update_company?(company)
+          unless current_user&.can_access_company?(company.id)
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          update_params = current_user&.admin? ? company_params : staff_company_params
+          unless current_user&.organization_admin? || staff_can_update_company?(company)
+            return render json: { error: "Not authorized" }, status: :forbidden
+          end
+
+          update_params = current_user&.organization_admin? ? company_params : staff_company_params
           if update_params.blank?
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
@@ -143,14 +148,15 @@ module Api
             )
           end
 
-          payload[:can_update] = current_user&.admin? || staff_can_update_company?(company)
-          payload[:editable_fields] = current_user&.admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          payload[:organization_id] = company.organization_id
+          payload[:can_update] = current_user&.organization_admin? || staff_can_update_company?(company)
+          payload[:editable_fields] = current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
 
           payload
         end
 
         def staff_client_access?
-          current_user&.admin? || current_user&.accountant? || current_user&.manager?
+          current_user&.organization_admin? || current_user&.accountant? || current_user&.manager?
         end
 
         def staff_can_update_company?(company)

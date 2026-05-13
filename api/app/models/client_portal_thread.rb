@@ -44,7 +44,7 @@ class ClientPortalThread < ApplicationRecord
   end
 
   def self.staff_user?(user)
-    user&.admin? || user&.manager? || user&.accountant?
+    user&.staff_member?
   end
 
   private

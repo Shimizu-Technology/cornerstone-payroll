@@ -33,7 +33,7 @@ export interface Department {
 // User & Auth
 // ----------------
 
-export type UserRole = 'admin' | 'manager' | 'employee' | 'accountant' | 'client';
+export type UserRole = 'super_admin' | 'org_admin' | 'admin' | 'manager' | 'employee' | 'accountant' | 'client';
 
 export interface AssignedCompanySummary {
   id: number;
@@ -46,6 +46,8 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  organization_id?: number;
+  organization_name?: string;
   company_id?: number;
   active?: boolean;
   assigned_company_ids?: number[];
