@@ -58,5 +58,30 @@ RSpec.describe "Api::V1::Auth", type: :request do
       )
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
     end
+
+    it "ignores an active company header outside the current user's organization" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      foreign_company = create(:company)
+      user = User.create!(
+        company: company,
+        organization: organization,
+        email: "auth-org-scope@example.com",
+        name: "Auth Org Scope",
+        role: "admin",
+        active: true
+      )
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
+
+      get "/api/v1/auth/me", headers: { "X-Company-Id" => foreign_company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("user")).to include(
+        "organization_id" => organization.id,
+        "organization_name" => organization.name,
+        "company_id" => company.id,
+        "home_company_id" => company.id
+      )
+    end
   end
 end

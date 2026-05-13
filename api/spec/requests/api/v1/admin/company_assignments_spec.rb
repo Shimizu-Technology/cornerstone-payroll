@@ -34,6 +34,16 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
   let!(:foreign_staff_company) { create(:company, organization: foreign_organization, name: "Foreign Staff HQ") }
   let!(:foreign_client_company) { create(:company, organization: foreign_organization, name: "Foreign Client") }
+  let!(:super_admin_user) do
+    User.create!(
+      company: staff_company,
+      organization: organization,
+      email: "assignment-super-admin@example.com",
+      name: "Assignment Super Admin",
+      role: "super_admin",
+      active: true
+    )
+  end
   let!(:foreign_user) do
     User.create!(
       company: foreign_staff_company,
@@ -126,6 +136,19 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
       expect(response).to have_http_status(:not_found)
       expect(response.parsed_body.fetch("error")).to eq("User not found")
+    end
+
+    it "prevents super admins from assigning a user to another organization's client" do
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user_id).and_return(super_admin_user.id)
+
+      expect {
+        put "/api/v1/admin/company_assignments/bulk_update",
+          params: { user_id: managed_user.id, company_ids: [foreign_client_company.id] }
+      }.not_to change { managed_user.company_assignments.reload.map(&:company_id) }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Company must belong to the user's organization")
     end
   end
 end
