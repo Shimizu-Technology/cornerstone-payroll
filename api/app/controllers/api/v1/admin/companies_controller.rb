@@ -61,20 +61,16 @@ module Api
 
           company = Company.new(company_params)
           company.organization = current_user.organization unless current_user.super_admin? && company.organization.present?
-          if company.organization&.client_limit_reached?
-            return render json: { errors: [ "Client limit reached for this organization" ] }, status: :unprocessable_entity
-          end
 
           company.check_stock_type ||= "top_check"
           company.check_offset_x ||= 0.0
           company.check_offset_y ||= 0.0
           company.next_check_number ||= 1001
 
-          if company.save
-            render json: { company: company_payload(company, detailed: true) }, status: :created
-          else
-            render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
-          end
+          company.organization.save_company_within_client_limit!(company)
+          render json: { company: company_payload(company, detailed: true) }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique => e
           render json: { errors: [ "EIN is already taken by another company" ] }, status: :unprocessable_entity
         end
