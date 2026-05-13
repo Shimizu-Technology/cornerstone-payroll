@@ -246,11 +246,11 @@ module Api
         end
 
         def organization_admin_roles
-          User.roles.values_at("admin", "org_admin", "super_admin").compact
+          User.roles.values_at("admin", "org_admin").compact
         end
 
         def organization_admin_role?(role)
-          %w[admin org_admin super_admin].include?(role)
+          %w[admin org_admin].include?(role)
         end
 
         def role_manageable?(role)

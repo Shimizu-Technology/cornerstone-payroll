@@ -136,7 +136,7 @@ module ClerkAuthenticatable
     user = User.find_by("LOWER(email) = ?", email)
     if user
       attrs = { clerk_id: payload["sub"] }
-      attrs[:organization] = user.company.organization if user.organization_id.blank? && user.company.present?
+      attrs[:organization_id] = Company.where(id: user.company_id).pick(:organization_id) if user.organization_id.blank? && user.company_id.present?
       attrs[:invitation_status] = "accepted" if user.invitation_pending?
       attrs[:name] = clerk_name if clerk_name.present?
       user.update!(attrs)
