@@ -67,6 +67,11 @@ module Api
           company.check_offset_y ||= 0.0
           company.next_check_number ||= 1001
 
+          unless company.organization
+            company.valid?
+            return render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
+          end
+
           company.organization.save_company_within_client_limit!(company)
           render json: { company: company_payload(company, detailed: true) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
