@@ -460,6 +460,57 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/companies/check_layout" do
+    it "returns the resolved layout used by the check PDF generator" do
+      company.update!(
+        check_offset_x: 0.125,
+        check_offset_y: -0.025,
+        check_layout_config: {
+          check_face: {
+            date: { x: 481.5 }
+          }
+        }
+      )
+
+      get "/api/v1/admin/companies/check_layout"
+
+      expect(response).to have_http_status(:ok)
+      layout = response.parsed_body.fetch("check_layout")
+
+      expect(layout).to include("check_stock_type" => "bottom_check")
+      expect(layout).to include("default_layout_config", "resolved_layout_config", "page")
+      expect(layout.dig("resolved_layout_config", "check_face", "date", "x")).to eq(481.5)
+      expect(layout.dig("resolved_layout_config", "check_face", "amount", "x")).to eq(CheckGenerator.default_layout_config.dig("check_face", "amount", "x"))
+      expect(layout.dig("page", "check_section_bottom")).to eq(0)
+      expect(layout.dig("page", "offset_x_points")).to be_within(0.001).of(9.0)
+    end
+
+    it "returns First Hawaiian 4-up layout metadata for 4-up stock" do
+      company.update!(check_stock_type: "first_hawaiian_4up")
+
+      get "/api/v1/admin/companies/check_layout"
+
+      expect(response).to have_http_status(:ok)
+      layout = response.parsed_body.fetch("check_layout")
+
+      expect(layout.fetch("check_stock_type")).to eq("first_hawaiian_4up")
+      expect(layout.dig("resolved_layout_config", "register", "payee", "x")).to be_present
+      expect(layout.dig("page", "slot_count")).to eq(4)
+    end
+
+    it "can preview a selected stock type without saving the company" do
+      company.update!(check_stock_type: "bottom_check")
+
+      get "/api/v1/admin/companies/check_layout", params: { check_stock_type: "first_hawaiian_4up" }
+
+      expect(response).to have_http_status(:ok)
+      layout = response.parsed_body.fetch("check_layout")
+      expect(layout.fetch("check_stock_type")).to eq("first_hawaiian_4up")
+      expect(layout.dig("page", "slot_count")).to eq(4)
+      expect(company.reload.check_stock_type).to eq("bottom_check")
+    end
+  end
+
   describe "PATCH /api/v1/admin/companies/check_settings" do
     it "updates offset, stock type, and layout overrides" do
       patch "/api/v1/admin/companies/check_settings",

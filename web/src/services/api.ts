@@ -316,7 +316,9 @@ import type {
   User,
   CheckListResponse,
   CheckItem,
+  CheckLayoutResponse,
   CheckSettings,
+  CheckStockType,
   W2GuReportResponse,
   W2GuPreflightResponse,
   W2GuFilingReadinessResponse,
@@ -1702,6 +1704,11 @@ export const checksApi = {
   // Company check settings
   getSettings: () =>
     api.get<{ check_settings: CheckSettings }>('/admin/companies/check_settings'),
+
+  getLayout: (checkStockType?: CheckStockType) =>
+    api.get<{ check_layout: CheckLayoutResponse }>(
+      `/admin/companies/check_layout${checkStockType ? `?check_stock_type=${encodeURIComponent(checkStockType)}` : ''}`
+    ),
 
   updateSettings: (settings: Partial<CheckSettings>) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/check_settings', settings),

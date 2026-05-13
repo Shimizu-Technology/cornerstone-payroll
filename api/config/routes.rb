@@ -56,6 +56,7 @@ Rails.application.routes.draw do
         # `/admin/companies/check_settings` do not get swallowed by `:id`.
         get   "companies/check_settings",     to: "checks#check_settings"
         patch "companies/check_settings",     to: "checks#update_check_settings"
+        get   "companies/check_layout",       to: "checks#check_layout"
         patch "companies/next_check_number",  to: "checks#update_next_check_number"
         get   "companies/alignment_test_pdf", to: "checks#alignment_test_pdf"
 

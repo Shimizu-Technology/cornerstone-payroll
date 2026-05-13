@@ -24,7 +24,7 @@ module Api
       class ChecksController < BaseController
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
-        before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
+        before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
         # GET /api/v1/admin/pay_periods/:pay_period_id/checks
@@ -449,6 +449,15 @@ module Api
         end
 
         # -----------------------------------------------------------------------
+        # GET /api/v1/admin/companies/:company_id/check_layout
+        # Returns the generator-resolved layout so the UI can edit the same
+        # field coordinates used by the PDF renderer.
+        # -----------------------------------------------------------------------
+        def check_layout
+          render json: { check_layout: company_check_layout_json(layout_preview_company(@company)) }
+        end
+
+        # -----------------------------------------------------------------------
         # PATCH /api/v1/admin/companies/:company_id/next_check_number
         # Admin-only: manually set the next blank check number.
         # If checks already exist, the next number can move forward but cannot
@@ -644,6 +653,37 @@ module Api
             auto_create_fit_check: company.auto_create_fit_check,
             check_layout_config: company.check_layout_config || {}
           }
+        end
+
+        def company_check_layout_json(company)
+          if company.first_hawaiian_4up_checks?
+            generator = FirstHawaiianFourUpCheckGenerator
+            layout = generator.resolved_layout_for(company)
+            page = generator.page_layout_metadata(company)
+          else
+            generator = CheckGenerator
+            layout = generator.resolved_layout_for(company)
+            page = generator.page_layout_metadata(company)
+          end
+
+          {
+            check_stock_type: company.check_stock_type,
+            check_offset_x: company.check_offset_x,
+            check_offset_y: company.check_offset_y,
+            default_layout_config: generator.default_layout_config,
+            resolved_layout_config: layout,
+            page: page
+          }
+        end
+
+        def layout_preview_company(company)
+          requested_stock_type = params[:check_stock_type].presence
+          return company unless requested_stock_type && Company::CHECK_STOCK_TYPES.include?(requested_stock_type)
+
+          company.dup.tap do |preview|
+            preview.id = company.id
+            preview.check_stock_type = requested_stock_type
+          end
         end
 
         def normalize_layout_numeric_values(value)

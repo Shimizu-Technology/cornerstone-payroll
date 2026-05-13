@@ -2,7 +2,7 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Download } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -12,9 +12,10 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
+import { CheckLayoutEditor } from '@/components/checks/CheckLayoutEditor';
 import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
-import type { CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
+import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 
 export function CheckSettingsPage() {
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -35,6 +36,7 @@ export function CheckSettingsPage() {
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
+  const [checkLayout, setCheckLayout] = useState<CheckLayoutResponse | null>(null);
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -57,10 +59,22 @@ export function CheckSettingsPage() {
     }
   }, []);
 
+  const loadCheckLayout = useCallback(async (selectedStockType = stockType) => {
+    try {
+      const data = await checksApi.getLayout(selectedStockType);
+      setCheckLayout(data.check_layout);
+    } catch {
+      setCheckLayout(null);
+    }
+  }, [stockType]);
+
   useEffect(() => {
     (async () => {
       try {
-        const data = await checksApi.getSettings();
+        const [data, layoutData] = await Promise.all([
+          checksApi.getSettings(),
+          checksApi.getLayout(),
+        ]);
         const s = data.check_settings;
         const normalizedOffsetX = typeof s.check_offset_x === 'number'
           ? s.check_offset_x
@@ -78,6 +92,7 @@ export function CheckSettingsPage() {
         setMemoTemplate(s.check_memo_template ?? '');
         setAutoCreateFitCheck(s.auto_create_fit_check ?? false);
         setNextCheckNumber(String(s.next_check_number));
+        setCheckLayout(layoutData.check_layout);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       } finally {
@@ -86,6 +101,38 @@ export function CheckSettingsPage() {
       loadProfiles();
     })();
   }, [loadProfiles]);
+
+  useEffect(() => {
+    if (!loading) {
+      loadCheckLayout(stockType);
+    }
+  }, [stockType, loading, loadCheckLayout]);
+
+  const parsedLayoutOverrides = useMemo(() => {
+    try {
+      const parsed = JSON.parse(layoutOverridesJson || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }, [layoutOverridesJson]);
+
+  const handleVisualLayoutChange = useCallback((config: Record<string, unknown>) => {
+    setLayoutOverridesJson(JSON.stringify(config, null, 2));
+    setError(null);
+    setSuccess(null);
+  }, []);
+
+  const handleVisualOffsetChange = useCallback((axis: 'x' | 'y', value: string) => {
+    if (axis === 'x') {
+      setOffsetX(value);
+    } else {
+      setOffsetY(value);
+    }
+    setSuccess(null);
+  }, []);
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -117,6 +164,7 @@ export function CheckSettingsPage() {
       });
       setSettings(data.check_settings);
       setLayoutOverridesJson(JSON.stringify(data.check_settings.check_layout_config ?? {}, null, 2));
+      await loadCheckLayout(stockType);
       setSuccess('Settings saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -209,6 +257,7 @@ export function CheckSettingsPage() {
       setOffsetX(Number(s.check_offset_x || 0).toFixed(3));
       setOffsetY(Number(s.check_offset_y || 0).toFixed(3));
       setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
+      await loadCheckLayout(s.check_stock_type);
       setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply profile');
@@ -289,7 +338,7 @@ export function CheckSettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <Header title="Check Printing Settings" />
 
-      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
 
         {/* Feedback */}
         {error && (
@@ -482,6 +531,30 @@ export function CheckSettingsPage() {
             </div>
 
             {/* Offset calibration */}
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Visual Calibration</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Drag a field or use the nudge buttons, then save settings and download an alignment test.
+                </p>
+              </div>
+              <CheckLayoutEditor
+                stockType={stockType}
+                offsetX={offsetX}
+                offsetY={offsetY}
+                layoutConfig={parsedLayoutOverrides ?? {}}
+                layout={checkLayout}
+                disabled={!parsedLayoutOverrides}
+                onLayoutConfigChange={handleVisualLayoutChange}
+                onOffsetChange={handleVisualOffsetChange}
+              />
+              {!parsedLayoutOverrides && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Fix the advanced JSON before using visual calibration.
+                </p>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
