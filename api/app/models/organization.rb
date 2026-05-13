@@ -21,8 +21,15 @@ class Organization < ApplicationRecord
     client_limit.nil?
   end
 
-  def client_limit_reached?
-    client_limit.present? && companies.count >= client_limit
+  def save_company_within_client_limit!(company)
+    with_lock do
+      if client_limit.present? && companies.count >= client_limit
+        company.errors.add(:base, "Client limit reached for this organization")
+        raise ActiveRecord::RecordInvalid, company
+      end
+
+      company.save!
+    end
   end
 
   private
