@@ -44,6 +44,26 @@ class FirstHawaiianFourUpCheckGenerator
 
   attr_reader :company, :entries, :starting_slot
 
+  def self.default_layout_config
+    stringify_layout(DEFAULT_LAYOUT)
+  end
+
+  def self.resolved_layout_for(company)
+    deep_merge(default_layout_config, stringify_layout(company.check_layout_config || {}))
+  end
+
+  def self.page_layout_metadata(company)
+    {
+      width: PAGE_WIDTH,
+      height: PAGE_HEIGHT,
+      slot_count: SLOT_COUNT,
+      slot_height: SLOT_HEIGHT,
+      preview_slot_bottom: PAGE_HEIGHT - SLOT_HEIGHT,
+      offset_x_points: (company.check_offset_x.to_f * 72).round(1),
+      offset_y_points: (company.check_offset_y.to_f * 72).round(1)
+    }
+  end
+
   def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1)
     @company = company
     @entries = payroll_items.map { |item| entry_from_payroll_item(item) } +
@@ -193,14 +213,14 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def layout_config
-    @layout_config ||= deep_merge(default_layout_config, stringify_layout(company.check_layout_config || {}))
+    @layout_config ||= self.class.resolved_layout_for(company)
   end
 
   def default_layout_config
-    @default_layout_config ||= stringify_layout(DEFAULT_LAYOUT)
+    @default_layout_config ||= self.class.default_layout_config
   end
 
-  def stringify_layout(value)
+  def self.stringify_layout(value)
     case value
     when Hash
       value.each_with_object({}) { |(key, nested), acc| acc[key.to_s] = stringify_layout(nested) }
@@ -211,10 +231,18 @@ class FirstHawaiianFourUpCheckGenerator
     end
   end
 
-  def deep_merge(base, overrides)
+  def stringify_layout(value)
+    self.class.stringify_layout(value)
+  end
+
+  def self.deep_merge(base, overrides)
     base.merge(overrides) do |_key, old_value, new_value|
       old_value.is_a?(Hash) && new_value.is_a?(Hash) ? deep_merge(old_value, new_value) : new_value
     end
+  end
+
+  def deep_merge(base, overrides)
+    self.class.deep_merge(base, overrides)
   end
 
   def draw_slot_outline(pdf, slot_bottom, label)
