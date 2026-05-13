@@ -3,14 +3,17 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
-  let!(:staff_company) { create(:company, name: "Staff HQ") }
-  let!(:client_company) { create(:company, name: "Accessible Client") }
-  let!(:other_company) { create(:company, name: "Foreign Client") }
-  let!(:switched_staff_company) { create(:company, name: "Switched Staff HQ") }
+  let!(:organization) { create(:organization, name: "Staff Firm") }
+  let!(:staff_company) { create(:company, organization: organization, name: "Staff HQ") }
+  let!(:client_company) { create(:company, organization: organization, name: "Accessible Client") }
+  let!(:other_company) { create(:company, organization: organization, name: "Second Client") }
+  let!(:switched_staff_company) { create(:company, organization: organization, name: "Switched Staff HQ") }
+  let!(:foreign_organization) { create(:organization, name: "Foreign Firm") }
 
   let!(:admin_user) do
     User.create!(
       company: staff_company,
+      organization: organization,
       email: "assignment-admin@example.com",
       name: "Assignment Admin",
       role: "admin",
@@ -21,6 +24,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
   let!(:managed_user) do
     User.create!(
       company: staff_company,
+      organization: organization,
       email: "assignment-user@example.com",
       name: "Managed User",
       role: "accountant",
@@ -28,10 +32,12 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
     )
   end
 
-  let!(:foreign_staff_company) { create(:company, name: "Foreign Staff HQ") }
+  let!(:foreign_staff_company) { create(:company, organization: foreign_organization, name: "Foreign Staff HQ") }
+  let!(:foreign_client_company) { create(:company, organization: foreign_organization, name: "Foreign Client") }
   let!(:foreign_user) do
     User.create!(
       company: foreign_staff_company,
+      organization: foreign_organization,
       email: "foreign-assignment-user@example.com",
       name: "Foreign User",
       role: "admin",
@@ -41,6 +47,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
   let!(:switched_managed_user) do
     User.create!(
       company: switched_staff_company,
+      organization: organization,
       email: "switched-assignment-user@example.com",
       name: "Switched User",
       role: "accountant",
@@ -50,7 +57,7 @@ RSpec.describe "Api::V1::Admin::CompanyAssignments", type: :request do
 
   let!(:admin_access_assignment) { CompanyAssignment.create!(user: admin_user, company: client_company) }
   let!(:managed_assignment) { CompanyAssignment.create!(user: managed_user, company: client_company) }
-  let!(:foreign_assignment) { CompanyAssignment.create!(user: foreign_user, company: other_company) }
+  let!(:foreign_assignment) { CompanyAssignment.create!(user: foreign_user, company: foreign_client_company) }
   let!(:switched_assignment) { CompanyAssignment.create!(user: switched_managed_user, company: client_company) }
 
   before do

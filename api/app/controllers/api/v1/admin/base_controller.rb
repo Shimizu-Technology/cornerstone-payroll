@@ -9,18 +9,16 @@ module Api
 
         private
 
-        # Allow admin, manager, and accountant roles to access the admin namespace.
+        # Allow organization admins, managers, and accountants to access the admin namespace.
         def require_staff_access!
-          unless current_user&.admin? || current_user&.manager? || current_user&.accountant?
+          unless current_user&.staff_member?
             render json: { error: "Staff access required" }, status: :forbidden
           end
         end
 
-        # Admins can access every company. Other staff must stay inside their
-        # assigned client scope.
+        # Staff must stay inside the companies granted by their platform role.
         def enforce_company_access!
           return if current_user.nil?
-          return if current_user.admin?
 
           unless current_user.can_access_company?(current_company_id)
             render json: { error: "You do not have access to this company" }, status: :forbidden
@@ -33,7 +31,7 @@ module Api
         end
 
         def require_manager_or_admin!
-          unless current_user&.admin? || current_user&.manager?
+          unless current_user&.organization_admin? || current_user&.manager?
             render json: { error: "Manager or admin access required" }, status: :forbidden
           end
         end

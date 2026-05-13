@@ -1,12 +1,16 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::Users", type: :request do
-  let!(:company) { create(:company, name: "Staff HQ") }
-  let!(:client_company) { create(:company, name: "Client A") }
-  let!(:other_company) { create(:company, name: "Client B") }
+  let!(:organization) { create(:organization, name: "Staff Firm") }
+  let!(:company) { create(:company, organization: organization, name: "Staff HQ") }
+  let!(:client_company) { create(:company, organization: organization, name: "Client A") }
+  let!(:other_company) { create(:company, organization: organization, name: "Client B") }
+  let!(:foreign_organization) { create(:organization, name: "Foreign Firm") }
+  let!(:foreign_company) { create(:company, organization: foreign_organization, name: "Foreign Client") }
   let!(:admin_user) do
     User.create!(
       company: company,
+      organization: organization,
       email: "users-admin@example.com",
       name: "Users Admin",
       role: "admin",
@@ -16,6 +20,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   let!(:managed_user) do
     User.create!(
       company: company,
+      organization: organization,
       email: "accountant@example.com",
       name: "Accountant User",
       role: "accountant",
@@ -26,6 +31,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   let!(:switched_company_user) do
     User.create!(
       company: other_company,
+      organization: organization,
       email: "other-company-user@example.com",
       name: "Other Company User",
       role: "accountant",
@@ -35,6 +41,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
   let!(:manager_user) do
     User.create!(
       company: company,
+      organization: organization,
       email: "manager@example.com",
       name: "Manager User",
       role: "manager",
@@ -75,6 +82,23 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response).to have_http_status(:ok)
       data = response.parsed_body.fetch("data")
       expect(data.map { |row| row.fetch("id") }).to include(admin_user.id, managed_user.id, switched_company_user.id)
+    end
+
+    it "does not expose users from another organization" do
+      foreign_user = User.create!(
+        company: foreign_company,
+        organization: foreign_organization,
+        email: "foreign-user@example.com",
+        name: "Foreign User",
+        role: "admin",
+        active: true
+      )
+
+      get "/api/v1/admin/users"
+
+      expect(response).to have_http_status(:ok)
+      data = response.parsed_body.fetch("data")
+      expect(data.map { |row| row.fetch("id") }).not_to include(foreign_user.id)
     end
   end
 
@@ -132,6 +156,22 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Email can't be blank")
+    end
+
+    it "prevents organization admins from creating platform super admins" do
+      expect {
+        post "/api/v1/admin/users",
+          params: {
+            user: {
+              email: "platform-admin@example.com",
+              name: "Platform Admin",
+              role: "super_admin"
+            }
+          }
+      }.not_to change(User, :count)
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Cannot assign that role")
     end
   end
 
@@ -233,13 +273,11 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
     end
 
     it "rejects assignment changes outside the admin's accessible companies" do
-      allow(admin_user).to receive(:accessible_company_ids).and_return([client_company.id])
-
       patch "/api/v1/admin/users/#{managed_user.id}",
         params: {
           user: {
             role: "accountant",
-            company_ids: [other_company.id]
+            company_ids: [foreign_company.id]
           }
         }
 

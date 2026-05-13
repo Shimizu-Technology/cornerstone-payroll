@@ -1,13 +1,15 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::Companies", type: :request do
-  let!(:staff_company) { create(:company, name: "Staff HQ") }
-  let!(:client_company) { create(:company, name: "Client A") }
-  let!(:inactive_client_company) { create(:company, name: "Inactive Client", active: false) }
+  let!(:organization) { create(:organization, name: "Staff Firm") }
+  let!(:staff_company) { create(:company, organization: organization, name: "Staff HQ") }
+  let!(:client_company) { create(:company, organization: organization, name: "Client A") }
+  let!(:inactive_client_company) { create(:company, organization: organization, name: "Inactive Client", active: false) }
 
   let!(:admin_user) do
     User.create!(
       company: staff_company,
+      organization: organization,
       email: "companies-admin@example.com",
       name: "Companies Admin",
       role: "admin",

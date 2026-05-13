@@ -8,16 +8,21 @@ module Api
 
         # POST /api/v1/admin/user_invitations
         def create
-          if User.where(company_id: current_company_id, email: invitation_params[:email]).exists?
+          permitted = invitation_params
+          if permitted[:role] == "super_admin" && !current_user&.super_admin?
+            return render json: { error: "Cannot assign that role" }, status: :forbidden
+          end
+
+          if User.where("LOWER(email) = ?", permitted[:email].to_s.strip.downcase).exists?
             return render json: { error: "User already exists" }, status: :unprocessable_entity
           end
 
           invitation = UserInvitation.create!(
             company_id: current_company_id,
             invited_by_id: current_user_id,
-            email: invitation_params[:email],
-            name: invitation_params[:name],
-            role: invitation_params[:role],
+            email: permitted[:email],
+            name: permitted[:name],
+            role: permitted[:role],
             token: SecureRandom.hex(32),
             invited_at: Time.current,
             expires_at: 7.days.from_now

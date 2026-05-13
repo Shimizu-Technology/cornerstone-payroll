@@ -136,6 +136,7 @@ module ClerkAuthenticatable
     user = User.find_by("LOWER(email) = ?", email)
     if user
       attrs = { clerk_id: payload["sub"] }
+      attrs[:organization] = user.company.organization if user.organization_id.blank? && user.company.present?
       attrs[:invitation_status] = "accepted" if user.invitation_pending?
       attrs[:name] = clerk_name if clerk_name.present?
       user.update!(attrs)
@@ -152,6 +153,7 @@ module ClerkAuthenticatable
         name: clerk_name || invitation.name || email,
         clerk_id: payload["sub"],
         company_id: invitation.company_id,
+        organization: invitation.company.organization,
         role: invitation.role
       )
       invitation.accept!
@@ -171,13 +173,19 @@ module ClerkAuthenticatable
     return nil if User.exists?
 
     User.transaction do
-      company = Company.order(:id).first || Company.create!(name: "Cornerstone Payroll")
+      organization = Organization.find_or_create_by!(slug: "cornerstone-tax-services") do |org|
+        org.name = "Cornerstone Tax Services"
+        org.status = "active"
+      end
+      company = Company.order(:id).first || Company.create!(name: "Cornerstone Payroll", organization: organization)
+      company.update!(organization: organization) if company.organization_id.blank?
 
       User.create!(
         email: email,
         name: clerk_name || email,
         clerk_id: payload["sub"],
         company: company,
+        organization: company.organization,
         role: "admin",
         invitation_status: "accepted"
       )

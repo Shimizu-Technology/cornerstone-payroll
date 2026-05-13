@@ -7,17 +7,17 @@ module Api
         before_action :require_admin!
 
         # GET /api/v1/admin/audit_logs
-        # Admins can view audit logs across all companies.
+        # Admins can view audit logs across companies they can access.
         # Optionally filter by company_id param to scope to an active client.
         def index
-          logs = if current_user.admin?
-            if params[:company_id].present?
-              AuditLog.where(company_id: params[:company_id])
-            else
-              AuditLog.all
-            end
+          accessible_company_ids = current_user.accessible_company_ids
+          logs = if params[:company_id].present?
+            company_id = params[:company_id].to_i
+            return render json: { error: "Not authorized" }, status: :forbidden unless accessible_company_ids.include?(company_id)
+
+            AuditLog.where(company_id: company_id)
           else
-            AuditLog.where(company_id: current_user.accessible_company_ids)
+            AuditLog.where(company_id: accessible_company_ids)
           end
 
           logs = logs.order(created_at: :desc)

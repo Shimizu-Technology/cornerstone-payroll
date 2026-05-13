@@ -10,9 +10,9 @@ module Api
         before_action :set_user, only: [ :show, :update, :destroy, :activate, :deactivate, :resend_invitation ]
 
         # GET /api/v1/admin/users
-        # Admins see ALL staff users across all companies (staff is global, not per-client).
+        # Organization admins see users in their firm; super admins can see all firms.
         def index
-          users = User.includes(company_assignments: :company).order(:name)
+          users = manageable_users.includes(company_assignments: :company, company: :organization).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -29,10 +29,15 @@ module Api
         # POST /api/v1/admin/users
         def create
           permitted = create_params
+          unless role_manageable?(permitted[:role])
+            return render json: { error: "Cannot assign that role" }, status: :forbidden
+          end
+
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
           user = User.new(permitted)
           user.company_id = current_user.company_id
+          user.organization = current_user.organization
           user.clerk_id = "pending_#{SecureRandom.uuid}"
           user.invitation_status = "pending"
           user.invited_by = current_user
@@ -66,6 +71,10 @@ module Api
         def update
           permitted = user_params
           requested_role = permitted[:role].presence || @user.role
+          unless role_manageable?(requested_role)
+            return render json: { error: "Cannot assign that role" }, status: :forbidden
+          end
+
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
 
@@ -73,8 +82,8 @@ module Api
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
-          if @user.role == "admin" && permitted.key?(:role) && requested_role != "admin"
-            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
+          if @user.organization_admin? && permitted.key?(:role) && !organization_admin_role?(requested_role)
+            if active_peer_admins(@user).none?
               return render json: { error: "Cannot demote the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -102,8 +111,8 @@ module Api
             return render json: { error: "Cannot deactivate your own account" }, status: :unprocessable_entity
           end
 
-          if @user.role == "admin"
-            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
+          if @user.organization_admin?
+            if active_peer_admins(@user).none?
               return render json: { error: "Cannot deactivate the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -118,8 +127,8 @@ module Api
             return render json: { error: "Cannot delete your own account" }, status: :unprocessable_entity
           end
 
-          if @user.role == "admin"
-            if User.where(role: "admin", active: true).where.not(id: @user.id).none?
+          if @user.organization_admin?
+            if active_peer_admins(@user).none?
               return render json: { error: "Cannot delete the last active admin" }, status: :unprocessable_entity
             end
           end
@@ -165,11 +174,7 @@ module Api
         private
 
         def set_user
-          # Staff users are global to the payroll workspace rather than scoped to
-          # the currently selected client company. This endpoint remains safe
-          # because the controller is admin-only, and assignment writes are
-          # separately constrained by `assignable_company_ids`.
-          @user = User.includes(company_assignments: :company).find_by(id: params[:id])
+          @user = manageable_users.includes(company_assignments: :company).find_by(id: params[:id])
           return if @user
 
           render json: { error: "User not found" }, status: :not_found
@@ -225,6 +230,36 @@ module Api
           @assignable_company_ids ||= current_user.accessible_company_ids
         end
 
+        def manageable_users
+          return User.all if current_user&.super_admin?
+
+          User.where(organization_id: current_user&.organization_id).where.not(role: User.roles.fetch("super_admin"))
+        end
+
+        def active_peer_admins(user)
+          scope = User.active.where.not(id: user.id)
+          if user.super_admin?
+            scope.where(role: User.roles.fetch("super_admin"))
+          else
+            scope.where(organization_id: user.organization_id, role: organization_admin_roles)
+          end
+        end
+
+        def organization_admin_roles
+          User.roles.values_at("admin", "org_admin", "super_admin").compact
+        end
+
+        def organization_admin_role?(role)
+          %w[admin org_admin super_admin].include?(role)
+        end
+
+        def role_manageable?(role)
+          return false if role.blank?
+          return true if current_user&.super_admin?
+
+          role != "super_admin"
+        end
+
         def role_requires_client_assignment?(role)
           role == "manager" || role == "accountant" || role == "client"
         end
@@ -272,6 +307,8 @@ module Api
             email: user.email,
             name: user.name,
             role: user.role,
+            organization_id: user.organization_id,
+            organization_name: user.organization&.name,
             company_id: user.company_id,
             active: user.active,
             invitation_status: user.invitation_status,
