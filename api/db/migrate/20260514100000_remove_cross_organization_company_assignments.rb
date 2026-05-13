@@ -19,7 +19,7 @@ class RemoveCrossOrganizationCompanyAssignments < ActiveRecord::Migration[8.1]
   def up
     MigrationCompanyAssignment
       .joins(:user, :company)
-      .where.not("users.organization_id = companies.organization_id")
+      .where("users.organization_id IS DISTINCT FROM companies.organization_id")
       .delete_all
   end
 
