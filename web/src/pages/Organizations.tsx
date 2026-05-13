@@ -14,10 +14,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationSummary } from '@/services/api';
+import type { PaginationMeta } from '@/types';
 
 export function Organizations() {
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -48,18 +51,19 @@ export function Organizations() {
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
   const [adminActionId, setAdminActionId] = useState<number | null>(null);
 
-  const fetchOrganizations = useCallback(async () => {
+  const fetchOrganizations = useCallback(async (nextPage = page) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await organizationsApi.list();
+      const response = await organizationsApi.list({ page: nextPage, per_page: 25 });
       setOrganizations(response.data);
+      setMeta(response.meta ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load organizations');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     void fetchOrganizations();
@@ -129,7 +133,8 @@ export function Organizations() {
         setSuccessMessage('Organization created');
       }
       resetNewForm();
-      await fetchOrganizations();
+      setPage(1);
+      await fetchOrganizations(1);
     } catch (err) {
       setNewError(err instanceof ApiError ? err.message : 'Failed to create organization');
     } finally {
@@ -271,6 +276,7 @@ export function Organizations() {
   const activeCount = organizations.filter((org) => org.status === 'active').length;
   const totalCompanies = organizations.reduce((sum, org) => sum + org.companies_count, 0);
   const totalUsers = organizations.reduce((sum, org) => sum + org.users_count, 0);
+  const totalOrganizations = meta?.total_count ?? organizations.length;
 
   return (
     <div>
@@ -294,7 +300,7 @@ export function Organizations() {
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Organizations</p>
-                <p className="text-2xl font-semibold text-neutral-900">{organizations.length}</p>
+                <p className="text-2xl font-semibold text-neutral-900">{totalOrganizations}</p>
               </div>
             </div>
           </Card>
@@ -540,6 +546,31 @@ export function Organizations() {
                 ))}
               </TableBody>
             </Table>
+            {meta && meta.total_pages > 1 && (
+              <div className="flex items-center justify-between border-t border-neutral-200 px-6 py-4">
+                <p className="text-sm text-neutral-500">
+                  Showing page {meta.current_page} of {meta.total_pages}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={meta.current_page <= 1 || isLoading}
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={meta.current_page >= meta.total_pages || isLoading}
+                    onClick={() => setPage((current) => current + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
 

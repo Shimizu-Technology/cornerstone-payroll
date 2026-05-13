@@ -16,8 +16,9 @@ class AddLimitsAndPrimaryCompanyToOrganizations < ActiveRecord::Migration[8.1]
     single_existing_organization = MigrationOrganization.count == 1
     MigrationOrganization.find_each do |organization|
       first_company_id = MigrationCompany.where(organization_id: organization.id).order(:id).pick(:id)
+      companies_count = MigrationCompany.where(organization_id: organization.id).count
       platform_org = single_existing_organization || organization.slug == "cornerstone-tax-services"
-      client_limit = platform_org ? nil : 3
+      client_limit = platform_org ? nil : [ companies_count, 3 ].max
       organization.update_columns(primary_company_id: first_company_id, client_limit: client_limit)
     end
   end
