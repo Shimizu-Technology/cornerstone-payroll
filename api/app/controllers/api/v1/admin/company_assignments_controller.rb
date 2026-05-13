@@ -7,6 +7,7 @@ module Api
         include Auditable
         audit_actions :bulk_update
         before_action :require_admin!
+        ASSIGNABLE_USER_ROLES = %w[manager accountant client].freeze
 
         # GET /api/v1/admin/company_assignments
         # List all assignments, optionally filtered by user_id
@@ -83,14 +84,16 @@ module Api
         private
 
         def scoped_users
-          return User.all if current_user&.super_admin?
+          scope = User.where(role: ASSIGNABLE_USER_ROLES)
+          return scope if current_user&.super_admin?
 
-          User.where(organization_id: current_user&.organization_id)
+          scope.where(organization_id: current_user&.organization_id)
         end
 
         def scoped_assignments
           scope = CompanyAssignment.includes(:user, :company)
                                    .joins(:user)
+                                   .where(users: { role: ASSIGNABLE_USER_ROLES })
                                    .where(company_id: assignable_company_ids)
           return scope if current_user&.super_admin?
 

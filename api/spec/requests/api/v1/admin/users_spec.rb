@@ -272,6 +272,31 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(switched_company_user.company_assignments).to be_empty
     end
 
+    it "does not let a colocated super admin satisfy the last organization admin guard" do
+      super_admin = User.create!(
+        company: company,
+        organization: organization,
+        email: "platform-peer@example.com",
+        name: "Platform Peer",
+        role: "super_admin",
+        active: true
+      )
+      expect(super_admin).to be_present
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin.id)
+
+      patch "/api/v1/admin/users/#{admin_user.id}",
+        params: {
+          user: {
+            role: "manager"
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Cannot demote the last active admin")
+      expect(admin_user.reload.role).to eq("admin")
+    end
+
     it "rejects assignment changes outside the admin's accessible companies" do
       patch "/api/v1/admin/users/#{managed_user.id}",
         params: {
