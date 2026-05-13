@@ -52,7 +52,7 @@ module Api
             admin_user = build_org_admin!(organization, primary_company, admin_attrs) if admin_attrs.present?
           end
 
-          invitation_result = admin_user ? invite_user(admin_user) : { success: false, error: nil }
+          invitation_result = admin_user ? safe_invite_user(admin_user) : { success: false, error: nil }
 
           render json: {
             data: serialize_organizations([ organization.reload ], detailed: true).first,
@@ -83,7 +83,7 @@ module Api
           end
 
           admin_user = build_org_admin!(@organization, primary_company, admin_user_params)
-          invitation_result = invite_user(admin_user)
+          invitation_result = safe_invite_user(admin_user)
 
           render json: {
             data: user_json(admin_user),
@@ -184,6 +184,12 @@ module Api
           end
 
           result
+        end
+
+        def safe_invite_user(user)
+          invite_user(user)
+        rescue ActiveRecord::RecordInvalid => e
+          { success: false, error: "Invitation could not be saved locally: #{e.record.errors.full_messages.join(', ')}" }
         end
 
         def build_redirect_url
