@@ -1750,6 +1750,8 @@ interface AuthApiUser {
   email: string;
   name: string;
   role: string;
+  organization_id?: number;
+  organization_name?: string;
   company_id: number;
   company_name: string;
   home_company_id: number;

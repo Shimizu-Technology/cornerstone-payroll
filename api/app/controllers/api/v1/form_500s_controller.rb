@@ -122,7 +122,7 @@ module Api
       end
 
       def require_staff_access!
-        return if current_user&.admin? || current_user&.manager? || current_user&.accountant?
+        return if current_user&.staff_member?
 
         render json: { error: "Access denied" }, status: :forbidden
       end

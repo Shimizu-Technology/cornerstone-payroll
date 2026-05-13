@@ -3,7 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
-  let!(:company) { Company.create!(name: "Test Company") }
+  let!(:organization) { create(:organization, name: "Pay Period Firm") }
+  let!(:company) { Company.create!(name: "Test Company", organization: organization) }
   let!(:department) { Department.create!(name: "Engineering", company: company) }
   let!(:admin_user) do
     User.create!(
@@ -87,7 +88,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "does not expose creator names from unrelated companies" do
-      other_company = Company.create!(name: "Other Company")
+      other_company = Company.create!(name: "Other Company", organization: create(:organization, name: "Other Firm"))
       other_user = User.create!(
         company: other_company,
         email: "other-creator@example.com",

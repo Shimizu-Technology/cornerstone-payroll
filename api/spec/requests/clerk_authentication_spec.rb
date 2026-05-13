@@ -3,7 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Clerk Authentication", type: :request do
-  let(:company) { Company.first || Company.create!(name: "Test Company") }
+  let(:organization) { Organization.first || create(:organization, name: "Test Organization") }
+  let(:company) { Company.first || Company.create!(name: "Test Company", organization: organization) }
   let(:user) do
     User.create!(
       company: company,
@@ -67,6 +68,7 @@ RSpec.describe "Clerk Authentication", type: :request do
     it "bootstraps the first user as an admin only when explicitly allowed" do
       User.delete_all
       Company.delete_all
+      Organization.delete_all
       original_bootstrap_setting = ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"]
       ENV["ALLOW_INITIAL_ADMIN_BOOTSTRAP"] = "true"
 
@@ -96,6 +98,7 @@ RSpec.describe "Clerk Authentication", type: :request do
     it "rejects unknown first users when bootstrap is not explicitly enabled" do
       User.delete_all
       Company.delete_all
+      Organization.delete_all
 
       allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
         "sub" => "user_new456"

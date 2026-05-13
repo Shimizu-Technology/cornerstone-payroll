@@ -3,6 +3,7 @@
 FactoryBot.define do
   factory :user do
     company
+    organization { company.organization }
     sequence(:email) { |n| "user#{n}@example.com" }
     sequence(:name) { |n| "User #{n}" }
     role { "admin" }

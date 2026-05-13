@@ -16,6 +16,8 @@ module Api
             email: current_user.email,
             name: current_user.name,
             role: current_user.role,
+            organization_id: current_user.organization_id,
+            organization_name: current_user.organization&.name,
             company_id: current_company_id,
             company_name: current_company&.name,
             home_company_id: current_user.company_id,

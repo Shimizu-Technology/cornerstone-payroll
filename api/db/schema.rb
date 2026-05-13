@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_13_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -171,6 +171,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
     t.string "email"
     t.string "name", null: false
     t.integer "next_check_number", default: 1001, null: false
+    t.bigint "organization_id", null: false
     t.string "pay_frequency", default: "biweekly"
     t.string "phone"
     t.string "state"
@@ -178,6 +179,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
     t.string "zip"
     t.index ["ein"], name: "index_companies_on_ein", unique: true
     t.index ["name"], name: "index_companies_on_name"
+    t.index ["organization_id"], name: "index_companies_on_organization_id"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -643,6 +645,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
     t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
   end
 
+  create_table "organizations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "status", default: "active", null: false
+    t.datetime "updated_at", null: false
+    t.index ["slug"], name: "index_organizations_on_slug", unique: true
+    t.index ["status"], name: "index_organizations_on_status"
+  end
+
   create_table "pay_period_correction_events", force: :cascade do |t|
     t.string "action_type", null: false
     t.bigint "actor_id"
@@ -1084,12 +1096,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
     t.bigint "invited_by_id"
     t.datetime "last_login_at"
     t.string "name", null: false
+    t.bigint "organization_id", null: false
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
     t.index ["clerk_id"], name: "index_users_on_clerk_id", unique: true
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["organization_id"], name: "index_users_on_organization_id"
     t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
   end
 
@@ -1130,6 +1144,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
   add_foreign_key "client_portal_threads", "companies"
   add_foreign_key "client_portal_threads", "users", column: "created_by_id", on_delete: :nullify
   add_foreign_key "client_portal_threads", "users", column: "resolved_by_id", on_delete: :nullify
+  add_foreign_key "companies", "organizations"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_ytd_totals", "companies"
@@ -1222,6 +1237,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_095600) do
   add_foreign_key "user_invitations", "users", column: "invited_by_id"
   add_foreign_key "user_sessions", "users"
   add_foreign_key "users", "companies"
+  add_foreign_key "users", "organizations"
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"

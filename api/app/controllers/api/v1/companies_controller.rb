@@ -21,7 +21,7 @@ module Api
               active_employee_counts: active_employee_counts
             )
           end,
-          can_manage_clients: current_user.admin?,
+          can_manage_clients: current_user.organization_admin?,
           can_switch_company: current_user.accessible_company_ids.size > 1,
           current_company_id: current_company_id
         }
