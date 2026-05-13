@@ -133,6 +133,37 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("Name can't be blank")
     end
+
+    it "returns created when the post-commit invitation metadata save fails" do
+      failed_user = User.new
+      failed_user.errors.add(:base, "Clerk invitation id could not be saved")
+      allow_any_instance_of(Api::V1::Admin::OrganizationsController)
+        .to receive(:invite_user)
+        .and_raise(ActiveRecord::RecordInvalid.new(failed_user))
+      platform_org.update!(primary_company: platform_company)
+
+      expect {
+        post "/api/v1/admin/organizations",
+          params: {
+            organization: {
+              name: "Invite Failure Firm",
+              primary_company_name: "Invite Failure HQ",
+              admin: {
+                email: "invite-failure@example.com",
+                name: "Invite Failure Admin"
+              }
+            }
+          }
+      }.to change(Organization, :count).by(1)
+        .and change(Company, :count).by(1)
+        .and change(User, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body).to include(
+        "invitation_sent" => false,
+        "invitation_error" => include("Clerk invitation id could not be saved")
+      )
+    end
   end
 
   describe "PATCH /api/v1/admin/organizations/:id" do
@@ -212,6 +243,31 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         organization_id: platform_org.id,
         company_id: secondary_company.id,
         role: "org_admin"
+      )
+    end
+
+    it "returns created when the post-commit invitation metadata save fails" do
+      failed_user = User.new
+      failed_user.errors.add(:base, "Clerk invitation id could not be saved")
+      allow_any_instance_of(Api::V1::Admin::OrganizationsController)
+        .to receive(:invite_user)
+        .and_raise(ActiveRecord::RecordInvalid.new(failed_user))
+      platform_org.update!(primary_company: platform_company)
+
+      expect {
+        post "/api/v1/admin/organizations/#{platform_org.id}/admin_users",
+          params: {
+            user: {
+              email: "late-invite-failure@example.com",
+              name: "Late Invite Failure"
+            }
+          }
+      }.to change(User, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body).to include(
+        "invitation_sent" => false,
+        "invitation_error" => include("Clerk invitation id could not be saved")
       )
     end
   end

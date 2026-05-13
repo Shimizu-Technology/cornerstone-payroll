@@ -310,7 +310,7 @@ export function Organizations() {
                 <Check className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Active</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Active on Page</p>
                 <p className="text-2xl font-semibold text-neutral-900">{activeCount}</p>
               </div>
             </div>
@@ -321,7 +321,7 @@ export function Organizations() {
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Client Accounts</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Clients on Page</p>
                 <p className="text-2xl font-semibold text-neutral-900">{totalCompanies}</p>
                 <p className="text-xs text-neutral-500">{totalUsers} users</p>
               </div>
