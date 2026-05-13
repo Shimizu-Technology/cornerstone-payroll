@@ -10,11 +10,24 @@ module Api
 
         # GET /api/v1/admin/organizations
         def index
+          page = [ params.fetch(:page, 1).to_i, 1 ].max
+          per_page = params.fetch(:per_page, 50).to_i.clamp(1, 100)
+          total_count = Organization.count
           organizations = Organization
-            .includes(:companies)
+            .includes(:companies, :primary_company)
             .order(:name)
+            .offset((page - 1) * per_page)
+            .limit(per_page)
 
-          render json: { data: organizations.map { |organization| organization_json(organization) } }
+          render json: {
+            data: serialize_organizations(organizations),
+            meta: {
+              page: page,
+              per_page: per_page,
+              total_count: total_count,
+              total_pages: (total_count.to_f / per_page).ceil
+            }
+          }
         end
 
         # GET /api/v1/admin/organizations/:id
@@ -34,6 +47,7 @@ module Api
           ActiveRecord::Base.transaction do
             organization = Organization.create!(permitted)
             primary_company = build_primary_company!(organization, primary_company_name)
+            organization.update!(primary_company: primary_company)
             admin_user = build_org_admin!(organization, primary_company, admin_attrs) if admin_attrs.present?
           end
 
@@ -62,7 +76,7 @@ module Api
 
         # POST /api/v1/admin/organizations/:id/admin_users
         def create_admin_user
-          primary_company = @organization.companies.order(:id).first
+          primary_company = @organization.primary_company
           unless primary_company
             return render json: { error: "Organization must have a primary company before admins can be invited" }, status: :unprocessable_entity
           end
@@ -89,17 +103,27 @@ module Api
         end
 
         def create_params
-          params.require(:organization).permit(
+          permitted = params.require(:organization).permit(
             :name,
             :slug,
             :status,
+            :client_limit,
+            :unlimited_clients,
             :primary_company_name,
             admin: [ :email, :name ]
           )
+          if ActiveModel::Type::Boolean.new.cast(permitted.delete(:unlimited_clients))
+            permitted[:client_limit] = nil
+          end
+          permitted
         end
 
         def update_params
-          params.require(:organization).permit(:name, :slug, :status)
+          permitted = params.require(:organization).permit(:name, :slug, :status, :client_limit, :unlimited_clients)
+          if ActiveModel::Type::Boolean.new.cast(permitted.delete(:unlimited_clients))
+            permitted[:client_limit] = nil
+          end
+          permitted
         end
 
         def admin_user_params
@@ -163,9 +187,9 @@ module Api
         end
 
         def organization_json(organization, detailed: false)
+          snapshot = organization_serializer_snapshot
           companies = organization.companies.sort_by(&:name)
-          admins = User.where(organization: organization, role: User.roles.values_at("admin", "org_admin").compact)
-                       .order(:name)
+          admins = snapshot[:admins_by_org_id].fetch(organization.id, [])
 
           payload = {
             id: organization.id,
@@ -173,9 +197,13 @@ module Api
             slug: organization.slug,
             status: organization.status,
             active: organization.status == "active",
+            client_limit: organization.client_limit,
+            clients_limit: organization.client_limit,
+            unlimited_clients: organization.unlimited_clients?,
+            primary_company_id: organization.primary_company_id,
             companies_count: companies.size,
             active_companies_count: companies.count(&:active),
-            users_count: User.where(organization: organization).count,
+            users_count: snapshot[:users_count_by_org_id].fetch(organization.id, 0),
             org_admins: admins.map { |user| user_json(user) },
             created_at: organization.created_at,
             updated_at: organization.updated_at
@@ -193,6 +221,30 @@ module Api
           end
 
           payload
+        end
+
+        def serialize_organizations(organizations, detailed: false)
+          organization_ids = organizations.map(&:id)
+          @organization_serializer_snapshot = {
+            users_count_by_org_id: User.where(organization_id: organization_ids).group(:organization_id).count,
+            admins_by_org_id: User
+              .where(organization_id: organization_ids, role: User.roles.values_at("admin", "org_admin").compact)
+              .order(:name)
+              .group_by(&:organization_id)
+          }
+          organizations.map { |organization| organization_json(organization, detailed: detailed) }
+        ensure
+          @organization_serializer_snapshot = nil
+        end
+
+        def organization_serializer_snapshot
+          @organization_serializer_snapshot ||= {
+            users_count_by_org_id: User.where(organization_id: @organization&.id).group(:organization_id).count,
+            admins_by_org_id: User
+              .where(organization_id: @organization&.id, role: User.roles.values_at("admin", "org_admin").compact)
+              .order(:name)
+              .group_by(&:organization_id)
+          }
         end
 
         def user_json(user)

@@ -61,6 +61,10 @@ module Api
 
           company = Company.new(company_params)
           company.organization = current_user.organization unless current_user.super_admin? && company.organization.present?
+          if company.organization&.client_limit_reached?
+            return render json: { errors: [ "Client limit reached for this organization" ] }, status: :unprocessable_entity
+          end
+
           company.check_stock_type ||= "top_check"
           company.check_offset_x ||= 0.0
           company.check_offset_y ||= 0.0

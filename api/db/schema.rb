@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_13_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_13_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -646,11 +646,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_13_120000) do
   end
 
   create_table "organizations", force: :cascade do |t|
+    t.integer "client_limit", default: 3
     t.datetime "created_at", null: false
     t.string "name", null: false
+    t.bigint "primary_company_id"
     t.string "slug", null: false
     t.string "status", default: "active", null: false
     t.datetime "updated_at", null: false
+    t.index ["primary_company_id"], name: "index_organizations_on_primary_company_id"
     t.index ["slug"], name: "index_organizations_on_slug", unique: true
     t.index ["status"], name: "index_organizations_on_status"
   end
@@ -1194,6 +1197,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_13_120000) do
   add_foreign_key "non_employee_checks", "companies"
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
+  add_foreign_key "organizations", "companies", column: "primary_company_id"
   add_foreign_key "pay_period_correction_events", "companies", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Building2, Check, Mail, Plus, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { ApiError, organizationsApi, type OrganizationSummary } from '@/services/api';
+import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationSummary } from '@/services/api';
 
 export function Organizations() {
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
@@ -26,6 +26,8 @@ export function Organizations() {
   const [newName, setNewName] = useState('');
   const [newSlug, setNewSlug] = useState('');
   const [newPrimaryCompanyName, setNewPrimaryCompanyName] = useState('');
+  const [newClientLimit, setNewClientLimit] = useState('3');
+  const [newUnlimitedClients, setNewUnlimitedClients] = useState(false);
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminEmail, setNewAdminEmail] = useState('');
   const [newError, setNewError] = useState<string | null>(null);
@@ -34,6 +36,8 @@ export function Organizations() {
   const [editName, setEditName] = useState('');
   const [editSlug, setEditSlug] = useState('');
   const [editStatus, setEditStatus] = useState<'active' | 'inactive'>('active');
+  const [editClientLimit, setEditClientLimit] = useState('3');
+  const [editUnlimitedClients, setEditUnlimitedClients] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
@@ -42,6 +46,7 @@ export function Organizations() {
   const [adminEmail, setAdminEmail] = useState('');
   const [adminError, setAdminError] = useState<string | null>(null);
   const [isSavingAdmin, setIsSavingAdmin] = useState(false);
+  const [adminActionId, setAdminActionId] = useState<number | null>(null);
 
   const fetchOrganizations = useCallback(async () => {
     setIsLoading(true);
@@ -66,11 +71,18 @@ export function Organizations() {
     return () => clearTimeout(timer);
   }, [successMessage]);
 
+  const parseClientLimit = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
   const resetNewForm = () => {
     setIsAdding(false);
     setNewName('');
     setNewSlug('');
     setNewPrimaryCompanyName('');
+    setNewClientLimit('3');
+    setNewUnlimitedClients(false);
     setNewAdminName('');
     setNewAdminEmail('');
     setNewError(null);
@@ -89,6 +101,10 @@ export function Organizations() {
       setNewError('First admin email is required');
       return;
     }
+    if (!newUnlimitedClients && parseClientLimit(newClientLimit) < 1) {
+      setNewError('Client limit must be at least 1, or choose unlimited');
+      return;
+    }
 
     setIsSavingNew(true);
     setNewError(null);
@@ -96,6 +112,8 @@ export function Organizations() {
       const response = await organizationsApi.create({
         name: newName.trim(),
         slug: newSlug.trim() || undefined,
+        client_limit: newUnlimitedClients ? null : parseClientLimit(newClientLimit),
+        unlimited_clients: newUnlimitedClients,
         primary_company_name: newPrimaryCompanyName.trim(),
         admin: {
           email: newAdminEmail.trim(),
@@ -124,12 +142,18 @@ export function Organizations() {
     setEditName(organization.name);
     setEditSlug(organization.slug);
     setEditStatus(organization.status);
+    setEditUnlimitedClients(organization.unlimited_clients);
+    setEditClientLimit(String(organization.client_limit ?? 3));
     setEditError(null);
   };
 
   const handleSaveEdit = async () => {
     if (!editingId || !editName.trim()) {
       setEditError('Organization name is required');
+      return;
+    }
+    if (!editUnlimitedClients && parseClientLimit(editClientLimit) < 1) {
+      setEditError('Client limit must be at least 1, or choose unlimited');
       return;
     }
 
@@ -140,6 +164,8 @@ export function Organizations() {
         name: editName.trim(),
         slug: editSlug.trim(),
         status: editStatus,
+        client_limit: editUnlimitedClients ? null : parseClientLimit(editClientLimit),
+        unlimited_clients: editUnlimitedClients,
       });
       setEditingId(null);
       setSuccessMessage('Organization updated');
@@ -185,6 +211,60 @@ export function Organizations() {
       setAdminError(err instanceof ApiError ? err.message : 'Failed to create organization admin');
     } finally {
       setIsSavingAdmin(false);
+    }
+  };
+
+  const handleRenameAdmin = async (admin: OrganizationAdminSummary) => {
+    const nextName = window.prompt('Admin name', admin.name);
+    if (nextName === null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === admin.name) return;
+
+    setAdminActionId(admin.id);
+    setError(null);
+    try {
+      await usersApi.update(admin.id, { name: trimmed });
+      setSuccessMessage('Organization admin updated');
+      await fetchOrganizations();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update organization admin');
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const handleToggleAdminActive = async (admin: OrganizationAdminSummary) => {
+    setAdminActionId(admin.id);
+    setError(null);
+    try {
+      if (admin.active === false) {
+        await usersApi.activate(admin.id);
+        setSuccessMessage('Organization admin activated');
+      } else {
+        await usersApi.deactivate(admin.id);
+        setSuccessMessage('Organization admin deactivated');
+      }
+      await fetchOrganizations();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update organization admin');
+    } finally {
+      setAdminActionId(null);
+    }
+  };
+
+  const handleDeleteAdmin = async (admin: OrganizationAdminSummary) => {
+    if (!window.confirm(`Delete ${admin.email}?`)) return;
+
+    setAdminActionId(admin.id);
+    setError(null);
+    try {
+      await usersApi.delete(admin.id);
+      setSuccessMessage('Organization admin deleted');
+      await fetchOrganizations();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete organization admin');
+    } finally {
+      setAdminActionId(null);
     }
   };
 
@@ -235,8 +315,9 @@ export function Organizations() {
                 <ShieldCheck className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Clients / Users</p>
-                <p className="text-2xl font-semibold text-neutral-900">{totalCompanies} / {totalUsers}</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Client Accounts</p>
+                <p className="text-2xl font-semibold text-neutral-900">{totalCompanies}</p>
+                <p className="text-xs text-neutral-500">{totalUsers} users</p>
               </div>
             </div>
           </Card>
@@ -278,6 +359,25 @@ export function Organizations() {
               <Input placeholder="Organization name *" value={newName} onChange={(event) => setNewName(event.target.value)} />
               <Input placeholder="Slug (optional)" value={newSlug} onChange={(event) => setNewSlug(event.target.value)} />
               <Input placeholder="Primary company name *" value={newPrimaryCompanyName} onChange={(event) => setNewPrimaryCompanyName(event.target.value)} />
+              <div className="flex items-center gap-3">
+                <Input
+                  placeholder="Client limit"
+                  type="number"
+                  min={1}
+                  value={newClientLimit}
+                  onChange={(event) => setNewClientLimit(event.target.value)}
+                  disabled={newUnlimitedClients}
+                />
+                <label className="flex shrink-0 items-center gap-2 text-sm text-neutral-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                    checked={newUnlimitedClients}
+                    onChange={(event) => setNewUnlimitedClients(event.target.checked)}
+                  />
+                  Unlimited
+                </label>
+              </div>
               <Input placeholder="First admin email *" type="email" value={newAdminEmail} onChange={(event) => setNewAdminEmail(event.target.value)} />
               <Input placeholder="First admin name (optional)" value={newAdminName} onChange={(event) => setNewAdminName(event.target.value)} />
             </div>
@@ -298,16 +398,16 @@ export function Organizations() {
             </div>
           </div>
         ) : (
-          <Card>
-            <Table>
+          <Card className="overflow-hidden">
+            <Table className="min-w-[1280px]" containerClassName="overflow-x-auto">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Organization</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Clients</TableHead>
-                  <TableHead>Users</TableHead>
-                  <TableHead>Org Admins</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="w-[300px]">Organization</TableHead>
+                  <TableHead className="w-[170px]">Status</TableHead>
+                  <TableHead className="w-[220px]">Clients</TableHead>
+                  <TableHead className="w-[110px]">Users</TableHead>
+                  <TableHead className="w-[360px]">Org Admins</TableHead>
+                  <TableHead className="w-[260px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -316,8 +416,8 @@ export function Organizations() {
                     <TableCell>
                       {editingId === organization.id ? (
                         <div className="space-y-2">
-                          <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
-                          <Input value={editSlug} onChange={(event) => setEditSlug(event.target.value)} />
+                          <Input className="w-64" value={editName} onChange={(event) => setEditName(event.target.value)} />
+                          <Input className="w-64" value={editSlug} onChange={(event) => setEditSlug(event.target.value)} />
                           {editError && <p className="text-xs text-danger-600">{editError}</p>}
                         </div>
                       ) : (
@@ -339,14 +439,80 @@ export function Organizations() {
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>{organization.active_companies_count} active / {organization.companies_count} total</TableCell>
+                    <TableCell>
+                      {editingId === organization.id ? (
+                        <div className="space-y-2">
+                          <Input
+                            className="w-28"
+                            type="number"
+                            min={1}
+                            value={editClientLimit}
+                            onChange={(event) => setEditClientLimit(event.target.value)}
+                            disabled={editUnlimitedClients}
+                          />
+                          <label className="flex items-center gap-2 text-xs text-neutral-700">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                              checked={editUnlimitedClients}
+                              onChange={(event) => setEditUnlimitedClients(event.target.checked)}
+                            />
+                            Unlimited clients
+                          </label>
+                        </div>
+                      ) : (
+                        <div>
+                          <p>{organization.active_companies_count} active, {organization.companies_count} total</p>
+                          <p className="text-xs text-neutral-500">
+                            Limit: {organization.unlimited_clients ? 'Unlimited' : organization.client_limit}
+                          </p>
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell>{organization.users_count}</TableCell>
                     <TableCell>
-                      <div className="space-y-1">
+                      <div className="space-y-2">
                         {organization.org_admins.length > 0 ? organization.org_admins.map((admin) => (
-                          <div key={admin.id} className="text-sm">
-                            <span className="font-medium text-neutral-800">{admin.name}</span>
-                            <span className="ml-1 text-neutral-500">{admin.email}</span>
+                          <div key={admin.id} className="flex items-center justify-between gap-2 text-sm">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium text-neutral-800">
+                                {admin.name}
+                                {admin.active === false && <span className="ml-2 text-xs font-normal text-neutral-500">Inactive</span>}
+                              </p>
+                              <p className="truncate text-xs text-neutral-500">{admin.email}</p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleRenameAdmin(admin)}
+                                disabled={adminActionId === admin.id}
+                                title="Rename admin"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleToggleAdminActive(admin)}
+                                disabled={adminActionId === admin.id}
+                                title={admin.active === false ? 'Activate admin' : 'Deactivate admin'}
+                              >
+                                {admin.active === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 w-8 p-0 text-danger-600 hover:text-danger-700"
+                                onClick={() => handleDeleteAdmin(admin)}
+                                disabled={adminActionId === admin.id}
+                                title="Delete admin"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         )) : (
                           <span className="text-sm text-danger-600">No org admins</span>
