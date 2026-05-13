@@ -182,8 +182,8 @@ export function CheckLayoutEditor({
   };
 
   const nudgeOffset = (dx: number, dy: number) => {
-    onOffsetChange('x', formatOffset(Number(offsetX || 0) + dx));
-    onOffsetChange('y', formatOffset(Number(offsetY || 0) + dy));
+    if (dx !== 0) onOffsetChange('x', formatOffset(Number(offsetX || 0) + dx));
+    if (dy !== 0) onOffsetChange('y', formatOffset(Number(offsetY || 0) + dy));
   };
 
   const resizeSelected = (delta: number) => {
@@ -300,7 +300,7 @@ export function CheckLayoutEditor({
                 title={`${field.label}: x ${field.x}, y ${field.y}`}
               >
                 <span className="block truncate text-[10px] font-semibold uppercase text-primary-700">{field.label}</span>
-                <span className="block whitespace-pre-line truncate text-neutral-800">{field.sample}</span>
+                <span className="block overflow-hidden whitespace-pre-line text-neutral-800">{field.sample}</span>
               </button>
             ))}
           </div>

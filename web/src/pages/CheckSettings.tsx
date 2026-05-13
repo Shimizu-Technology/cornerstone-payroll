@@ -71,10 +71,7 @@ export function CheckSettingsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [data, layoutData] = await Promise.all([
-          checksApi.getSettings(),
-          checksApi.getLayout(),
-        ]);
+        const data = await checksApi.getSettings();
         const s = data.check_settings;
         const normalizedOffsetX = typeof s.check_offset_x === 'number'
           ? s.check_offset_x
@@ -92,7 +89,6 @@ export function CheckSettingsPage() {
         setMemoTemplate(s.check_memo_template ?? '');
         setAutoCreateFitCheck(s.auto_create_fit_check ?? false);
         setNextCheckNumber(String(s.next_check_number));
-        setCheckLayout(layoutData.check_layout);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       } finally {
