@@ -65,7 +65,7 @@ export function CompanySwitcher() {
   if (!canSwitchCompany || companies.length <= 1) {
     return (
       <div className="border-b border-neutral-200/70 px-4 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Company</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
         <p className="mt-0.5 truncate text-sm font-semibold text-neutral-900">
           {activeCompany?.name || 'Loading...'}
         </p>
