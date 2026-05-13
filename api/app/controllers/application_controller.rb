@@ -22,6 +22,10 @@ class ApplicationController < ActionController::API
     current_user&.organization
   end
 
+  def current_organization_id
+    current_user&.organization_id
+  end
+
   def current_company
     @current_company ||= Company.find_by(id: current_company_id)
   end

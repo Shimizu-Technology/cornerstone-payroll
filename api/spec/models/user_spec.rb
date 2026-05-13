@@ -59,7 +59,8 @@ RSpec.describe User, type: :model do
       foreign_company = create(:company)
       user = create(:user, company: company, organization: organization, role: "accountant")
       CompanyAssignment.create!(user: user, company: assigned_company)
-      CompanyAssignment.create!(user: user, company: foreign_company)
+      stale_assignment = CompanyAssignment.new(user: user, company: foreign_company)
+      stale_assignment.save!(validate: false)
 
       expect(user.accessible_company_ids).to eq([assigned_company.id])
     end
