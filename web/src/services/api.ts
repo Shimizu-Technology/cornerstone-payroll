@@ -555,6 +555,10 @@ export interface OrganizationSummary {
   slug: string;
   status: 'active' | 'inactive';
   active: boolean;
+  client_limit: number | null;
+  clients_limit?: number | null;
+  unlimited_clients: boolean;
+  primary_company_id?: number | null;
   companies_count: number;
   active_companies_count: number;
   users_count: number;
@@ -572,13 +576,13 @@ export interface OrganizationCreateResponse {
 }
 
 export const organizationsApi = {
-  list: () =>
-    api.get<{ data: OrganizationSummary[] }>('/admin/organizations'),
+  list: (params?: { page?: number; per_page?: number }) =>
+    api.get<{ data: OrganizationSummary[]; meta?: PaginationMeta }>('/admin/organizations', params),
   get: (id: number) =>
     api.get<{ data: OrganizationSummary }>(`/admin/organizations/${id}`),
-  create: (data: { name: string; slug?: string; status?: 'active' | 'inactive'; primary_company_name?: string; admin?: { email: string; name?: string } }) =>
+  create: (data: { name: string; slug?: string; status?: 'active' | 'inactive'; client_limit?: number | null; unlimited_clients?: boolean; primary_company_name?: string; admin?: { email: string; name?: string } }) =>
     api.post<OrganizationCreateResponse>('/admin/organizations', { organization: data }),
-  update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status'>>) =>
+  update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status' | 'client_limit' | 'unlimited_clients'>>) =>
     api.patch<{ data: OrganizationSummary }>(`/admin/organizations/${id}`, { organization: data }),
   createAdminUser: (id: number, data: { email: string; name?: string }) =>
     api.post<{ data: OrganizationAdminSummary; invitation_sent: boolean; invitation_error?: string | null }>(

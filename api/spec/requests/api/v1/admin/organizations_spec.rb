@@ -38,6 +38,12 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       get "/api/v1/admin/organizations"
 
       expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("meta")).to include(
+        "page" => 1,
+        "per_page" => 50,
+        "total_count" => 2,
+        "total_pages" => 1
+      )
       names = response.parsed_body.fetch("data").map { |row| row.fetch("name") }
       expect(names).to include("Platform Org", "Second Firm")
     end
@@ -82,6 +88,10 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       company = organization.companies.find_by!(name: "Acme Payroll HQ")
       admin = User.find_by!(email: "owner@acme.example")
 
+      expect(organization).to have_attributes(
+        primary_company_id: company.id,
+        client_limit: 3
+      )
       expect(admin).to have_attributes(
         organization_id: organization.id,
         company_id: company.id,
@@ -90,7 +100,9 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       )
       expect(response.parsed_body.fetch("data")).to include(
         "name" => "Acme Guam CPAs",
-        "companies_count" => 1
+        "companies_count" => 1,
+        "client_limit" => 3,
+        "unlimited_clients" => false
       )
       expect(response.parsed_body.fetch("admin_user")).to include(
         "email" => "owner@acme.example",
@@ -124,14 +136,32 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         params: {
           organization: {
             name: "Platform Organization",
-            status: "inactive"
+            status: "inactive",
+            unlimited_clients: true
           }
         }
 
       expect(response).to have_http_status(:ok)
       expect(platform_org.reload).to have_attributes(
         name: "Platform Organization",
-        status: "inactive"
+        status: "inactive",
+        client_limit: nil
+      )
+    end
+
+    it "updates a finite client limit" do
+      patch "/api/v1/admin/organizations/#{platform_org.id}",
+        params: {
+          organization: {
+            client_limit: 8
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(platform_org.reload.client_limit).to eq(8)
+      expect(response.parsed_body.fetch("data")).to include(
+        "client_limit" => 8,
+        "unlimited_clients" => false
       )
     end
   end
@@ -143,7 +173,10 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         .and_return({ success: false, error: "Clerk API not configured" })
     end
 
-    it "creates an additional org admin in the target organization" do
+    it "creates an additional org admin in the target organization's primary company" do
+      secondary_company = create(:company, organization: platform_org, name: "Secondary Client")
+      platform_org.update!(primary_company: secondary_company)
+
       expect {
         post "/api/v1/admin/organizations/#{platform_org.id}/admin_users",
           params: {
@@ -158,7 +191,7 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       created = User.find_by!(email: "second-admin@example.com")
       expect(created).to have_attributes(
         organization_id: platform_org.id,
-        company_id: platform_company.id,
+        company_id: secondary_company.id,
         role: "org_admin"
       )
     end
