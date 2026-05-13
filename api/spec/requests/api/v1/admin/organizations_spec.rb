@@ -102,7 +102,11 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         "name" => "Acme Guam CPAs",
         "companies_count" => 1,
         "client_limit" => 3,
-        "unlimited_clients" => false
+        "unlimited_clients" => false,
+        "users_count" => 1
+      )
+      expect(response.parsed_body.dig("data", "org_admins")).to contain_exactly(
+        include("email" => "owner@acme.example", "role" => "org_admin")
       )
       expect(response.parsed_body.fetch("admin_user")).to include(
         "email" => "owner@acme.example",
