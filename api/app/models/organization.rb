@@ -5,19 +5,44 @@ class Organization < ApplicationRecord
 
   has_many :companies, dependent: :restrict_with_error
   has_many :users, dependent: :restrict_with_error
+  belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true
   validates :status, inclusion: { in: STATUSES }
+  validates :client_limit, numericality: { only_integer: true, greater_than: 0 }, allow_nil: true
+  validate :primary_company_must_belong_to_organization
 
   scope :active, -> { where(status: "active") }
+
+  def unlimited_clients?
+    client_limit.nil?
+  end
+
+  def save_company_within_client_limit!(company)
+    with_lock do
+      if client_limit.present? && companies.count >= client_limit
+        company.errors.add(:base, "Client limit reached for this organization")
+        raise ActiveRecord::RecordInvalid, company
+      end
+
+      company.save!
+    end
+  end
 
   private
 
   def normalize_slug
     self.slug = name.to_s.parameterize if slug.blank? && name.present?
     self.slug = slug.to_s.parameterize if slug.present?
+  end
+
+  def primary_company_must_belong_to_organization
+    return if primary_company.blank? || id.blank?
+    return if primary_company.organization_id == id
+
+    errors.add(:primary_company, "must belong to this organization")
   end
 end

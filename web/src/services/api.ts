@@ -531,6 +531,66 @@ export const userInvitationsApi = {
     api.post<{ data: UserInvitationResponse }>('/admin/user_invitations', { invitation: data }),
 };
 
+export interface OrganizationAdminSummary {
+  id: number;
+  email: string;
+  name: string;
+  role: User['role'];
+  active: boolean;
+  invitation_status?: string;
+  invitation_pending?: boolean;
+  last_login_at?: string | null;
+}
+
+export interface OrganizationCompanySummary {
+  id: number;
+  name: string;
+  active: boolean;
+  pay_frequency: string;
+}
+
+export interface OrganizationSummary {
+  id: number;
+  name: string;
+  slug: string;
+  status: 'active' | 'inactive';
+  active: boolean;
+  client_limit: number | null;
+  clients_limit?: number | null;
+  unlimited_clients: boolean;
+  primary_company_id?: number | null;
+  companies_count: number;
+  active_companies_count: number;
+  users_count: number;
+  org_admins: OrganizationAdminSummary[];
+  companies?: OrganizationCompanySummary[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationCreateResponse {
+  data: OrganizationSummary;
+  admin_user?: OrganizationAdminSummary | null;
+  invitation_sent: boolean;
+  invitation_error?: string | null;
+}
+
+export const organizationsApi = {
+  list: (params?: { page?: number; per_page?: number }) =>
+    api.get<{ data: OrganizationSummary[]; meta?: PaginationMeta }>('/admin/organizations', params),
+  get: (id: number) =>
+    api.get<{ data: OrganizationSummary }>(`/admin/organizations/${id}`),
+  create: (data: { name: string; slug?: string; status?: 'active' | 'inactive'; client_limit?: number | null; unlimited_clients?: boolean; primary_company_name?: string; admin?: { email: string; name?: string } }) =>
+    api.post<OrganizationCreateResponse>('/admin/organizations', { organization: data }),
+  update: (id: number, data: Partial<Pick<OrganizationSummary, 'name' | 'slug' | 'status' | 'client_limit' | 'unlimited_clients'>>) =>
+    api.patch<{ data: OrganizationSummary }>(`/admin/organizations/${id}`, { organization: data }),
+  createAdminUser: (id: number, data: { email: string; name?: string }) =>
+    api.post<{ data: OrganizationAdminSummary; invitation_sent: boolean; invitation_error?: string | null }>(
+      `/admin/organizations/${id}/admin_users`,
+      { user: data }
+    ),
+};
+
 // Audit Logs (Admin API)
 export interface AuditLogEntry {
   id: number;
