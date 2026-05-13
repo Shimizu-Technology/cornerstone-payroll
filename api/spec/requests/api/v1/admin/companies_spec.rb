@@ -64,6 +64,64 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/companies" do
+    it "blocks client creation when the organization client limit is reached" do
+      organization.update!(client_limit: 3)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: {
+            name: "Client Over Limit",
+            pay_frequency: "biweekly"
+          }
+        }
+      }.not_to change(Company, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Client limit reached for this organization")
+    end
+
+    it "allows client creation when the organization has unlimited clients" do
+      organization.update!(client_limit: nil)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: {
+            name: "Client Unlimited",
+            pay_frequency: "biweekly"
+          }
+        }
+      }.to change(Company, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(Company.find_by!(name: "Client Unlimited").organization_id).to eq(organization.id)
+    end
+
+    it "returns validation errors when no organization can be assigned" do
+      platform_admin = instance_double(
+        User,
+        staff_member?: true,
+        organization_admin?: true,
+        super_admin?: true,
+        organization: nil
+      )
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(platform_admin)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:enforce_company_access!)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: {
+            name: "Client Without Org",
+            pay_frequency: "biweekly"
+          }
+        }
+      }.not_to change(Company, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Organization must exist")
+    end
+  end
+
   describe "assigned staff access" do
     let!(:accountant_user) do
       User.create!(

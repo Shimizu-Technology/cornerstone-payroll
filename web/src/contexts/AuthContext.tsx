@@ -20,6 +20,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isManager: boolean;
   isAccountant: boolean;
   isClient: boolean;
@@ -83,6 +84,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         isAuthenticated: !!user,
         isAdmin: isAdminRole(user?.role),
+        isSuperAdmin: user?.role === 'super_admin',
         isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
@@ -181,6 +183,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         isLoading: !isLoaded || isLoading,
         isAuthenticated: !!user && isSignedIn === true,
         isAdmin: isAdminRole(user?.role),
+        isSuperAdmin: user?.role === 'super_admin',
         isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',

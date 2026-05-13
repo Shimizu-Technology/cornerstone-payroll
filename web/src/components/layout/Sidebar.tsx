@@ -85,6 +85,9 @@ const adminNavigation: NavItem[] = [
   { name: 'User Management', href: '/settings/users', icon: <UserCog className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Audit Logs', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
 ];
+const platformNavigation: NavItem[] = [
+  { name: 'Organizations', href: '/settings/organizations', icon: <Building2 className="h-[18px] w-[18px] shrink-0" /> },
+];
 const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
@@ -211,6 +214,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
+  const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -298,6 +302,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           <>
             <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Administration" collapsed={collapsed} />
             <div className="space-y-1.5">
+              {isSuperAdmin && (
+                <NavSection items={platformNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+              )}
               <NavSection
                 items={isAdmin ? adminNavigation : adminNavigation.filter((item) => item.href === CLIENT_MANAGEMENT_PATH)}
                 collapsed={collapsed}

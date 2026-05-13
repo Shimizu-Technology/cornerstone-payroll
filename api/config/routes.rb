@@ -67,6 +67,11 @@ Rails.application.routes.draw do
         end
 
         resources :companies, only: [:index, :show, :create, :update]
+        resources :organizations, only: [ :index, :show, :create, :update ] do
+          member do
+            post "admin_users", to: "organizations#create_admin_user"
+          end
+        end
         resources :company_assignments, only: [:index, :create, :destroy] do
           collection do
             put :bulk_update
