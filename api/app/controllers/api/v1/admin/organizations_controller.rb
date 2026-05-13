@@ -22,6 +22,7 @@ module Api
           render json: {
             data: serialize_organizations(organizations),
             meta: {
+              current_page: page,
               page: page,
               per_page: per_page,
               total_count: total_count,
@@ -32,7 +33,7 @@ module Api
 
         # GET /api/v1/admin/organizations/:id
         def show
-          render json: { data: organization_json(@organization, detailed: true) }
+          render json: { data: serialize_organizations([ @organization ], detailed: true).first }
         end
 
         # POST /api/v1/admin/organizations
@@ -68,7 +69,7 @@ module Api
         # PATCH /api/v1/admin/organizations/:id
         def update
           if @organization.update(update_params)
-            render json: { data: organization_json(@organization.reload, detailed: true) }
+            render json: { data: serialize_organizations([ @organization.reload ], detailed: true).first }
           else
             render json: { error: @organization.errors.full_messages }, status: :unprocessable_entity
           end
@@ -114,6 +115,8 @@ module Api
           )
           if ActiveModel::Type::Boolean.new.cast(permitted.delete(:unlimited_clients))
             permitted[:client_limit] = nil
+          elsif permitted.key?(:client_limit) && permitted[:client_limit].nil?
+            permitted.delete(:client_limit)
           end
           permitted
         end
@@ -122,6 +125,8 @@ module Api
           permitted = params.require(:organization).permit(:name, :slug, :status, :client_limit, :unlimited_clients)
           if ActiveModel::Type::Boolean.new.cast(permitted.delete(:unlimited_clients))
             permitted[:client_limit] = nil
+          elsif permitted.key?(:client_limit) && permitted[:client_limit].nil?
+            permitted.delete(:client_limit)
           end
           permitted
         end

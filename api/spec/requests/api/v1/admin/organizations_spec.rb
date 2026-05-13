@@ -39,6 +39,7 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("meta")).to include(
+        "current_page" => 1,
         "page" => 1,
         "per_page" => 50,
         "total_count" => 2,
@@ -167,6 +168,20 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
         "client_limit" => 8,
         "unlimited_clients" => false
       )
+    end
+
+    it "does not treat a null client limit as unlimited without the explicit flag" do
+      platform_org.update!(client_limit: 6)
+
+      patch "/api/v1/admin/organizations/#{platform_org.id}",
+        params: {
+          organization: {
+            client_limit: nil
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(platform_org.reload.client_limit).to eq(6)
     end
   end
 
