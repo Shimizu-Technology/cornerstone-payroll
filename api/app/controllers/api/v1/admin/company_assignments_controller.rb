@@ -79,6 +79,8 @@ module Api
           render json: {
             data: user.company_assignments.includes(:company).map { |a| serialize_assignment(a) }
           }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         private

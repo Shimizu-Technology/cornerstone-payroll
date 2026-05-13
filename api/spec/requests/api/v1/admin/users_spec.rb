@@ -48,6 +48,16 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       active: true
     )
   end
+  let!(:super_admin_user) do
+    User.create!(
+      company: company,
+      organization: organization,
+      email: "users-super-admin@example.com",
+      name: "Users Super Admin",
+      role: "super_admin",
+      active: true
+    )
+  end
 
   before do
     allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
@@ -308,6 +318,23 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("One or more companies are not accessible")
+      expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
+    end
+
+    it "prevents super admins from saving cross-organization client assignments" do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin_user.id)
+
+      patch "/api/v1/admin/users/#{managed_user.id}",
+        params: {
+          user: {
+            role: "accountant",
+            company_ids: [foreign_company.id]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Company must belong to the user's organization")
       expect(managed_user.reload.company_assignments.pluck(:company_id)).to eq([client_company.id])
     end
   end
