@@ -96,6 +96,30 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(response).to have_http_status(:created)
       expect(Company.find_by!(name: "Client Unlimited").organization_id).to eq(organization.id)
     end
+
+    it "returns validation errors when no organization can be assigned" do
+      platform_admin = instance_double(
+        User,
+        staff_member?: true,
+        organization_admin?: true,
+        super_admin?: true,
+        organization: nil
+      )
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(platform_admin)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:enforce_company_access!)
+
+      expect {
+        post "/api/v1/admin/companies", params: {
+          company: {
+            name: "Client Without Org",
+            pay_frequency: "biweekly"
+          }
+        }
+      }.not_to change(Company, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Organization must exist")
+    end
   end
 
   describe "assigned staff access" do
