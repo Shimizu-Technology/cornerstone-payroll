@@ -54,7 +54,7 @@ module Api
           invitation_result = admin_user ? invite_user(admin_user) : { success: false, error: nil }
 
           render json: {
-            data: organization_json(organization.reload, detailed: true),
+            data: serialize_organizations([ organization.reload ], detailed: true).first,
             admin_user: admin_user && user_json(admin_user),
             invitation_sent: invitation_result[:success] && invitation_result[:url].present?,
             invitation_error: invitation_result[:success] ? nil : invitation_result[:error]
