@@ -5,6 +5,8 @@ require "set"
 class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
 
+  belongs_to :organization
+
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy

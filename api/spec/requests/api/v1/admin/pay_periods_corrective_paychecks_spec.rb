@@ -4,7 +4,8 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request do
   let!(:tax_table) { create(:tax_table) }
-  let!(:company) { Company.create!(name: "CorrCo", auto_create_fit_check: false) }
+  let!(:organization) { create(:organization, name: "Correction Firm") }
+  let!(:company) { Company.create!(name: "CorrCo", organization: organization, auto_create_fit_check: false) }
   let!(:department) { Department.create!(name: "Eng", company: company) }
   let!(:admin_user) do
     User.create!(company: company, email: "admin-corr@example.com",
@@ -16,6 +17,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
       first_name: "Jane", last_name: "Doe", email: "jane@example.com",
       employment_type: "hourly", pay_rate: 15.00, pay_frequency: "biweekly",
       filing_status: "single", allowances: 0, status: "active",
+      address_line1: "123 Correction Way", city: "Hagatna", state: "GU", zip: "96910",
       hire_date: Date.new(2024, 1, 1)
     )
   end
@@ -65,13 +67,14 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
     end
 
     it "404s when employee is not in this company" do
-      other_company = Company.create!(name: "Other")
+      other_company = Company.create!(name: "Other", organization: create(:organization, name: "Other Correction Firm"))
       other_dept = Department.create!(name: "X", company: other_company)
       other_emp = Employee.create!(
         company: other_company, department: other_dept,
         first_name: "X", last_name: "Y", email: "x@y.com",
         employment_type: "hourly", pay_rate: 10, pay_frequency: "biweekly",
         filing_status: "single", allowances: 0, status: "active",
+        address_line1: "456 Other Way", city: "Hagatna", state: "GU", zip: "96910",
         hire_date: Date.today
       )
       post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paycheck_preview",
@@ -87,6 +90,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
         first_name: "L", last_name: "Z", email: "l@z.com",
         employment_type: "hourly", pay_rate: 10, pay_frequency: "biweekly",
         filing_status: "single", allowances: 0, status: "active",
+        address_line1: "789 Lone Way", city: "Hagatna", state: "GU", zip: "96910",
         hire_date: Date.today
       )
       post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paycheck_preview",

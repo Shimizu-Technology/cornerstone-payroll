@@ -82,19 +82,19 @@ module Api
 
         private
 
-        def staff_company_id
-          current_user.company_id
-        end
-
         def scoped_users
-          User.where(company_id: staff_company_id)
+          return User.all if current_user&.super_admin?
+
+          User.where(organization_id: current_user&.organization_id)
         end
 
         def scoped_assignments
-          CompanyAssignment.includes(:user, :company)
-                           .joins(:user)
-                           .where(users: { company_id: staff_company_id })
-                           .where(company_id: assignable_company_ids)
+          scope = CompanyAssignment.includes(:user, :company)
+                                   .joins(:user)
+                                   .where(company_id: assignable_company_ids)
+          return scope if current_user&.super_admin?
+
+          scope.where(users: { organization_id: current_user&.organization_id })
         end
 
         def assignable_company_ids

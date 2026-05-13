@@ -25,7 +25,7 @@ module Api
         private
 
         def require_client_portal_access!
-          return if current_user&.admin? || current_user&.manager? || current_user&.accountant? || current_user&.client?
+          return if current_user&.staff_member? || current_user&.client?
 
           render json: { error: "Client portal access required" }, status: :forbidden
         end
