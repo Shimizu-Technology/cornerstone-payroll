@@ -402,6 +402,16 @@ export function InvoiceMaker() {
         return next.sort((a, b) => a.name.localeCompare(b.name));
       });
     }
+
+    if (invoice.invoice_billing_profile) {
+      setBillingProfiles((current) => {
+        const profile = invoice.invoice_billing_profile!;
+        const next = current.some((candidate) => candidate.id === profile.id)
+          ? current.map((candidate) => candidate.id === profile.id ? profile : candidate)
+          : [...current, profile];
+        return next.sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name) || a.id - b.id);
+      });
+    }
   };
 
   const upsertChatSession = (session: InvoiceChatSession) => {
