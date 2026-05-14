@@ -153,6 +153,25 @@ class AddInvoiceBillingProfilesAndSnapshots < ActiveRecord::Migration[8.1]
 
     remove_index :invoices, name: "index_invoices_on_company_id_and_invoice_number"
 
+    execute <<~SQL.squish
+      WITH duplicate_invoices AS (
+        SELECT
+          id,
+          invoice_number,
+          ROW_NUMBER() OVER (
+            PARTITION BY invoice_billing_profile_id, invoice_number
+            ORDER BY id
+          ) AS duplicate_position
+        FROM invoices
+        WHERE invoice_number IS NOT NULL
+      )
+      UPDATE invoices
+      SET invoice_number = duplicate_invoices.invoice_number || '-DUP-' || invoices.id::text
+      FROM duplicate_invoices
+      WHERE invoices.id = duplicate_invoices.id
+        AND duplicate_invoices.duplicate_position > 1
+    SQL
+
     add_index :invoice_recipients, [ :organization_id, :name ], name: "index_invoice_recipients_on_org_name"
     add_index :invoices, [ :organization_id, :invoice_date ], name: "index_invoices_on_org_invoice_date"
     add_index :invoices, [ :organization_id, :status ], name: "index_invoices_on_org_status"

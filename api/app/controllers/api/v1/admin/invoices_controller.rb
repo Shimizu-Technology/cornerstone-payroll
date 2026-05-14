@@ -96,7 +96,8 @@ module Api
         def preview_pdf
           return unless ensure_line_items_for_pdf!
 
-          generator = InvoicePdfGenerator.new(@invoice, snapshot: @invoice.draft_snapshot(actor: current_user))
+          snapshot = @invoice.draft? ? @invoice.draft_snapshot(actor: current_user) : nil
+          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
