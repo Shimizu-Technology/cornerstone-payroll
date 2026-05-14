@@ -315,7 +315,7 @@ export function InvoiceMaker() {
 
   const buildPayloadForForm = (state: InvoiceFormState): InvoicePayload => ({
     invoice_recipient_id: Number(state.invoice_recipient_id),
-    invoice_billing_profile_id: Number(state.invoice_billing_profile_id),
+    invoice_billing_profile_id: state.invoice_billing_profile_id ? Number(state.invoice_billing_profile_id) : undefined,
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
     service_period_start: state.service_period_start || null,
@@ -530,7 +530,6 @@ export function InvoiceMaker() {
     setSuccess(null);
     try {
       const payload = buildPayload();
-      if (!payload.invoice_billing_profile_id) throw new Error('From billing profile is required');
       if (!payload.invoice_recipient_id) throw new Error('Bill To recipient is required');
       if (!payload.invoice_date) throw new Error('Invoice date is required');
 
