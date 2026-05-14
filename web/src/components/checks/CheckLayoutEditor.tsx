@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Move } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -125,8 +125,13 @@ export function CheckLayoutEditor({
   onOffsetChange,
 }: CheckLayoutEditorProps) {
   const previewRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
   const [selectedId, setSelectedId] = useState<string>('check_face.payee');
   const [draggingId, setDraggingId] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    dragCleanupRef.current?.();
+  }, []);
 
   const mergedLayout = useMemo(() => {
     if (!layout) return {};
@@ -199,6 +204,7 @@ export function CheckLayoutEditor({
     if (!preview) return;
 
     event.preventDefault();
+    dragCleanupRef.current?.();
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedId(field.id);
     setDraggingId(field.id);
@@ -219,14 +225,20 @@ export function CheckLayoutEditor({
       });
     };
 
-    const handleUp = () => {
-      setDraggingId(null);
+    const cleanup = (clearDragState: boolean) => {
+      if (clearDragState) setDraggingId(null);
       window.removeEventListener('pointermove', handleMove);
       window.removeEventListener('pointerup', handleUp);
+      dragCleanupRef.current = null;
+    };
+
+    const handleUp = () => {
+      cleanup(true);
     };
 
     window.addEventListener('pointermove', handleMove);
     window.addEventListener('pointerup', handleUp);
+    dragCleanupRef.current = () => cleanup(false);
   };
 
   if (!layout) {
@@ -239,11 +251,11 @@ export function CheckLayoutEditor({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="rounded-lg border border-neutral-200 bg-neutral-100 p-3">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="rounded-xl border border-neutral-200 bg-gradient-to-b from-slate-50 to-slate-100 p-4 shadow-inner">
           <div
             ref={previewRef}
-            className="relative mx-auto w-full max-w-[620px] overflow-hidden rounded-md border border-neutral-300 bg-white shadow-sm"
+            className="relative mx-auto w-full max-w-[640px] overflow-hidden rounded-lg border border-slate-300 bg-white shadow-md"
             style={{ aspectRatio: `${pageWidth} / ${pageHeight}` }}
           >
             {stockType === 'first_hawaiian_4up' ? (
@@ -257,7 +269,7 @@ export function CheckLayoutEditor({
                   }}
                 >
                   <span className="absolute left-2 top-2 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500">
-                    Slot {index + 1}
+                    Check {index + 1}
                   </span>
                 </div>
               ))
@@ -275,43 +287,52 @@ export function CheckLayoutEditor({
               </>
             )}
 
-            {fieldBoxes.map((field) => (
-              <button
-                key={field.id}
-                type="button"
-                onPointerDown={(event) => handlePointerDown(event, field)}
-                onClick={() => setSelectedId(field.id)}
-                disabled={disabled}
-                className={cn(
-                  'absolute rounded-sm border bg-white/85 px-1 text-left shadow-sm transition-colors',
-                  'hover:border-primary-500 hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300',
-                  selectedField?.id === field.id ? 'border-primary-600 bg-primary-50 ring-2 ring-primary-200' : 'border-neutral-400',
-                  draggingId === field.id && 'cursor-grabbing',
-                  disabled && 'cursor-not-allowed opacity-60'
-                )}
-                style={{
-                  left: `${(field.left / pageWidth) * 100}%`,
-                  top: `${(field.top / pageHeight) * 100}%`,
-                  width: `${(field.width / pageWidth) * 100}%`,
-                  minHeight: `${(field.height / pageHeight) * 100}%`,
-                  fontSize: `${Math.max(8, field.fontSize)}px`,
-                  textAlign: field.align ?? 'left',
-                }}
-                title={`${field.label}: x ${field.x}, y ${field.y}`}
-              >
-                <span className="block truncate text-[10px] font-semibold uppercase text-primary-700">{field.label}</span>
-                <span className="block overflow-hidden whitespace-pre-line text-neutral-800">{field.sample}</span>
-              </button>
-            ))}
+            {fieldBoxes.map((field, index) => {
+              const isSelected = selectedField?.id === field.id;
+              const isDragging = draggingId === field.id;
+
+              return (
+                <button
+                  key={field.id}
+                  type="button"
+                  onPointerDown={(event) => handlePointerDown(event, field)}
+                  onClick={() => setSelectedId(field.id)}
+                  disabled={disabled}
+                  className={cn(
+                    'absolute rounded-md border px-1.5 py-0.5 text-left leading-tight transition-[background-color,border-color,box-shadow,transform]',
+                    'hover:border-primary-500 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300',
+                    isSelected
+                      ? 'border-primary-600 bg-white shadow-lg shadow-primary-950/10 ring-2 ring-primary-200'
+                      : 'border-slate-300 bg-white/90 shadow-[0_1px_4px_rgba(15,23,42,0.12)]',
+                    !disabled && 'cursor-grab',
+                    isDragging && 'scale-[1.01] cursor-grabbing shadow-xl shadow-primary-950/15',
+                    disabled && 'cursor-not-allowed opacity-60'
+                  )}
+                  style={{
+                    left: `${(field.left / pageWidth) * 100}%`,
+                    top: `${(field.top / pageHeight) * 100}%`,
+                    width: `${(field.width / pageWidth) * 100}%`,
+                    minHeight: `${(field.height / pageHeight) * 100}%`,
+                    fontSize: `${Math.max(8, field.fontSize)}px`,
+                    textAlign: field.align ?? 'left',
+                    zIndex: isDragging ? 50 : isSelected ? 40 : 10 + index,
+                  }}
+                  aria-label={`Select ${field.label} field`}
+                >
+                  <span className="block truncate text-[9px] font-semibold uppercase tracking-wide text-primary-700">{field.label}</span>
+                  <span className="block overflow-hidden whitespace-pre-line text-neutral-800">{field.sample}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="space-y-3">
-          <div className="rounded-lg border border-neutral-200 bg-white p-3">
+          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <Label className="text-xs uppercase text-neutral-500">Selected Field</Label>
             <p className="mt-1 text-sm font-semibold text-neutral-900">{selectedField?.label ?? 'None'}</p>
             {selectedField && (
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-500">
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-neutral-500">
                 <span>X {selectedField.x.toFixed(1)}</span>
                 <span>Y {selectedField.y.toFixed(1)}</span>
                 <span>Width {selectedField.width.toFixed(1)}</span>
@@ -320,7 +341,7 @@ export function CheckLayoutEditor({
             )}
           </div>
 
-          <div className="rounded-lg border border-neutral-200 bg-white p-3">
+          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <Label className="text-xs uppercase text-neutral-500">Nudge Field</Label>
             <div className="mt-3 grid grid-cols-3 gap-2">
               <span />
@@ -348,7 +369,7 @@ export function CheckLayoutEditor({
             </div>
           </div>
 
-          <div className="rounded-lg border border-neutral-200 bg-white p-3">
+          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <Label className="flex items-center gap-1 text-xs uppercase text-neutral-500">
               <Move className="h-3.5 w-3.5" />
               Move Whole Layout
