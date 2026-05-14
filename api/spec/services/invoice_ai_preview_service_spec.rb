@@ -26,7 +26,7 @@ RSpec.describe InvoiceAiPreviewService do
       "quantity" => 1.0,
       "rate" => 1000.0
     )
-    expect(preview["payment_terms"]).to eq("Due on receipt")
+    expect(preview["payment_terms"]).to be_nil
     expect(preview["email_subject"]).to eq("Invoice from #{company.name}")
     expect(preview["email_body"]).to include("Hi Shimizu Technology")
     expect(preview["email_body"]).to end_with(company.name)

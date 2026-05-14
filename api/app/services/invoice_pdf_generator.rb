@@ -165,29 +165,43 @@ class InvoicePdfGenerator
   def totals_and_payment(pdf)
     pdf.move_down 14
     total = money(invoice_data["total_amount"])
-    payment_text = billing["payment_instructions"].presence || "Please remit payment according to the terms on this invoice."
-    terms = invoice_data["payment_terms"].presence || billing["default_payment_terms"]
+    payment_text = visible_payment_instructions
+    terms = invoice_data["payment_terms"].presence
 
-    pdf.table(
-      [[
-        { content: payment_block(payment_text, terms) },
-        { content: "Total Due\n#{total}", align: :right }
-      ]],
-      width: pdf.bounds.width,
-      cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10 }
-    ) do
-      columns(0).width = pdf.bounds.width - 180
-      columns(1).width = 180
-      columns(0).background_color = PANEL
-      columns(1).background_color = "F0FDFA"
-      columns(1).font_style = :bold
+    if payment_text.present? || terms.present?
+      pdf.table(
+        [[
+          { content: payment_block(payment_text, terms) },
+          { content: "Total Due\n#{total}", align: :right }
+        ]],
+        width: pdf.bounds.width,
+        cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10 }
+      ) do
+        columns(0).width = pdf.bounds.width - 180
+        columns(1).width = 180
+        columns(0).background_color = PANEL
+        columns(1).background_color = "F0FDFA"
+        columns(1).font_style = :bold
+      end
+    else
+      pdf.bounding_box([ pdf.bounds.right - 180, pdf.cursor ], width: 180) do
+        pdf.table([[ { content: "Total Due\n#{total}", align: :right } ]], width: 180, cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10, background_color: "F0FDFA", font_style: :bold })
+      end
     end
   end
 
   def payment_block(payment_text, terms)
-    parts = [ "Payment Instructions", payment_text ]
+    parts = []
+    parts << "Payment Instructions\n#{payment_text}" if payment_text.present?
     parts << "\nTerms\n#{terms}" if terms.present?
     parts.join("\n")
+  end
+
+  def visible_payment_instructions
+    text = billing["payment_instructions"].to_s.strip.presence
+    return nil if text == "Please remit payment according to the instructions on this invoice."
+
+    text
   end
 
   def notes(pdf)

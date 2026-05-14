@@ -107,6 +107,7 @@ class InvoiceAiPreviewService
       If the staff asks for a bill-to recipient that is not in the recipient list and gives at least the recipient name, set invoice_recipient_id to null and fill new_recipient. Email and billing address are helpful but optional.
       If the bill-to recipient is unclear, set invoice_recipient_id and new_recipient to null and ask a clarification question.
       Use numeric quantity and rate values. Do not include currency symbols in numeric fields.
+      Only include payment_terms when the staff explicitly asks for terms or the current preview already has terms they did not ask to remove.
       If the staff is modifying an existing preview, preserve fields they did not ask to change.
       For hourly invoices, use quantity as hours and rate as the hourly rate. If an attachment shows total hours and total/net pay, derive the rate from total divided by hours when no explicit rate is supplied.
       Preserve service dates when supplied. For a date range with daily hourly entries, include each billable date as its own line item when the details are available.
@@ -219,7 +220,7 @@ class InvoiceAiPreviewService
       "invoice_date" => normalize_date(raw["invoice_date"]) || Date.current.iso8601,
       "service_period_start" => normalize_date(raw["service_period_start"]),
       "service_period_end" => normalize_date(raw["service_period_end"]),
-      "payment_terms" => raw["payment_terms"].presence || recipient&.payment_terms || new_recipient&.fetch("payment_terms", nil),
+      "payment_terms" => raw["payment_terms"].presence,
       "notes" => raw["notes"].presence,
       "email_subject" => raw["email_subject"].presence || email_subject_for(recipient_name, billing_profile),
       "email_body" => raw["email_body"].presence || email_body_for(recipient_name, billing_profile),
@@ -248,7 +249,7 @@ class InvoiceAiPreviewService
       "invoice_date" => Date.current.iso8601,
       "service_period_start" => nil,
       "service_period_end" => nil,
-      "payment_terms" => recipient&.payment_terms,
+      "payment_terms" => nil,
       "notes" => nil,
       "email_subject" => email_subject_for(recipient&.name, billing_profile),
       "email_body" => email_body_for(recipient&.name, billing_profile),

@@ -246,9 +246,13 @@ export function InvoiceMaker() {
       setRecipients(recipientResponse.invoice_recipients);
       setBillingProfiles(billingProfileResponse.invoice_billing_profiles);
       const defaultProfile = billingProfileResponse.invoice_billing_profiles.find((profile) => profile.is_default) || billingProfileResponse.invoice_billing_profiles[0];
-      setInvoiceForm((current) => current.invoice_billing_profile_id || !defaultProfile
-        ? current
-        : { ...current, invoice_billing_profile_id: String(defaultProfile.id), payment_terms: current.payment_terms || defaultProfile.default_payment_terms || '' });
+      setInvoiceForm((current) => {
+        if (current.invoice_billing_profile_id || !defaultProfile) return current;
+
+        const next = { ...current, invoice_billing_profile_id: String(defaultProfile.id), payment_terms: current.payment_terms || defaultProfile.default_payment_terms || '' };
+        savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(next));
+        return next;
+      });
       setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load invoices');
@@ -382,6 +386,33 @@ export function InvoiceMaker() {
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
   };
 
+  const upsertInvoice = (invoice: Invoice) => {
+    setInvoices((current) => {
+      const next = current.some((candidate) => candidate.id === invoice.id)
+        ? current.map((candidate) => candidate.id === invoice.id ? invoice : candidate)
+        : [invoice, ...current];
+      return next.sort((a, b) => b.invoice_date.localeCompare(a.invoice_date) || b.created_at.localeCompare(a.created_at));
+    });
+
+    if (invoice.invoice_recipient) {
+      setRecipients((current) => {
+        const next = current.some((recipient) => recipient.id === invoice.invoice_recipient!.id)
+          ? current.map((recipient) => recipient.id === invoice.invoice_recipient!.id ? invoice.invoice_recipient! : recipient)
+          : [...current, invoice.invoice_recipient!];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+    }
+  };
+
+  const upsertChatSession = (session: InvoiceChatSession) => {
+    setChatSessions((current) => {
+      const next = current.some((candidate) => candidate.id === session.id)
+        ? current.map((candidate) => candidate.id === session.id ? session : candidate)
+        : [session, ...current];
+      return next.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    });
+  };
+
   const applyPreviewToForm = (preview: InvoiceAiPreview) => {
     const recipientId = preview.invoice_recipient_id ? String(preview.invoice_recipient_id) : '';
     const profileId = preview.invoice_billing_profile_id || selectedBillingProfile?.id || billingProfiles.find((profile) => profile.is_default)?.id || billingProfiles[0]?.id;
@@ -423,6 +454,11 @@ export function InvoiceMaker() {
   };
 
   const handleSelectInvoice = (id: number) => {
+    if (invoiceForm.id === id) {
+      setInvoiceMode('manual');
+      return;
+    }
+
     if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     loadInvoice(id);
@@ -760,6 +796,8 @@ export function InvoiceMaker() {
 
     setChatBusy(true);
     setError(null);
+    setSuccess(null);
+    setCreatedChatInvoice(null);
     let createdSessionId: number | null = null;
     const attachments = chatImages;
     const optimisticId = -Date.now();
@@ -806,7 +844,6 @@ export function InvoiceMaker() {
 
     setChatInput('');
     setChatImages([]);
-    setCreatedChatInvoice(null);
     setOptimisticChatMessages((current) => [...current, ...pendingMessages]);
     if (!currentSessionId) {
       setActiveChatSession(optimisticSession);
@@ -867,7 +904,8 @@ export function InvoiceMaker() {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
       setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
-      await loadData();
+      upsertInvoice(response.invoice);
+      upsertChatSession(response.invoice_chat_session);
       setSuccess('Invoice created from AI preview.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
@@ -928,8 +966,8 @@ export function InvoiceMaker() {
       downloadBlob(blob, 'invoice.pdf');
       const refreshed = await invoicesApi.get(createdChatInvoice.id);
       setCreatedChatInvoice(refreshed.invoice);
-      await loadData();
-      setSuccess('Invoice generated.');
+      upsertInvoice(refreshed.invoice);
+      setSuccess(refreshed.invoice.status === 'generated' ? 'Invoice generated.' : 'Invoice PDF downloaded.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate PDF');
@@ -1258,7 +1296,7 @@ export function InvoiceMaker() {
     ],
     [activeChatSession?.id, activeChatSession?.messages, optimisticChatMessages]
   );
-  const chatCanAcceptMessages = !activeChatSession || activeChatSession.status === 'active';
+  const chatCanAcceptMessages = !activeChatSession || (!activeChatSession.archived && activeChatSession.status !== 'archived');
   const activePreviewVersion = activeChatSession?.current_preview_version || 0;
   const activePreviewIsReady = Boolean(activePreview && activePreview.status === 'preview' && chatCanAcceptMessages && !createdChatInvoice);
 
@@ -1777,11 +1815,6 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
-                {!chatCanAcceptMessages && (
-                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    This assistant session is complete. Start a new chat for another invoice.
-                  </div>
-                )}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
@@ -1845,7 +1878,9 @@ export function InvoiceMaker() {
                       <div className="flex items-start gap-3">
                         <CheckCircle className="mt-0.5 h-5 w-5 text-green-700" />
                         <div>
-                          <p className="text-sm font-semibold text-neutral-900">Draft invoice created</p>
+                          <p className="text-sm font-semibold text-neutral-900">
+                            {createdChatInvoice.status === 'generated' ? 'Invoice generated' : 'Draft invoice created'}
+                          </p>
                           <p className="mt-1 text-sm text-neutral-600">
                             {createdChatInvoice.invoice_number} for {createdChatInvoice.recipient_name || 'the selected recipient'} · {currency(createdChatInvoice.total_amount)}
                           </p>
@@ -1860,7 +1895,7 @@ export function InvoiceMaker() {
                       </Button>
                       <Button type="button" onClick={generateCreatedChatInvoice} disabled={pdfBusy}>
                         <Download className="mr-1.5 h-4 w-4" />
-                        Generate PDF
+                        {createdChatInvoice.status === 'generated' ? 'Download PDF' : 'Generate PDF'}
                       </Button>
                       <Button type="button" variant="outline" onClick={copyEmail} disabled={!createdChatInvoice.email_subject && !createdChatInvoice.email_body}>
                         <Copy className="mr-1.5 h-4 w-4" />
