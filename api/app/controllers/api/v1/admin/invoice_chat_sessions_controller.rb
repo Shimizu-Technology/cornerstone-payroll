@@ -123,8 +123,8 @@ module Api
             @session.lock!
             raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
 
-            if current_preview_already_created?
-              invoice = Invoice.find_by(id: @session.invoice_id, organization_id: current_organization_id)
+            if (created_invoice_id = current_preview_created_invoice_id)
+              invoice = Invoice.find_by(id: created_invoice_id, organization_id: current_organization_id)
               raise ArgumentError, "Invoice already created for this preview but could not be found" unless invoice
               next
             end
@@ -141,7 +141,10 @@ module Api
             @session.messages.create!(
               role: "assistant",
               content: "Created draft invoice #{invoice.invoice_number}. You can keep using this chat for the next invoice.",
-              preview: preview,
+              preview: preview.merge(
+                "created_invoice_id" => invoice.id,
+                "created_invoice_number" => invoice.invoice_number
+              ),
               preview_version: @session.current_preview_version,
               has_preview: true
             )
@@ -243,14 +246,14 @@ module Api
           invoice
         end
 
-        def current_preview_already_created?
-          return false if @session.invoice_id.blank?
-
-          @session.messages.where(
+        def current_preview_created_invoice_id
+          created_message = @session.messages.where(
             role: "assistant",
             has_preview: true,
             preview_version: @session.current_preview_version
-          ).where("content LIKE ?", "Created draft invoice%").exists?
+          ).where.not("preview ->> 'created_invoice_id' IS NULL").last
+
+          created_message&.preview&.dig("created_invoice_id")
         end
 
         def recipient_from_preview!(preview)

@@ -239,6 +239,10 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(invoice.total_amount).to eq(300)
       expect(invoice.status).to eq("draft")
       expect(session.reload.invoice_id).to eq(invoice.id)
+      expect(session.messages.last.preview).to include(
+        "created_invoice_id" => invoice.id,
+        "created_invoice_number" => invoice.invoice_number
+      )
     end
 
     it "returns the existing invoice when the same preview is confirmed twice" do
@@ -293,8 +297,11 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       session.update_column(:invoice_id, invoice.id)
       session.messages.create!(
         role: "assistant",
-        content: "Created draft invoice #{invoice.invoice_number}.",
-        preview: session.current_preview,
+        content: "Invoice is ready.",
+        preview: session.current_preview.merge(
+          "created_invoice_id" => invoice.id,
+          "created_invoice_number" => invoice.invoice_number
+        ),
         preview_version: session.current_preview_version,
         has_preview: true
       )
