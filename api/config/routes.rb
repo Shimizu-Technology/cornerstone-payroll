@@ -131,6 +131,7 @@ Rails.application.routes.draw do
             post :approve
             post :unapprove
             post :commit
+            patch :correct_pay_date
             post :generate_fit_check
             post :retry_tax_sync
             # CPR-71: Payroll correction workflow

@@ -1,11 +1,23 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
+import type { FormEvent } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -14,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatCurrency, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -200,6 +212,10 @@ export function PayPeriodDetail() {
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
+  const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
+  const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
+  const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');
+  const [payDateCorrectionSubmitting, setPayDateCorrectionSubmitting] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
@@ -516,6 +532,50 @@ export function PayPeriodDetail() {
     }
   };
 
+  const openPayDateCorrection = () => {
+    if (!payPeriod) return;
+    setPayDateCorrectionDate(payPeriod.pay_date);
+    setPayDateCorrectionReason('');
+    setPayDateCorrectionOpen(true);
+  };
+
+  const handleCorrectPayDate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!payPeriod) return;
+
+    if (!payDateCorrectionDate) {
+      setError('Pay date is required');
+      return;
+    }
+
+    if (payDateCorrectionDate < payPeriod.end_date) {
+      setError('Pay date must be on or after end date');
+      return;
+    }
+
+    if (!payDateCorrectionReason.trim()) {
+      setError('A reason is required to correct a committed pay date');
+      return;
+    }
+
+    try {
+      setPayDateCorrectionSubmitting(true);
+      setError(null);
+      const response = await payPeriodsApi.correctPayDate(payPeriod.id, {
+        pay_date: payDateCorrectionDate,
+        reason: payDateCorrectionReason.trim(),
+      });
+      setPayPeriod(response.pay_period);
+      setPayDateCorrectionOpen(false);
+      setPayDateCorrectionReason('');
+      await loadPayPeriod(payPeriod.id, true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to correct pay date');
+    } finally {
+      setPayDateCorrectionSubmitting(false);
+    }
+  };
+
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
     setPayPeriod(updatedPayPeriod);
     setPayrollItems(updatedPayPeriod.payroll_items || []);
@@ -693,6 +753,10 @@ export function PayPeriodDetail() {
   const lifecycle = payPeriod.lifecycle || {};
   const processedAt = payPeriod.processed_at || payPeriod.committed_at || lifecycle.committed?.timestamp;
   const processedBy = payPeriod.processed_by_name || lifecycle.committed?.actor_name;
+  const payDateCorrections = payPeriod.pay_date_corrections || [];
+  const formatCorrectionPayDate = (date?: string | null) => (
+    date ? formatDate(date, { month: 'long', day: 'numeric', year: 'numeric' }) : 'Unknown date'
+  );
   const lifecycleActor = (actorName?: string | null) => {
     if (actorName) return `by ${actorName}`;
     return 'Operator not recorded';
@@ -756,6 +820,11 @@ export function PayPeriodDetail() {
             <Button variant="outline" onClick={() => navigate('/pay-periods')}>
               Back to List
             </Button>
+            {isCommitted && !isVoided && (
+              <Button variant="outline" onClick={openPayDateCorrection}>
+                Correct Pay Date
+              </Button>
+            )}
             {isDraft && (
               <>
                 {canImportMosa && (
@@ -856,6 +925,40 @@ export function PayPeriodDetail() {
             </>
           )}
         </div>
+
+        {payDateCorrections.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="space-y-4 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-amber-950">Pay Date Corrections</h3>
+                <p className="mt-1 text-sm text-amber-800">
+                  Date-only corrections made after this payroll was committed. Payroll dollar amounts were not changed.
+                </p>
+              </div>
+              <div className="divide-y divide-amber-200 rounded-md border border-amber-200 bg-white/70">
+                {payDateCorrections.map((correction) => (
+                  <div key={correction.id} className="space-y-2 p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <p className="text-sm font-medium text-gray-900">
+                        Pay date changed from {formatCorrectionPayDate(correction.old_pay_date)} to {formatCorrectionPayDate(correction.new_pay_date)}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatGuamDateTime(correction.corrected_at)}
+                        {correction.corrected_by_name ? ` by ${correction.corrected_by_name}` : ''}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wider text-amber-700">Reason</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                        {correction.reason || 'No reason recorded'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <div className="border-b px-4 py-3">
@@ -2148,6 +2251,66 @@ export function PayPeriodDetail() {
         contractorPayType={editingItem ? employeeLookup.get(editingItem.employee_id)?.contractor_pay_type as 'hourly' | 'flat_fee' | undefined : undefined}
         wageRates={editingItem ? (employeeLookup.get(editingItem.employee_id)?.wage_rates || []) : []}
       />
+
+      <Dialog
+        open={payDateCorrectionOpen}
+        onOpenChange={(open) => {
+          setPayDateCorrectionOpen(open);
+          if (!open) {
+            setPayDateCorrectionReason('');
+            setPayDateCorrectionDate('');
+          }
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={handleCorrectPayDate}>
+            <DialogHeader>
+              <DialogTitle>Correct Committed Pay Date</DialogTitle>
+              <DialogDescription>
+                Use this only for a clerical pay date mistake after payroll was committed. Payroll amounts stay unchanged.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="committed_pay_date">Pay Date</Label>
+                <Input
+                  id="committed_pay_date"
+                  type="date"
+                  value={payDateCorrectionDate}
+                  onChange={(event) => setPayDateCorrectionDate(event.target.value)}
+                  required
+                />
+                <p className="text-xs text-gray-500">
+                  This updates the committed pay period, matching check dates, pay stubs, reports, tax sync payloads, and linked pay-period checks.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="committed_pay_date_reason">Reason</Label>
+                <Textarea
+                  id="committed_pay_date_reason"
+                  value={payDateCorrectionReason}
+                  onChange={(event) => setPayDateCorrectionReason(event.target.value)}
+                  placeholder="Example: Pay date was entered as April 15 but should be April 30."
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPayDateCorrectionOpen(false)}
+                disabled={payDateCorrectionSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={payDateCorrectionSubmitting}>
+                {payDateCorrectionSubmitting ? 'Saving...' : 'Save Pay Date Correction'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
