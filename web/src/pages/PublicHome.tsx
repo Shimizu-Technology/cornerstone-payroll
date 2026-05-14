@@ -32,7 +32,7 @@ const featureBands = [
 ];
 
 export function PublicHome() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   return (
     <main className="min-h-screen bg-white text-neutral-950">
@@ -48,18 +48,23 @@ export function PublicHome() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              to="/login"
-              className="inline-flex items-center justify-center rounded-xl px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-            >
-              Sign In
-            </Link>
-            {isAuthenticated && (
+            {isLoading ? (
+              <span className="inline-flex items-center justify-center rounded-xl px-3 py-1.5 text-xs font-medium text-neutral-500">
+                Checking...
+              </span>
+            ) : isAuthenticated ? (
               <Link
                 to="/app"
                 className="inline-flex items-center justify-center rounded-xl bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-700"
               >
                 Open App
+              </Link>
+            ) : (
+              <Link
+                to="/login"
+                className="inline-flex items-center justify-center rounded-xl px-3 py-1.5 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+              >
+                Sign In
               </Link>
             )}
           </div>
@@ -83,6 +88,8 @@ export function PublicHome() {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a
                 href="https://shimizu-technology.com"
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-5 py-3 text-sm font-semibold text-neutral-950 transition-colors hover:bg-neutral-100"
               >
                 Platform Inquiries
@@ -90,6 +97,8 @@ export function PublicHome() {
               </a>
               <a
                 href="https://cornerstone-accounting.tax"
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/25 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
               >
                 Payroll Service Help
@@ -152,7 +161,14 @@ export function PublicHome() {
               Product, implementation, and platform inquiries for firms interested in Guam-native payroll software.
             </p>
             <div className="mt-5 space-y-2 text-sm text-neutral-700">
-              <p>shimizu-technology.com</p>
+              <a
+                href="https://shimizu-technology.com"
+                target="_blank"
+                rel="noreferrer"
+                className="block transition-colors hover:text-primary-700 hover:underline"
+              >
+                shimizu-technology.com
+              </a>
               <p>671-483-0219</p>
             </div>
           </div>
@@ -163,7 +179,14 @@ export function PublicHome() {
               Payroll and accounting service inquiries for businesses that want help operating payroll in Guam.
             </p>
             <div className="mt-5 space-y-2 text-sm text-neutral-700">
-              <p>cornerstone-accounting.tax</p>
+              <a
+                href="https://cornerstone-accounting.tax"
+                target="_blank"
+                rel="noreferrer"
+                className="block transition-colors hover:text-primary-700 hover:underline"
+              >
+                cornerstone-accounting.tax
+              </a>
               <p>671-482-8671</p>
             </div>
           </div>
