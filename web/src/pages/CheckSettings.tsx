@@ -3,6 +3,7 @@
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Download } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -56,6 +57,8 @@ export function CheckSettingsPage() {
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
   const [testCheckType, setTestCheckType] = useState<TestCheckType>('payroll');
   const [generatingTestCheck, setGeneratingTestCheck] = useState(false);
+  const [testCheckPreviewUrl, setTestCheckPreviewUrl] = useState<string | null>(null);
+  const [testCheckPreviewFilename, setTestCheckPreviewFilename] = useState('test_check.pdf');
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -157,6 +160,12 @@ export function CheckSettingsPage() {
     document.addEventListener('click', handleDocumentClick, true);
     return () => document.removeEventListener('click', handleDocumentClick, true);
   }, [hasUnsavedCheckSettings]);
+
+  useEffect(() => {
+    return () => {
+      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+    };
+  }, [testCheckPreviewUrl]);
 
   const confirmDiscardUnsavedChanges = useCallback((message: string) => {
     return !hasUnsavedCheckSettings || window.confirm(message);
@@ -326,38 +335,48 @@ export function CheckSettingsPage() {
     check_layout_config: layoutConfig,
   });
 
-  const openPdfBlob = (blob: Blob, filename: string, targetWindow?: Window | null) => {
-    const url = URL.createObjectURL(blob);
-    if (targetWindow) {
-      targetWindow.location.href = url;
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      a.click();
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  };
-
   const handleTestCheckPdf = async () => {
     setError(null);
     setSuccess(null);
-    let printWindow: Window | null = null;
     try {
       const layoutConfig = parseLayoutOverridesForAction();
       setGeneratingTestCheck(true);
-      printWindow = window.open('', '_blank');
       const { blob, filename } = await checksApi.testCheckPdf({
         sample_type: testCheckType,
         check_settings: currentDraftCheckSettings(layoutConfig),
       });
-      openPdfBlob(blob, filename || `test_check_${testCheckType}.pdf`, printWindow);
-      setSuccess('Test check PDF generated from the current draft settings.');
+      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+      setTestCheckPreviewUrl(URL.createObjectURL(blob));
+      setTestCheckPreviewFilename(filename || `test_check_${testCheckType}.pdf`);
     } catch (err) {
-      if (printWindow) printWindow.close();
       setError(err instanceof Error ? err.message : 'Failed to generate test check PDF');
     } finally {
       setGeneratingTestCheck(false);
+    }
+  };
+
+  const handleCloseTestCheckPreview = () => {
+    if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+    setTestCheckPreviewUrl(null);
+  };
+
+  const handleDownloadTestCheckPreview = () => {
+    if (!testCheckPreviewUrl) return;
+    const a = document.createElement('a');
+    a.href = testCheckPreviewUrl;
+    a.download = testCheckPreviewFilename;
+    a.click();
+  };
+
+  const handlePrintTestCheckPreview = () => {
+    if (!testCheckPreviewUrl) return;
+    const printWindow = window.open(testCheckPreviewUrl);
+    if (printWindow) {
+      printWindow.addEventListener('load', () => {
+        printWindow.print();
+      });
+    } else {
+      setError('Pop-up blocked. Please allow pop-ups for this site to print checks.');
     }
   };
 
@@ -801,7 +820,7 @@ export function CheckSettingsPage() {
                   <div>
                     <Label htmlFor="test-check-type">Test Print</Label>
                     <p className="mt-1 text-xs text-blue-900">
-                      Generate a sample check from the current draft settings before saving or printing real checks.
+                      Generate a preview from the current draft settings, then print from the browser just like a real check.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-end gap-2">
@@ -820,7 +839,7 @@ export function CheckSettingsPage() {
                       {generatingTestCheck ? (
                         <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Generating...</>
                       ) : (
-                        <><Download className="w-4 h-4 mr-2" /> Open Test Check PDF</>
+                        <><Download className="w-4 h-4 mr-2" /> Preview Test Check</>
                       )}
                     </Button>
                   </div>
@@ -982,6 +1001,42 @@ export function CheckSettingsPage() {
         </Card>
 
       </div>
+
+      {testCheckPreviewUrl && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Test Check Preview
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  This preview uses the current draft settings. Nothing is saved until you click Save Settings.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={handlePrintTestCheckPreview}>
+                  Print
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadTestCheckPreview}>
+                  Download PDF
+                </Button>
+                <Button size="sm" onClick={handleCloseTestCheckPreview}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 bg-gray-100 p-5">
+              <iframe
+                src={`${testCheckPreviewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
+                className="h-full w-full rounded-xl border bg-white shadow-lg"
+                title="Test Check Preview"
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
