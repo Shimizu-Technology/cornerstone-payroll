@@ -59,8 +59,7 @@ module Api
         end
 
         def restore
-          restored_status = @session.invoice_id.present? ? "invoice_created" : "active"
-          @session.update!(archived: false, status: restored_status, updated_by: current_user)
+          @session.update!(archived: false, status: "active", updated_by: current_user)
           render json: { invoice_chat_session: session_payload(@session.reload, detailed: true) }
         end
 
@@ -86,7 +85,8 @@ module Api
 
           InvoiceChatSession.transaction do
             @session.lock!
-            raise ArgumentError, "Cannot send messages to a non-active session" unless @session.status == "active"
+            raise ArgumentError, "Cannot send messages to an archived session" if @session.archived? || @session.status == "archived"
+            @session.status = "active" if @session.status == "invoice_created"
 
             user_message = @session.messages.create!(role: "user", content: content, image_urls: image_urls)
             version = @session.store_preview!(preview, actor: current_user)
@@ -123,9 +123,9 @@ module Api
             @session.lock!
             raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
 
-            if @session.status == "invoice_created" && @session.invoice_id.present?
+            if current_preview_already_created?
               invoice = Invoice.find_by(id: @session.invoice_id, company_id: current_company_id)
-              raise ArgumentError, "Invoice already created for this session but could not be found" unless invoice
+              raise ArgumentError, "Invoice already created for this preview but could not be found" unless invoice
               next
             end
 
@@ -134,13 +134,13 @@ module Api
             @session.update!(
               invoice: invoice,
               invoice_recipient_id: invoice.invoice_recipient_id,
-              status: "invoice_created",
+              status: "active",
               updated_by: current_user
             )
             created_invoice = true
             @session.messages.create!(
               role: "assistant",
-              content: "Created draft invoice #{invoice.invoice_number}.",
+              content: "Created draft invoice #{invoice.invoice_number}. You can keep using this chat for the next invoice.",
               preview: preview,
               preview_version: @session.current_preview_version,
               has_preview: true
@@ -165,7 +165,8 @@ module Api
 
           InvoiceChatSession.transaction do
             @session.lock!
-            raise ArgumentError, "Cannot restore previews on a non-active session" unless @session.status == "active"
+            raise ArgumentError, "Cannot restore previews on an archived session" if @session.archived? || @session.status == "archived"
+            @session.status = "active" if @session.status == "invoice_created"
 
             version = @session.store_preview!(message.preview, actor: current_user)
             @session.messages.create!(
@@ -228,7 +229,7 @@ module Api
             invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
             service_period_start: parse_preview_date(preview["service_period_start"]),
             service_period_end: parse_preview_date(preview["service_period_end"]),
-            payment_terms: preview["payment_terms"].presence || recipient.payment_terms,
+            payment_terms: preview["payment_terms"].presence,
             notes: preview["notes"].presence,
             email_subject: preview["email_subject"].presence,
             email_body: preview["email_body"].presence,
@@ -240,6 +241,16 @@ module Api
           end
           invoice.save!
           invoice
+        end
+
+        def current_preview_already_created?
+          return false if @session.invoice_id.blank?
+
+          @session.messages.where(
+            role: "assistant",
+            has_preview: true,
+            preview_version: @session.current_preview_version
+          ).where("content LIKE ?", "Created draft invoice%").exists?
         end
 
         def recipient_from_preview!(preview)

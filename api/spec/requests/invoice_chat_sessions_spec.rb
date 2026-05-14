@@ -91,7 +91,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       file&.unlink
     end
 
-    it "does not overwrite the preview on a completed session" do
+    it "continues the chat on a previously completed session" do
       original_preview = { "status" => "preview", "message" => "Original preview." }
       next_preview = { "status" => "preview", "message" => "New preview." }
       session = create(
@@ -109,11 +109,11 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message",
         params: { content: "Change this invoice" }
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to eq("Cannot send messages to a non-active session")
-      expect(session.messages.reload).to be_empty
-      expect(session.reload.current_preview).to eq(original_preview)
-      expect(session.current_preview_version).to eq(1)
+      expect(response).to have_http_status(:ok)
+      expect(session.messages.reload.size).to eq(2)
+      expect(session.reload.status).to eq("active")
+      expect(session.current_preview).to eq(next_preview)
+      expect(session.current_preview_version).to eq(2)
     end
 
     it "cleans up uploaded attachments on unexpected failures before persistence" do
