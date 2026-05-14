@@ -188,6 +188,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/confirm" do
     it "creates a draft invoice from the current preview" do
       recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+      billing_profile = create(:invoice_billing_profile, organization: company.organization, name: "Shimizu Technology", invoice_prefix: "ST")
       session = create(
         :invoice_chat_session,
         company: company,
@@ -196,6 +197,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
         current_preview_version: 1,
         current_preview: {
           "status" => "preview",
+          "invoice_billing_profile_id" => billing_profile.id,
           "invoice_recipient_id" => recipient.id,
           "invoice_date" => "2026-05-02",
           "payment_terms" => "Due on receipt",
@@ -212,6 +214,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       invoice = Invoice.last
       expect(invoice.company_id).to eq(company.id)
       expect(invoice.invoice_recipient_id).to eq(recipient.id)
+      expect(invoice.invoice_billing_profile_id).to eq(billing_profile.id)
       expect(invoice.total_amount).to eq(300)
       expect(invoice.status).to eq("draft")
       expect(session.reload.invoice_id).to eq(invoice.id)

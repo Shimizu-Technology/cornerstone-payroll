@@ -224,7 +224,7 @@ module Api
             organization_id: current_organization_id,
             company_id: current_company_id,
             invoice_recipient: recipient,
-            invoice_billing_profile: InvoiceBillingProfile.ensure_default_for!(current_organization),
+            invoice_billing_profile: billing_profile_from_preview!(preview),
             invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
             service_period_start: parse_preview_date(preview["service_period_start"]),
             service_period_end: parse_preview_date(preview["service_period_end"]),
@@ -258,6 +258,21 @@ module Api
           raise ArgumentError, "Invoice recipient not found" if attrs.blank?
 
           InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, company_id: current_company_id, active: true))
+        end
+
+        def billing_profile_from_preview!(preview)
+          if preview["invoice_billing_profile_id"].present?
+            profile = InvoiceBillingProfile.find_by(
+              id: preview["invoice_billing_profile_id"],
+              organization_id: current_organization_id,
+              active: true
+            )
+            raise ArgumentError, "Invoice billing profile not found" unless profile
+
+            return profile
+          end
+
+          InvoiceBillingProfile.ensure_default_for!(current_organization)
         end
 
         def new_recipient_attributes_from_preview(raw)
@@ -398,6 +413,7 @@ module Api
             updated_by_name: invoice.updated_by&.name,
             line_item_count: invoice.line_items.size,
             invoice_recipient: recipient_payload(invoice.invoice_recipient),
+            invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
             line_items: invoice.line_items.map { |item| invoice_line_item_payload(item) },
             created_at: invoice.created_at,
             updated_at: invoice.updated_at
@@ -420,6 +436,28 @@ module Api
             template_type: recipient.template_type,
             notes: recipient.notes,
             active: recipient.active
+          }
+        end
+
+        def billing_profile_payload(profile)
+          return nil unless profile
+
+          {
+            id: profile.id,
+            organization_id: profile.organization_id,
+            name: profile.name,
+            legal_name: profile.legal_name,
+            website: profile.website,
+            phone: profile.phone,
+            email: profile.email,
+            address: profile.address,
+            payment_instructions: profile.payment_instructions,
+            default_payment_terms: profile.default_payment_terms,
+            invoice_prefix: profile.invoice_prefix,
+            remit_to: profile.remit_to,
+            footer_note: profile.footer_note,
+            active: profile.active,
+            is_default: profile.is_default
           }
         end
 
