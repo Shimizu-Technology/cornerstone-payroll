@@ -250,6 +250,42 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(response.parsed_body.dig("invoice", "id")).to eq(invoice_id)
     end
 
+    it "finds an already-created preview invoice across companies in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization, name: "Shimizu Technology")
+      invoice = create(:invoice, :with_line_item, company: other_company, organization: company.organization, invoice_recipient: recipient)
+      session = create(
+        :invoice_chat_session,
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        current_preview_version: 1,
+        current_preview: {
+          "status" => "preview",
+          "invoice_recipient_id" => recipient.id,
+          "invoice_date" => "2026-05-02",
+          "line_items" => [
+            { "description" => "Payroll service", "quantity" => 2, "rate" => 150 }
+          ]
+        }
+      )
+      session.update_column(:invoice_id, invoice.id)
+      session.messages.create!(
+        role: "assistant",
+        content: "Created draft invoice #{invoice.invoice_number}.",
+        preview: session.current_preview,
+        preview_version: session.current_preview_version,
+        has_preview: true
+      )
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      }.not_to change(Invoice, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("invoice", "id")).to eq(invoice.id)
+    end
+
     it "rejects inactive recipients in a preview" do
       recipient = create(:invoice_recipient, company: company, active: false)
       session = create(
