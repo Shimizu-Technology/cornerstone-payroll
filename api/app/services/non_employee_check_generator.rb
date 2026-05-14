@@ -15,22 +15,26 @@ class NonEmployeeCheckGenerator
   SECTION_HEIGHT = PAGE_HEIGHT / 3.0
   M              = 16.0
 
+  CHECK_FACE_FIELDS = %i[date payee amount amount_words memo].freeze
   DEFAULT_LAYOUT = {
-    check_face: {
-      date:         { x: 474.0, y: 216.0, width: 112.0, font_size: 10.0 },
-      payee:        { x: 64.0,  y: 180.0, width: 320.0, font_size: 10.0 },
-      amount:       { x: 467.0, y: 182.0, width: 120.0, font_size: 10.0 },
-      amount_words: { x: 52.0,  y: 156.0, width: 492.0, font_size: 9.0 },
-      memo:         { x: 22.0,  y: 64.0,  width: 260.0, font_size: 7.5 }
-    }
+    check_face: CheckGenerator::DEFAULT_LAYOUT.fetch(:check_face).slice(*CHECK_FACE_FIELDS)
   }.freeze
 
-  attr_reader :check, :company, :preview_layout_config
+  attr_reader :check, :company, :layout_config_override
+
+  def self.default_layout_config
+    stringify_layout(DEFAULT_LAYOUT)
+  end
+
+  def self.resolved_layout_for(company, layout_config: nil)
+    source_layout = layout_config.nil? ? company.check_layout_config : layout_config
+    deep_merge(default_layout_config, stringify_layout(source_layout || {}))
+  end
 
   def initialize(non_employee_check, layout_config: nil)
     @check   = non_employee_check
     @company = non_employee_check.company
-    @preview_layout_config = layout_config
+    @layout_config_override = layout_config
   end
 
   def generate
@@ -83,28 +87,28 @@ class NonEmployeeCheckGenerator
     memo_cfg = layout_field(:memo)
 
     # Date (top-right)
-    pdf.bounding_box([date_cfg[:x] + ox, sect_bot + date_cfg[:y] + oy], width: date_cfg[:width]) do
-      pdf.font_size(date_cfg[:font_size]) { pdf.text check_date_str, align: :right }
+    pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
+      pdf.font_size(date_cfg["font_size"].to_f) { pdf.text check_date_str, align: :right }
     end
 
     # Payee (left)
-    pdf.bounding_box([payee_cfg[:x] + ox, sect_bot + payee_cfg[:y] + oy], width: payee_cfg[:width]) do
-      pdf.font_size(payee_cfg[:font_size]) { pdf.text check.payable_to }
+    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f) do
+      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text check.payable_to }
     end
 
     # Amount (right)
-    pdf.bounding_box([amount_cfg[:x] + ox, sect_bot + amount_cfg[:y] + oy], width: amount_cfg[:width]) do
-      pdf.font_size(amount_cfg[:font_size]) { pdf.text fn(check.amount), align: :right }
+    pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
+      pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(check.amount), align: :right }
     end
 
     # Amount in words
-    pdf.bounding_box([words_cfg[:x] + ox, sect_bot + words_cfg[:y] + oy], width: words_cfg[:width]) do
-      pdf.font_size(words_cfg[:font_size]) { pdf.text NumberToWords.convert(check.amount) }
+    pdf.bounding_box([words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy], width: words_cfg["width"].to_f) do
+      pdf.font_size(words_cfg["font_size"].to_f) { pdf.text NumberToWords.convert(check.amount) }
     end
 
     # Memo
-    pdf.bounding_box([memo_cfg[:x] + ox, sect_bot + memo_cfg[:y] + oy], width: memo_cfg[:width]) do
-      pdf.font_size(memo_cfg[:font_size]) { pdf.text check.memo.to_s }
+    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
+      pdf.font_size(memo_cfg["font_size"].to_f) { pdf.text check.memo.to_s }
     end
   end
 
@@ -341,32 +345,25 @@ class NonEmployeeCheckGenerator
   end
 
   def layout_field(field)
-    layout_config.fetch(:check_face).fetch(field)
+    layout_config.fetch("check_face").fetch(field.to_s)
   end
 
   def layout_config
-    @layout_config ||= begin
-      base = DEFAULT_LAYOUT.deep_dup
-      overrides = normalize_layout_config(preview_layout_config)
-      overrides.present? ? deep_merge(base, overrides) : base
-    end
+    @layout_config ||= self.class.resolved_layout_for(company, layout_config: layout_config_override)
   end
 
-  def normalize_layout_config(value)
+  def self.stringify_layout(value)
     case value
     when Hash
-      value.each_with_object({}) do |(key, nested), acc|
-        normalized_key = key.to_s.underscore.to_sym
-        acc[normalized_key] = normalize_layout_config(nested)
-      end
+      value.each_with_object({}) { |(key, nested), acc| acc[key.to_s] = stringify_layout(nested) }
     when Array
-      value.map { |entry| normalize_layout_config(entry) }
+      value.map { |entry| stringify_layout(entry) }
     else
       value
     end
   end
 
-  def deep_merge(base, overrides)
+  def self.deep_merge(base, overrides)
     base.merge(overrides) do |_key, old_value, new_value|
       old_value.is_a?(Hash) && new_value.is_a?(Hash) ? deep_merge(old_value, new_value) : new_value
     end
