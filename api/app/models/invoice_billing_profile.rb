@@ -15,8 +15,17 @@ class InvoiceBillingProfile < ApplicationRecord
 
   def self.ensure_default_for!(organization)
     organization.with_lock do
-      existing = organization.invoice_billing_profiles.active.order(Arel.sql("is_default DESC"), :id).first
-      return existing if existing
+      profiles = organization.invoice_billing_profiles
+      profiles.where(active: false, is_default: true).update_all(is_default: false)
+
+      existing_default = profiles.active.where(is_default: true).order(:id).first
+      return existing_default if existing_default
+
+      existing_active = profiles.active.order(:id).first
+      if existing_active
+        existing_active.update!(is_default: true)
+        return existing_active
+      end
 
       primary_company = organization.primary_company || organization.companies.order(:id).first
       organization.invoice_billing_profiles.create!(
