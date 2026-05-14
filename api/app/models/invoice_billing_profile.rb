@@ -67,6 +67,7 @@ class InvoiceBillingProfile < ApplicationRecord
     self.remit_to = remit_to.to_s.strip.presence
     self.footer_note = footer_note.to_s.strip.presence
     self.active = true if active.nil?
+    self.is_default = false unless active?
   end
 
   def clear_other_defaults

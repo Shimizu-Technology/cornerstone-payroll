@@ -3,6 +3,14 @@
 require "rails_helper"
 
 RSpec.describe InvoiceBillingProfile do
+  it "clears the default flag when archived through normal saves" do
+    profile = create(:invoice_billing_profile, active: true, is_default: true)
+
+    profile.update!(active: false)
+
+    expect(profile.reload).to have_attributes(active: false, is_default: false)
+  end
+
   describe ".ensure_default_for!" do
     it "promotes an existing active profile when no active default exists" do
       organization = create(:organization)
