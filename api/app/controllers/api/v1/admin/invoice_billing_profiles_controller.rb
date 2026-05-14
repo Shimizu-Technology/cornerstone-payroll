@@ -37,7 +37,7 @@ module Api
 
         def destroy
           if @profile.invoices.exists?
-            @profile.update!(active: false)
+            @profile.update!(active: false, is_default: false)
             render json: { invoice_billing_profile: profile_payload(@profile), message: "Billing profile archived" }
           else
             @profile.destroy!

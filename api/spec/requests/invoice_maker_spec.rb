@@ -57,6 +57,23 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
     end
   end
 
+  describe "DELETE /api/v1/admin/invoice_billing_profiles/:id" do
+    it "archives an in-use default profile and clears the default flag" do
+      profile = create(:invoice_billing_profile, organization: company.organization, name: "Default Sender", is_default: true)
+      recipient = create(:invoice_recipient, company: company)
+      create(:invoice, :with_line_item, company: company, organization: company.organization, invoice_billing_profile: profile, invoice_recipient: recipient)
+
+      delete "/api/v1/admin/invoice_billing_profiles/#{profile.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(profile.reload).to have_attributes(active: false, is_default: false)
+      expect {
+        InvoiceBillingProfile.ensure_default_for!(company.organization)
+      }.to change(InvoiceBillingProfile, :count).by(1)
+      expect(company.organization.invoice_billing_profiles.active.find_by(is_default: true)).to be_present
+    end
+  end
+
   describe "POST /api/v1/admin/invoices" do
     it "creates a draft invoice with line items and calculated total" do
       recipient = create(:invoice_recipient, company: company)

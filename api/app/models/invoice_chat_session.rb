@@ -19,8 +19,8 @@ class InvoiceChatSession < ApplicationRecord
 
   validates :title, presence: true
   validates :status, presence: true, inclusion: { in: STATUSES }
-  validate :recipient_must_belong_to_company
-  validate :invoice_must_belong_to_company
+  validate :recipient_must_belong_to_organization
+  validate :invoice_must_belong_to_organization
 
   scope :recent, -> { order(updated_at: :desc, created_at: :desc) }
 
@@ -47,17 +47,17 @@ class InvoiceChatSession < ApplicationRecord
     self.archived = false if archived.nil?
   end
 
-  def recipient_must_belong_to_company
+  def recipient_must_belong_to_organization
     return if invoice_recipient.blank? || company_id.blank?
-    return if invoice_recipient.company_id == company_id
+    return if invoice_recipient.organization_id == company&.organization_id
 
-    errors.add(:invoice_recipient, "must belong to the same company")
+    errors.add(:invoice_recipient, "must belong to the same organization")
   end
 
-  def invoice_must_belong_to_company
+  def invoice_must_belong_to_organization
     return if invoice.blank? || company_id.blank?
-    return if invoice.company_id == company_id
+    return if invoice.organization_id == company&.organization_id
 
-    errors.add(:invoice, "must belong to the same company")
+    errors.add(:invoice, "must belong to the same organization")
   end
 end
