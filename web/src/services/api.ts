@@ -1719,6 +1719,19 @@ export const checksApi = {
   // Download alignment test PDF through authenticated API client
   alignmentTestPdf: () =>
     api.getBlob('/admin/companies/alignment_test_pdf'),
+  testCheckPdf: (data: {
+    sample_type: 'payroll' | 'fit' | 'grt' | 'vendor';
+    check_settings: {
+      check_stock_type: CheckStockType;
+      check_offset_x: number;
+      check_offset_y: number;
+      bank_name: string | null;
+      bank_address: string | null;
+      check_memo_template: string | null;
+      check_layout_config: Record<string, unknown>;
+    };
+  }) =>
+    api.postBlob('/admin/companies/test_check_pdf', data),
 };
 
 // ============================================================

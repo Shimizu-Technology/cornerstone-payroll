@@ -511,6 +511,76 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/companies/test_check_pdf" do
+    it "renders a payroll test PDF from draft settings without saving them" do
+      company.update!(
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        check_layout_config: {}
+      )
+
+      post "/api/v1/admin/companies/test_check_pdf",
+        params: {
+          sample_type: "payroll",
+          check_settings: {
+            check_stock_type: "top_check",
+            check_offset_x: 0.25,
+            check_offset_y: -0.125,
+            bank_name: "Draft Bank",
+            bank_address: "Draft Bank Address",
+            check_memo_template: "Draft memo",
+            check_layout_config: {
+              check_face: {
+                payee: { x: 72.5 }
+              }
+            }
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.body).to start_with("%PDF")
+
+      company.reload
+      expect(company.check_stock_type).to eq("bottom_check")
+      expect(company.check_offset_x.to_f).to eq(0.0)
+      expect(company.check_offset_y.to_f).to eq(0.0)
+      expect(company.bank_name).not_to eq("Draft Bank")
+      expect(company.check_layout_config).to eq({})
+    end
+
+    it "renders non-employee test PDFs from draft settings without saving them" do
+      post "/api/v1/admin/companies/test_check_pdf",
+        params: {
+          sample_type: "grt",
+          check_settings: {
+            check_stock_type: "bottom_check",
+            check_offset_x: 0.1,
+            check_offset_y: 0.2,
+            check_layout_config: {
+              check_face: {
+                memo: { x: 48.0, width: 300.0 }
+              }
+            }
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.body).to start_with("%PDF")
+      expect(company.reload.check_layout_config).to eq({})
+    end
+
+    it "rejects unknown test check types" do
+      post "/api/v1/admin/companies/test_check_pdf",
+        params: { sample_type: "unknown", check_settings: {} }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Unknown test check type")
+    end
+  end
+
   describe "PATCH /api/v1/admin/companies/check_settings" do
     it "updates offset, stock type, and layout overrides" do
       patch "/api/v1/admin/companies/check_settings",
