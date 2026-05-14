@@ -24,7 +24,7 @@ module Api
       class ChecksController < BaseController
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
-        before_action :set_company,       only: [ :check_settings, :update_check_settings, :alignment_test_pdf, :update_next_check_number ]
+        before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
 
         # -----------------------------------------------------------------------
         # GET /api/v1/admin/pay_periods/:pay_period_id/checks
@@ -449,6 +449,51 @@ module Api
         end
 
         # -----------------------------------------------------------------------
+        # GET /api/v1/admin/companies/:company_id/check_layout
+        # Returns the generator-resolved layout so the UI can edit the same
+        # field coordinates used by the PDF renderer.
+        # -----------------------------------------------------------------------
+        def check_layout
+          render json: { check_layout: company_check_layout_json(layout_preview_company(@company)) }
+        end
+
+        # -----------------------------------------------------------------------
+        # POST /api/v1/admin/companies/test_check_pdf
+        # Renders a sample check using draft settings from the Check Settings UI.
+        # Nothing is persisted and no real check/payroll records are created.
+        # -----------------------------------------------------------------------
+        def test_check_pdf
+          preview_company = check_settings_preview_company(@company)
+          sample_type = params[:sample_type].presence || "payroll"
+
+          pdf_data = case sample_type
+          when "payroll"
+            sample_item = build_test_payroll_item(preview_company)
+            if preview_company.first_hawaiian_4up_checks?
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [sample_item]).generate
+            else
+              CheckGenerator.new(sample_item).generate
+            end
+          when "fit", "grt", "vendor"
+            sample_check = build_test_non_employee_check(preview_company, sample_type)
+            if preview_company.first_hawaiian_4up_checks?
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [sample_check]).generate
+            else
+              NonEmployeeCheckGenerator.new(sample_check, layout_config: preview_company.check_layout_config).generate
+            end
+          else
+            return render json: { error: "Unknown test check type" }, status: :unprocessable_entity
+          end
+
+          send_data pdf_data,
+            type: "application/pdf",
+            disposition: "inline",
+            filename: "test_check_#{sample_type}_#{Date.current}.pdf"
+        rescue StandardError => e
+          render json: { error: "Failed to generate test check: #{e.message}" }, status: :unprocessable_entity
+        end
+
+        # -----------------------------------------------------------------------
         # PATCH /api/v1/admin/companies/:company_id/next_check_number
         # Admin-only: manually set the next blank check number.
         # If checks already exist, the next number can move forward but cannot
@@ -646,6 +691,73 @@ module Api
           }
         end
 
+        def check_settings_preview_company(company)
+          permitted = preview_check_settings_params
+          company.dup.tap do |preview|
+            preview.id = company.id
+            preview.check_stock_type = permitted[:check_stock_type] if permitted.key?(:check_stock_type)
+            preview.check_offset_x = permitted[:check_offset_x] if permitted.key?(:check_offset_x)
+            preview.check_offset_y = permitted[:check_offset_y] if permitted.key?(:check_offset_y)
+            preview.bank_name = permitted[:bank_name] if permitted.key?(:bank_name)
+            preview.bank_address = permitted[:bank_address] if permitted.key?(:bank_address)
+            preview.check_memo_template = permitted[:check_memo_template] if permitted.key?(:check_memo_template)
+            preview.check_layout_config = permitted[:check_layout_config] if permitted.key?(:check_layout_config)
+          end
+        end
+
+        def preview_check_settings_params
+          raw = params[:check_settings].presence || {}
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+          permitted = raw.permit(
+            :check_stock_type,
+            :check_offset_x,
+            :check_offset_y,
+            :bank_name,
+            :bank_address,
+            :check_memo_template,
+            check_layout_config: {}
+          )
+
+          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
+            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
+          elsif permitted[:check_layout_config].is_a?(Hash)
+            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
+          end
+
+          permitted
+        end
+
+        def company_check_layout_json(company)
+          if company.first_hawaiian_4up_checks?
+            generator = FirstHawaiianFourUpCheckGenerator
+            layout = generator.resolved_layout_for(company)
+            page = generator.page_layout_metadata(company)
+          else
+            generator = CheckGenerator
+            layout = generator.resolved_layout_for(company)
+            page = generator.page_layout_metadata(company)
+          end
+
+          {
+            check_stock_type: company.check_stock_type,
+            check_offset_x: company.check_offset_x,
+            check_offset_y: company.check_offset_y,
+            default_layout_config: generator.default_layout_config,
+            resolved_layout_config: layout,
+            page: page
+          }
+        end
+
+        def layout_preview_company(company)
+          requested_stock_type = params[:check_stock_type].presence
+          return company unless requested_stock_type && Company::CHECK_STOCK_TYPES.include?(requested_stock_type)
+
+          company.dup.tap do |preview|
+            preview.id = company.id
+            preview.check_stock_type = requested_stock_type
+          end
+        end
+
         def normalize_layout_numeric_values(value)
           case value
           when Hash
@@ -723,6 +835,93 @@ module Api
             voided: false
           )
           item
+        end
+
+        def build_test_payroll_item(company)
+          pay_period = PayPeriod.new(
+            company: company,
+            start_date: Date.current.beginning_of_month,
+            end_date: Date.current.beginning_of_month + 13.days,
+            pay_date: Date.current,
+            status: "committed"
+          )
+          employee = Employee.new(
+            company: company,
+            first_name: "Jane",
+            last_name: "Sample",
+            employment_type: "hourly",
+            pay_frequency: "biweekly",
+            pay_rate: 15.55,
+            address_line1: "123 Marine Dr",
+            city: "Hagatna",
+            state: "GU",
+            zip: "96910"
+          )
+
+          PayrollItem.new(
+            company: company,
+            pay_period: pay_period,
+            employee: employee,
+            employment_type: "hourly",
+            pay_rate: 15.55,
+            hours_worked: 80,
+            gross_pay: 1244.00,
+            net_pay: 947.26,
+            withholding_tax: 124.40,
+            social_security_tax: 77.13,
+            medicare_tax: 18.04,
+            retirement_payment: 62.20,
+            insurance_payment: 15.00,
+            total_deductions: 296.74,
+            check_number: "TEST",
+            check_print_count: 0,
+            voided: false
+          )
+        end
+
+        def build_test_non_employee_check(company, sample_type)
+          attrs = case sample_type
+          when "fit"
+            {
+              payable_to: "Treasurer of Guam",
+              amount: 1240.55,
+              check_type: "tax_deposit",
+              memo: "FIT deposit for payroll period",
+              description: "Sample Federal Income Tax deposit",
+              reference_number: "FIT-TEST",
+              payment_period_type: "pay_period"
+            }
+          when "grt"
+            {
+              payable_to: "Treasurer of Guam",
+              amount: 438.22,
+              check_type: "grt",
+              memo: "GRT payment for #{Date.current.strftime('%B %Y')}",
+              description: "Sample Gross Receipts Tax payment",
+              reference_number: "GRT-TEST",
+              payment_period_type: "month",
+              tax_year: Date.current.year,
+              tax_month: Date.current.month
+            }
+          else
+            {
+              payable_to: "Sample Vendor LLC",
+              amount: 325.00,
+              check_type: "vendor",
+              memo: "Sample vendor payment",
+              description: "Sample vendor invoice payment",
+              reference_number: "INV-TEST",
+              payment_period_type: "none"
+            }
+          end
+
+          NonEmployeeCheck.new(attrs.merge(
+            company: company,
+            check_number: "TEST",
+            payment_date: Date.current,
+            created_at: Time.current,
+            updated_at: Time.current
+          ))
         end
       end
     end

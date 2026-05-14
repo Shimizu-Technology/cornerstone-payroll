@@ -27,9 +27,8 @@ class Company < ApplicationRecord
   has_many :form500_filings, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
-  # NOTE: printer_profiles used to be company-scoped but moved to per-user
-  # scope (a printer belongs to its operator, not to a tenant). See
-  # ScopePrinterProfilesToUser migration.
+  # Printer profiles are organization-scoped so every operator in the same
+  # accounting firm can share the same physical printer calibration.
 
   before_validation :normalize_blanks
 

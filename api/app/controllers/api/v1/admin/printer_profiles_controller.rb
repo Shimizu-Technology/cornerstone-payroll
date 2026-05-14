@@ -3,17 +3,16 @@
 module Api
   module V1
     module Admin
-      # Printer profiles are scoped to the logged-in user so the same
-      # calibration is available no matter which client the operator has
-      # switched into. The `apply` action still writes to the *currently
-      # active company's* check settings — that's the act of saying
-      # "use this printer's offsets for this client right now".
+      # Printer profiles are scoped to the current organization so everyone in
+      # the same accounting firm can reuse the same office printer calibration.
+      # The `apply` action still writes to the currently active company's check
+      # settings — that's the act of saying "use this printer here right now".
       class PrinterProfilesController < BaseController
         before_action :set_profile, only: [:show, :update, :destroy, :apply]
 
         # GET /api/v1/admin/printer_profiles
         def index
-          profiles = current_user.printer_profiles.ordered
+          profiles = current_organization.printer_profiles.ordered
           render json: { printer_profiles: profiles.map { |p| profile_json(p) } }
         end
 
@@ -24,7 +23,7 @@ module Api
 
         # POST /api/v1/admin/printer_profiles
         def create
-          profile = current_user.printer_profiles.build(profile_params)
+          profile = current_organization.printer_profiles.build(profile_params)
           if profile.save
             render json: { printer_profile: profile_json(profile) }, status: :created
           else
@@ -77,8 +76,12 @@ module Api
           @current_company ||= Company.find(current_company_id)
         end
 
+        def current_organization
+          @current_organization ||= current_company.organization
+        end
+
         def set_profile
-          @profile = current_user.printer_profiles.find_by(id: params[:id])
+          @profile = current_organization.printer_profiles.find_by(id: params[:id])
           return if @profile
 
           render json: { error: "Printer profile not found" }, status: :not_found
@@ -104,6 +107,7 @@ module Api
             check_offset_y: profile.check_offset_y,
             check_layout_config: profile.check_layout_config,
             is_default: profile.is_default,
+            organization_id: profile.organization_id,
             created_at: profile.created_at,
             updated_at: profile.updated_at
           }

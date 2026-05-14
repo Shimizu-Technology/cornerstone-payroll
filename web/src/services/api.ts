@@ -316,7 +316,9 @@ import type {
   User,
   CheckListResponse,
   CheckItem,
+  CheckLayoutResponse,
   CheckSettings,
+  CheckStockType,
   W2GuReportResponse,
   W2GuPreflightResponse,
   W2GuFilingReadinessResponse,
@@ -1703,6 +1705,11 @@ export const checksApi = {
   getSettings: () =>
     api.get<{ check_settings: CheckSettings }>('/admin/companies/check_settings'),
 
+  getLayout: (checkStockType?: CheckStockType) =>
+    api.get<{ check_layout: CheckLayoutResponse }>(
+      `/admin/companies/check_layout${checkStockType ? `?check_stock_type=${encodeURIComponent(checkStockType)}` : ''}`
+    ),
+
   updateSettings: (settings: Partial<CheckSettings>) =>
     api.patch<{ check_settings: CheckSettings }>('/admin/companies/check_settings', settings),
 
@@ -1712,6 +1719,19 @@ export const checksApi = {
   // Download alignment test PDF through authenticated API client
   alignmentTestPdf: () =>
     api.getBlob('/admin/companies/alignment_test_pdf'),
+  testCheckPdf: (data: {
+    sample_type: 'payroll' | 'fit' | 'grt' | 'vendor';
+    check_settings: {
+      check_stock_type: CheckStockType;
+      check_offset_x: number;
+      check_offset_y: number;
+      bank_name: string | null;
+      bank_address: string | null;
+      check_memo_template: string | null;
+      check_layout_config: Record<string, unknown>;
+    };
+  }) =>
+    api.postBlob('/admin/companies/test_check_pdf', data),
 };
 
 // ============================================================
@@ -1719,6 +1739,7 @@ export const checksApi = {
 // ============================================================
 export interface PrinterProfile {
   id: number;
+  organization_id: number;
   name: string;
   description: string | null;
   notes: string | null;
