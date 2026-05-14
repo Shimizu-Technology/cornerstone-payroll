@@ -34,6 +34,7 @@ import PayrollReminders from '@/pages/PayrollReminders';
 import { TimeTrackingSources } from '@/pages/TimeTrackingSources';
 import { Login } from '@/pages/Login';
 import { Invite } from '@/pages/Invite';
+import { PublicHome } from '@/pages/PublicHome';
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
@@ -90,7 +91,7 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAdmin) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
 
   return <>{children}</>;
@@ -118,7 +119,7 @@ function SuperAdminOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isSuperAdmin) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
 
   return <>{children}</>;
@@ -146,7 +147,7 @@ function StaffOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (isClient) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
 
   return <>{children}</>;
@@ -174,7 +175,7 @@ function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isClient) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
 
   return <>{children}</>;
@@ -207,20 +208,20 @@ function AppRoutes() {
   return (
     <Routes>
       {/* Public routes */}
+      <Route path="/" element={<PublicHome />} />
       <Route path="/login" element={<Login />} />
       <Route path="/invite" element={<Invite />} />
-      <Route path="/callback" element={<Navigate to="/" replace />} />
+      <Route path="/callback" element={<Navigate to="/app" replace />} />
 
       {/* Protected routes */}
       <Route
-        path="/"
         element={
           <ProtectedRoute>
             <Layout />
           </ProtectedRoute>
         }
       >
-        <Route index element={isClient ? <ClientDashboard /> : <Dashboard />} />
+        <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="employees" element={<EmployeeList />} />
         <Route path="employees/new" element={<EmployeeForm />} />
         <Route path="employees/:id" element={<EmployeeForm />} />
@@ -248,7 +249,7 @@ function AppRoutes() {
       </Route>
 
       {/* Catch-all redirect */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>
   );
 }

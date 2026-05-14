@@ -1,4 +1,5 @@
 import { SignIn } from '@clerk/clerk-react';
+import { Navigate } from 'react-router-dom';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -24,7 +25,7 @@ const highlights = [
 ];
 
 export function Login() {
-  const { isLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -47,6 +48,10 @@ export function Login() {
         </Card>
       </div>
     );
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/app" replace />;
   }
 
   return (

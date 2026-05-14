@@ -20,9 +20,29 @@ RSpec.describe Invoice, type: :model do
 
   it "assigns an invoice number when one is not supplied" do
     recipient = create(:invoice_recipient, invoice_prefix: "CS")
-    invoice = create(:invoice, :with_line_item, company: recipient.company, invoice_recipient: recipient, invoice_number: nil)
+    billing_profile = create(:invoice_billing_profile, organization: recipient.organization, invoice_prefix: "ST")
+    invoice = create(
+      :invoice,
+      :with_line_item,
+      company: recipient.company,
+      invoice_recipient: recipient,
+      invoice_billing_profile: billing_profile,
+      invoice_number: nil
+    )
 
-    expect(invoice.invoice_number).to match(/\ACS-\d{4}-\d{4}\z/)
+    expect(invoice.invoice_number).to match(/\AST-\d{4}-\d{4}\z/)
+  end
+
+  it "captures a billing and recipient snapshot when generated" do
+    billing_profile = create(:invoice_billing_profile, name: "Shimizu Technology", invoice_prefix: "ST")
+    recipient = create(:invoice_recipient, company: billing_profile.organization.companies.first || create(:company, organization: billing_profile.organization), name: "Pacific Client")
+    invoice = create(:invoice, :with_line_item, company: recipient.company, organization: billing_profile.organization, invoice_billing_profile: billing_profile, invoice_recipient: recipient)
+
+    invoice.mark_generated!
+
+    expect(invoice.snapshot.dig("billing_profile", "name")).to eq("Shimizu Technology")
+    expect(invoice.snapshot.dig("recipient", "name")).to eq("Pacific Client")
+    expect(invoice.snapshot.fetch("line_items").first.fetch("description")).to eq("Payroll services")
   end
 
   it "rejects backward status transitions" do
