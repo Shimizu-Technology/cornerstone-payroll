@@ -20,6 +20,27 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(body["title"]).to eq("May invoices")
       expect(body["company_id"]).to eq(company.id)
     end
+
+    it "allows a recipient from another company in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization)
+
+      post "/api/v1/admin/invoice_chat_sessions",
+        params: { invoice_chat_session: { title: "Org recipient", invoice_recipient_id: recipient.id } }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("invoice_chat_session", "invoice_recipient_id")).to eq(recipient.id)
+    end
+
+    it "allows a linked invoice from another company in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization)
+      invoice = create(:invoice, :with_line_item, company: other_company, organization: company.organization, invoice_recipient: recipient)
+
+      session = build(:invoice_chat_session, company: company, invoice: invoice, invoice_recipient: recipient)
+
+      expect(session).to be_valid
+    end
   end
 
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/message" do

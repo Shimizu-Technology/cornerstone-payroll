@@ -207,7 +207,7 @@ module Api
         def session_attributes
           raw = params.fetch(:invoice_chat_session, ActionController::Parameters.new).permit(:title, :invoice_recipient_id)
           if raw[:invoice_recipient_id].present?
-            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], company_id: current_company_id, active: true)
+            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], organization_id: current_organization_id, active: true)
             raise ArgumentError, "Invoice recipient not found" unless recipient
           end
           raw
