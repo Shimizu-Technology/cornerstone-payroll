@@ -2,7 +2,7 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Download } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,21 @@ import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 
+function checkSettingsSnapshot(values: {
+  stockType: CheckStockType;
+  offsetX: string;
+  offsetY: string;
+  bankName: string;
+  bankAddress: string;
+  layoutOverridesJson: string;
+  memoTemplate: string;
+  autoCreateFitCheck: boolean;
+}) {
+  return JSON.stringify(values);
+}
+
 export function CheckSettingsPage() {
+  const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,6 +51,7 @@ export function CheckSettingsPage() {
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
   const [checkLayout, setCheckLayout] = useState<CheckLayoutResponse | null>(null);
+  const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -49,6 +64,99 @@ export function CheckSettingsPage() {
   const [editProfileDescription, setEditProfileDescription] = useState('');
   const [editProfileNotes, setEditProfileNotes] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
+
+  const currentSettingsSnapshot = useMemo(() => checkSettingsSnapshot({
+    stockType,
+    offsetX,
+    offsetY,
+    bankName,
+    bankAddress,
+    layoutOverridesJson,
+    memoTemplate,
+    autoCreateFitCheck,
+  }), [stockType, offsetX, offsetY, bankName, bankAddress, layoutOverridesJson, memoTemplate, autoCreateFitCheck]);
+
+  const hasUnsavedCheckSettings = savedSettingsSnapshot !== null && currentSettingsSnapshot !== savedSettingsSnapshot;
+
+  const applySettingsToForm = useCallback((s: CheckSettingsType) => {
+    const normalizedOffsetX = typeof s.check_offset_x === 'number'
+      ? s.check_offset_x
+      : Number(s.check_offset_x || 0);
+    const normalizedOffsetY = typeof s.check_offset_y === 'number'
+      ? s.check_offset_y
+      : Number(s.check_offset_y || 0);
+    const nextOffsetX = normalizedOffsetX.toFixed(3);
+    const nextOffsetY = normalizedOffsetY.toFixed(3);
+    const nextBankName = s.bank_name ?? '';
+    const nextBankAddress = s.bank_address ?? '';
+    const nextLayoutOverridesJson = JSON.stringify(s.check_layout_config ?? {}, null, 2);
+    const nextMemoTemplate = s.check_memo_template ?? '';
+    const nextAutoCreateFitCheck = s.auto_create_fit_check ?? false;
+
+    setSettings(s);
+    setStockType(s.check_stock_type);
+    setOffsetX(nextOffsetX);
+    setOffsetY(nextOffsetY);
+    setBankName(nextBankName);
+    setBankAddress(nextBankAddress);
+    setLayoutOverridesJson(nextLayoutOverridesJson);
+    setMemoTemplate(nextMemoTemplate);
+    setAutoCreateFitCheck(nextAutoCreateFitCheck);
+    setNextCheckNumber(String(s.next_check_number));
+    setSavedSettingsSnapshot(checkSettingsSnapshot({
+      stockType: s.check_stock_type,
+      offsetX: nextOffsetX,
+      offsetY: nextOffsetY,
+      bankName: nextBankName,
+      bankAddress: nextBankAddress,
+      layoutOverridesJson: nextLayoutOverridesJson,
+      memoTemplate: nextMemoTemplate,
+      autoCreateFitCheck: nextAutoCreateFitCheck,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!hasUnsavedCheckSettings) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedCheckSettings]);
+
+  useEffect(() => {
+    if (!hasUnsavedCheckSettings) return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      if (nextUrl.origin !== window.location.origin) return;
+      if (
+        nextUrl.pathname === window.location.pathname &&
+        nextUrl.search === window.location.search &&
+        nextUrl.hash === window.location.hash
+      ) return;
+
+      if (!window.confirm('You have unsaved check setting changes. Leave this page and discard them?')) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    document.addEventListener('click', handleDocumentClick, true);
+    return () => document.removeEventListener('click', handleDocumentClick, true);
+  }, [hasUnsavedCheckSettings]);
+
+  const confirmDiscardUnsavedChanges = useCallback((message: string) => {
+    return !hasUnsavedCheckSettings || window.confirm(message);
+  }, [hasUnsavedCheckSettings]);
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -72,23 +180,7 @@ export function CheckSettingsPage() {
     (async () => {
       try {
         const data = await checksApi.getSettings();
-        const s = data.check_settings;
-        const normalizedOffsetX = typeof s.check_offset_x === 'number'
-          ? s.check_offset_x
-          : Number(s.check_offset_x || 0);
-        const normalizedOffsetY = typeof s.check_offset_y === 'number'
-          ? s.check_offset_y
-          : Number(s.check_offset_y || 0);
-        setSettings(s);
-        setStockType(s.check_stock_type);
-        setOffsetX(normalizedOffsetX.toFixed(3));
-        setOffsetY(normalizedOffsetY.toFixed(3));
-        setBankName(s.bank_name ?? '');
-        setBankAddress(s.bank_address ?? '');
-        setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
-        setMemoTemplate(s.check_memo_template ?? '');
-        setAutoCreateFitCheck(s.auto_create_fit_check ?? false);
-        setNextCheckNumber(String(s.next_check_number));
+        applySettingsToForm(data.check_settings);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       } finally {
@@ -96,10 +188,14 @@ export function CheckSettingsPage() {
       }
       loadProfiles();
     })();
-  }, [loadProfiles]);
+  }, [applySettingsToForm, loadProfiles]);
 
   useEffect(() => {
     if (!loading) {
+      if (skipNextLayoutEffectRef.current) {
+        skipNextLayoutEffectRef.current = false;
+        return;
+      }
       loadCheckLayout(stockType);
     }
   }, [stockType, loading, loadCheckLayout]);
@@ -158,8 +254,7 @@ export function CheckSettingsPage() {
         auto_create_fit_check: autoCreateFitCheck,
         check_layout_config: parsedLayoutOverrides,
       });
-      setSettings(data.check_settings);
-      setLayoutOverridesJson(JSON.stringify(data.check_settings.check_layout_config ?? {}, null, 2));
+      applySettingsToForm(data.check_settings);
       await loadCheckLayout(stockType);
       setSuccess('Settings saved.');
     } catch (err) {
@@ -245,15 +340,17 @@ export function CheckSettingsPage() {
   };
 
   const handleApplyProfile = async (profile: PrinterProfile) => {
+    if (!confirmDiscardUnsavedChanges(`You have unsaved check setting changes. Applying "${profile.name}" will replace them with that printer profile. Continue?`)) return;
+
     setError(null);
     try {
-      const data = await printerProfilesApi.apply(profile.id);
-      const s = data.check_settings;
-      setStockType(s.check_stock_type);
-      setOffsetX(Number(s.check_offset_x || 0).toFixed(3));
-      setOffsetY(Number(s.check_offset_y || 0).toFixed(3));
-      setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
-      await loadCheckLayout(s.check_stock_type);
+      await printerProfilesApi.apply(profile.id);
+      const data = await checksApi.getSettings();
+      if (data.check_settings.check_stock_type !== stockType) {
+        skipNextLayoutEffectRef.current = true;
+      }
+      applySettingsToForm(data.check_settings);
+      await loadCheckLayout(data.check_settings.check_stock_type);
       setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply profile');
@@ -343,6 +440,11 @@ export function CheckSettingsPage() {
         {success && (
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{success}</div>
         )}
+        {hasUnsavedCheckSettings && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            You have unsaved check setting changes. They are only in this browser until you click <strong>Save Settings</strong>.
+          </div>
+        )}
 
         {/* Printer Profiles */}
         <Card>
@@ -353,8 +455,8 @@ export function CheckSettingsPage() {
                 Save and switch between alignment settings for different printers.
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                These profiles follow your account across every client &mdash; calibrate
-                your printer once and reuse it everywhere. <span className="font-medium">Use This Printer</span>
+                These profiles are shared with everyone in your organization &mdash; calibrate
+                an office printer once and reuse it across clients. <span className="font-medium">Use This Printer</span>
                 {' '}applies the profile to the active client only.
               </p>
             </div>
@@ -501,7 +603,7 @@ export function CheckSettingsPage() {
               <p className="font-medium">Recommended workflow</p>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs sm:text-sm">
                 <li>Download the alignment test PDF.</li>
-                <li>Print it on plain paper.</li>
+                <li>Print it on plain paper or a photocopy of real check stock.</li>
                 <li>Hold it behind your real check stock and see what is off.</li>
                 <li>Use X and Y offset for small overall shifts.</li>
                 <li>Only open Advanced Calibration if one specific area still needs fine tuning.</li>
@@ -531,7 +633,7 @@ export function CheckSettingsPage() {
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">Visual Calibration</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Drag a field or use the nudge buttons, then save settings and download an alignment test.
+                  Drag a field or use the nudge buttons. Nothing is saved until you click Save Settings.
                 </p>
               </div>
               <CheckLayoutEditor
@@ -633,7 +735,7 @@ export function CheckSettingsPage() {
               </Button>
               <p className="text-xs text-gray-500">
                 The alignment test now marks the configured check-face anchors and stub row baselines.
-                Print on plain paper and hold it against your stock before using real checks.
+                Print on plain paper or a photocopy of real check stock, confirm alignment, then print on live check stock.
               </p>
             </div>
 

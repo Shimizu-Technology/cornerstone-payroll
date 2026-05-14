@@ -5,6 +5,7 @@ class Organization < ApplicationRecord
 
   has_many :companies, dependent: :restrict_with_error
   has_many :users, dependent: :restrict_with_error
+  has_many :printer_profiles, dependent: :destroy
   belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug

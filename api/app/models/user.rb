@@ -11,9 +11,6 @@ class User < ApplicationRecord
   has_many :user_invitations, foreign_key: :invited_by_id, dependent: :nullify
   has_many :company_assignments, dependent: :destroy
   has_many :assigned_companies, through: :company_assignments, source: :company
-  # Printer profiles are tied to the user (their physical printer) so the
-  # same calibration follows them across every client they switch into.
-  has_many :printer_profiles, dependent: :destroy
   has_many :uploaded_client_documents, class_name: "ClientDocument", foreign_key: :uploaded_by_id, dependent: :nullify
   has_many :requested_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :requested_by_id, dependent: :nullify
   has_many :reviewed_employee_change_requests, class_name: "EmployeeChangeRequest", foreign_key: :reviewed_by_id, dependent: :nullify

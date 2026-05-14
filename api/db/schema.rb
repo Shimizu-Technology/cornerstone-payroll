@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_14_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -881,11 +881,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_100000) do
     t.boolean "is_default", default: false, null: false
     t.string "name", null: false
     t.text "notes"
+    t.bigint "organization_id", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
-    t.index ["user_id", "name"], name: "index_printer_profiles_on_user_id_and_name", unique: true
-    t.index ["user_id"], name: "index_printer_profiles_on_user_id"
-    t.index ["user_id"], name: "index_printer_profiles_one_default_per_user", unique: true, where: "(is_default = true)"
+    t.index ["organization_id", "name"], name: "index_printer_profiles_on_organization_id_and_name", unique: true
+    t.index ["organization_id"], name: "index_printer_profiles_on_organization_id"
+    t.index ["organization_id"], name: "index_printer_profiles_one_default_per_organization", unique: true, where: "(is_default = true)"
   end
 
   create_table "punch_entries", force: :cascade do |t|
@@ -1219,7 +1219,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_100000) do
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"
-  add_foreign_key "printer_profiles", "users"
+  add_foreign_key "printer_profiles", "organizations"
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
