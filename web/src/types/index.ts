@@ -208,6 +208,17 @@ export interface PayPeriodCorrectionEvent {
   created_at: string;
 }
 
+export interface PayDateCorrection {
+  id: number;
+  old_pay_date?: string | null;
+  new_pay_date?: string | null;
+  reason?: string | null;
+  payroll_items_updated?: number | null;
+  non_employee_checks_updated?: number | null;
+  corrected_at: string;
+  corrected_by_name?: string | null;
+}
+
 export interface PayPeriod {
   id: number;
   company_id?: number;
@@ -238,6 +249,7 @@ export interface PayPeriod {
     committed?: PayPeriodLifecycleEvent;
     tax_synced?: PayPeriodLifecycleEvent;
   };
+  pay_date_corrections?: PayDateCorrection[];
   // Tax sync fields (CPR-53)
   tax_sync_status?: TaxSyncStatus | null;
   tax_sync_attempts?: number;

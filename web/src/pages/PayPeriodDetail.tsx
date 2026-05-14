@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { formatCurrency, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -753,6 +753,10 @@ export function PayPeriodDetail() {
   const lifecycle = payPeriod.lifecycle || {};
   const processedAt = payPeriod.processed_at || payPeriod.committed_at || lifecycle.committed?.timestamp;
   const processedBy = payPeriod.processed_by_name || lifecycle.committed?.actor_name;
+  const payDateCorrections = payPeriod.pay_date_corrections || [];
+  const formatCorrectionPayDate = (date?: string | null) => (
+    date ? formatDate(date, { month: 'long', day: 'numeric', year: 'numeric' }) : 'Unknown date'
+  );
   const lifecycleActor = (actorName?: string | null) => {
     if (actorName) return `by ${actorName}`;
     return 'Operator not recorded';
@@ -921,6 +925,40 @@ export function PayPeriodDetail() {
             </>
           )}
         </div>
+
+        {payDateCorrections.length > 0 && (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="space-y-4 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-amber-950">Pay Date Corrections</h3>
+                <p className="mt-1 text-sm text-amber-800">
+                  Date-only corrections made after this payroll was committed. Payroll dollar amounts were not changed.
+                </p>
+              </div>
+              <div className="divide-y divide-amber-200 rounded-md border border-amber-200 bg-white/70">
+                {payDateCorrections.map((correction) => (
+                  <div key={correction.id} className="space-y-2 p-4">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                      <p className="text-sm font-medium text-gray-900">
+                        Pay date changed from {formatCorrectionPayDate(correction.old_pay_date)} to {formatCorrectionPayDate(correction.new_pay_date)}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {formatGuamDateTime(correction.corrected_at)}
+                        {correction.corrected_by_name ? ` by ${correction.corrected_by_name}` : ''}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wider text-amber-700">Reason</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">
+                        {correction.reason || 'No reason recorded'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <div className="border-b px-4 py-3">
@@ -2252,7 +2290,7 @@ export function PayPeriodDetail() {
                   id="committed_pay_date_reason"
                   value={payDateCorrectionReason}
                   onChange={(event) => setPayDateCorrectionReason(event.target.value)}
-                  placeholder="Example: AIRE payroll was entered as April 15 but should be April 30."
+                  placeholder="Example: Pay date was entered as April 15 but should be April 30."
                   required
                 />
               </div>
