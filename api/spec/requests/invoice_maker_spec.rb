@@ -57,6 +57,20 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/invoice_billing_profiles/:id" do
+    it "returns a validation error when default promotion hits a uniqueness race" do
+      profile = create(:invoice_billing_profile, organization: company.organization, name: "Sender A")
+      allow_any_instance_of(InvoiceBillingProfile).to receive(:update)
+        .and_raise(ActiveRecord::RecordNotUnique.new("duplicate default"))
+
+      patch "/api/v1/admin/invoice_billing_profiles/#{profile.id}",
+        params: { invoice_billing_profile: { is_default: true } }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"]).to include("A billing profile with those settings already exists")
+    end
+  end
+
   describe "DELETE /api/v1/admin/invoice_billing_profiles/:id" do
     it "archives an in-use default profile and clears the default flag" do
       profile = create(:invoice_billing_profile, organization: company.organization, name: "Default Sender", is_default: true)

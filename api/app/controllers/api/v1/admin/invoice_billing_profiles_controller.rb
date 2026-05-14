@@ -25,6 +25,8 @@ module Api
           else
             render json: { errors: profile.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordNotUnique
+          render_record_not_unique
         end
 
         def update
@@ -33,6 +35,8 @@ module Api
           else
             render json: { errors: @profile.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordNotUnique
+          render_record_not_unique
         end
 
         def destroy
@@ -70,6 +74,10 @@ module Api
             :active,
             :is_default
           )
+        end
+
+        def render_record_not_unique
+          render json: { errors: [ "A billing profile with those settings already exists" ] }, status: :unprocessable_entity
         end
 
         def profile_payload(profile)
