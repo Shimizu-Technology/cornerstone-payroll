@@ -837,6 +837,15 @@ export const payPeriodsApi = {
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
   commit: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`),
+  correctPayDate: (id: number, data: { pay_date: string; reason: string }) =>
+    api.patch<PayPeriodResponse & {
+      correction: {
+        old_pay_date: string;
+        new_pay_date: string;
+        payroll_items_updated: number;
+        non_employee_checks_updated: number;
+      };
+    }>(`/admin/pay_periods/${id}/correct_pay_date`, data),
   retryTaxSync: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/retry_tax_sync`),
   generateFitCheck: (id: number) =>

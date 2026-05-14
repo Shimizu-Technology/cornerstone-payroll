@@ -1,11 +1,23 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
+import type { FormEvent } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -200,6 +212,10 @@ export function PayPeriodDetail() {
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
+  const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
+  const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
+  const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');
+  const [payDateCorrectionSubmitting, setPayDateCorrectionSubmitting] = useState(false);
   const [editingItem, setEditingItem] = useState<PayrollItem | null>(null);
   const [correctingItem, setCorrectingItem] = useState<PayrollItem | null>(null);
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
@@ -516,6 +532,50 @@ export function PayPeriodDetail() {
     }
   };
 
+  const openPayDateCorrection = () => {
+    if (!payPeriod) return;
+    setPayDateCorrectionDate(payPeriod.pay_date);
+    setPayDateCorrectionReason('');
+    setPayDateCorrectionOpen(true);
+  };
+
+  const handleCorrectPayDate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!payPeriod) return;
+
+    if (!payDateCorrectionDate) {
+      setError('Pay date is required');
+      return;
+    }
+
+    if (payDateCorrectionDate < payPeriod.end_date) {
+      setError('Pay date must be on or after end date');
+      return;
+    }
+
+    if (!payDateCorrectionReason.trim()) {
+      setError('A reason is required to correct a committed pay date');
+      return;
+    }
+
+    try {
+      setPayDateCorrectionSubmitting(true);
+      setError(null);
+      const response = await payPeriodsApi.correctPayDate(payPeriod.id, {
+        pay_date: payDateCorrectionDate,
+        reason: payDateCorrectionReason.trim(),
+      });
+      setPayPeriod(response.pay_period);
+      setPayDateCorrectionOpen(false);
+      setPayDateCorrectionReason('');
+      await loadPayPeriod(payPeriod.id, true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to correct pay date');
+    } finally {
+      setPayDateCorrectionSubmitting(false);
+    }
+  };
+
   const handleImportComplete = (updatedPayPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => {
     setPayPeriod(updatedPayPeriod);
     setPayrollItems(updatedPayPeriod.payroll_items || []);
@@ -756,6 +816,11 @@ export function PayPeriodDetail() {
             <Button variant="outline" onClick={() => navigate('/pay-periods')}>
               Back to List
             </Button>
+            {isCommitted && !isVoided && (
+              <Button variant="outline" onClick={openPayDateCorrection}>
+                Correct Pay Date
+              </Button>
+            )}
             {isDraft && (
               <>
                 {canImportMosa && (
@@ -2148,6 +2213,63 @@ export function PayPeriodDetail() {
         contractorPayType={editingItem ? employeeLookup.get(editingItem.employee_id)?.contractor_pay_type as 'hourly' | 'flat_fee' | undefined : undefined}
         wageRates={editingItem ? (employeeLookup.get(editingItem.employee_id)?.wage_rates || []) : []}
       />
+
+      <Dialog
+        open={payDateCorrectionOpen}
+        onOpenChange={(open) => {
+          setPayDateCorrectionOpen(open);
+          if (!open) setPayDateCorrectionReason('');
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={handleCorrectPayDate}>
+            <DialogHeader>
+              <DialogTitle>Correct Committed Pay Date</DialogTitle>
+              <DialogDescription>
+                Use this only for a clerical pay date mistake after payroll was committed. Payroll amounts stay unchanged.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="committed_pay_date">Pay Date</Label>
+                <Input
+                  id="committed_pay_date"
+                  type="date"
+                  value={payDateCorrectionDate}
+                  onChange={(event) => setPayDateCorrectionDate(event.target.value)}
+                  required
+                />
+                <p className="text-xs text-gray-500">
+                  This updates the committed pay period, matching check dates, pay stubs, reports, tax sync payloads, and linked pay-period checks.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="committed_pay_date_reason">Reason</Label>
+                <Textarea
+                  id="committed_pay_date_reason"
+                  value={payDateCorrectionReason}
+                  onChange={(event) => setPayDateCorrectionReason(event.target.value)}
+                  placeholder="Example: AIRE payroll was entered as April 15 but should be April 30."
+                  required
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPayDateCorrectionOpen(false)}
+                disabled={payDateCorrectionSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={payDateCorrectionSubmitting}>
+                {payDateCorrectionSubmitting ? 'Saving...' : 'Save Pay Date Correction'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

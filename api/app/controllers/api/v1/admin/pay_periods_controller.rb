@@ -16,7 +16,7 @@ module Api
                       :corrective_paychecks
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
-          :void, :create_correction_run, :correction_history, :generate_fit_check,
+          :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods
         ]
 
@@ -444,6 +444,52 @@ module Api
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # PATCH /api/v1/admin/pay_periods/:id/correct_pay_date
+        #
+        # Date-only correction for a committed payroll run. This does not
+        # recalculate payroll dollars; it fixes the pay period date, any matching
+        # check override dates, matching linked non-employee check dates, and the
+        # stored YTD display snapshots used on generated stubs.
+        def correct_pay_date
+          result = PayPeriodPayDateCorrectionService.call(
+            pay_period: @pay_period,
+            new_pay_date: params[:pay_date],
+            reason: params[:reason]
+          )
+
+          AuditLog.record!(
+            user:        current_user,
+            company_id:  current_company_id,
+            action:      "correct_committed_pay_date",
+            record_type: "pay_periods",
+            record_id:   @pay_period.id,
+            metadata:    {
+              old_pay_date: result.old_pay_date,
+              new_pay_date: result.new_pay_date,
+              reason: params[:reason].to_s.strip,
+              payroll_items_updated: result.payroll_items_updated,
+              non_employee_checks_updated: result.non_employee_checks_updated
+            },
+            ip_address:  request.remote_ip,
+            user_agent:  request.user_agent
+          )
+
+          @pay_period.reload
+          render json: {
+            pay_period: pay_period_json(@pay_period),
+            correction: {
+              old_pay_date: result.old_pay_date,
+              new_pay_date: result.new_pay_date,
+              payroll_items_updated: result.payroll_items_updated,
+              non_employee_checks_updated: result.non_employee_checks_updated
+            }
+          }
+        rescue PayPeriodPayDateCorrectionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         end
 
         # ----------------------------------------------------------------
