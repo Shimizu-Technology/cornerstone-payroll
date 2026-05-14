@@ -56,6 +56,18 @@ class ScopePrinterProfilesToOrganization < ActiveRecord::Migration[8.0]
        WHERE users.organization_id = pp.organization_id
     SQL
 
+    execute <<~SQL.squish
+      UPDATE printer_profiles pp
+         SET user_id = users.id
+        FROM (
+          SELECT DISTINCT ON (organization_id) id, organization_id
+            FROM users
+        ORDER BY organization_id, id ASC
+        ) users
+       WHERE users.organization_id = pp.organization_id
+         AND pp.user_id IS NULL
+    SQL
+
     execute "DELETE FROM printer_profiles WHERE user_id IS NULL"
     change_column_null :printer_profiles, :user_id, false
 
