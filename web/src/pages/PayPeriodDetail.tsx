@@ -2218,7 +2218,10 @@ export function PayPeriodDetail() {
         open={payDateCorrectionOpen}
         onOpenChange={(open) => {
           setPayDateCorrectionOpen(open);
-          if (!open) setPayDateCorrectionReason('');
+          if (!open) {
+            setPayDateCorrectionReason('');
+            setPayDateCorrectionDate('');
+          }
         }}
       >
         <DialogContent>

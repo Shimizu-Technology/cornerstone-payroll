@@ -844,6 +844,7 @@ export const payPeriodsApi = {
         new_pay_date: string;
         payroll_items_updated: number;
         non_employee_checks_updated: number;
+        noop: boolean;
       };
     }>(`/admin/pay_periods/${id}/correct_pay_date`, data),
   retryTaxSync: (id: number) =>

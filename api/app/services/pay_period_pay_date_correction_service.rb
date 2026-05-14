@@ -12,6 +12,7 @@ class PayPeriodPayDateCorrectionService
     :new_pay_date,
     :payroll_items_updated,
     :non_employee_checks_updated,
+    :noop,
     keyword_init: true
   )
 
@@ -42,7 +43,8 @@ class PayPeriodPayDateCorrectionService
           old_pay_date: old_pay_date,
           new_pay_date: new_pay_date,
           payroll_items_updated: 0,
-          non_employee_checks_updated: 0
+          non_employee_checks_updated: 0,
+          noop: true
         )
         next
       end
@@ -68,7 +70,8 @@ class PayPeriodPayDateCorrectionService
         old_pay_date: old_pay_date,
         new_pay_date: new_pay_date,
         payroll_items_updated: payroll_items_updated,
-        non_employee_checks_updated: non_employee_checks_updated
+        non_employee_checks_updated: non_employee_checks_updated,
+        noop: false
       )
 
       ActiveRecord.after_all_transactions_commit do
