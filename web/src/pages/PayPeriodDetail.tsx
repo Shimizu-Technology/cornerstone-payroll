@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -2003,12 +2003,12 @@ export function PayPeriodDetail() {
           <Card>
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Checks</h3>
-              <a
-                href={`/settings/checks`}
+              <Link
+                to="/check-settings"
                 className="text-xs text-blue-600 hover:underline"
               >
                 Check Settings ›
-              </a>
+              </Link>
             </div>
             <div className="p-4">
               <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} />
