@@ -49,7 +49,7 @@ interface SidebarProps {
 }
 
 const clientNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -59,7 +59,7 @@ const clientNavigation: NavItem[] = [
 ];
 
 const portalNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },

@@ -3,6 +3,8 @@
 FactoryBot.define do
   factory :invoice do
     company
+    organization { company.organization }
+    invoice_billing_profile { association(:invoice_billing_profile, organization: organization) }
     invoice_recipient { association(:invoice_recipient, company: company) }
     sequence(:invoice_number) { |n| "INV-2026-#{n.to_s.rjust(4, '0')}" }
     invoice_date { Date.new(2026, 5, 2) }

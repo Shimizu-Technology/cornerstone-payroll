@@ -221,8 +221,10 @@ module Api
           raise ArgumentError, "Preview must include at least one line item" if line_items.empty?
 
           invoice = Invoice.new(
+            organization_id: current_organization_id,
             company_id: current_company_id,
             invoice_recipient: recipient,
+            invoice_billing_profile: InvoiceBillingProfile.ensure_default_for!(current_organization),
             invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
             service_period_start: parse_preview_date(preview["service_period_start"]),
             service_period_end: parse_preview_date(preview["service_period_end"]),
@@ -244,7 +246,7 @@ module Api
           if preview["invoice_recipient_id"].present?
             recipient = InvoiceRecipient.find_by(
               id: preview["invoice_recipient_id"],
-              company_id: current_company_id,
+              organization_id: current_organization_id,
               active: true
             )
             raise ArgumentError, "Invoice recipient not found" unless recipient
@@ -255,7 +257,7 @@ module Api
           attrs = new_recipient_attributes_from_preview(preview["new_recipient"])
           raise ArgumentError, "Invoice recipient not found" if attrs.blank?
 
-          InvoiceRecipient.create!(attrs.merge(company_id: current_company_id, active: true))
+          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, company_id: current_company_id, active: true))
         end
 
         def new_recipient_attributes_from_preview(raw)
@@ -369,9 +371,12 @@ module Api
         def invoice_payload(invoice)
           {
             id: invoice.id,
+            organization_id: invoice.organization_id,
             company_id: invoice.company_id,
             invoice_recipient_id: invoice.invoice_recipient_id,
+            invoice_billing_profile_id: invoice.invoice_billing_profile_id,
             recipient_name: invoice.invoice_recipient&.name,
+            billing_profile_name: invoice.invoice_billing_profile&.name,
             invoice_number: invoice.invoice_number,
             invoice_date: invoice.invoice_date,
             service_period_start: invoice.service_period_start,
@@ -404,6 +409,7 @@ module Api
 
           {
             id: recipient.id,
+            organization_id: recipient.organization_id,
             company_id: recipient.company_id,
             name: recipient.name,
             email: recipient.email,

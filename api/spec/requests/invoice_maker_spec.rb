@@ -9,6 +9,8 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
   before do
     allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_user).and_return(admin_user)
     allow_any_instance_of(Api::V1::Admin::InvoiceRecipientsController).to receive(:current_company_id).and_return(company.id)
+    allow_any_instance_of(Api::V1::Admin::InvoiceBillingProfilesController).to receive(:current_user).and_return(admin_user)
+    allow_any_instance_of(Api::V1::Admin::InvoiceBillingProfilesController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_user).and_return(admin_user)
     allow_any_instance_of(Api::V1::Admin::InvoicesController).to receive(:current_company_id).and_return(company.id)
   end
@@ -33,14 +35,38 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/invoice_billing_profiles" do
+    it "creates an organization-scoped billing profile" do
+      post "/api/v1/admin/invoice_billing_profiles",
+        params: {
+          invoice_billing_profile: {
+            name: "Shimizu Technology",
+            legal_name: "Shimizu Technology",
+            website: "https://shimizu-technology.com",
+            phone: "671-483-0219",
+            invoice_prefix: "ST",
+            payment_instructions: "Please make checks payable to Shimizu Technology."
+          }
+        }
+
+      expect(response).to have_http_status(:created)
+      body = response.parsed_body.fetch("invoice_billing_profile")
+      expect(body["name"]).to eq("Shimizu Technology")
+      expect(body["organization_id"]).to eq(company.organization_id)
+      expect(body["invoice_prefix"]).to eq("ST")
+    end
+  end
+
   describe "POST /api/v1/admin/invoices" do
     it "creates a draft invoice with line items and calculated total" do
       recipient = create(:invoice_recipient, company: company)
+      billing_profile = create(:invoice_billing_profile, organization: company.organization, name: "Shimizu Technology", invoice_prefix: "ST")
 
       post "/api/v1/admin/invoices",
         params: {
           invoice: {
             invoice_recipient_id: recipient.id,
+            invoice_billing_profile_id: billing_profile.id,
             invoice_number: "INV-1001",
             invoice_date: "2026-05-02",
             service_period_start: "2026-05-01",
@@ -66,8 +92,27 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       expect(response).to have_http_status(:created)
       body = response.parsed_body.fetch("invoice")
       expect(body["invoice_number"]).to eq("INV-1001")
+      expect(body["invoice_billing_profile"]["name"]).to eq("Shimizu Technology")
       expect(body["total_amount"]).to eq(420.0)
       expect(body["line_items"].size).to eq(2)
+    end
+
+    it "rejects a billing profile from another organization" do
+      recipient = create(:invoice_recipient, company: company)
+      other_profile = create(:invoice_billing_profile)
+
+      post "/api/v1/admin/invoices",
+        params: {
+          invoice: {
+            invoice_recipient_id: recipient.id,
+            invoice_billing_profile_id: other_profile.id,
+            invoice_number: "INV-1002",
+            invoice_date: "2026-05-02"
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Invoice billing profile not found")
     end
 
     it "rejects a recipient from another company" do

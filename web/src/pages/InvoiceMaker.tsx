@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   invoiceRecipientsApi,
+  invoiceBillingProfilesApi,
   invoiceChatSessionsApi,
   invoicesApi,
   type BlobDownload,
@@ -15,6 +16,8 @@ import {
   type InvoiceChatMessage,
   type InvoiceChatSession,
   type Invoice,
+  type InvoiceBillingProfile,
+  type InvoiceBillingProfilePayload,
   type InvoiceLineItem,
   type InvoicePayload,
   type InvoiceRecipient,
@@ -41,6 +44,7 @@ interface ChatAttachmentPreview {
 
 interface InvoiceFormState {
   id?: number;
+  invoice_billing_profile_id: string;
   invoice_recipient_id: string;
   invoice_number: string;
   invoice_date: string;
@@ -68,6 +72,23 @@ interface RecipientFormState {
   active: boolean;
 }
 
+interface BillingProfileFormState {
+  id?: number;
+  name: string;
+  legal_name: string;
+  website: string;
+  phone: string;
+  email: string;
+  address: string;
+  payment_instructions: string;
+  default_payment_terms: string;
+  invoice_prefix: string;
+  remit_to: string;
+  footer_note: string;
+  active: boolean;
+  is_default: boolean;
+}
+
 const padDatePart = (value: number) => String(value).padStart(2, '0');
 
 const today = () => {
@@ -76,6 +97,7 @@ const today = () => {
 };
 
 const emptyInvoiceForm = (): InvoiceFormState => ({
+  invoice_billing_profile_id: '',
   invoice_recipient_id: '',
   invoice_number: '',
   invoice_date: today(),
@@ -98,6 +120,22 @@ const emptyRecipientForm = (): RecipientFormState => ({
   template_type: 'standard',
   notes: '',
   active: true,
+});
+
+const emptyBillingProfileForm = (): BillingProfileFormState => ({
+  name: '',
+  legal_name: '',
+  website: '',
+  phone: '',
+  email: '',
+  address: '',
+  payment_instructions: '',
+  default_payment_terms: '',
+  invoice_prefix: 'INV',
+  remit_to: '',
+  footer_note: '',
+  active: true,
+  is_default: false,
 });
 
 const statusColors: Record<InvoiceStatus, string> = {
@@ -162,8 +200,10 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 export function InvoiceMaker() {
   const { activeCompanyId } = useCompany();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingProfiles, setBillingProfiles] = useState<InvoiceBillingProfile[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
+  const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -171,7 +211,9 @@ export function InvoiceMaker() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [recipientSaving, setRecipientSaving] = useState(false);
+  const [billingProfileSaving, setBillingProfileSaving] = useState(false);
   const [showRecipientForm, setShowRecipientForm] = useState(false);
+  const [showBillingProfileForm, setShowBillingProfileForm] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -193,13 +235,19 @@ export function InvoiceMaker() {
     setLoading(true);
     setError(null);
     try {
-      const [invoiceResponse, recipientResponse, chatResponse] = await Promise.all([
+      const [invoiceResponse, recipientResponse, billingProfileResponse, chatResponse] = await Promise.all([
         invoicesApi.list(),
         invoiceRecipientsApi.list({ active: true }),
+        invoiceBillingProfilesApi.list({ active: true }),
         invoiceChatSessionsApi.list({ include_archived: showArchivedChatSessions }),
       ]);
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
+      setBillingProfiles(billingProfileResponse.invoice_billing_profiles);
+      const defaultProfile = billingProfileResponse.invoice_billing_profiles.find((profile) => profile.is_default) || billingProfileResponse.invoice_billing_profiles[0];
+      setInvoiceForm((current) => current.invoice_billing_profile_id || !defaultProfile
+        ? current
+        : { ...current, invoice_billing_profile_id: String(defaultProfile.id), payment_terms: current.payment_terms || defaultProfile.default_payment_terms || '' });
       setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load invoices');
@@ -251,12 +299,18 @@ export function InvoiceMaker() {
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
     [invoiceForm.invoice_recipient_id, recipients]
   );
+  const selectedBillingProfile = useMemo(
+    () => billingProfiles.find((profile) => String(profile.id) === invoiceForm.invoice_billing_profile_id),
+    [billingProfiles, invoiceForm.invoice_billing_profile_id]
+  );
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
+  const activeBillingProfiles = useMemo(() => billingProfiles.filter((profile) => profile.active), [billingProfiles]);
   const activePreview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
   const previewLineItems = activePreview?.line_items || [];
 
   const buildPayloadForForm = (state: InvoiceFormState): InvoicePayload => ({
     invoice_recipient_id: Number(state.invoice_recipient_id),
+    invoice_billing_profile_id: Number(state.invoice_billing_profile_id),
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
     service_period_start: state.service_period_start || null,
@@ -284,7 +338,12 @@ export function InvoiceMaker() {
   };
 
   const resetInvoiceForm = () => {
-    const nextForm = emptyInvoiceForm();
+    const defaultProfile = billingProfiles.find((profile) => profile.is_default) || billingProfiles[0];
+    const nextForm = {
+      ...emptyInvoiceForm(),
+      invoice_billing_profile_id: defaultProfile ? String(defaultProfile.id) : '',
+      payment_terms: defaultProfile?.default_payment_terms || '',
+    };
     setInvoiceForm(nextForm);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
     setError(null);
@@ -301,6 +360,7 @@ export function InvoiceMaker() {
 
     const nextForm: InvoiceFormState = {
       id: invoice.id,
+      invoice_billing_profile_id: String(invoice.invoice_billing_profile_id),
       invoice_recipient_id: String(invoice.invoice_recipient_id),
       invoice_number: invoice.invoice_number || '',
       invoice_date: invoice.invoice_date,
@@ -323,7 +383,9 @@ export function InvoiceMaker() {
 
   const applyPreviewToForm = (preview: InvoiceAiPreview) => {
     const recipientId = preview.invoice_recipient_id ? String(preview.invoice_recipient_id) : '';
+    const profileId = selectedBillingProfile?.id || billingProfiles.find((profile) => profile.is_default)?.id || billingProfiles[0]?.id;
     const nextForm: InvoiceFormState = {
+      invoice_billing_profile_id: profileId ? String(profileId) : '',
       invoice_recipient_id: recipientId,
       invoice_number: '',
       invoice_date: preview.invoice_date || today(),
@@ -376,9 +438,9 @@ export function InvoiceMaker() {
     setInvoiceForm((current) => ({
       ...current,
       invoice_recipient_id: recipientId,
-      payment_terms: recipient?.payment_terms || current.payment_terms,
+      payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${current.invoice_number || ''} from Cornerstone Payroll`.trim()
+        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'Cornerstone Payroll'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
@@ -431,6 +493,7 @@ export function InvoiceMaker() {
     setSuccess(null);
     try {
       const payload = buildPayload();
+      if (!payload.invoice_billing_profile_id) throw new Error('From billing profile is required');
       if (!payload.invoice_recipient_id) throw new Error('Bill To recipient is required');
       if (!payload.invoice_date) throw new Error('Invoice date is required');
 
@@ -894,6 +957,66 @@ export function InvoiceMaker() {
     active: recipientForm.active,
   });
 
+  const buildBillingProfilePayload = (): InvoiceBillingProfilePayload => ({
+    name: billingProfileForm.name.trim(),
+    legal_name: billingProfileForm.legal_name.trim() || null,
+    website: billingProfileForm.website.trim() || null,
+    phone: billingProfileForm.phone.trim() || null,
+    email: billingProfileForm.email.trim() || null,
+    address: billingProfileForm.address.trim() || null,
+    payment_instructions: billingProfileForm.payment_instructions.trim() || null,
+    default_payment_terms: billingProfileForm.default_payment_terms.trim() || null,
+    invoice_prefix: billingProfileForm.invoice_prefix.trim() || null,
+    remit_to: billingProfileForm.remit_to.trim() || null,
+    footer_note: billingProfileForm.footer_note.trim() || null,
+    active: billingProfileForm.active,
+    is_default: billingProfileForm.is_default,
+  });
+
+  const editBillingProfile = (profile: InvoiceBillingProfile) => {
+    setBillingProfileForm({
+      id: profile.id,
+      name: profile.name,
+      legal_name: profile.legal_name || '',
+      website: profile.website || '',
+      phone: profile.phone || '',
+      email: profile.email || '',
+      address: profile.address || '',
+      payment_instructions: profile.payment_instructions || '',
+      default_payment_terms: profile.default_payment_terms || '',
+      invoice_prefix: profile.invoice_prefix || '',
+      remit_to: profile.remit_to || '',
+      footer_note: profile.footer_note || '',
+      active: profile.active,
+      is_default: profile.is_default,
+    });
+    setShowBillingProfileForm(true);
+  };
+
+  const saveBillingProfile = async () => {
+    setBillingProfileSaving(true);
+    setError(null);
+    try {
+      const payload = buildBillingProfilePayload();
+      if (!payload.name) throw new Error('Billing profile name is required');
+      const response = billingProfileForm.id
+        ? await invoiceBillingProfilesApi.update(billingProfileForm.id, payload)
+        : await invoiceBillingProfilesApi.create(payload);
+      await loadData();
+      setInvoiceForm((current) => current.invoice_billing_profile_id
+        ? current
+        : { ...current, invoice_billing_profile_id: String(response.invoice_billing_profile.id), payment_terms: current.payment_terms || response.invoice_billing_profile.default_payment_terms || '' });
+      setBillingProfileForm(emptyBillingProfileForm());
+      setShowBillingProfileForm(false);
+      setSuccess('Billing profile saved.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save billing profile');
+    } finally {
+      setBillingProfileSaving(false);
+    }
+  };
+
   const editRecipient = (recipient: InvoiceRecipient) => {
     setRecipientForm({
       id: recipient.id,
@@ -938,7 +1061,7 @@ export function InvoiceMaker() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
-            <p className="text-sm text-neutral-500">Saved invoices for the active company</p>
+            <p className="text-sm text-neutral-500">Saved invoices for this organization</p>
           </div>
           <Button size="sm" variant="outline" onClick={handleNewInvoice}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -966,7 +1089,9 @@ export function InvoiceMaker() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
-                    <p className="truncate text-xs text-neutral-500">{invoice.recipient_name || 'No recipient'}</p>
+                    <p className="truncate text-xs text-neutral-500">
+                      {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
+                    </p>
                   </div>
                   <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
                 </div>
@@ -1049,6 +1174,75 @@ export function InvoiceMaker() {
     </Card>
   );
 
+  const billingProfilesPanel = (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">Billing Profiles</h2>
+            <p className="text-sm text-neutral-500">Invoice from identities</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setBillingProfileForm(emptyBillingProfileForm());
+              setShowBillingProfileForm((value) => !value);
+            }}
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add
+          </Button>
+        </div>
+
+        {showBillingProfileForm && (
+          <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+            <Input value={billingProfileForm.name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, name: event.target.value }))} placeholder="Profile name" />
+            <Input value={billingProfileForm.legal_name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Legal/display name" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input value={billingProfileForm.phone} onChange={(event) => setBillingProfileForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone" />
+              <Input value={billingProfileForm.email} onChange={(event) => setBillingProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
+            </div>
+            <Input value={billingProfileForm.website} onChange={(event) => setBillingProfileForm((current) => ({ ...current, website: event.target.value }))} placeholder="Website" />
+            <Textarea value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Remittance address" rows={2} />
+            <Textarea value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} placeholder="Payment instructions" rows={2} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
+              <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />
+            </div>
+            <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
+            <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            <label className="flex items-center gap-2 text-sm text-neutral-600">
+              <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
+              Use as default profile
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setShowBillingProfileForm(false)}>Cancel</Button>
+              <Button size="sm" onClick={saveBillingProfile} disabled={billingProfileSaving}>
+                {billingProfileSaving ? 'Saving...' : 'Save Profile'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {activeBillingProfiles.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              onClick={() => editBillingProfile(profile)}
+              className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
+            >
+              <span className="font-medium text-neutral-900">{profile.name}</span>
+              {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">Default</span>}
+              <span className="block truncate text-xs text-neutral-500">{profile.email || profile.phone || profile.website || 'No contact details'}</span>
+            </button>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   const alertBanner = (error || success) ? (
     <div className={`rounded-xl border px-4 py-3 text-sm ${
       error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
@@ -1101,6 +1295,7 @@ export function InvoiceMaker() {
         <div className="grid gap-6 p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
           <div className="space-y-6">
             {invoiceHistoryPanel}
+            {billingProfilesPanel}
             {recipientsPanel}
           </div>
 
@@ -1138,6 +1333,28 @@ export function InvoiceMaker() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-neutral-700">From</span>
+                  <select
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    value={invoiceForm.invoice_billing_profile_id}
+                    onChange={(event) => {
+                      const nextProfile = billingProfiles.find((profile) => String(profile.id) === event.target.value);
+                      setInvoiceForm((current) => ({
+                        ...current,
+                        invoice_billing_profile_id: event.target.value,
+                        payment_terms: current.payment_terms || nextProfile?.default_payment_terms || '',
+                      }));
+                    }}
+                  >
+                    <option value="">Select billing profile...</option>
+                    {billingProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name}{profile.active ? '' : ' (archived)'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Bill To</span>
                   <select
@@ -1375,6 +1592,7 @@ export function InvoiceMaker() {
                 )}
               </CardContent>
             </Card>
+            {billingProfilesPanel}
             {recipientsPanel}
           </div>
 

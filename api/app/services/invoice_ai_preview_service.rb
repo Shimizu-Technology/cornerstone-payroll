@@ -257,7 +257,7 @@ class InvoiceAiPreviewService
   end
 
   def active_recipients
-    InvoiceRecipient.where(company_id: company.id, active: true)
+    InvoiceRecipient.where(organization_id: company.organization_id, active: true)
   end
 
   def detect_line_items_from_message(recipient)
