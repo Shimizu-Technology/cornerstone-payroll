@@ -16,7 +16,7 @@ module Api
                       :corrective_paychecks
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
-          :void, :create_correction_run, :correction_history, :generate_fit_check,
+          :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods
         ]
 
@@ -35,6 +35,7 @@ module Api
 
           loaded = @pay_periods.to_a
           preload_pay_period_audit_logs!(loaded)
+          preload_pay_period_pay_date_corrections!(loaded)
           preload_pay_period_created_users!(loaded)
           render json: {
             pay_periods: loaded.map { |pp| pay_period_json(pp) },
@@ -444,6 +445,59 @@ module Api
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # PATCH /api/v1/admin/pay_periods/:id/correct_pay_date
+        #
+        # Date-only correction for a committed payroll run. This does not
+        # recalculate payroll dollars; it fixes the pay period date, any matching
+        # check override dates, matching linked non-employee check dates, and the
+        # stored YTD display snapshots used on generated stubs.
+        def correct_pay_date
+          result = PayPeriodPayDateCorrectionService.call(
+            pay_period: @pay_period,
+            new_pay_date: params[:pay_date],
+            reason: params[:reason]
+          )
+
+          unless result.noop
+            begin
+              AuditLog.record!(
+                user:        current_user,
+                company_id:  current_company_id,
+                action:      "correct_committed_pay_date",
+                record_type: "PayPeriod",
+                record_id:   @pay_period.id,
+                metadata:    {
+                  old_pay_date: result.old_pay_date,
+                  new_pay_date: result.new_pay_date,
+                  reason: params[:reason].to_s.strip,
+                  payroll_items_updated: result.payroll_items_updated,
+                  non_employee_checks_updated: result.non_employee_checks_updated
+                },
+                ip_address:  request.remote_ip,
+                user_agent:  request.user_agent
+              )
+            rescue StandardError => e
+              Rails.logger.error("[correct_pay_date] AuditLog failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
+            end
+          end
+
+          @pay_period.reload
+          render json: {
+            pay_period: pay_period_json(@pay_period),
+            correction: {
+              old_pay_date: result.old_pay_date,
+              new_pay_date: result.new_pay_date,
+              payroll_items_updated: result.payroll_items_updated,
+              non_employee_checks_updated: result.non_employee_checks_updated,
+              noop: result.noop
+            }
+          }
+        rescue PayPeriodPayDateCorrectionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         end
 
         # ----------------------------------------------------------------
@@ -858,6 +912,7 @@ module Api
             tax_sync_last_error: pay_period.tax_sync_last_error,
             tax_synced_at: pay_period.tax_synced_at,
             lifecycle: lifecycle,
+            pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,
             voided_at:                pay_period.voided_at,
@@ -1091,6 +1146,24 @@ module Api
             end
         end
 
+        def preload_pay_period_pay_date_corrections!(pay_periods)
+          @pay_period_pay_date_corrections_by_record_id =
+            if pay_periods.empty?
+              {}
+            else
+              AuditLog
+                .where(
+                  company_id: current_company_id,
+                  record_type: "PayPeriod",
+                  action: "correct_committed_pay_date",
+                  record_id: pay_periods.map(&:id)
+                )
+                .includes(:user)
+                .order(:created_at)
+                .group_by { |log| log.record_id.to_i }
+            end
+        end
+
         def preload_pay_period_created_users!(pay_periods)
           user_ids = pay_periods.filter_map(&:created_by_id).uniq
           @pay_period_created_user_names_by_id = visible_user_names_for_pay_periods(user_ids)
@@ -1110,6 +1183,38 @@ module Api
                 .order(:created_at)
                 .to_a
           end
+        end
+
+        def pay_period_pay_date_corrections(pay_period)
+          @pay_period_pay_date_corrections_by_record_id ||= {}
+          @pay_period_pay_date_corrections_by_record_id.fetch(pay_period.id) do
+            @pay_period_pay_date_corrections_by_record_id[pay_period.id] =
+              AuditLog
+                .where(
+                  company_id: pay_period.company_id,
+                  record_type: "PayPeriod",
+                  action: "correct_committed_pay_date",
+                  record_id: pay_period.id
+                )
+                .includes(:user)
+                .order(:created_at)
+                .to_a
+          end
+        end
+
+        def pay_date_correction_json(log)
+          metadata = log.metadata || {}
+
+          {
+            id: log.id,
+            old_pay_date: metadata["old_pay_date"],
+            new_pay_date: metadata["new_pay_date"],
+            reason: metadata["reason"],
+            payroll_items_updated: metadata["payroll_items_updated"],
+            non_employee_checks_updated: metadata["non_employee_checks_updated"],
+            corrected_at: log.created_at,
+            corrected_by_name: log.user&.name
+          }
         end
 
         def pay_period_lifecycle_summary(pay_period)
