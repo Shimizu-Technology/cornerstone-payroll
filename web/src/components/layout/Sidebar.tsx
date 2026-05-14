@@ -249,7 +249,15 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     )}>
       {/* Logo */}
       <div className="border-b border-neutral-200/70 px-3 py-5">
-        <div className={cn('flex items-center', collapsed ? 'justify-center' : 'gap-3 px-3')}>
+        <NavLink
+          to="/"
+          onClick={onNavigate}
+          aria-label="Go to home page"
+          className={cn(
+            'flex items-center rounded-2xl transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
+            collapsed ? 'justify-center p-1' : 'gap-3 px-3 py-1'
+          )}
+        >
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 text-white shadow-md shadow-primary-700/25">
             <span className="text-sm font-bold tracking-tight">CP</span>
           </div>
@@ -259,7 +267,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               <p className="text-xs text-neutral-500">Payroll workspace</p>
             </div>
           )}
-        </div>
+        </NavLink>
       </div>
 
       {/* Company switcher — hide when collapsed */}

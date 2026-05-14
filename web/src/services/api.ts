@@ -2384,6 +2384,8 @@ export interface InvoiceBillingProfilePayload {
 export interface InvoiceAiPreview {
   status: 'preview' | 'clarification_needed';
   message?: string | null;
+  invoice_billing_profile_id?: number | null;
+  invoice_billing_profile_name?: string | null;
   invoice_recipient_id?: number | null;
   invoice_recipient_name?: string | null;
   new_recipient?: {

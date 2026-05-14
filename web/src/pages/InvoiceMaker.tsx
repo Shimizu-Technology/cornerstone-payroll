@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -230,6 +230,7 @@ export function InvoiceMaker() {
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -383,7 +384,7 @@ export function InvoiceMaker() {
 
   const applyPreviewToForm = (preview: InvoiceAiPreview) => {
     const recipientId = preview.invoice_recipient_id ? String(preview.invoice_recipient_id) : '';
-    const profileId = selectedBillingProfile?.id || billingProfiles.find((profile) => profile.is_default)?.id || billingProfiles[0]?.id;
+    const profileId = preview.invoice_billing_profile_id || selectedBillingProfile?.id || billingProfiles.find((profile) => profile.is_default)?.id || billingProfiles[0]?.id;
     const nextForm: InvoiceFormState = {
       invoice_billing_profile_id: profileId ? String(profileId) : '',
       invoice_recipient_id: recipientId,
@@ -779,7 +780,7 @@ export function InvoiceMaker() {
       session_id: sessionId,
       id: optimisticId - 1,
       role: 'assistant',
-      content: 'Drafting invoice details...',
+      content: 'Preparing invoice preview',
       image_urls: [],
       preview: {},
       has_preview: false,
@@ -853,12 +854,12 @@ export function InvoiceMaker() {
     } finally {
       removePendingMessages();
       setChatBusy(false);
+      window.setTimeout(() => chatInputRef.current?.focus(), 0);
     }
   };
 
   const createInvoiceFromPreview = async () => {
     if (!activeChatSession) return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     setChatBusy(true);
     setError(null);
@@ -1258,6 +1259,23 @@ export function InvoiceMaker() {
     [activeChatSession?.id, activeChatSession?.messages, optimisticChatMessages]
   );
   const chatCanAcceptMessages = !activeChatSession || activeChatSession.status === 'active';
+  const activePreviewVersion = activeChatSession?.current_preview_version || 0;
+  const activePreviewIsReady = Boolean(activePreview && activePreview.status === 'preview' && chatCanAcceptMessages && !createdChatInvoice);
+
+  const previewBillingProfileName = (preview?: InvoiceAiPreview | Record<string, never> | null) => {
+    const aiPreview = preview as InvoiceAiPreview | null | undefined;
+    if (aiPreview?.invoice_billing_profile_name) return aiPreview.invoice_billing_profile_name;
+    const profileId = aiPreview?.invoice_billing_profile_id;
+    return billingProfiles.find((profile) => profile.id === profileId)?.name || billingProfiles.find((profile) => profile.is_default)?.name || billingProfiles[0]?.name || 'Default sender';
+  };
+
+  const isCurrentPreviewMessage = (message: InvoiceChatMessage | OptimisticChatMessage) => (
+    Boolean(message.has_preview && message.preview_version && message.preview_version === activePreviewVersion)
+  );
+
+  const canRestorePreviewMessage = (message: InvoiceChatMessage | OptimisticChatMessage) => (
+    Boolean(message.role === 'assistant' && message.has_preview && message.preview_version && message.preview_version !== activePreviewVersion && chatCanAcceptMessages)
+  );
 
   return (
     <div>
@@ -1641,7 +1659,10 @@ export function InvoiceMaker() {
                           <button
                             key={prompt}
                             type="button"
-                            onClick={() => setChatInput(prompt)}
+                            onClick={() => {
+                              setChatInput(prompt);
+                              window.setTimeout(() => chatInputRef.current?.focus(), 0);
+                            }}
                             className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/50"
                           >
                             {prompt}
@@ -1652,46 +1673,82 @@ export function InvoiceMaker() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {activeChatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
+                    {activeChatMessages.map((message) => {
+                      const pendingAssistant = message.role === 'assistant' && message.id < 0;
+                      const currentPreviewMessage = isCurrentPreviewMessage(message);
+                      const restorePreviewMessage = canRestorePreviewMessage(message);
+
+                      return (
                         <div
-                          className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                            message.role === 'user'
-                              ? 'bg-primary-600 text-white'
-                              : 'border border-neutral-200 bg-white text-neutral-700'
-                          }`}
+                          key={message.id}
+                          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
-                          <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                          {message.image_urls.length > 0 && (
-                            <span className={`mt-2 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
-                              {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
-                            </span>
-                          )}
-                          {message.has_preview && (
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                                message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
-                              }`}>
-                                Invoice preview ready
+                          <div
+                            className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                              message.role === 'user'
+                                ? 'bg-primary-600 text-white'
+                                : 'border border-neutral-200 bg-white text-neutral-700'
+                            }`}
+                          >
+                            {pendingAssistant ? (
+                              <div className="flex items-center gap-3 text-neutral-600">
+                                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                                <div>
+                                  <p className="font-medium text-neutral-800">Preparing invoice preview</p>
+                                  <p className="text-xs text-neutral-500">Reading the request and matching saved bill-to profiles.</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                            )}
+                            {message.image_urls.length > 0 && (
+                              <span className={`mt-2 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
+                                {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
                               </span>
-                              {message.role === 'assistant' && chatCanAcceptMessages && (
-                                <button
-                                  type="button"
-                                  onClick={() => restoreChatPreview(message.id)}
-                                  className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
-                                >
-                                  <RotateCcw className="h-3 w-3" />
-                                  Use version
-                                </button>
-                              )}
-                            </div>
-                          )}
+                            )}
+                            {message.has_preview && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                                  message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
+                                }`}>
+                                  Invoice preview ready
+                                </span>
+                                {currentPreviewMessage && activePreviewIsReady && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={createInvoiceFromPreview}
+                                      className="inline-flex items-center gap-1 rounded-full bg-primary-600 px-2 py-1 text-xs font-medium text-white hover:bg-primary-700"
+                                    >
+                                      <ReceiptText className="h-3 w-3" />
+                                      Create invoice
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={usePreviewAsDraft}
+                                      className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
+                                    >
+                                      <PencilLine className="h-3 w-3" />
+                                      Edit manually
+                                    </button>
+                                  </>
+                                )}
+                                {restorePreviewMessage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => restoreChatPreview(message.id)}
+                                    className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    Use version
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <div ref={chatMessagesEndRef} />
                   </div>
                 )}
@@ -1742,6 +1799,7 @@ export function InvoiceMaker() {
                     />
                   </label>
                   <Textarea
+                    ref={chatInputRef}
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
                     onPaste={handleChatPaste}
@@ -1817,6 +1875,9 @@ export function InvoiceMaker() {
                 ) : activePreview?.status === 'preview' ? (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                        From {previewBillingProfileName(activePreview)}
+                      </p>
                       <p className="text-sm font-semibold text-neutral-900">
                         {activePreview.invoice_recipient_name || 'Recipient needed'}
                       </p>
