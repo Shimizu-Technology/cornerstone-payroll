@@ -1726,6 +1726,7 @@ export const checksApi = {
 // ============================================================
 export interface PrinterProfile {
   id: number;
+  organization_id: number;
   name: string;
   description: string | null;
   notes: string | null;
