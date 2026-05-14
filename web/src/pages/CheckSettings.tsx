@@ -2,7 +2,8 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Download } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -12,11 +13,28 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
+import { CheckLayoutEditor } from '@/components/checks/CheckLayoutEditor';
 import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
-import type { CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
+import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
+
+type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
+
+function checkSettingsSnapshot(values: {
+  stockType: CheckStockType;
+  offsetX: string;
+  offsetY: string;
+  bankName: string;
+  bankAddress: string;
+  layoutOverridesJson: string;
+  memoTemplate: string;
+  autoCreateFitCheck: boolean;
+}) {
+  return JSON.stringify(values);
+}
 
 export function CheckSettingsPage() {
+  const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,6 +53,12 @@ export function CheckSettingsPage() {
   const [nextCheckNumber, setNextCheckNumber] = useState('');
   const [nextCheckNumberSaving, setNextCheckNumberSaving] = useState(false);
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
+  const [checkLayout, setCheckLayout] = useState<CheckLayoutResponse | null>(null);
+  const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
+  const [testCheckType, setTestCheckType] = useState<TestCheckType>('payroll');
+  const [generatingTestCheck, setGeneratingTestCheck] = useState(false);
+  const [testCheckPreviewUrl, setTestCheckPreviewUrl] = useState<string | null>(null);
+  const [testCheckPreviewFilename, setTestCheckPreviewFilename] = useState('test_check.pdf');
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -48,6 +72,105 @@ export function CheckSettingsPage() {
   const [editProfileNotes, setEditProfileNotes] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
 
+  const currentSettingsSnapshot = useMemo(() => checkSettingsSnapshot({
+    stockType,
+    offsetX,
+    offsetY,
+    bankName,
+    bankAddress,
+    layoutOverridesJson,
+    memoTemplate,
+    autoCreateFitCheck,
+  }), [stockType, offsetX, offsetY, bankName, bankAddress, layoutOverridesJson, memoTemplate, autoCreateFitCheck]);
+
+  const hasUnsavedCheckSettings = savedSettingsSnapshot !== null && currentSettingsSnapshot !== savedSettingsSnapshot;
+
+  const applySettingsToForm = useCallback((s: CheckSettingsType) => {
+    const normalizedOffsetX = typeof s.check_offset_x === 'number'
+      ? s.check_offset_x
+      : Number(s.check_offset_x || 0);
+    const normalizedOffsetY = typeof s.check_offset_y === 'number'
+      ? s.check_offset_y
+      : Number(s.check_offset_y || 0);
+    const nextOffsetX = normalizedOffsetX.toFixed(3);
+    const nextOffsetY = normalizedOffsetY.toFixed(3);
+    const nextBankName = s.bank_name ?? '';
+    const nextBankAddress = s.bank_address ?? '';
+    const nextLayoutOverridesJson = JSON.stringify(s.check_layout_config ?? {}, null, 2);
+    const nextMemoTemplate = s.check_memo_template ?? '';
+    const nextAutoCreateFitCheck = s.auto_create_fit_check ?? false;
+
+    setSettings(s);
+    setStockType(s.check_stock_type);
+    setOffsetX(nextOffsetX);
+    setOffsetY(nextOffsetY);
+    setBankName(nextBankName);
+    setBankAddress(nextBankAddress);
+    setLayoutOverridesJson(nextLayoutOverridesJson);
+    setMemoTemplate(nextMemoTemplate);
+    setAutoCreateFitCheck(nextAutoCreateFitCheck);
+    setNextCheckNumber(String(s.next_check_number));
+    setSavedSettingsSnapshot(checkSettingsSnapshot({
+      stockType: s.check_stock_type,
+      offsetX: nextOffsetX,
+      offsetY: nextOffsetY,
+      bankName: nextBankName,
+      bankAddress: nextBankAddress,
+      layoutOverridesJson: nextLayoutOverridesJson,
+      memoTemplate: nextMemoTemplate,
+      autoCreateFitCheck: nextAutoCreateFitCheck,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!hasUnsavedCheckSettings) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedCheckSettings]);
+
+  useEffect(() => {
+    if (!hasUnsavedCheckSettings) return;
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const anchor = target?.closest('a[href]') as HTMLAnchorElement | null;
+      if (!anchor || (anchor.target && anchor.target !== '_self')) return;
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      if (nextUrl.origin !== window.location.origin) return;
+      if (
+        nextUrl.pathname === window.location.pathname &&
+        nextUrl.search === window.location.search &&
+        nextUrl.hash === window.location.hash
+      ) return;
+
+      if (!window.confirm('You have unsaved check setting changes. Leave this page and discard them?')) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    document.addEventListener('click', handleDocumentClick, true);
+    return () => document.removeEventListener('click', handleDocumentClick, true);
+  }, [hasUnsavedCheckSettings]);
+
+  useEffect(() => {
+    return () => {
+      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+    };
+  }, [testCheckPreviewUrl]);
+
+  const confirmDiscardUnsavedChanges = useCallback((message: string) => {
+    return !hasUnsavedCheckSettings || window.confirm(message);
+  }, [hasUnsavedCheckSettings]);
+
   const loadProfiles = useCallback(async () => {
     try {
       const data = await printerProfilesApi.list();
@@ -57,27 +180,20 @@ export function CheckSettingsPage() {
     }
   }, []);
 
+  const loadCheckLayout = useCallback(async (selectedStockType = stockType) => {
+    try {
+      const data = await checksApi.getLayout(selectedStockType);
+      setCheckLayout(data.check_layout);
+    } catch {
+      setCheckLayout(null);
+    }
+  }, [stockType]);
+
   useEffect(() => {
     (async () => {
       try {
         const data = await checksApi.getSettings();
-        const s = data.check_settings;
-        const normalizedOffsetX = typeof s.check_offset_x === 'number'
-          ? s.check_offset_x
-          : Number(s.check_offset_x || 0);
-        const normalizedOffsetY = typeof s.check_offset_y === 'number'
-          ? s.check_offset_y
-          : Number(s.check_offset_y || 0);
-        setSettings(s);
-        setStockType(s.check_stock_type);
-        setOffsetX(normalizedOffsetX.toFixed(3));
-        setOffsetY(normalizedOffsetY.toFixed(3));
-        setBankName(s.bank_name ?? '');
-        setBankAddress(s.bank_address ?? '');
-        setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
-        setMemoTemplate(s.check_memo_template ?? '');
-        setAutoCreateFitCheck(s.auto_create_fit_check ?? false);
-        setNextCheckNumber(String(s.next_check_number));
+        applySettingsToForm(data.check_settings);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings');
       } finally {
@@ -85,7 +201,43 @@ export function CheckSettingsPage() {
       }
       loadProfiles();
     })();
-  }, [loadProfiles]);
+  }, [applySettingsToForm, loadProfiles]);
+
+  useEffect(() => {
+    if (!loading) {
+      if (skipNextLayoutEffectRef.current) {
+        skipNextLayoutEffectRef.current = false;
+        return;
+      }
+      loadCheckLayout(stockType);
+    }
+  }, [stockType, loading, loadCheckLayout]);
+
+  const parsedLayoutOverrides = useMemo(() => {
+    try {
+      const parsed = JSON.parse(layoutOverridesJson || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }, [layoutOverridesJson]);
+
+  const handleVisualLayoutChange = useCallback((config: Record<string, unknown>) => {
+    setLayoutOverridesJson(JSON.stringify(config, null, 2));
+    setError(null);
+    setSuccess(null);
+  }, []);
+
+  const handleVisualOffsetChange = useCallback((axis: 'x' | 'y', value: string) => {
+    if (axis === 'x') {
+      setOffsetX(value);
+    } else {
+      setOffsetY(value);
+    }
+    setSuccess(null);
+  }, []);
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -115,8 +267,8 @@ export function CheckSettingsPage() {
         auto_create_fit_check: autoCreateFitCheck,
         check_layout_config: parsedLayoutOverrides,
       });
-      setSettings(data.check_settings);
-      setLayoutOverridesJson(JSON.stringify(data.check_settings.check_layout_config ?? {}, null, 2));
+      applySettingsToForm(data.check_settings);
+      await loadCheckLayout(stockType);
       setSuccess('Settings saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
@@ -165,6 +317,69 @@ export function CheckSettingsPage() {
     }
   };
 
+  const parseLayoutOverridesForAction = () => {
+    const parsed = JSON.parse(layoutOverridesJson || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Advanced layout overrides must be a JSON object.');
+    }
+    return parsed as Record<string, unknown>;
+  };
+
+  const currentDraftCheckSettings = (layoutConfig: Record<string, unknown>) => ({
+    check_stock_type: stockType,
+    check_offset_x: parseFloat(offsetX),
+    check_offset_y: parseFloat(offsetY),
+    bank_name: bankName.trim() || null,
+    bank_address: bankAddress.trim() || null,
+    check_memo_template: memoTemplate.trim() || null,
+    check_layout_config: layoutConfig,
+  });
+
+  const handleTestCheckPdf = async () => {
+    setError(null);
+    setSuccess(null);
+    try {
+      const layoutConfig = parseLayoutOverridesForAction();
+      setGeneratingTestCheck(true);
+      const { blob, filename } = await checksApi.testCheckPdf({
+        sample_type: testCheckType,
+        check_settings: currentDraftCheckSettings(layoutConfig),
+      });
+      if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+      setTestCheckPreviewUrl(URL.createObjectURL(blob));
+      setTestCheckPreviewFilename(filename || `test_check_${testCheckType}.pdf`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate test check PDF');
+    } finally {
+      setGeneratingTestCheck(false);
+    }
+  };
+
+  const handleCloseTestCheckPreview = () => {
+    if (testCheckPreviewUrl) URL.revokeObjectURL(testCheckPreviewUrl);
+    setTestCheckPreviewUrl(null);
+  };
+
+  const handleDownloadTestCheckPreview = () => {
+    if (!testCheckPreviewUrl) return;
+    const a = document.createElement('a');
+    a.href = testCheckPreviewUrl;
+    a.download = testCheckPreviewFilename;
+    a.click();
+  };
+
+  const handlePrintTestCheckPreview = () => {
+    if (!testCheckPreviewUrl) return;
+    const printWindow = window.open(testCheckPreviewUrl);
+    if (printWindow) {
+      printWindow.addEventListener('load', () => {
+        printWindow.print();
+      });
+    } else {
+      setError('Pop-up blocked. Please allow pop-ups for this site to print checks.');
+    }
+  };
+
   const handleSaveCurrentAsProfile = async () => {
     if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
     setProfileSaving(true);
@@ -201,14 +416,17 @@ export function CheckSettingsPage() {
   };
 
   const handleApplyProfile = async (profile: PrinterProfile) => {
+    if (!confirmDiscardUnsavedChanges(`You have unsaved check setting changes. Applying "${profile.name}" will replace them with that printer profile. Continue?`)) return;
+
     setError(null);
     try {
-      const data = await printerProfilesApi.apply(profile.id);
-      const s = data.check_settings;
-      setStockType(s.check_stock_type);
-      setOffsetX(Number(s.check_offset_x || 0).toFixed(3));
-      setOffsetY(Number(s.check_offset_y || 0).toFixed(3));
-      setLayoutOverridesJson(JSON.stringify(s.check_layout_config ?? {}, null, 2));
+      await printerProfilesApi.apply(profile.id);
+      const data = await checksApi.getSettings();
+      if (data.check_settings.check_stock_type !== stockType) {
+        skipNextLayoutEffectRef.current = true;
+      }
+      applySettingsToForm(data.check_settings);
+      await loadCheckLayout(data.check_settings.check_stock_type);
       setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply profile');
@@ -276,6 +494,14 @@ export function CheckSettingsPage() {
     setError(null);
   };
 
+  const handleClearProfileCalibration = () => {
+    setOffsetX('0.000');
+    setOffsetY('0.000');
+    setLayoutOverridesJson('{}');
+    setSuccess('Printer profile calibration cleared. Click Save Settings to make it active.');
+    setError(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -289,7 +515,7 @@ export function CheckSettingsPage() {
     <div className="min-h-screen bg-gray-50">
       <Header title="Check Printing Settings" />
 
-      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
 
         {/* Feedback */}
         {error && (
@@ -297,6 +523,11 @@ export function CheckSettingsPage() {
         )}
         {success && (
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{success}</div>
+        )}
+        {hasUnsavedCheckSettings && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            You have unsaved check setting changes. They are only in this browser until you click <strong>Save Settings</strong>.
+          </div>
         )}
 
         {/* Printer Profiles */}
@@ -308,14 +539,19 @@ export function CheckSettingsPage() {
                 Save and switch between alignment settings for different printers.
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                These profiles follow your account across every client &mdash; calibrate
-                your printer once and reuse it everywhere. <span className="font-medium">Use This Printer</span>
+                These profiles are shared with everyone in your organization &mdash; calibrate
+                an office printer once and reuse it across clients. <span className="font-medium">Use This Printer</span>
                 {' '}applies the profile to the active client only.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
-              {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
+                Clear Profile Settings
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
+                {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
+              </Button>
+            </div>
           </div>
           <CardContent className="p-4 space-y-3">
             {showAddProfile && (
@@ -456,7 +692,7 @@ export function CheckSettingsPage() {
               <p className="font-medium">Recommended workflow</p>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs sm:text-sm">
                 <li>Download the alignment test PDF.</li>
-                <li>Print it on plain paper.</li>
+                <li>Print it on plain paper or a photocopy of real check stock.</li>
                 <li>Hold it behind your real check stock and see what is off.</li>
                 <li>Use X and Y offset for small overall shifts.</li>
                 <li>Only open Advanced Calibration if one specific area still needs fine tuning.</li>
@@ -482,6 +718,30 @@ export function CheckSettingsPage() {
             </div>
 
             {/* Offset calibration */}
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">Visual Calibration</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Drag a field or use the nudge buttons. Nothing is saved until you click Save Settings.
+                </p>
+              </div>
+              <CheckLayoutEditor
+                stockType={stockType}
+                offsetX={offsetX}
+                offsetY={offsetY}
+                layoutConfig={parsedLayoutOverrides ?? {}}
+                layout={checkLayout}
+                disabled={!parsedLayoutOverrides}
+                onLayoutConfigChange={handleVisualLayoutChange}
+                onOffsetChange={handleVisualOffsetChange}
+              />
+              {!parsedLayoutOverrides && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Fix the advanced JSON before using visual calibration.
+                </p>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
@@ -554,7 +814,37 @@ export function CheckSettingsPage() {
             </div>
 
             {/* Alignment test */}
-            <div className="pt-2 border-t flex flex-wrap items-center gap-3">
+            <div className="pt-2 border-t space-y-3">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <Label htmlFor="test-check-type">Test Print</Label>
+                    <p className="mt-1 text-xs text-blue-900">
+                      Generate a preview from the current draft settings, then print from the browser just like a real check.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Select
+                      id="test-check-type"
+                      value={testCheckType}
+                      onChange={(e) => setTestCheckType(e.target.value as TestCheckType)}
+                      className="w-56 bg-white"
+                    >
+                      <option value="payroll">Payroll check</option>
+                      <option value="fit">FIT tax check</option>
+                      <option value="grt">GRT check</option>
+                      <option value="vendor">Vendor check</option>
+                    </Select>
+                    <Button variant="outline" onClick={handleTestCheckPdf} type="button" disabled={generatingTestCheck}>
+                      {generatingTestCheck ? (
+                        <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Generating...</>
+                      ) : (
+                        <><Download className="w-4 h-4 mr-2" /> Preview Test Check</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
               <Button variant="outline" onClick={handleAlignmentTest} type="button" disabled={downloadingAlignment}>
                 {downloadingAlignment ? (
                   <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Downloading...</>
@@ -564,7 +854,7 @@ export function CheckSettingsPage() {
               </Button>
               <p className="text-xs text-gray-500">
                 The alignment test now marks the configured check-face anchors and stub row baselines.
-                Print on plain paper and hold it against your stock before using real checks.
+                Print on plain paper or a photocopy of real check stock, confirm alignment, then print on live check stock.
               </p>
             </div>
 
@@ -711,6 +1001,42 @@ export function CheckSettingsPage() {
         </Card>
 
       </div>
+
+      {testCheckPreviewUrl && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="flex h-[92vh] w-[95vw] max-w-[1400px] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-6 py-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Test Check Preview
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  This preview uses the current draft settings. Nothing is saved until you click Save Settings.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" onClick={handlePrintTestCheckPreview}>
+                  Print
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadTestCheckPreview}>
+                  Download PDF
+                </Button>
+                <Button size="sm" onClick={handleCloseTestCheckPreview}>
+                  Close
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 bg-gray-100 p-5">
+              <iframe
+                src={`${testCheckPreviewUrl}#toolbar=0&navpanes=0&scrollbar=1&view=Fit`}
+                className="h-full w-full rounded-xl border bg-white shadow-lg"
+                title="Test Check Preview"
+              />
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

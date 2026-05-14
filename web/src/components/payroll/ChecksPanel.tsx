@@ -512,6 +512,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
         </div>
       )}
 
+      <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+        Before printing on live check stock, print one test page on plain paper or a photocopy of the real check and confirm the alignment.
+      </div>
+
       {/* Checks table */}
       {filteredChecks.length === 0 ? (
         <div className="py-8 text-center text-gray-500 text-sm">

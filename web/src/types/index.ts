@@ -674,6 +674,29 @@ export interface CheckSettings {
   check_layout_config: Record<string, unknown>;
 }
 
+export interface CheckLayoutPageMetadata {
+  width: number;
+  height: number;
+  section_height?: number;
+  check_section_bottom?: number;
+  stub1_section_bottom?: number;
+  stub2_section_bottom?: number;
+  slot_count?: number;
+  slot_height?: number;
+  preview_slot_bottom?: number;
+  offset_x_points: number;
+  offset_y_points: number;
+}
+
+export interface CheckLayoutResponse {
+  check_stock_type: CheckStockType;
+  check_offset_x: number;
+  check_offset_y: number;
+  default_layout_config: Record<string, unknown>;
+  resolved_layout_config: Record<string, unknown>;
+  page: CheckLayoutPageMetadata;
+}
+
 // ----------------
 // W-2GU Report (CPR-68)
 // ----------------

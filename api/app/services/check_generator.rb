@@ -65,6 +65,28 @@ class CheckGenerator
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
+  def self.default_layout_config
+    stringify_layout(DEFAULT_LAYOUT)
+  end
+
+  def self.resolved_layout_for(company)
+    deep_merge(default_layout_config, stringify_layout(company.check_layout_config || {}))
+  end
+
+  def self.page_layout_metadata(company)
+    top_check = company.check_stock_type != "bottom_check"
+    {
+      width: PAGE_WIDTH,
+      height: PAGE_HEIGHT,
+      section_height: SECTION_HEIGHT,
+      check_section_bottom: top_check ? (SECTION_HEIGHT * 2) : 0,
+      stub1_section_bottom: top_check ? SECTION_HEIGHT : (SECTION_HEIGHT * 2),
+      stub2_section_bottom: top_check ? 0 : SECTION_HEIGHT,
+      offset_x_points: (company.check_offset_x.to_f * 72).round(1),
+      offset_y_points: (company.check_offset_y.to_f * 72).round(1)
+    }
+  end
+
   def initialize(payroll_item)
     @payroll_item = payroll_item
     @employee     = payroll_item.employee
@@ -715,10 +737,10 @@ class CheckGenerator
   end
 
   def layout_config
-    @layout_config ||= deep_merge(stringify_layout(DEFAULT_LAYOUT), stringify_layout(company.check_layout_config || {}))
+    @layout_config ||= self.class.resolved_layout_for(company)
   end
 
-  def stringify_layout(value)
+  def self.stringify_layout(value)
     case value
     when Hash
       value.each_with_object({}) { |(key, nested), acc| acc[key.to_s] = stringify_layout(nested) }
@@ -729,7 +751,11 @@ class CheckGenerator
     end
   end
 
-  def deep_merge(base, overrides)
+  def stringify_layout(value)
+    self.class.stringify_layout(value)
+  end
+
+  def self.deep_merge(base, overrides)
     base.merge(overrides) do |_key, old_value, new_value|
       if old_value.is_a?(Hash) && new_value.is_a?(Hash)
         deep_merge(old_value, new_value)
@@ -737,6 +763,10 @@ class CheckGenerator
         new_value
       end
     end
+  end
+
+  def deep_merge(base, overrides)
+    self.class.deep_merge(base, overrides)
   end
 
   def draw_alignment_marker(pdf, x:, y:, label:)
