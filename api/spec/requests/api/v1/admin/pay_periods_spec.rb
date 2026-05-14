@@ -322,6 +322,138 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/pay_periods/:id/correct_pay_date" do
+    before do
+      allow(PayrollTaxSyncJob).to receive(:perform_later)
+    end
+
+    it "corrects a committed pay date and related date-bearing records without changing dollars" do
+      old_pay_date = Date.new(2026, 4, 15)
+      new_pay_date = Date.new(2026, 4, 30)
+      pay_period.update!(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 15),
+        pay_date: old_pay_date,
+        status: "committed",
+        committed_at: Time.current,
+        tax_sync_status: "synced",
+        tax_synced_at: Time.current
+      )
+      prior_period = create(
+        :pay_period,
+        :committed,
+        company: company,
+        start_date: Date.new(2026, 3, 16),
+        end_date: Date.new(2026, 3, 31),
+        pay_date: Date.new(2026, 4, 16)
+      )
+      create(
+        :payroll_item,
+        :with_check,
+        company: company,
+        employee: employee,
+        pay_period: prior_period,
+        gross_pay: 50,
+        net_pay: 45,
+        withholding_tax: 3,
+        social_security_tax: 1,
+        medicare_tax: 1,
+        ytd_gross: 150,
+        ytd_net: 135,
+        ytd_withholding_tax: 9,
+        ytd_social_security_tax: 3,
+        ytd_medicare_tax: 3
+      )
+      payroll_item = create(
+        :payroll_item,
+        :with_check,
+        company: company,
+        employee: employee,
+        pay_period: pay_period,
+        check_date: old_pay_date,
+        gross_pay: 100,
+        net_pay: 90,
+        withholding_tax: 6,
+        social_security_tax: 2,
+        medicare_tax: 2,
+        ytd_gross: 100,
+        ytd_net: 90,
+        ytd_withholding_tax: 6,
+        ytd_social_security_tax: 2,
+        ytd_medicare_tax: 2
+      )
+      non_employee_check = create(
+        :non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        payment_period_type: "pay_period",
+        payment_date: old_pay_date
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
+        params: {
+          pay_date: new_pay_date.iso8601,
+          reason: "AIRE payroll was entered with the wrong pay date"
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to have_attributes(
+        pay_date: new_pay_date,
+        tax_sync_status: "pending",
+        tax_synced_at: nil
+      )
+      expect(payroll_item.reload).to have_attributes(
+        check_date: new_pay_date,
+        gross_pay: 100,
+        net_pay: 90,
+        ytd_gross: 150,
+        ytd_net: 135
+      )
+      expect(prior_period.payroll_items.first.reload).to have_attributes(
+        ytd_gross: 50,
+        ytd_net: 45
+      )
+      expect(non_employee_check.reload.payment_date).to eq(new_pay_date)
+      expect(AuditLog.last).to have_attributes(
+        action: "correct_committed_pay_date",
+        record_type: "pay_periods",
+        record_id: pay_period.id
+      )
+      expect(AuditLog.last.metadata).to include(
+        "old_pay_date" => old_pay_date.to_s,
+        "new_pay_date" => new_pay_date.to_s,
+        "reason" => "AIRE payroll was entered with the wrong pay date"
+      )
+      expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
+    end
+
+    it "rejects pay date corrections outside the original tax year" do
+      pay_period.update!(pay_date: Date.new(2026, 12, 31), status: "committed", committed_at: Time.current)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
+        params: { pay_date: "2027-01-02", reason: "Wrong date" }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to match(/same tax year/)
+    end
+
+    it "requires a reason" do
+      pay_period.update!(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 15),
+        pay_date: Date.new(2026, 4, 15),
+        status: "committed",
+        committed_at: Time.current
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
+        params: { pay_date: "2026-04-30", reason: "" }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to match(/reason is required/)
+    end
+  end
+
   describe "DELETE /api/v1/admin/pay_periods/:id" do
     it "deletes a draft pay period" do
       expect {
