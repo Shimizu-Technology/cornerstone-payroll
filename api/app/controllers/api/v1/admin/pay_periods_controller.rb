@@ -35,6 +35,7 @@ module Api
 
           loaded = @pay_periods.to_a
           preload_pay_period_audit_logs!(loaded)
+          preload_pay_period_pay_date_corrections!(loaded)
           preload_pay_period_created_users!(loaded)
           render json: {
             pay_periods: loaded.map { |pp| pay_period_json(pp) },
@@ -911,6 +912,7 @@ module Api
             tax_sync_last_error: pay_period.tax_sync_last_error,
             tax_synced_at: pay_period.tax_synced_at,
             lifecycle: lifecycle,
+            pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,
             voided_at:                pay_period.voided_at,
@@ -1144,6 +1146,24 @@ module Api
             end
         end
 
+        def preload_pay_period_pay_date_corrections!(pay_periods)
+          @pay_period_pay_date_corrections_by_record_id =
+            if pay_periods.empty?
+              {}
+            else
+              AuditLog
+                .where(
+                  company_id: current_company_id,
+                  record_type: "PayPeriod",
+                  action: "correct_committed_pay_date",
+                  record_id: pay_periods.map(&:id)
+                )
+                .includes(:user)
+                .order(:created_at)
+                .group_by { |log| log.record_id.to_i }
+            end
+        end
+
         def preload_pay_period_created_users!(pay_periods)
           user_ids = pay_periods.filter_map(&:created_by_id).uniq
           @pay_period_created_user_names_by_id = visible_user_names_for_pay_periods(user_ids)
@@ -1163,6 +1183,38 @@ module Api
                 .order(:created_at)
                 .to_a
           end
+        end
+
+        def pay_period_pay_date_corrections(pay_period)
+          @pay_period_pay_date_corrections_by_record_id ||= {}
+          @pay_period_pay_date_corrections_by_record_id.fetch(pay_period.id) do
+            @pay_period_pay_date_corrections_by_record_id[pay_period.id] =
+              AuditLog
+                .where(
+                  company_id: pay_period.company_id,
+                  record_type: "PayPeriod",
+                  action: "correct_committed_pay_date",
+                  record_id: pay_period.id
+                )
+                .includes(:user)
+                .order(:created_at)
+                .to_a
+          end
+        end
+
+        def pay_date_correction_json(log)
+          metadata = log.metadata || {}
+
+          {
+            id: log.id,
+            old_pay_date: metadata["old_pay_date"],
+            new_pay_date: metadata["new_pay_date"],
+            reason: metadata["reason"],
+            payroll_items_updated: metadata["payroll_items_updated"],
+            non_employee_checks_updated: metadata["non_employee_checks_updated"],
+            corrected_at: log.created_at,
+            corrected_by_name: log.user&.name
+          }
         end
 
         def pay_period_lifecycle_summary(pay_period)

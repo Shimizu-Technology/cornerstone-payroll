@@ -393,7 +393,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
         params: {
           pay_date: new_pay_date.iso8601,
-          reason: "AIRE payroll was entered with the wrong pay date"
+          reason: "Pay date was entered with the wrong date"
         }
 
       expect(response).to have_http_status(:ok)
@@ -422,7 +422,14 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(AuditLog.last.metadata).to include(
         "old_pay_date" => old_pay_date.to_s,
         "new_pay_date" => new_pay_date.to_s,
-        "reason" => "AIRE payroll was entered with the wrong pay date"
+        "reason" => "Pay date was entered with the wrong date"
+      )
+      correction = response.parsed_body.dig("pay_period", "pay_date_corrections").last
+      expect(correction).to include(
+        "old_pay_date" => old_pay_date.to_s,
+        "new_pay_date" => new_pay_date.to_s,
+        "reason" => "Pay date was entered with the wrong date",
+        "corrected_by_name" => admin_user.name
       )
       expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
     end
@@ -443,7 +450,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
         params: {
           pay_date: new_pay_date.iso8601,
-          reason: "AIRE payroll was entered with the wrong pay date"
+          reason: "Pay date was entered with the wrong date"
         }
 
       expect(response).to have_http_status(:ok)
