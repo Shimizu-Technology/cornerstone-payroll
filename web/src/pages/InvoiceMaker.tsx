@@ -865,7 +865,6 @@ export function InvoiceMaker() {
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
-      hydrateInvoiceForm(response.invoice);
       setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
       await loadData();
@@ -929,7 +928,6 @@ export function InvoiceMaker() {
       downloadBlob(blob, 'invoice.pdf');
       const refreshed = await invoicesApi.get(createdChatInvoice.id);
       setCreatedChatInvoice(refreshed.invoice);
-      hydrateInvoiceForm(refreshed.invoice);
       await loadData();
       setSuccess('Invoice generated.');
       window.setTimeout(() => setSuccess(null), 3500);
@@ -942,6 +940,8 @@ export function InvoiceMaker() {
 
   const editCreatedChatInvoiceManually = () => {
     if (!createdChatInvoice) return;
+    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+
     hydrateInvoiceForm(createdChatInvoice);
     setInvoiceMode('manual');
   };

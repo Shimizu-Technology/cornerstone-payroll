@@ -144,14 +144,20 @@ class InvoicePdfGenerator
       ]
     end
 
-    pdf.table(rows, header: true, width: pdf.bounds.width, cell_style: { size: 9, padding: [ 9, 8 ], border_color: "E5E7EB" }) do
+    table_width = pdf.bounds.width
+    date_width = 74
+    quantity_width = 52
+    rate_width = 78
+    amount_width = 80
+
+    pdf.table(rows, header: true, width: table_width, cell_style: { size: 9, padding: [ 9, 8 ], border_color: "E5E7EB" }) do
       row(0).background_color = "ECFDF5"
       row(0).text_color = "064E3B"
-      columns(0).width = 225
-      columns(1).width = 74
-      columns(2).width = 52
-      columns(3).width = 78
-      columns(4).width = 80
+      columns(0).width = table_width - date_width - quantity_width - rate_width - amount_width
+      columns(1).width = date_width
+      columns(2).width = quantity_width
+      columns(3).width = rate_width
+      columns(4).width = amount_width
       columns(2..4).align = :right
     end
   end
