@@ -293,6 +293,18 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       expect(response.parsed_body["errors"]).to include("Line items must include at least one item")
       expect(invoice.reload.status).to eq("draft")
     end
+
+    it "does not mark the invoice generated when PDF rendering fails" do
+      invoice = create(:invoice, :with_line_item, company: company)
+      allow_any_instance_of(InvoicePdfGenerator).to receive(:generate).and_raise(Prawn::Errors::CannotFit, "layout overflow")
+
+      post "/api/v1/admin/invoices/#{invoice.id}/generate_pdf"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(invoice.reload.status).to eq("draft")
+      expect(invoice.generated_at).to be_nil
+      expect(invoice.snapshot).to eq({})
+    end
   end
 
   describe "PATCH /api/v1/admin/invoices/:id/update_status" do

@@ -108,9 +108,10 @@ module Api
         def generate_pdf
           return unless ensure_line_items_for_pdf!
 
-          @invoice.mark_generated!(actor: current_user) if @invoice.draft?
-          generator = InvoicePdfGenerator.new(@invoice)
+          snapshot = @invoice.draft? ? @invoice.generated_snapshot(actor: current_user) : nil
+          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
           pdf_content = generator.generate
+          @invoice.mark_generated!(actor: current_user, snapshot: snapshot) if @invoice.draft?
           send_data pdf_content,
             filename: generator.filename,
             type: "application/pdf",

@@ -71,22 +71,25 @@ class Invoice < ApplicationRecord
     %w[generated sent paid voided archived].include?(status)
   end
 
-  def mark_generated!(actor:)
-    self.status = "generated"
-    self.generated_at = Time.current
-    self.snapshot = build_snapshot(actor: actor)
-    self.snapshot_version = 1
+  SNAPSHOT_VERSION = 1
+
+  def mark_generated!(actor:, snapshot: nil)
+    snapshot_payload = snapshot.presence || generated_snapshot(actor: actor)
     update!(
       status: "generated",
-      generated_at: generated_at,
+      generated_at: snapshot_payload["generated_at"],
       updated_by: actor,
-      snapshot: snapshot,
-      snapshot_version: snapshot_version
+      snapshot: snapshot_payload,
+      snapshot_version: SNAPSHOT_VERSION
     )
   end
 
   def draft_snapshot(actor: nil)
     build_snapshot(actor: actor)
+  end
+
+  def generated_snapshot(actor:)
+    build_snapshot(actor: actor, status: "generated")
   end
 
   def update_status!(next_status, actor:)
@@ -201,10 +204,10 @@ class Invoice < ApplicationRecord
     errors.add(:line_items, "must include at least one line item")
   end
 
-  def build_snapshot(actor:)
+  def build_snapshot(actor:, status: self.status, generated_at: Time.current)
     {
-      "version" => 1,
-      "generated_at" => Time.current.iso8601,
+      "version" => SNAPSHOT_VERSION,
+      "generated_at" => generated_at.iso8601,
       "generated_by" => actor && { "id" => actor.id, "name" => actor.name, "email" => actor.email },
       "invoice" => {
         "id" => id,

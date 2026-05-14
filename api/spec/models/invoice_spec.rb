@@ -38,7 +38,7 @@ RSpec.describe Invoice, type: :model do
     recipient = create(:invoice_recipient, company: billing_profile.organization.companies.first || create(:company, organization: billing_profile.organization), name: "Pacific Client")
     invoice = create(:invoice, :with_line_item, company: recipient.company, organization: billing_profile.organization, invoice_billing_profile: billing_profile, invoice_recipient: recipient)
 
-    invoice.mark_generated!
+    invoice.mark_generated!(actor: nil)
 
     expect(invoice.snapshot.dig("billing_profile", "name")).to eq("Shimizu Technology")
     expect(invoice.snapshot.dig("recipient", "name")).to eq("Pacific Client")
