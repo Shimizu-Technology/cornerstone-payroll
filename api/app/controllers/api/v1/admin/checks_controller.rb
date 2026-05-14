@@ -479,7 +479,7 @@ module Api
             if preview_company.first_hawaiian_4up_checks?
               FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [sample_check]).generate
             else
-              NonEmployeeCheckGenerator.new(sample_check).generate
+              NonEmployeeCheckGenerator.new(sample_check, layout_config: preview_company.check_layout_config).generate
             end
           else
             return render json: { error: "Unknown test check type" }, status: :unprocessable_entity

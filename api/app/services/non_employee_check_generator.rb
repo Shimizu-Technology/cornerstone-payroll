@@ -25,11 +25,12 @@ class NonEmployeeCheckGenerator
     }
   }.freeze
 
-  attr_reader :check, :company
+  attr_reader :check, :company, :preview_layout_config
 
-  def initialize(non_employee_check)
+  def initialize(non_employee_check, layout_config: nil)
     @check   = non_employee_check
     @company = non_employee_check.company
+    @preview_layout_config = layout_config
   end
 
   def generate
@@ -75,31 +76,35 @@ class NonEmployeeCheckGenerator
   def draw_check_face(pdf, sect_bot, voided)
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
 
-    cfg = DEFAULT_LAYOUT[:check_face]
+    date_cfg = layout_field(:date)
+    payee_cfg = layout_field(:payee)
+    amount_cfg = layout_field(:amount)
+    words_cfg = layout_field(:amount_words)
+    memo_cfg = layout_field(:memo)
 
     # Date (top-right)
-    pdf.bounding_box([cfg[:date][:x] + ox, sect_bot + cfg[:date][:y] + oy], width: cfg[:date][:width]) do
-      pdf.font_size(cfg[:date][:font_size]) { pdf.text check_date_str, align: :right }
+    pdf.bounding_box([date_cfg[:x] + ox, sect_bot + date_cfg[:y] + oy], width: date_cfg[:width]) do
+      pdf.font_size(date_cfg[:font_size]) { pdf.text check_date_str, align: :right }
     end
 
     # Payee (left)
-    pdf.bounding_box([cfg[:payee][:x] + ox, sect_bot + cfg[:payee][:y] + oy], width: cfg[:payee][:width]) do
-      pdf.font_size(cfg[:payee][:font_size]) { pdf.text check.payable_to }
+    pdf.bounding_box([payee_cfg[:x] + ox, sect_bot + payee_cfg[:y] + oy], width: payee_cfg[:width]) do
+      pdf.font_size(payee_cfg[:font_size]) { pdf.text check.payable_to }
     end
 
     # Amount (right)
-    pdf.bounding_box([cfg[:amount][:x] + ox, sect_bot + cfg[:amount][:y] + oy], width: cfg[:amount][:width]) do
-      pdf.font_size(cfg[:amount][:font_size]) { pdf.text fn(check.amount), align: :right }
+    pdf.bounding_box([amount_cfg[:x] + ox, sect_bot + amount_cfg[:y] + oy], width: amount_cfg[:width]) do
+      pdf.font_size(amount_cfg[:font_size]) { pdf.text fn(check.amount), align: :right }
     end
 
     # Amount in words
-    pdf.bounding_box([cfg[:amount_words][:x] + ox, sect_bot + cfg[:amount_words][:y] + oy], width: cfg[:amount_words][:width]) do
-      pdf.font_size(cfg[:amount_words][:font_size]) { pdf.text NumberToWords.convert(check.amount) }
+    pdf.bounding_box([words_cfg[:x] + ox, sect_bot + words_cfg[:y] + oy], width: words_cfg[:width]) do
+      pdf.font_size(words_cfg[:font_size]) { pdf.text NumberToWords.convert(check.amount) }
     end
 
     # Memo
-    pdf.bounding_box([cfg[:memo][:x] + ox, sect_bot + cfg[:memo][:y] + oy], width: cfg[:memo][:width]) do
-      pdf.font_size(cfg[:memo][:font_size]) { pdf.text check.memo.to_s }
+    pdf.bounding_box([memo_cfg[:x] + ox, sect_bot + memo_cfg[:y] + oy], width: memo_cfg[:width]) do
+      pdf.font_size(memo_cfg[:font_size]) { pdf.text check.memo.to_s }
     end
   end
 
@@ -333,6 +338,38 @@ class NonEmployeeCheckGenerator
 
   def check_date_str
     check.effective_payment_date.strftime("%m/%d/%Y")
+  end
+
+  def layout_field(field)
+    layout_config.fetch(:check_face).fetch(field)
+  end
+
+  def layout_config
+    @layout_config ||= begin
+      base = DEFAULT_LAYOUT.deep_dup
+      overrides = normalize_layout_config(preview_layout_config)
+      overrides.present? ? deep_merge(base, overrides) : base
+    end
+  end
+
+  def normalize_layout_config(value)
+    case value
+    when Hash
+      value.each_with_object({}) do |(key, nested), acc|
+        normalized_key = key.to_s.underscore.to_sym
+        acc[normalized_key] = normalize_layout_config(nested)
+      end
+    when Array
+      value.map { |entry| normalize_layout_config(entry) }
+    else
+      value
+    end
+  end
+
+  def deep_merge(base, overrides)
+    base.merge(overrides) do |_key, old_value, new_value|
+      old_value.is_a?(Hash) && new_value.is_a?(Hash) ? deep_merge(old_value, new_value) : new_value
+    end
   end
 
   def format_date(d)
