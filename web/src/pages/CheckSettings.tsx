@@ -17,6 +17,8 @@ import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
 
+type TestCheckType = 'payroll' | 'fit' | 'grt' | 'vendor';
+
 function checkSettingsSnapshot(values: {
   stockType: CheckStockType;
   offsetX: string;
@@ -52,6 +54,8 @@ export function CheckSettingsPage() {
   const [downloadingAlignment, setDownloadingAlignment] = useState(false);
   const [checkLayout, setCheckLayout] = useState<CheckLayoutResponse | null>(null);
   const [savedSettingsSnapshot, setSavedSettingsSnapshot] = useState<string | null>(null);
+  const [testCheckType, setTestCheckType] = useState<TestCheckType>('payroll');
+  const [generatingTestCheck, setGeneratingTestCheck] = useState(false);
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -304,6 +308,59 @@ export function CheckSettingsPage() {
     }
   };
 
+  const parseLayoutOverridesForAction = () => {
+    const parsed = JSON.parse(layoutOverridesJson || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Advanced layout overrides must be a JSON object.');
+    }
+    return parsed as Record<string, unknown>;
+  };
+
+  const currentDraftCheckSettings = (layoutConfig: Record<string, unknown>) => ({
+    check_stock_type: stockType,
+    check_offset_x: parseFloat(offsetX),
+    check_offset_y: parseFloat(offsetY),
+    bank_name: bankName.trim() || null,
+    bank_address: bankAddress.trim() || null,
+    check_memo_template: memoTemplate.trim() || null,
+    check_layout_config: layoutConfig,
+  });
+
+  const openPdfBlob = (blob: Blob, filename: string, targetWindow?: Window | null) => {
+    const url = URL.createObjectURL(blob);
+    if (targetWindow) {
+      targetWindow.location.href = url;
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
+  const handleTestCheckPdf = async () => {
+    setError(null);
+    setSuccess(null);
+    let printWindow: Window | null = null;
+    try {
+      const layoutConfig = parseLayoutOverridesForAction();
+      setGeneratingTestCheck(true);
+      printWindow = window.open('', '_blank');
+      const { blob, filename } = await checksApi.testCheckPdf({
+        sample_type: testCheckType,
+        check_settings: currentDraftCheckSettings(layoutConfig),
+      });
+      openPdfBlob(blob, filename || `test_check_${testCheckType}.pdf`, printWindow);
+      setSuccess('Test check PDF generated from the current draft settings.');
+    } catch (err) {
+      if (printWindow) printWindow.close();
+      setError(err instanceof Error ? err.message : 'Failed to generate test check PDF');
+    } finally {
+      setGeneratingTestCheck(false);
+    }
+  };
+
   const handleSaveCurrentAsProfile = async () => {
     if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
     setProfileSaving(true);
@@ -418,6 +475,14 @@ export function CheckSettingsPage() {
     setError(null);
   };
 
+  const handleClearProfileCalibration = () => {
+    setOffsetX('0.000');
+    setOffsetY('0.000');
+    setLayoutOverridesJson('{}');
+    setSuccess('Printer profile calibration cleared. Click Save Settings to make it active.');
+    setError(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -460,9 +525,14 @@ export function CheckSettingsPage() {
                 {' '}applies the profile to the active client only.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
-              {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
+                Clear Profile Settings
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
+                {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
+              </Button>
+            </div>
           </div>
           <CardContent className="p-4 space-y-3">
             {showAddProfile && (
@@ -725,7 +795,37 @@ export function CheckSettingsPage() {
             </div>
 
             {/* Alignment test */}
-            <div className="pt-2 border-t flex flex-wrap items-center gap-3">
+            <div className="pt-2 border-t space-y-3">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <Label htmlFor="test-check-type">Test Print</Label>
+                    <p className="mt-1 text-xs text-blue-900">
+                      Generate a sample check from the current draft settings before saving or printing real checks.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Select
+                      id="test-check-type"
+                      value={testCheckType}
+                      onChange={(e) => setTestCheckType(e.target.value as TestCheckType)}
+                      className="w-56 bg-white"
+                    >
+                      <option value="payroll">Payroll check</option>
+                      <option value="fit">FIT tax check</option>
+                      <option value="grt">GRT check</option>
+                      <option value="vendor">Vendor check</option>
+                    </Select>
+                    <Button variant="outline" onClick={handleTestCheckPdf} type="button" disabled={generatingTestCheck}>
+                      {generatingTestCheck ? (
+                        <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Generating...</>
+                      ) : (
+                        <><Download className="w-4 h-4 mr-2" /> Open Test Check PDF</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
               <Button variant="outline" onClick={handleAlignmentTest} type="button" disabled={downloadingAlignment}>
                 {downloadingAlignment ? (
                   <><div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" /> Downloading...</>

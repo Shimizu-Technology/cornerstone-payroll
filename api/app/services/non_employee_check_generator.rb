@@ -27,6 +27,14 @@ class NonEmployeeCheckGenerator
 
   attr_reader :check, :company
 
+  def self.default_layout_config
+    stringify_layout(DEFAULT_LAYOUT)
+  end
+
+  def self.resolved_layout_for(company)
+    deep_merge(default_layout_config, stringify_layout(company.check_layout_config || {}))
+  end
+
   def initialize(non_employee_check)
     @check   = non_employee_check
     @company = non_employee_check.company
@@ -75,31 +83,35 @@ class NonEmployeeCheckGenerator
   def draw_check_face(pdf, sect_bot, voided)
     draw_void_watermark(pdf, sect_bot, sect_bot + SECTION_HEIGHT) if voided
 
-    cfg = DEFAULT_LAYOUT[:check_face]
+    date_cfg = layout_field(:check_face, :date)
+    payee_cfg = layout_field(:check_face, :payee)
+    amount_cfg = layout_field(:check_face, :amount)
+    words_cfg = layout_field(:check_face, :amount_words)
+    memo_cfg = layout_field(:check_face, :memo)
 
     # Date (top-right)
-    pdf.bounding_box([cfg[:date][:x] + ox, sect_bot + cfg[:date][:y] + oy], width: cfg[:date][:width]) do
-      pdf.font_size(cfg[:date][:font_size]) { pdf.text check_date_str, align: :right }
+    pdf.bounding_box([date_cfg["x"].to_f + ox, sect_bot + date_cfg["y"].to_f + oy], width: date_cfg["width"].to_f) do
+      pdf.font_size(date_cfg["font_size"].to_f) { pdf.text check_date_str, align: :right }
     end
 
     # Payee (left)
-    pdf.bounding_box([cfg[:payee][:x] + ox, sect_bot + cfg[:payee][:y] + oy], width: cfg[:payee][:width]) do
-      pdf.font_size(cfg[:payee][:font_size]) { pdf.text check.payable_to }
+    pdf.bounding_box([payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy], width: payee_cfg["width"].to_f) do
+      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text check.payable_to }
     end
 
     # Amount (right)
-    pdf.bounding_box([cfg[:amount][:x] + ox, sect_bot + cfg[:amount][:y] + oy], width: cfg[:amount][:width]) do
-      pdf.font_size(cfg[:amount][:font_size]) { pdf.text fn(check.amount), align: :right }
+    pdf.bounding_box([amount_cfg["x"].to_f + ox, sect_bot + amount_cfg["y"].to_f + oy], width: amount_cfg["width"].to_f) do
+      pdf.font_size(amount_cfg["font_size"].to_f) { pdf.text fn(check.amount), align: :right }
     end
 
     # Amount in words
-    pdf.bounding_box([cfg[:amount_words][:x] + ox, sect_bot + cfg[:amount_words][:y] + oy], width: cfg[:amount_words][:width]) do
-      pdf.font_size(cfg[:amount_words][:font_size]) { pdf.text NumberToWords.convert(check.amount) }
+    pdf.bounding_box([words_cfg["x"].to_f + ox, sect_bot + words_cfg["y"].to_f + oy], width: words_cfg["width"].to_f) do
+      pdf.font_size(words_cfg["font_size"].to_f) { pdf.text NumberToWords.convert(check.amount) }
     end
 
     # Memo
-    pdf.bounding_box([cfg[:memo][:x] + ox, sect_bot + cfg[:memo][:y] + oy], width: cfg[:memo][:width]) do
-      pdf.font_size(cfg[:memo][:font_size]) { pdf.text check.memo.to_s }
+    pdf.bounding_box([memo_cfg["x"].to_f + ox, sect_bot + memo_cfg["y"].to_f + oy], width: memo_cfg["width"].to_f) do
+      pdf.font_size(memo_cfg["font_size"].to_f) { pdf.text check.memo.to_s }
     end
   end
 
@@ -333,6 +345,40 @@ class NonEmployeeCheckGenerator
 
   def check_date_str
     check.effective_payment_date.strftime("%m/%d/%Y")
+  end
+
+  def layout_field(section, field)
+    default = default_layout_config.fetch(section.to_s).fetch(field.to_s)
+    section_config = layout_config[section.to_s]
+    configured = section_config[field.to_s] if section_config.is_a?(Hash)
+    return default unless configured.is_a?(Hash)
+
+    default.merge(configured)
+  end
+
+  def layout_config
+    @layout_config ||= self.class.resolved_layout_for(company)
+  end
+
+  def default_layout_config
+    @default_layout_config ||= self.class.default_layout_config
+  end
+
+  def self.stringify_layout(value)
+    case value
+    when Hash
+      value.each_with_object({}) { |(key, nested), acc| acc[key.to_s] = stringify_layout(nested) }
+    when Array
+      value.map { |entry| stringify_layout(entry) }
+    else
+      value
+    end
+  end
+
+  def self.deep_merge(base, overrides)
+    base.merge(overrides) do |_key, old_value, new_value|
+      old_value.is_a?(Hash) && new_value.is_a?(Hash) ? deep_merge(old_value, new_value) : new_value
+    end
   end
 
   def format_date(d)
