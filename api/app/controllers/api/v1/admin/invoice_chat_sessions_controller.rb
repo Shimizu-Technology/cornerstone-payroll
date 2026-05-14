@@ -124,7 +124,7 @@ module Api
             raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
 
             if current_preview_already_created?
-              invoice = Invoice.find_by(id: @session.invoice_id, company_id: current_company_id)
+              invoice = Invoice.find_by(id: @session.invoice_id, organization_id: current_organization_id)
               raise ArgumentError, "Invoice already created for this preview but could not be found" unless invoice
               next
             end
