@@ -459,22 +459,28 @@ module Api
             reason: params[:reason]
           )
 
-          AuditLog.record!(
-            user:        current_user,
-            company_id:  current_company_id,
-            action:      "correct_committed_pay_date",
-            record_type: "pay_periods",
-            record_id:   @pay_period.id,
-            metadata:    {
-              old_pay_date: result.old_pay_date,
-              new_pay_date: result.new_pay_date,
-              reason: params[:reason].to_s.strip,
-              payroll_items_updated: result.payroll_items_updated,
-              non_employee_checks_updated: result.non_employee_checks_updated
-            },
-            ip_address:  request.remote_ip,
-            user_agent:  request.user_agent
-          )
+          unless result.noop
+            begin
+              AuditLog.record!(
+                user:        current_user,
+                company_id:  current_company_id,
+                action:      "correct_committed_pay_date",
+                record_type: "PayPeriod",
+                record_id:   @pay_period.id,
+                metadata:    {
+                  old_pay_date: result.old_pay_date,
+                  new_pay_date: result.new_pay_date,
+                  reason: params[:reason].to_s.strip,
+                  payroll_items_updated: result.payroll_items_updated,
+                  non_employee_checks_updated: result.non_employee_checks_updated
+                },
+                ip_address:  request.remote_ip,
+                user_agent:  request.user_agent
+              )
+            rescue StandardError => e
+              Rails.logger.error("[correct_pay_date] AuditLog failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
+            end
+          end
 
           @pay_period.reload
           render json: {
@@ -483,7 +489,8 @@ module Api
               old_pay_date: result.old_pay_date,
               new_pay_date: result.new_pay_date,
               payroll_items_updated: result.payroll_items_updated,
-              non_employee_checks_updated: result.non_employee_checks_updated
+              non_employee_checks_updated: result.non_employee_checks_updated,
+              noop: result.noop
             }
           }
         rescue PayPeriodPayDateCorrectionService::Error => e

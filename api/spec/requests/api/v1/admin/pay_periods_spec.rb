@@ -416,7 +416,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(non_employee_check.reload.payment_date).to eq(new_pay_date)
       expect(AuditLog.last).to have_attributes(
         action: "correct_committed_pay_date",
-        record_type: "pay_periods",
+        record_type: "PayPeriod",
         record_id: pay_period.id
       )
       expect(AuditLog.last.metadata).to include(
@@ -425,6 +425,53 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "reason" => "AIRE payroll was entered with the wrong pay date"
       )
       expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
+    end
+
+    it "does not mask a successful correction when audit logging fails" do
+      old_pay_date = Date.new(2026, 4, 15)
+      new_pay_date = Date.new(2026, 4, 30)
+      pay_period.update!(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 15),
+        pay_date: old_pay_date,
+        status: "committed",
+        committed_at: Time.current
+      )
+
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
+        params: {
+          pay_date: new_pay_date.iso8601,
+          reason: "AIRE payroll was entered with the wrong pay date"
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.pay_date).to eq(new_pay_date)
+      expect(response.parsed_body.dig("correction", "old_pay_date")).to eq(old_pay_date.to_s)
+      expect(response.parsed_body.dig("correction", "new_pay_date")).to eq(new_pay_date.to_s)
+    end
+
+    it "treats same-date submissions as no-ops without writing a correction audit log" do
+      pay_date = Date.new(2026, 4, 15)
+      pay_period.update!(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 15),
+        pay_date: pay_date,
+        status: "committed",
+        committed_at: Time.current
+      )
+
+      expect {
+        patch "/api/v1/admin/pay_periods/#{pay_period.id}/correct_pay_date",
+          params: {
+            pay_date: pay_date.iso8601,
+            reason: "No change needed"
+          }
+      }.not_to change { AuditLog.where(action: "correct_committed_pay_date").count }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("correction", "noop")).to eq(true)
     end
 
     it "rejects pay date corrections outside the original tax year" do
