@@ -163,6 +163,24 @@ RSpec.describe Form941GuAggregator do
         expect(lines[:line6_total_taxes_before_adj]).to eq((275.0 + line5e).round(2))
       end
 
+      it "excludes voided payroll items from quarterly totals" do
+        create(:payroll_item, :voided,
+          pay_period: pp_may,
+          employee: employee2,
+          gross_pay: 10_000.00,
+          withholding_tax: 1_000.00,
+          social_security_tax: 620.00,
+          employer_social_security_tax: 620.00,
+          medicare_tax: 145.00,
+          employer_medicare_tax: 145.00,
+          reported_tips: 500.00)
+
+        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
+        expect(lines[:line3_fit_withheld]).to eq(275.0)
+        expect(lines[:line5c_medicare_combined_tax]).to eq(159.5)
+        expect(report[:tax_detail][:total_employee_taxes]).to eq(695.75)
+      end
+
       it "placeholder lines are nil" do
         expect(lines[:line7_adj_fractions_cents]).to be_nil
         expect(lines[:line8_adj_sick_pay]).to be_nil

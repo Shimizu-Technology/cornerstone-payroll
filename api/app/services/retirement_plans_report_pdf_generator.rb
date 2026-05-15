@@ -23,7 +23,7 @@ class RetirementPlansReportPdfGenerator
   def generate
     items = pay_period.payroll_items
       .includes(:employee)
-      .where(voided: false)
+      .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 36, 50, 36])

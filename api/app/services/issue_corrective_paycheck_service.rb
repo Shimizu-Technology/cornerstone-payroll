@@ -549,7 +549,7 @@ class IssueCorrectivePaycheckService
   def create_supplemental_fit_check!(supplemental)
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
-      .where(voided: false)
+      .not_voided
       .sum(:withholding_tax)
 
     return if fit_total.to_f <= 0 # no positive FIT delta → no deposit needed

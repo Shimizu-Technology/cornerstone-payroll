@@ -132,7 +132,7 @@ class CheckSignoffPdfGenerator
     end
 
     items = pay_period.payroll_items
-      .where(voided: false)
+      .not_voided
       .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")
       .select("payroll_items.*, employees.first_name, employees.last_name")
       .order("employees.last_name ASC, employees.first_name ASC")
