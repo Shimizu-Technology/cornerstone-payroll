@@ -368,6 +368,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     scope = @employee.payroll_items
       .joins(:pay_period)
+      .not_voided
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
@@ -383,6 +384,7 @@ class IssueCorrectivePaycheckService
     year = pay_date.year
     @employee.payroll_items
       .joins(:pay_period)
+      .not_voided
       .where(pay_periods: { id: PayPeriod.reportable_committed
                                           .where(company_id: @original_pay_period.company_id,
                                                  pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
