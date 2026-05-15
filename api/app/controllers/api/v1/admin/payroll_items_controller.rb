@@ -90,15 +90,20 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
 
-          PayPeriodExcludedEmployee.find_or_create_by!(
-            pay_period: @pay_period,
-            employee: @payroll_item.employee
-          ) do |exclusion|
-            exclusion.excluded_by = current_user
-            exclusion.reason = "Removed from pay period"
+          ActiveRecord::Base.transaction do
+            PayPeriodExcludedEmployee.find_or_create_by!(
+              pay_period: @pay_period,
+              employee: @payroll_item.employee
+            ) do |exclusion|
+              exclusion.excluded_by = current_user
+              exclusion.reason = "Removed from pay period"
+            end
+            @payroll_item.destroy!
           end
-          @payroll_item.destroy
+
           head :no_content
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate

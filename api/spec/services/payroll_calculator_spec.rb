@@ -159,6 +159,30 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to eq(0.0)
     end
 
+    it "reapplies W-4 extra withholding when hours arrive after a zero-pay calculation" do
+      employee.update!(additional_withholding: 66.0)
+      payroll_item.update!(
+        hours_worked: 0,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        custom_earnings: []
+      )
+
+      described_class.for(employee, payroll_item).calculate
+      payroll_item.save!
+      expect(payroll_item.reload.additional_withholding).to eq(0.0)
+
+      payroll_item.update!(hours_worked: 10)
+      described_class.for(employee.reload, payroll_item.reload).calculate
+
+      expect(payroll_item.additional_withholding).to eq(66.0)
+      expect(payroll_item.total_deductions).to be >= 66.0
+      expect(payroll_item.net_pay).to be >= 0.0
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 
