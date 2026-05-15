@@ -717,7 +717,7 @@ module Api
             return render json: { message: "FIT tax deposit check already exists", check_id: existing.id, created: false }
           end
 
-          committed_items = @pay_period.payroll_items.where(voided: false).to_a
+          committed_items = @pay_period.payroll_items.not_voided.to_a
           create_fit_tax_deposit_check!(committed_items)
 
           fit_check = NonEmployeeCheck.find_by(fit_query)

@@ -593,7 +593,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          items = pp.payroll_items.where(voided: false)
+          items = pp.payroll_items.not_voided
           check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
@@ -738,7 +738,7 @@ module Api
           saved = CheckSignoffSheet.find_by(pay_period_id: pp.id)
 
           items = pp.payroll_items
-            .where(voided: false)
+            .not_voided
             .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")
             .select("payroll_items.id, payroll_items.employee_id, payroll_items.check_number, employees.first_name, employees.last_name")
             .order("employees.last_name ASC, employees.first_name ASC")
@@ -1020,7 +1020,7 @@ module Api
             pay_periods = pay_periods.where(pay_date: start_date..end_date)
           end
 
-          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).where(voided: false).where.not(employment_type: "contractor")
+          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).not_voided.where.not(employment_type: "contractor")
           employee_ss_total       = items.sum(:social_security_tax)
           employee_medicare_total = items.sum(:medicare_tax)
           employer_ss_total       = items.sum(:employer_social_security_tax)
@@ -1099,7 +1099,7 @@ module Api
 
           items = PayrollItem.joins(:pay_period)
                             .where(company_id: current_company_id)
-                            .where(voided: false)
+                            .not_voided
                             .where(pay_periods: {
                               id: reportable_period_ids
                             })
@@ -1347,7 +1347,8 @@ module Api
 
           employee.payroll_items
                   .joins(:pay_period)
-                  .where(voided: false, company_id: current_company_id)
+                  .where(company_id: current_company_id)
+                  .not_voided
                   .where(pay_periods: { id: reportable_period_ids })
                   .to_a
         end
@@ -1359,7 +1360,8 @@ module Api
                                            .select(:id)
 
           PayrollItem.joins(:pay_period)
-                     .where(voided: false, company_id: current_company_id)
+                     .where(company_id: current_company_id)
+                     .not_voided
                      .where(pay_periods: { id: reportable_period_ids })
                      .select(:employee_id, :total_deductions, :custom_earnings, :custom_deductions)
                      .to_a
