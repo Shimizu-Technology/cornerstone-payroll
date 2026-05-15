@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
-import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
+import { Archive, Bot, CheckCircle, Copy, Download, Eye, FileText, ImagePlus, Loader2, Mail, MessageSquare, PencilLine, Plus, ReceiptText, RotateCcw, Save, Send, Sparkles, Trash2, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   invoiceRecipientsApi,
+  invoiceBillingProfilesApi,
   invoiceChatSessionsApi,
   invoicesApi,
   type BlobDownload,
@@ -15,6 +16,8 @@ import {
   type InvoiceChatMessage,
   type InvoiceChatSession,
   type Invoice,
+  type InvoiceBillingProfile,
+  type InvoiceBillingProfilePayload,
   type InvoiceLineItem,
   type InvoicePayload,
   type InvoiceRecipient,
@@ -41,6 +44,7 @@ interface ChatAttachmentPreview {
 
 interface InvoiceFormState {
   id?: number;
+  invoice_billing_profile_id: string;
   invoice_recipient_id: string;
   invoice_number: string;
   invoice_date: string;
@@ -68,6 +72,23 @@ interface RecipientFormState {
   active: boolean;
 }
 
+interface BillingProfileFormState {
+  id?: number;
+  name: string;
+  legal_name: string;
+  website: string;
+  phone: string;
+  email: string;
+  address: string;
+  payment_instructions: string;
+  default_payment_terms: string;
+  invoice_prefix: string;
+  remit_to: string;
+  footer_note: string;
+  active: boolean;
+  is_default: boolean;
+}
+
 const padDatePart = (value: number) => String(value).padStart(2, '0');
 
 const today = () => {
@@ -76,6 +97,7 @@ const today = () => {
 };
 
 const emptyInvoiceForm = (): InvoiceFormState => ({
+  invoice_billing_profile_id: '',
   invoice_recipient_id: '',
   invoice_number: '',
   invoice_date: today(),
@@ -98,6 +120,22 @@ const emptyRecipientForm = (): RecipientFormState => ({
   template_type: 'standard',
   notes: '',
   active: true,
+});
+
+const emptyBillingProfileForm = (): BillingProfileFormState => ({
+  name: '',
+  legal_name: '',
+  website: '',
+  phone: '',
+  email: '',
+  address: '',
+  payment_instructions: '',
+  default_payment_terms: '',
+  invoice_prefix: 'INV',
+  remit_to: '',
+  footer_note: '',
+  active: true,
+  is_default: false,
 });
 
 const statusColors: Record<InvoiceStatus, string> = {
@@ -162,8 +200,10 @@ function invoicePayloadSignature(payload: InvoicePayload) {
 export function InvoiceMaker() {
   const { activeCompanyId } = useCompany();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [billingProfiles, setBillingProfiles] = useState<InvoiceBillingProfile[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [invoiceForm, setInvoiceForm] = useState<InvoiceFormState>(emptyInvoiceForm);
+  const [billingProfileForm, setBillingProfileForm] = useState<BillingProfileFormState>(emptyBillingProfileForm);
   const [recipientForm, setRecipientForm] = useState<RecipientFormState>(emptyRecipientForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -171,7 +211,9 @@ export function InvoiceMaker() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [recipientSaving, setRecipientSaving] = useState(false);
+  const [billingProfileSaving, setBillingProfileSaving] = useState(false);
   const [showRecipientForm, setShowRecipientForm] = useState(false);
+  const [showBillingProfileForm, setShowBillingProfileForm] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -188,18 +230,29 @@ export function InvoiceMaker() {
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [invoiceResponse, recipientResponse, chatResponse] = await Promise.all([
+      const [invoiceResponse, recipientResponse, billingProfileResponse, chatResponse] = await Promise.all([
         invoicesApi.list(),
         invoiceRecipientsApi.list({ active: true }),
+        invoiceBillingProfilesApi.list({ active: true }),
         invoiceChatSessionsApi.list({ include_archived: showArchivedChatSessions }),
       ]);
       setInvoices(invoiceResponse.invoices);
       setRecipients(recipientResponse.invoice_recipients);
+      setBillingProfiles(billingProfileResponse.invoice_billing_profiles);
+      const defaultProfile = billingProfileResponse.invoice_billing_profiles.find((profile) => profile.is_default) || billingProfileResponse.invoice_billing_profiles[0];
+      setInvoiceForm((current) => {
+        if (current.invoice_billing_profile_id || !defaultProfile) return current;
+
+        const next = { ...current, invoice_billing_profile_id: String(defaultProfile.id), payment_terms: current.payment_terms || defaultProfile.default_payment_terms || '' };
+        savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(next));
+        return next;
+      });
       setChatSessions(chatResponse.invoice_chat_sessions);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load invoices');
@@ -251,12 +304,18 @@ export function InvoiceMaker() {
     () => recipients.find((recipient) => String(recipient.id) === invoiceForm.invoice_recipient_id),
     [invoiceForm.invoice_recipient_id, recipients]
   );
+  const selectedBillingProfile = useMemo(
+    () => billingProfiles.find((profile) => String(profile.id) === invoiceForm.invoice_billing_profile_id),
+    [billingProfiles, invoiceForm.invoice_billing_profile_id]
+  );
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
+  const activeBillingProfiles = useMemo(() => billingProfiles.filter((profile) => profile.active), [billingProfiles]);
   const activePreview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
   const previewLineItems = activePreview?.line_items || [];
 
   const buildPayloadForForm = (state: InvoiceFormState): InvoicePayload => ({
     invoice_recipient_id: Number(state.invoice_recipient_id),
+    invoice_billing_profile_id: state.invoice_billing_profile_id ? Number(state.invoice_billing_profile_id) : undefined,
     invoice_number: state.invoice_number.trim() || null,
     invoice_date: state.invoice_date,
     service_period_start: state.service_period_start || null,
@@ -284,7 +343,12 @@ export function InvoiceMaker() {
   };
 
   const resetInvoiceForm = () => {
-    const nextForm = emptyInvoiceForm();
+    const defaultProfile = billingProfiles.find((profile) => profile.is_default) || billingProfiles[0];
+    const nextForm = {
+      ...emptyInvoiceForm(),
+      invoice_billing_profile_id: defaultProfile ? String(defaultProfile.id) : '',
+      payment_terms: defaultProfile?.default_payment_terms || '',
+    };
     setInvoiceForm(nextForm);
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
     setError(null);
@@ -299,8 +363,19 @@ export function InvoiceMaker() {
       });
     }
 
+    if (invoice.invoice_billing_profile) {
+      setBillingProfiles((current) => {
+        const profile = invoice.invoice_billing_profile!;
+        const next = current.some((candidate) => candidate.id === profile.id)
+          ? current.map((candidate) => candidate.id === profile.id ? profile : candidate)
+          : [...current, profile];
+        return next.sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name) || a.id - b.id);
+      });
+    }
+
     const nextForm: InvoiceFormState = {
       id: invoice.id,
+      invoice_billing_profile_id: String(invoice.invoice_billing_profile_id),
       invoice_recipient_id: String(invoice.invoice_recipient_id),
       invoice_number: invoice.invoice_number || '',
       invoice_date: invoice.invoice_date,
@@ -321,9 +396,48 @@ export function InvoiceMaker() {
     savedInvoiceSignatureRef.current = invoicePayloadSignature(buildPayloadForForm(nextForm));
   };
 
+  const upsertInvoice = (invoice: Invoice) => {
+    setInvoices((current) => {
+      const next = current.some((candidate) => candidate.id === invoice.id)
+        ? current.map((candidate) => candidate.id === invoice.id ? invoice : candidate)
+        : [invoice, ...current];
+      return next.sort((a, b) => b.invoice_date.localeCompare(a.invoice_date) || b.created_at.localeCompare(a.created_at));
+    });
+
+    if (invoice.invoice_recipient) {
+      setRecipients((current) => {
+        const next = current.some((recipient) => recipient.id === invoice.invoice_recipient!.id)
+          ? current.map((recipient) => recipient.id === invoice.invoice_recipient!.id ? invoice.invoice_recipient! : recipient)
+          : [...current, invoice.invoice_recipient!];
+        return next.sort((a, b) => a.name.localeCompare(b.name));
+      });
+    }
+
+    if (invoice.invoice_billing_profile) {
+      setBillingProfiles((current) => {
+        const profile = invoice.invoice_billing_profile!;
+        const next = current.some((candidate) => candidate.id === profile.id)
+          ? current.map((candidate) => candidate.id === profile.id ? profile : candidate)
+          : [...current, profile];
+        return next.sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name) || a.id - b.id);
+      });
+    }
+  };
+
+  const upsertChatSession = (session: InvoiceChatSession) => {
+    setChatSessions((current) => {
+      const next = current.some((candidate) => candidate.id === session.id)
+        ? current.map((candidate) => candidate.id === session.id ? session : candidate)
+        : [session, ...current];
+      return next.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    });
+  };
+
   const applyPreviewToForm = (preview: InvoiceAiPreview) => {
     const recipientId = preview.invoice_recipient_id ? String(preview.invoice_recipient_id) : '';
+    const profileId = preview.invoice_billing_profile_id || selectedBillingProfile?.id || billingProfiles.find((profile) => profile.is_default)?.id || billingProfiles[0]?.id;
     const nextForm: InvoiceFormState = {
+      invoice_billing_profile_id: profileId ? String(profileId) : '',
       invoice_recipient_id: recipientId,
       invoice_number: '',
       invoice_date: preview.invoice_date || today(),
@@ -360,6 +474,11 @@ export function InvoiceMaker() {
   };
 
   const handleSelectInvoice = (id: number) => {
+    if (invoiceForm.id === id) {
+      setInvoiceMode('manual');
+      return;
+    }
+
     if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
     setInvoiceMode('manual');
     loadInvoice(id);
@@ -376,9 +495,9 @@ export function InvoiceMaker() {
     setInvoiceForm((current) => ({
       ...current,
       invoice_recipient_id: recipientId,
-      payment_terms: recipient?.payment_terms || current.payment_terms,
+      payment_terms: recipient?.payment_terms || current.payment_terms || selectedBillingProfile?.default_payment_terms || '',
       email_subject: recipient
-        ? `Invoice ${current.invoice_number || ''} from Cornerstone Payroll`.trim()
+        ? `Invoice ${current.invoice_number || ''} from ${selectedBillingProfile?.name || 'Cornerstone Payroll'}`.trim()
         : current.email_subject,
       email_body: recipient
         ? `Hi ${recipient.name},\n\nPlease find the attached invoice for your records.\n\nThank you,`
@@ -696,6 +815,8 @@ export function InvoiceMaker() {
 
     setChatBusy(true);
     setError(null);
+    setSuccess(null);
+    setCreatedChatInvoice(null);
     let createdSessionId: number | null = null;
     const attachments = chatImages;
     const optimisticId = -Date.now();
@@ -716,7 +837,7 @@ export function InvoiceMaker() {
       session_id: sessionId,
       id: optimisticId - 1,
       role: 'assistant',
-      content: 'Drafting invoice details...',
+      content: 'Preparing invoice preview',
       image_urls: [],
       preview: {},
       has_preview: false,
@@ -742,7 +863,6 @@ export function InvoiceMaker() {
 
     setChatInput('');
     setChatImages([]);
-    setCreatedChatInvoice(null);
     setOptimisticChatMessages((current) => [...current, ...pendingMessages]);
     if (!currentSessionId) {
       setActiveChatSession(optimisticSession);
@@ -790,21 +910,21 @@ export function InvoiceMaker() {
     } finally {
       removePendingMessages();
       setChatBusy(false);
+      window.setTimeout(() => chatInputRef.current?.focus(), 0);
     }
   };
 
   const createInvoiceFromPreview = async () => {
     if (!activeChatSession) return;
-    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
 
     setChatBusy(true);
     setError(null);
     try {
       const response = await invoiceChatSessionsApi.confirm(activeChatSession.id);
-      hydrateInvoiceForm(response.invoice);
       setCreatedChatInvoice(response.invoice);
       setActiveChatSession(response.invoice_chat_session);
-      await loadData();
+      upsertInvoice(response.invoice);
+      upsertChatSession(response.invoice_chat_session);
       setSuccess('Invoice created from AI preview.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
@@ -865,9 +985,8 @@ export function InvoiceMaker() {
       downloadBlob(blob, 'invoice.pdf');
       const refreshed = await invoicesApi.get(createdChatInvoice.id);
       setCreatedChatInvoice(refreshed.invoice);
-      hydrateInvoiceForm(refreshed.invoice);
-      await loadData();
-      setSuccess('Invoice generated.');
+      upsertInvoice(refreshed.invoice);
+      setSuccess(refreshed.invoice.status === 'generated' ? 'Invoice generated.' : 'Invoice PDF downloaded.');
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate PDF');
@@ -878,6 +997,8 @@ export function InvoiceMaker() {
 
   const editCreatedChatInvoiceManually = () => {
     if (!createdChatInvoice) return;
+    if (hasUnsavedInvoiceChanges() && !window.confirm('Discard unsaved invoice changes?')) return;
+
     hydrateInvoiceForm(createdChatInvoice);
     setInvoiceMode('manual');
   };
@@ -893,6 +1014,66 @@ export function InvoiceMaker() {
     notes: recipientForm.notes.trim() || null,
     active: recipientForm.active,
   });
+
+  const buildBillingProfilePayload = (): InvoiceBillingProfilePayload => ({
+    name: billingProfileForm.name.trim(),
+    legal_name: billingProfileForm.legal_name.trim() || null,
+    website: billingProfileForm.website.trim() || null,
+    phone: billingProfileForm.phone.trim() || null,
+    email: billingProfileForm.email.trim() || null,
+    address: billingProfileForm.address.trim() || null,
+    payment_instructions: billingProfileForm.payment_instructions.trim() || null,
+    default_payment_terms: billingProfileForm.default_payment_terms.trim() || null,
+    invoice_prefix: billingProfileForm.invoice_prefix.trim() || null,
+    remit_to: billingProfileForm.remit_to.trim() || null,
+    footer_note: billingProfileForm.footer_note.trim() || null,
+    active: billingProfileForm.active,
+    is_default: billingProfileForm.is_default,
+  });
+
+  const editBillingProfile = (profile: InvoiceBillingProfile) => {
+    setBillingProfileForm({
+      id: profile.id,
+      name: profile.name,
+      legal_name: profile.legal_name || '',
+      website: profile.website || '',
+      phone: profile.phone || '',
+      email: profile.email || '',
+      address: profile.address || '',
+      payment_instructions: profile.payment_instructions || '',
+      default_payment_terms: profile.default_payment_terms || '',
+      invoice_prefix: profile.invoice_prefix || '',
+      remit_to: profile.remit_to || '',
+      footer_note: profile.footer_note || '',
+      active: profile.active,
+      is_default: profile.is_default,
+    });
+    setShowBillingProfileForm(true);
+  };
+
+  const saveBillingProfile = async () => {
+    setBillingProfileSaving(true);
+    setError(null);
+    try {
+      const payload = buildBillingProfilePayload();
+      if (!payload.name) throw new Error('Billing profile name is required');
+      const response = billingProfileForm.id
+        ? await invoiceBillingProfilesApi.update(billingProfileForm.id, payload)
+        : await invoiceBillingProfilesApi.create(payload);
+      await loadData();
+      setInvoiceForm((current) => current.invoice_billing_profile_id
+        ? current
+        : { ...current, invoice_billing_profile_id: String(response.invoice_billing_profile.id), payment_terms: current.payment_terms || response.invoice_billing_profile.default_payment_terms || '' });
+      setBillingProfileForm(emptyBillingProfileForm());
+      setShowBillingProfileForm(false);
+      setSuccess('Billing profile saved.');
+      window.setTimeout(() => setSuccess(null), 3500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save billing profile');
+    } finally {
+      setBillingProfileSaving(false);
+    }
+  };
 
   const editRecipient = (recipient: InvoiceRecipient) => {
     setRecipientForm({
@@ -938,7 +1119,7 @@ export function InvoiceMaker() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
-            <p className="text-sm text-neutral-500">Saved invoices for the active company</p>
+            <p className="text-sm text-neutral-500">Saved invoices for this organization</p>
           </div>
           <Button size="sm" variant="outline" onClick={handleNewInvoice}>
             <Plus className="mr-1.5 h-4 w-4" />
@@ -966,7 +1147,9 @@ export function InvoiceMaker() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-neutral-900">{invoice.invoice_number}</p>
-                    <p className="truncate text-xs text-neutral-500">{invoice.recipient_name || 'No recipient'}</p>
+                    <p className="truncate text-xs text-neutral-500">
+                      {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
+                    </p>
                   </div>
                   <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
                 </div>
@@ -1049,6 +1232,75 @@ export function InvoiceMaker() {
     </Card>
   );
 
+  const billingProfilesPanel = (
+    <Card>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">Billing Profiles</h2>
+            <p className="text-sm text-neutral-500">Invoice from identities</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setBillingProfileForm(emptyBillingProfileForm());
+              setShowBillingProfileForm((value) => !value);
+            }}
+          >
+            <Plus className="mr-1.5 h-4 w-4" />
+            Add
+          </Button>
+        </div>
+
+        {showBillingProfileForm && (
+          <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
+            <Input value={billingProfileForm.name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, name: event.target.value }))} placeholder="Profile name" />
+            <Input value={billingProfileForm.legal_name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Legal/display name" />
+            <div className="grid grid-cols-2 gap-2">
+              <Input value={billingProfileForm.phone} onChange={(event) => setBillingProfileForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone" />
+              <Input value={billingProfileForm.email} onChange={(event) => setBillingProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
+            </div>
+            <Input value={billingProfileForm.website} onChange={(event) => setBillingProfileForm((current) => ({ ...current, website: event.target.value }))} placeholder="Website" />
+            <Textarea value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Remittance address" rows={2} />
+            <Textarea value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} placeholder="Payment instructions" rows={2} />
+            <div className="grid grid-cols-2 gap-2">
+              <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
+              <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />
+            </div>
+            <Textarea value={billingProfileForm.default_payment_terms} onChange={(event) => setBillingProfileForm((current) => ({ ...current, default_payment_terms: event.target.value }))} placeholder="Default payment terms" rows={2} />
+            <Textarea value={billingProfileForm.footer_note} onChange={(event) => setBillingProfileForm((current) => ({ ...current, footer_note: event.target.value }))} placeholder="Footer note" rows={2} />
+            <label className="flex items-center gap-2 text-sm text-neutral-600">
+              <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
+              Use as default profile
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setShowBillingProfileForm(false)}>Cancel</Button>
+              <Button size="sm" onClick={saveBillingProfile} disabled={billingProfileSaving}>
+                {billingProfileSaving ? 'Saving...' : 'Save Profile'}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {activeBillingProfiles.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              onClick={() => editBillingProfile(profile)}
+              className="w-full rounded-lg border border-neutral-200 bg-white p-3 text-left text-sm transition-colors hover:border-primary-300 hover:bg-primary-50/40"
+            >
+              <span className="font-medium text-neutral-900">{profile.name}</span>
+              {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-700">Default</span>}
+              <span className="block truncate text-xs text-neutral-500">{profile.email || profile.phone || profile.website || 'No contact details'}</span>
+            </button>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   const alertBanner = (error || success) ? (
     <div className={`rounded-xl border px-4 py-3 text-sm ${
       error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'
@@ -1063,7 +1315,24 @@ export function InvoiceMaker() {
     ],
     [activeChatSession?.id, activeChatSession?.messages, optimisticChatMessages]
   );
-  const chatCanAcceptMessages = !activeChatSession || activeChatSession.status === 'active';
+  const chatCanAcceptMessages = !activeChatSession || (!activeChatSession.archived && activeChatSession.status !== 'archived');
+  const activePreviewVersion = activeChatSession?.current_preview_version || 0;
+  const activePreviewIsReady = Boolean(activePreview && activePreview.status === 'preview' && chatCanAcceptMessages && !createdChatInvoice);
+
+  const previewBillingProfileName = (preview?: InvoiceAiPreview | Record<string, never> | null) => {
+    const aiPreview = preview as InvoiceAiPreview | null | undefined;
+    if (aiPreview?.invoice_billing_profile_name) return aiPreview.invoice_billing_profile_name;
+    const profileId = aiPreview?.invoice_billing_profile_id;
+    return billingProfiles.find((profile) => profile.id === profileId)?.name || billingProfiles.find((profile) => profile.is_default)?.name || billingProfiles[0]?.name || 'Default sender';
+  };
+
+  const isCurrentPreviewMessage = (message: InvoiceChatMessage | OptimisticChatMessage) => (
+    Boolean(message.has_preview && message.preview_version && message.preview_version === activePreviewVersion)
+  );
+
+  const canRestorePreviewMessage = (message: InvoiceChatMessage | OptimisticChatMessage) => (
+    Boolean(message.role === 'assistant' && message.has_preview && message.preview_version && message.preview_version !== activePreviewVersion && chatCanAcceptMessages)
+  );
 
   return (
     <div>
@@ -1101,6 +1370,7 @@ export function InvoiceMaker() {
         <div className="grid gap-6 p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
           <div className="space-y-6">
             {invoiceHistoryPanel}
+            {billingProfilesPanel}
             {recipientsPanel}
           </div>
 
@@ -1138,6 +1408,28 @@ export function InvoiceMaker() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-neutral-700">From</span>
+                  <select
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    value={invoiceForm.invoice_billing_profile_id}
+                    onChange={(event) => {
+                      const nextProfile = billingProfiles.find((profile) => String(profile.id) === event.target.value);
+                      setInvoiceForm((current) => ({
+                        ...current,
+                        invoice_billing_profile_id: event.target.value,
+                        payment_terms: current.payment_terms || nextProfile?.default_payment_terms || '',
+                      }));
+                    }}
+                  >
+                    <option value="">Select billing profile...</option>
+                    {billingProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name}{profile.active ? '' : ' (archived)'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Bill To</span>
                   <select
@@ -1375,6 +1667,7 @@ export function InvoiceMaker() {
                 )}
               </CardContent>
             </Card>
+            {billingProfilesPanel}
             {recipientsPanel}
           </div>
 
@@ -1423,7 +1716,10 @@ export function InvoiceMaker() {
                           <button
                             key={prompt}
                             type="button"
-                            onClick={() => setChatInput(prompt)}
+                            onClick={() => {
+                              setChatInput(prompt);
+                              window.setTimeout(() => chatInputRef.current?.focus(), 0);
+                            }}
                             className="rounded-xl border border-neutral-200 bg-white px-4 py-3 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/50"
                           >
                             {prompt}
@@ -1434,46 +1730,82 @@ export function InvoiceMaker() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {activeChatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
+                    {activeChatMessages.map((message) => {
+                      const pendingAssistant = message.role === 'assistant' && message.id < 0;
+                      const currentPreviewMessage = isCurrentPreviewMessage(message);
+                      const restorePreviewMessage = canRestorePreviewMessage(message);
+
+                      return (
                         <div
-                          className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                            message.role === 'user'
-                              ? 'bg-primary-600 text-white'
-                              : 'border border-neutral-200 bg-white text-neutral-700'
-                          }`}
+                          key={message.id}
+                          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                         >
-                          <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                          {message.image_urls.length > 0 && (
-                            <span className={`mt-2 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
-                              {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
-                            </span>
-                          )}
-                          {message.has_preview && (
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                                message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
-                              }`}>
-                                Invoice preview ready
+                          <div
+                            className={`max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                              message.role === 'user'
+                                ? 'bg-primary-600 text-white'
+                                : 'border border-neutral-200 bg-white text-neutral-700'
+                            }`}
+                          >
+                            {pendingAssistant ? (
+                              <div className="flex items-center gap-3 text-neutral-600">
+                                <Loader2 className="h-4 w-4 animate-spin text-primary-600" />
+                                <div>
+                                  <p className="font-medium text-neutral-800">Preparing invoice preview</p>
+                                  <p className="text-xs text-neutral-500">Reading the request and matching saved bill-to profiles.</p>
+                                </div>
+                              </div>
+                            ) : (
+                              <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
+                            )}
+                            {message.image_urls.length > 0 && (
+                              <span className={`mt-2 block text-xs ${message.role === 'user' ? 'text-primary-100' : 'text-neutral-400'}`}>
+                                {message.image_urls.length} attachment{message.image_urls.length === 1 ? '' : 's'}
                               </span>
-                              {message.role === 'assistant' && chatCanAcceptMessages && (
-                                <button
-                                  type="button"
-                                  onClick={() => restoreChatPreview(message.id)}
-                                  className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
-                                >
-                                  <RotateCcw className="h-3 w-3" />
-                                  Use version
-                                </button>
-                              )}
-                            </div>
-                          )}
+                            )}
+                            {message.has_preview && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                                  message.role === 'user' ? 'bg-white/15 text-white' : 'bg-primary-50 text-primary-700'
+                                }`}>
+                                  Invoice preview ready
+                                </span>
+                                {currentPreviewMessage && activePreviewIsReady && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={createInvoiceFromPreview}
+                                      className="inline-flex items-center gap-1 rounded-full bg-primary-600 px-2 py-1 text-xs font-medium text-white hover:bg-primary-700"
+                                    >
+                                      <ReceiptText className="h-3 w-3" />
+                                      Create invoice
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={usePreviewAsDraft}
+                                      className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
+                                    >
+                                      <PencilLine className="h-3 w-3" />
+                                      Edit manually
+                                    </button>
+                                  </>
+                                )}
+                                {restorePreviewMessage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => restoreChatPreview(message.id)}
+                                    className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-xs font-medium text-primary-700 ring-1 ring-primary-200 hover:bg-primary-50"
+                                  >
+                                    <RotateCcw className="h-3 w-3" />
+                                    Use version
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     <div ref={chatMessagesEndRef} />
                   </div>
                 )}
@@ -1502,11 +1834,6 @@ export function InvoiceMaker() {
                     ))}
                   </div>
                 )}
-                {!chatCanAcceptMessages && (
-                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                    This assistant session is complete. Start a new chat for another invoice.
-                  </div>
-                )}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <label className="inline-flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-neutral-300 bg-white text-neutral-600 transition-colors hover:border-primary-300 hover:text-primary-700">
                     <ImagePlus className="h-5 w-5" />
@@ -1524,6 +1851,7 @@ export function InvoiceMaker() {
                     />
                   </label>
                   <Textarea
+                    ref={chatInputRef}
                     value={chatInput}
                     onChange={(event) => setChatInput(event.target.value)}
                     onPaste={handleChatPaste}
@@ -1569,7 +1897,9 @@ export function InvoiceMaker() {
                       <div className="flex items-start gap-3">
                         <CheckCircle className="mt-0.5 h-5 w-5 text-green-700" />
                         <div>
-                          <p className="text-sm font-semibold text-neutral-900">Draft invoice created</p>
+                          <p className="text-sm font-semibold text-neutral-900">
+                            {createdChatInvoice.status === 'generated' ? 'Invoice generated' : 'Draft invoice created'}
+                          </p>
                           <p className="mt-1 text-sm text-neutral-600">
                             {createdChatInvoice.invoice_number} for {createdChatInvoice.recipient_name || 'the selected recipient'} · {currency(createdChatInvoice.total_amount)}
                           </p>
@@ -1584,7 +1914,7 @@ export function InvoiceMaker() {
                       </Button>
                       <Button type="button" onClick={generateCreatedChatInvoice} disabled={pdfBusy}>
                         <Download className="mr-1.5 h-4 w-4" />
-                        Generate PDF
+                        {createdChatInvoice.status === 'generated' ? 'Download PDF' : 'Generate PDF'}
                       </Button>
                       <Button type="button" variant="outline" onClick={copyEmail} disabled={!createdChatInvoice.email_subject && !createdChatInvoice.email_body}>
                         <Copy className="mr-1.5 h-4 w-4" />
@@ -1599,6 +1929,9 @@ export function InvoiceMaker() {
                 ) : activePreview?.status === 'preview' ? (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-primary-200 bg-primary-50/40 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-500">
+                        From {previewBillingProfileName(activePreview)}
+                      </p>
                       <p className="text-sm font-semibold text-neutral-900">
                         {activePreview.invoice_recipient_name || 'Recipient needed'}
                       </p>

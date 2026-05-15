@@ -20,6 +20,27 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       expect(body["title"]).to eq("May invoices")
       expect(body["company_id"]).to eq(company.id)
     end
+
+    it "allows a recipient from another company in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization)
+
+      post "/api/v1/admin/invoice_chat_sessions",
+        params: { invoice_chat_session: { title: "Org recipient", invoice_recipient_id: recipient.id } }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("invoice_chat_session", "invoice_recipient_id")).to eq(recipient.id)
+    end
+
+    it "allows a linked invoice from another company in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization)
+      invoice = create(:invoice, :with_line_item, company: other_company, organization: company.organization, invoice_recipient: recipient)
+
+      session = build(:invoice_chat_session, company: company, invoice: invoice, invoice_recipient: recipient)
+
+      expect(session).to be_valid
+    end
   end
 
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/message" do
@@ -91,7 +112,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       file&.unlink
     end
 
-    it "does not overwrite the preview on a completed session" do
+    it "continues the chat on a previously completed session" do
       original_preview = { "status" => "preview", "message" => "Original preview." }
       next_preview = { "status" => "preview", "message" => "New preview." }
       session = create(
@@ -109,11 +130,11 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       post "/api/v1/admin/invoice_chat_sessions/#{session.id}/message",
         params: { content: "Change this invoice" }
 
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to eq("Cannot send messages to a non-active session")
-      expect(session.messages.reload).to be_empty
-      expect(session.reload.current_preview).to eq(original_preview)
-      expect(session.current_preview_version).to eq(1)
+      expect(response).to have_http_status(:ok)
+      expect(session.messages.reload.size).to eq(2)
+      expect(session.reload.status).to eq("active")
+      expect(session.current_preview).to eq(next_preview)
+      expect(session.current_preview_version).to eq(2)
     end
 
     it "cleans up uploaded attachments on unexpected failures before persistence" do
@@ -188,6 +209,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
   describe "POST /api/v1/admin/invoice_chat_sessions/:id/confirm" do
     it "creates a draft invoice from the current preview" do
       recipient = create(:invoice_recipient, company: company, name: "Shimizu Technology")
+      billing_profile = create(:invoice_billing_profile, organization: company.organization, name: "Shimizu Technology", invoice_prefix: "ST")
       session = create(
         :invoice_chat_session,
         company: company,
@@ -196,6 +218,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
         current_preview_version: 1,
         current_preview: {
           "status" => "preview",
+          "invoice_billing_profile_id" => billing_profile.id,
           "invoice_recipient_id" => recipient.id,
           "invoice_date" => "2026-05-02",
           "payment_terms" => "Due on receipt",
@@ -212,9 +235,14 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       invoice = Invoice.last
       expect(invoice.company_id).to eq(company.id)
       expect(invoice.invoice_recipient_id).to eq(recipient.id)
+      expect(invoice.invoice_billing_profile_id).to eq(billing_profile.id)
       expect(invoice.total_amount).to eq(300)
       expect(invoice.status).to eq("draft")
       expect(session.reload.invoice_id).to eq(invoice.id)
+      expect(session.messages.last.preview).to include(
+        "created_invoice_id" => invoice.id,
+        "created_invoice_number" => invoice.invoice_number
+      )
     end
 
     it "returns the existing invoice when the same preview is confirmed twice" do
@@ -245,6 +273,45 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("invoice", "id")).to eq(invoice_id)
+    end
+
+    it "finds an already-created preview invoice across companies in the same organization" do
+      other_company = create(:company, organization: company.organization)
+      recipient = create(:invoice_recipient, company: other_company, organization: company.organization, name: "Shimizu Technology")
+      invoice = create(:invoice, :with_line_item, company: other_company, organization: company.organization, invoice_recipient: recipient)
+      session = create(
+        :invoice_chat_session,
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        current_preview_version: 1,
+        current_preview: {
+          "status" => "preview",
+          "invoice_recipient_id" => recipient.id,
+          "invoice_date" => "2026-05-02",
+          "line_items" => [
+            { "description" => "Payroll service", "quantity" => 2, "rate" => 150 }
+          ]
+        }
+      )
+      session.update_column(:invoice_id, invoice.id)
+      session.messages.create!(
+        role: "assistant",
+        content: "Invoice is ready.",
+        preview: session.current_preview.merge(
+          "created_invoice_id" => invoice.id,
+          "created_invoice_number" => invoice.invoice_number
+        ),
+        preview_version: session.current_preview_version,
+        has_preview: true
+      )
+
+      expect {
+        post "/api/v1/admin/invoice_chat_sessions/#{session.id}/confirm"
+      }.not_to change(Invoice, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("invoice", "id")).to eq(invoice.id)
     end
 
     it "rejects inactive recipients in a preview" do

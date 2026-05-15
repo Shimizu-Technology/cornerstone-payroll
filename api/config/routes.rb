@@ -256,6 +256,7 @@ Rails.application.routes.draw do
         end
 
         # Invoice Maker (standalone firm tool)
+        resources :invoice_billing_profiles, except: [:new, :edit]
         resources :invoice_recipients, except: [:new, :edit]
         resources :invoices, except: [:new, :edit] do
           member do

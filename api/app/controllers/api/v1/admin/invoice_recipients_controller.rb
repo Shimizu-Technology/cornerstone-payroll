@@ -8,7 +8,7 @@ module Api
 
         def index
           recipients = InvoiceRecipient
-            .where(company_id: current_company_id)
+            .where(organization_id: current_organization_id)
             .alphabetical
 
           recipients = recipients.active if ActiveModel::Type::Boolean.new.cast(params[:active])
@@ -24,6 +24,7 @@ module Api
 
         def create
           recipient = InvoiceRecipient.new(recipient_attributes)
+          recipient.organization_id = current_organization_id
           recipient.company_id = current_company_id
 
           if recipient.save
@@ -54,7 +55,7 @@ module Api
         private
 
         def set_recipient
-          @recipient = InvoiceRecipient.find_by(id: params[:id], company_id: current_company_id)
+          @recipient = InvoiceRecipient.find_by(id: params[:id], organization_id: current_organization_id)
           return if @recipient
 
           render json: { error: "Invoice recipient not found" }, status: :not_found
@@ -77,6 +78,7 @@ module Api
         def recipient_payload(recipient)
           {
             id: recipient.id,
+            organization_id: recipient.organization_id,
             company_id: recipient.company_id,
             name: recipient.name,
             email: recipient.email,

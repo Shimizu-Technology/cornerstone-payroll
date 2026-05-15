@@ -2,6 +2,15 @@
 # https://payroll.cornerstonetaxservices.com
 
 User-agent: *
-Disallow: /
+Allow: /
+Disallow: /app
+Disallow: /employees
+Disallow: /pay-periods
+Disallow: /reports
+Disallow: /settings
+Disallow: /tools
+Disallow: /check-settings
+Disallow: /payroll-reminders
+Disallow: /time-tracking-sources
 
-# This is a private payroll application — no public pages to index.
+# Public homepage is indexable. Authenticated app routes remain private.
