@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { RotateCcw, RotateCw } from 'lucide-react';
 import { timecardsApi, punchEntriesApi, employeesApi } from '@/services/api';
 import type { TimecardData, PunchEntryData } from '@/services/api';
 import type { Employee, PayrollItem } from '@/types';
@@ -57,13 +58,13 @@ function parseTimeMinutes(value: string): number | null {
   return hours * 60 + minutes;
 }
 
-function calculateEditableHours(entry: EditableEntry): number | null {
-  const clockIn = parseTimeMinutes(entry.clock_in);
-  const lunchOut = parseTimeMinutes(entry.lunch_out);
-  const lunchIn = parseTimeMinutes(entry.lunch_in);
-  const clockOut = parseTimeMinutes(entry.clock_out);
-  const in3 = parseTimeMinutes(entry.in3);
-  const out3 = parseTimeMinutes(entry.out3);
+function calculatePunchHours(entry: Partial<Record<typeof PUNCH_TIME_FIELDS[number], string | null | undefined>>): number | null {
+  const clockIn = parseTimeMinutes(entry.clock_in || '');
+  const lunchOut = parseTimeMinutes(entry.lunch_out || '');
+  const lunchIn = parseTimeMinutes(entry.lunch_in || '');
+  const clockOut = parseTimeMinutes(entry.clock_out || '');
+  const in3 = parseTimeMinutes(entry.in3 || '');
+  const out3 = parseTimeMinutes(entry.out3 || '');
   const pairs: Array<[number, number]> = [];
 
   if (lunchOut !== null && lunchIn !== null) {
@@ -86,6 +87,14 @@ function calculateEditableHours(entry: EditableEntry): number | null {
   }
 
   return Math.max(Math.round((totalMinutes / 60) * 100) / 100, 0);
+}
+
+function calculateEditableHours(entry: EditableEntry): number | null {
+  return calculatePunchHours(entry);
+}
+
+function calculateEntryHours(entry: PunchEntryData): number | null {
+  return calculatePunchHours(entry);
 }
 
 function confidenceColor(c: number | null): string {
@@ -239,7 +248,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
 }) {
   const isProcessing = tc.ocr_status === 'pending' || tc.ocr_status === 'processing';
   const punchesWithData = tc.punch_entries.filter((pe) => !pe.blank_day);
-  const totalHours = punchesWithData.reduce((sum, pe) => sum + (pe.hours_worked || 0), 0);
+  const totalHours = punchesWithData.reduce((sum, pe) => sum + (calculateEntryHours(pe) ?? pe.hours_worked ?? 0), 0);
   const isComplete = tc.ocr_status === 'complete';
   const isReviewed = tc.ocr_status === 'reviewed';
   const hasAttention = tc.review_summary.attention_count > 0;
@@ -529,13 +538,16 @@ function ZoomableImage({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [showOriginal, setShowOriginal] = useState(true);
+  const [rotation, setRotation] = useState(0);
   const dragStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
 
   const MAX_ZOOM = 8;
   const ZOOM_STEP = 0.5;
   const handleZoomIn = () => setZoom((z) => Math.min(z + ZOOM_STEP, MAX_ZOOM));
   const handleZoomOut = () => { setZoom((z) => { const next = Math.max(z - ZOOM_STEP, 1); if (next === 1) setPan({ x: 0, y: 0 }); return next; }); };
-  const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+  const handleReset = () => { setZoom(1); setPan({ x: 0, y: 0 }); setRotation(0); };
+  const rotateLeft = () => { setRotation((value) => (value + 270) % 360); setPan({ x: 0, y: 0 }); };
+  const rotateRight = () => { setRotation((value) => (value + 90) % 360); setPan({ x: 0, y: 0 }); };
 
   const src = showOriginal ? (originalSrc || enhancedSrc) : (enhancedSrc || originalSrc);
   const hasBothImages = !!(originalSrc && enhancedSrc);
@@ -585,7 +597,13 @@ function ZoomableImage({
         <Button size="sm" variant="outline" onClick={handleZoomOut} disabled={zoom <= 1} className="px-2 py-1 text-xs">−</Button>
         <span className="text-xs text-gray-500 w-12 text-center">{(zoom * 100).toFixed(0)}%</span>
         <Button size="sm" variant="outline" onClick={handleZoomIn} disabled={zoom >= MAX_ZOOM} className="px-2 py-1 text-xs">+</Button>
-        {zoom > 1 && (
+        <Button size="sm" variant="outline" onClick={rotateLeft} className="px-2 py-1 text-xs" title="Rotate left">
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+        <Button size="sm" variant="outline" onClick={rotateRight} className="px-2 py-1 text-xs" title="Rotate right">
+          <RotateCw className="h-3.5 w-3.5" />
+        </Button>
+        {(zoom > 1 || rotation !== 0) && (
           <Button size="sm" variant="outline" onClick={handleReset} className="px-2 py-1 text-xs ml-1">Reset</Button>
         )}
       </div>
@@ -622,7 +640,8 @@ function ZoomableImage({
           style={{
             width: `${zoom * 100}%`,
             maxWidth: 'none',
-            transform: `translate(${pan.x}px, ${pan.y}px)`,
+            transform: `translate(${pan.x}px, ${pan.y}px) rotate(${rotation}deg)`,
+            transformOrigin: 'center center',
           }}
         />
       </div>
@@ -1098,9 +1117,12 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
                 const rowHours = calculateEditableHours(entry);
 
                 const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                const blankTone = index % 2 === 0 ? 'bg-gray-50/50' : 'bg-gray-100';
+                const approvedTone = index % 2 === 0 ? 'bg-blue-50' : 'bg-blue-100/70';
+                const attentionTone = index % 2 === 0 ? 'bg-orange-50' : 'bg-orange-100/70';
                 const rowBg = original?.needs_attention
-                  ? original.review_state === 'approved' ? 'bg-blue-50' : 'bg-orange-50'
-                  : isBlank ? 'bg-gray-50/50' : rowTone;
+                  ? original.review_state === 'approved' ? approvedTone : attentionTone
+                  : isBlank ? blankTone : rowTone;
 
                 return (
                   <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-gray-400' : ''}`}>

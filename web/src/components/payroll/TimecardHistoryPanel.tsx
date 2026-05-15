@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { RotateCcw, RotateCw } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { timecardsApi } from '@/services/api';
@@ -14,6 +15,47 @@ function formatTime(t: string | null | undefined): string {
   const ampm = h >= 12 ? 'PM' : 'AM';
   const h12 = h % 12 || 12;
   return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+const PUNCH_TIME_FIELDS = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
+
+function parseTimeMinutes(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const [hStr, mStr] = value.split(':');
+  const hours = Number(hStr);
+  const minutes = Number(mStr);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function calculatePunchHours(entry: Pick<PunchEntryData, typeof PUNCH_TIME_FIELDS[number]>): number | null {
+  const clockIn = parseTimeMinutes(entry.clock_in);
+  const lunchOut = parseTimeMinutes(entry.lunch_out);
+  const lunchIn = parseTimeMinutes(entry.lunch_in);
+  const clockOut = parseTimeMinutes(entry.clock_out);
+  const in3 = parseTimeMinutes(entry.in3);
+  const out3 = parseTimeMinutes(entry.out3);
+  const pairs: Array<[number, number]> = [];
+
+  if (lunchOut !== null && lunchIn !== null) {
+    if (clockIn !== null) pairs.push([clockIn, lunchOut]);
+    if (clockOut !== null) pairs.push([lunchIn, clockOut]);
+  } else if (clockIn !== null && clockOut !== null) {
+    pairs.push([clockIn, clockOut]);
+  } else if (clockIn !== null && lunchOut !== null) {
+    pairs.push([clockIn, lunchOut]);
+  }
+  if (in3 !== null && out3 !== null) pairs.push([in3, out3]);
+
+  if (pairs.length === 0) return null;
+
+  const totalMinutes = pairs.reduce((sum, [start, rawEnd]) => {
+    const end = rawEnd < start ? rawEnd + 24 * 60 : rawEnd;
+    return sum + end - start;
+  }, 0);
+
+  return Math.max(Math.round((totalMinutes / 60) * 100) / 100, 0);
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -37,7 +79,7 @@ function PunchTable({ entries }: { entries: PunchEntryData[] }) {
     return <p className="text-sm text-gray-400 italic py-2">No punch entries recorded</p>;
   }
 
-  const totalHours = activeEntries.reduce((sum, e) => sum + (e.hours_worked || 0), 0);
+  const totalHours = activeEntries.reduce((sum, e) => sum + (calculatePunchHours(e) ?? e.hours_worked ?? 0), 0);
 
   return (
     <div className="overflow-x-auto">
@@ -57,15 +99,17 @@ function PunchTable({ entries }: { entries: PunchEntryData[] }) {
         <tbody>
           {activeEntries.map((entry, index) => {
             const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+            const attentionTone = index % 2 === 0 ? 'bg-amber-50' : 'bg-amber-100/70';
+            const rowHours = calculatePunchHours(entry) ?? entry.hours_worked;
             return (
-            <tr key={entry.id} className={`border-b border-gray-100 ${entry.needs_attention ? 'bg-amber-50' : rowTone}`}>
+            <tr key={entry.id} className={`border-b border-gray-100 ${entry.needs_attention ? attentionTone : rowTone}`}>
               <td className="py-1.5 px-2 text-gray-500">{entry.day_of_week}</td>
               <td className="py-1.5 px-2">{entry.date || `Day ${entry.card_day}`}</td>
               <td className="py-1.5 px-2 text-center">{formatTime(entry.clock_in)}</td>
               <td className="py-1.5 px-2 text-center">{formatTime(entry.lunch_out)}</td>
               <td className="py-1.5 px-2 text-center">{formatTime(entry.lunch_in)}</td>
               <td className="py-1.5 px-2 text-center">{formatTime(entry.clock_out)}</td>
-              <td className="py-1.5 px-2 text-right font-medium">{entry.hours_worked?.toFixed(2) ?? '—'}</td>
+              <td className="py-1.5 px-2 text-right font-medium">{rowHours?.toFixed(2) ?? '—'}</td>
               <td className="py-1.5 px-2 text-center">
                 {entry.review_state === 'approved' ? (
                   <span className="text-green-600">✓</span>
@@ -94,10 +138,11 @@ function PunchTable({ entries }: { entries: PunchEntryData[] }) {
 function TimecardCard({ timecard }: { timecard: TimecardData }) {
   const [expanded, setExpanded] = useState(false);
   const [imageExpanded, setImageExpanded] = useState(false);
+  const [imageRotation, setImageRotation] = useState(0);
 
   const totalHours = timecard.punch_entries
     .filter(e => !e.blank_day)
-    .reduce((sum, e) => sum + (e.hours_worked || 0), 0);
+    .reduce((sum, e) => sum + (calculatePunchHours(e) ?? e.hours_worked ?? 0), 0);
 
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -158,11 +203,49 @@ function TimecardCard({ timecard }: { timecard: TimecardData }) {
                 {imageExpanded ? 'Collapse Image' : 'View Full Image'}
               </button>
               {imageExpanded && (
-                <img
-                  src={timecard.image_url}
-                  alt="Timecard full view"
-                  className="max-w-full rounded border shadow-sm"
-                />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setImageRotation((value) => (value + 270) % 360)}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Rotate Left
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setImageRotation((value) => (value + 90) % 360)}
+                    >
+                      <RotateCw className="h-3.5 w-3.5 mr-1" />
+                      Rotate Right
+                    </Button>
+                    {imageRotation !== 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setImageRotation(0)}
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </div>
+                  <div className="overflow-auto rounded border bg-white">
+                    <img
+                      src={timecard.image_url}
+                      alt="Timecard full view"
+                      className="max-w-full shadow-sm"
+                      style={{
+                        transform: `rotate(${imageRotation}deg)`,
+                        transformOrigin: 'center center',
+                      }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -211,7 +294,7 @@ export function TimecardHistoryPanel({ payPeriodId }: TimecardHistoryPanelProps)
   if (timecards.length === 0) return null;
 
   const totalHours = timecards.reduce(
-    (sum, tc) => sum + tc.punch_entries.filter(e => !e.blank_day).reduce((s, e) => s + (e.hours_worked || 0), 0),
+    (sum, tc) => sum + tc.punch_entries.filter(e => !e.blank_day).reduce((s, e) => s + (calculatePunchHours(e) ?? e.hours_worked ?? 0), 0),
     0
   );
 

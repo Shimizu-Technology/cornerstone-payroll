@@ -13,7 +13,10 @@ module Api
         # GET /api/v1/admin/printer_profiles
         def index
           profiles = current_organization.printer_profiles.ordered
-          render json: { printer_profiles: profiles.map { |p| profile_json(p) } }
+          render json: {
+            printer_profiles: profiles.map { |p| profile_json(p) },
+            active_printer_profile_id: current_company.active_printer_profile_id
+          }
         end
 
         # GET /api/v1/admin/printer_profiles/:id
@@ -54,7 +57,8 @@ module Api
             check_stock_type: @profile.check_stock_type,
             check_offset_x: @profile.check_offset_x,
             check_offset_y: @profile.check_offset_y,
-            check_layout_config: @profile.check_layout_config
+            check_layout_config: @profile.check_layout_config,
+            active_printer_profile: @profile
           )
             render json: {
               printer_profile: profile_json(@profile),
@@ -62,7 +66,29 @@ module Api
                 check_stock_type: current_company.check_stock_type,
                 check_offset_x: current_company.check_offset_x,
                 check_offset_y: current_company.check_offset_y,
-                check_layout_config: current_company.check_layout_config
+                check_layout_config: current_company.check_layout_config,
+                active_printer_profile_id: current_company.active_printer_profile_id,
+                active_printer_profile_name: current_company.active_printer_profile&.name
+              }
+            }
+          else
+            render json: { errors: current_company.errors.full_messages }, status: :unprocessable_entity
+          end
+        end
+
+        # POST /api/v1/admin/printer_profiles/clear_active
+        # Keeps the current check settings, but disconnects them from any saved
+        # printer preset so operators can clearly work without a selected preset.
+        def clear_active
+          if current_company.update(active_printer_profile: nil)
+            render json: {
+              check_settings: {
+                check_stock_type: current_company.check_stock_type,
+                check_offset_x: current_company.check_offset_x,
+                check_offset_y: current_company.check_offset_y,
+                check_layout_config: current_company.check_layout_config,
+                active_printer_profile_id: nil,
+                active_printer_profile_name: nil
               }
             }
           else

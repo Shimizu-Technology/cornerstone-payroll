@@ -687,6 +687,8 @@ export interface CheckSettings {
   check_memo_template: string | null;
   auto_create_fit_check: boolean;
   check_layout_config: Record<string, unknown>;
+  active_printer_profile_id: number | null;
+  active_printer_profile_name: string | null;
 }
 
 export interface CheckLayoutPageMetadata {
