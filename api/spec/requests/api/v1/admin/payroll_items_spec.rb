@@ -37,5 +37,17 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(exclusion.excluded_by_id).to eq(admin_user.id)
       expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
     end
+
+    it "rolls back the exclusion if removing the payroll item fails" do
+      allow_any_instance_of(PayrollItem).to receive(:destroy!)
+        .and_raise(ActiveRecord::RecordNotDestroyed.new("Could not remove payroll item", payroll_item))
+
+      expect {
+        delete "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+      }.not_to change(PayPeriodExcludedEmployee, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(pay_period.payroll_items.where(employee_id: employee.id)).to exist
+    end
   end
 end

@@ -107,13 +107,7 @@ class PayrollCalculator
 
     payroll_item.employer_social_security_tax = taxes[:employer_social_security]
     payroll_item.employer_medicare_tax = taxes[:employer_medicare]
-    payroll_item.additional_withholding =
-      if payroll_item.additional_withholding_override.present?
-        payroll_item.additional_withholding_override.to_f
-      else
-        employee.additional_withholding.to_f
-      end
-
+    sync_additional_withholding_from_employee!
   end
 
   def calculate_retirement
@@ -370,6 +364,17 @@ class PayrollCalculator
     reduction = [ excess, payroll_item.additional_withholding.to_f ].min
     payroll_item.additional_withholding = (payroll_item.additional_withholding.to_f - reduction).round(2)
     payroll_item.total_deductions = (payroll_item.total_deductions.to_f - reduction).round(2)
+  end
+
+  def sync_additional_withholding_from_employee!
+    # Rehydrate before every calculation so a previous zero-pay cap does not
+    # suppress the employee's configured W-4 extra withholding on recalculation.
+    payroll_item.additional_withholding =
+      if payroll_item.additional_withholding_override.present?
+        payroll_item.additional_withholding_override.to_f
+      else
+        employee.additional_withholding.to_f
+      end
   end
 
   def ensure_employer_contribution_type!(deduction_type)
