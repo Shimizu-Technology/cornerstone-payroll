@@ -55,8 +55,10 @@ function PunchTable({ entries }: { entries: PunchEntryData[] }) {
           </tr>
         </thead>
         <tbody>
-          {activeEntries.map(entry => (
-            <tr key={entry.id} className={`border-b border-gray-100 ${entry.needs_attention ? 'bg-amber-50' : ''}`}>
+          {activeEntries.map((entry, index) => {
+            const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+            return (
+            <tr key={entry.id} className={`border-b border-gray-100 ${entry.needs_attention ? 'bg-amber-50' : rowTone}`}>
               <td className="py-1.5 px-2 text-gray-500">{entry.day_of_week}</td>
               <td className="py-1.5 px-2">{entry.date || `Day ${entry.card_day}`}</td>
               <td className="py-1.5 px-2 text-center">{formatTime(entry.clock_in)}</td>
@@ -74,7 +76,8 @@ function PunchTable({ entries }: { entries: PunchEntryData[] }) {
                 )}
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
         <tfoot>
           <tr className="border-t font-medium">

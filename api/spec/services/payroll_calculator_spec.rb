@@ -139,6 +139,26 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.additional_withholding).to eq(0)
     end
 
+    it "does not let extra W-4 withholding create a negative normal paycheck" do
+      employee.update!(additional_withholding: 66.0)
+      payroll_item.update!(
+        hours_worked: 0,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        custom_earnings: []
+      )
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(0.0)
+      expect(payroll_item.additional_withholding).to eq(0.0)
+      expect(payroll_item.total_deductions).to eq(0.0)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 

@@ -82,13 +82,6 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-gray-100 text-gray-700',
-  unprinted: 'bg-yellow-100 text-yellow-700',
-  printed: 'bg-green-100 text-green-700',
-  voided: 'bg-red-100 text-red-700',
-};
-
 export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
@@ -572,9 +565,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-sm">{check.payable_to}</span>
-                        <Badge className={STATUS_COLORS[check.check_status] || 'bg-gray-100 text-gray-700'}>
-                          {check.check_status}
-                        </Badge>
                         <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
                         {check.auto_generated_type === 'fit_deposit' && (
                           <Badge className="bg-amber-100 text-amber-800">Auto FIT</Badge>

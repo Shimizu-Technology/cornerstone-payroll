@@ -19,6 +19,7 @@ module TimeTracking
       results = { applied: [], skipped: [], errors: [] }
       seen_employee_ids = Set.new
       current_import_source = import_source_key
+      excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
       @import.with_lock do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
@@ -51,6 +52,10 @@ module TimeTracking
           employee = Employee.active.find_by(id: employee_id, company_id: @company.id)
           unless employee
             results[:errors] << { source_user_id: source_user_id, employee_id: employee_id, error: "Employee not found or inactive" }
+            next
+          end
+          if excluded_employee_ids.include?(employee.id)
+            results[:skipped] << { source_user_id: source_user_id, employee_id: employee.id, reason: "Excluded from this pay period" }
             next
           end
 

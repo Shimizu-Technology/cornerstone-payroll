@@ -61,7 +61,7 @@ class TransmittalLogPdfGenerator
         pdf.text "Date Rec'd: ______________________"
       end
     end
-    pdf.move_down 16
+    pdf.move_cursor_to(y_start - 58)
   end
 
   def render_dates(pdf)

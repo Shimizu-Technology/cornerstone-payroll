@@ -1090,16 +1090,17 @@ function TimecardDetail({ timecard: initialTc, onBack, payPeriodId, employees, o
               </tr>
             </thead>
             <tbody>
-              {editable.map((entry) => {
+              {editable.map((entry, index) => {
                 const rowKey = entry.id != null ? `entry-${entry.id}` : `placeholder-${entry.date}`;
                 const original = entry.id != null ? tc.punch_entries.find((pe) => pe.id === entry.id) : null;
                 const isBlank = !entry.clock_in && !entry.lunch_out && !entry.lunch_in && !entry.clock_out && !entry.in3 && !entry.out3;
                 const dow = entry._dow || original?.day_of_week || '';
                 const rowHours = calculateEditableHours(entry);
 
+                const rowTone = index % 2 === 0 ? 'bg-white' : 'bg-slate-100';
                 const rowBg = original?.needs_attention
                   ? original.review_state === 'approved' ? 'bg-blue-50' : 'bg-orange-50'
-                  : isBlank ? 'bg-gray-50/50' : '';
+                  : isBlank ? 'bg-gray-50/50' : rowTone;
 
                 return (
                   <tr key={rowKey} className={`text-sm ${rowBg} ${isBlank ? 'text-gray-400' : ''}`}>

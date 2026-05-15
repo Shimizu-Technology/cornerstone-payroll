@@ -57,6 +57,7 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if @payroll_item.save
+            @pay_period.pay_period_excluded_employees.where(employee_id: employee.id).delete_all
             @payroll_item.calculate! if params[:auto_calculate]
             render json: { payroll_item: payroll_item_json(@payroll_item) }, status: :created
           else
@@ -89,6 +90,13 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
 
+          PayPeriodExcludedEmployee.find_or_create_by!(
+            pay_period: @pay_period,
+            employee: @payroll_item.employee
+          ) do |exclusion|
+            exclusion.excluded_by = current_user
+            exclusion.reason = "Removed from pay period"
+          end
           @payroll_item.destroy
           head :no_content
         end

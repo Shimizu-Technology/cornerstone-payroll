@@ -265,6 +265,8 @@ class PayrollCalculator
       custom_deductions_total +
       payroll_item.tips_paid_out.to_f
     ).round(2)
+
+    cap_additional_withholding_to_available_pay!
   end
 
   def calculate_net_pay
@@ -273,6 +275,7 @@ class PayrollCalculator
       payroll_item.total_deductions +
       payroll_item.non_taxable_pay.to_f
     ).round(2)
+    payroll_item.net_pay = 0.0 if payroll_item.net_pay.negative? && !payroll_item.correction_entry?
   end
 
   def update_ytd_on_item
@@ -354,6 +357,19 @@ class PayrollCalculator
 
   def roth_retirement_deduction?(deduction_type)
     deduction_type.category == "post_tax" || deduction_type.name.to_s.match?(/roth/i)
+  end
+
+  def cap_additional_withholding_to_available_pay!
+    return if payroll_item.correction_entry?
+    return unless payroll_item.additional_withholding.to_f.positive?
+
+    available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
+    excess = payroll_item.total_deductions.to_f - available_pay
+    return unless excess.positive?
+
+    reduction = [ excess, payroll_item.additional_withholding.to_f ].min
+    payroll_item.additional_withholding = (payroll_item.additional_withholding.to_f - reduction).round(2)
+    payroll_item.total_deductions = (payroll_item.total_deductions.to_f - reduction).round(2)
   end
 
   def ensure_employer_contribution_type!(deduction_type)

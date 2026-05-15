@@ -1151,6 +1151,7 @@ export interface ImportPreviewResponse {
 export interface ImportApplyResponse {
   results: {
     success: { employee_id: number; name: string }[];
+    skipped?: { employee_id: number; name?: string; reason: string }[];
     errors: { employee_id: number; name: string; error: string }[];
   };
   pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
