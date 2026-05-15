@@ -81,6 +81,7 @@ class W2GuAggregator
     @aggregated_items ||= PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id)
+      .where(voided: false)
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
           .where(company_id: company.id, pay_date: year_range)

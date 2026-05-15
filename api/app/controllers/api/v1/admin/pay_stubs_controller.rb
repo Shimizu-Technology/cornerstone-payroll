@@ -187,6 +187,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
+                         .not_voided
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)

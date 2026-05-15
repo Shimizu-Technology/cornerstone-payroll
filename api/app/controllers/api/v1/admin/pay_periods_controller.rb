@@ -816,7 +816,7 @@ module Api
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items
           if items.loaded?
-            arr = items.to_a
+            arr = items.to_a.reject(&:voided?)
             {
               count: arr.size,
               gross: arr.sum { |i| i.gross_pay.to_f },
@@ -825,7 +825,7 @@ module Api
               employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
             }
           else
-            row = items.pick(
+            row = items.not_voided.pick(
               Arel.sql("COUNT(*)"),
               Arel.sql("COALESCE(SUM(gross_pay), 0)"),
               Arel.sql("COALESCE(SUM(net_pay), 0)"),
@@ -1363,6 +1363,7 @@ module Api
 
           if committed_period_ids.any?
             rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
+                              .not_voided
                               .group(:employee_id)
                               .pluck(
                                 :employee_id,
