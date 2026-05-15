@@ -444,6 +444,7 @@ module Api
           elsif permitted[:check_layout_config].is_a?(Hash)
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
           end
+          permitted[:active_printer_profile_id] = nil
 
           if @company.update(permitted)
             render json: { check_settings: company_check_settings_json(@company) }
@@ -693,7 +694,9 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
-            check_layout_config: company.check_layout_config || {}
+            check_layout_config: company.check_layout_config || {},
+            active_printer_profile_id: company.active_printer_profile_id,
+            active_printer_profile_name: company.active_printer_profile&.name
           }
         end
 

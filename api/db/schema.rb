@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_16_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_16_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -157,6 +157,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_090000) do
     t.boolean "active", default: true
     t.string "address_line1"
     t.string "address_line2"
+    t.bigint "active_printer_profile_id"
     t.boolean "auto_create_fit_check", default: false, null: false
     t.string "bank_address"
     t.string "bank_name"
@@ -177,6 +178,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_090000) do
     t.string "state"
     t.datetime "updated_at", null: false
     t.string "zip"
+    t.index ["active_printer_profile_id"], name: "index_companies_on_active_printer_profile_id"
     t.index ["ein"], name: "index_companies_on_ein", unique: true
     t.index ["name"], name: "index_companies_on_name"
     t.index ["organization_id"], name: "index_companies_on_organization_id"
@@ -1258,6 +1260,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_090000) do
   add_foreign_key "pay_periods", "companies"
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
+  add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"

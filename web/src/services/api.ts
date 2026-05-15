@@ -1765,7 +1765,7 @@ export interface PrinterProfile {
 
 export const printerProfilesApi = {
   list: () =>
-    api.get<{ printer_profiles: PrinterProfile[] }>('/admin/printer_profiles'),
+    api.get<{ printer_profiles: PrinterProfile[]; active_printer_profile_id: number | null }>('/admin/printer_profiles'),
   get: (id: number) =>
     api.get<{ printer_profile: PrinterProfile }>(`/admin/printer_profiles/${id}`),
   create: (data: Partial<PrinterProfile>) =>
@@ -1775,7 +1775,9 @@ export const printerProfilesApi = {
   delete: (id: number) =>
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
-    api.post<{ printer_profile: PrinterProfile; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config'> }>(`/admin/printer_profiles/${id}/apply`),
+    api.post<{ printer_profile: PrinterProfile; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply`),
+  clearActive: () =>
+    api.post<{ check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>('/admin/printer_profiles/clear_active'),
 };
 
 // ============================================================

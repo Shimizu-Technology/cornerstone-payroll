@@ -63,6 +63,9 @@ Rails.application.routes.draw do
 
         # Printer Profiles (saved check alignment presets per printer)
         resources :printer_profiles, only: [:index, :show, :create, :update, :destroy] do
+          collection do
+            post :clear_active
+          end
           member do
             post :apply
           end
