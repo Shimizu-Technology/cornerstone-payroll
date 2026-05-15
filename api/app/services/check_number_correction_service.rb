@@ -112,7 +112,7 @@ class CheckNumberCorrectionService
 
   def payroll_check_numbers
     pay_period.payroll_items
-      .where(voided: false)
+      .not_voided
       .where.not(check_number: nil)
       .pluck(:check_number)
   end

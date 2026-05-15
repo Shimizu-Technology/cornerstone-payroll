@@ -463,7 +463,7 @@ class PayStubGenerator
     payroll_item.employee.payroll_items
       .joins(:pay_period)
       .select(:id, :custom_deductions)
-      .where(voided: false)
+      .not_voided
       .where(pay_periods: {
         company_id: payroll_item.company_id,
         pay_date: Date.new(year, 1, 1)..payroll_item.pay_period.pay_date

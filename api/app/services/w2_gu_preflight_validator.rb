@@ -58,7 +58,7 @@ class W2GuPreflightValidator
     employee_ids = PayrollItem
       .joins(:pay_period)
       .where(company_id: company.id)
-      .where(voided: false)
+      .not_voided
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
           .where(company_id: company.id)
