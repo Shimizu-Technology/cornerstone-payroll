@@ -28,7 +28,7 @@ class PayrollSummaryByEmployeePdfGenerator
   def generate
     items = pay_period.payroll_items
       .includes(:employee, :payroll_item_earnings, payroll_item_deductions: :deduction_type)
-      .where(voided: false)
+      .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [30, 30, 44, 30])

@@ -717,7 +717,7 @@ module Api
             return render json: { message: "FIT tax deposit check already exists", check_id: existing.id, created: false }
           end
 
-          committed_items = @pay_period.payroll_items.where(voided: false).to_a
+          committed_items = @pay_period.payroll_items.not_voided.to_a
           create_fit_tax_deposit_check!(committed_items)
 
           fit_check = NonEmployeeCheck.find_by(fit_query)
@@ -816,7 +816,7 @@ module Api
         def pay_period_aggregates(pay_period)
           items = pay_period.payroll_items
           if items.loaded?
-            arr = items.to_a
+            arr = items.to_a.reject(&:voided?)
             {
               count: arr.size,
               gross: arr.sum { |i| i.gross_pay.to_f },
@@ -825,7 +825,7 @@ module Api
               employer_medicare: arr.sum { |i| i.employer_medicare_tax.to_f }
             }
           else
-            row = items.pick(
+            row = items.not_voided.pick(
               Arel.sql("COUNT(*)"),
               Arel.sql("COALESCE(SUM(gross_pay), 0)"),
               Arel.sql("COALESCE(SUM(net_pay), 0)"),
@@ -1363,6 +1363,7 @@ module Api
 
           if committed_period_ids.any?
             rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
+                              .not_voided
                               .group(:employee_id)
                               .pluck(
                                 :employee_id,

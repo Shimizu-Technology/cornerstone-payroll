@@ -10,21 +10,22 @@ module Api
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
           @payroll_items = @pay_period.payroll_items.includes(:employee)
+          reportable_items = @payroll_items.not_voided
 
           render json: {
             payroll_items: @payroll_items.map { |item| payroll_item_json(item) },
             summary: {
-              total_gross: @payroll_items.sum(:gross_pay),
-              total_withholding: @payroll_items.sum(:withholding_tax),
-              total_social_security: @payroll_items.sum(:social_security_tax),
-              total_medicare: @payroll_items.sum(:medicare_tax),
-              total_deductions: @payroll_items.sum(:total_deductions),
-              total_net: @payroll_items.sum(:net_pay),
+              total_gross: reportable_items.sum(:gross_pay),
+              total_withholding: reportable_items.sum(:withholding_tax),
+              total_social_security: reportable_items.sum(:social_security_tax),
+              total_medicare: reportable_items.sum(:medicare_tax),
+              total_deductions: reportable_items.sum(:total_deductions),
+              total_net: reportable_items.sum(:net_pay),
               # Employer obligations (what Cornerstone deposits with Guam DRT)
-              total_employer_social_security: @payroll_items.sum(:employer_social_security_tax),
-              total_employer_medicare: @payroll_items.sum(:employer_medicare_tax),
-              total_employer_taxes: @payroll_items.sum(:employer_social_security_tax) + @payroll_items.sum(:employer_medicare_tax),
-              employee_count: @payroll_items.count
+              total_employer_social_security: reportable_items.sum(:employer_social_security_tax),
+              total_employer_medicare: reportable_items.sum(:employer_medicare_tax),
+              total_employer_taxes: reportable_items.sum(:employer_social_security_tax) + reportable_items.sum(:employer_medicare_tax),
+              employee_count: reportable_items.count
             }
           }
         end

@@ -70,6 +70,22 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
         expect(payload[:line_items].size).to eq(1)
       end
 
+      it "excludes voided payroll items" do
+        create(:payroll_item, :voided,
+          pay_period: pay_period,
+          employee: create(:employee, company: company, first_name: "Voided", last_name: "Worker"),
+          gross_pay: 175.00,
+          net_pay: 175.00,
+          withholding_tax: 0.00,
+          social_security_tax: 0.00,
+          medicare_tax: 0.00,
+          employer_social_security_tax: 0.00,
+          employer_medicare_tax: 0.00
+        )
+
+        expect(payload[:line_items].map { |item| item[:employee_name] }).to eq([ "John Doe" ])
+      end
+
       it "includes correct employee payroll data" do
         item = payload[:line_items].first
         expect(item[:employee_name]).to eq("John Doe")
@@ -97,6 +113,20 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
         totals = payload[:totals]
         expected = 300.0 + 148.8 + 34.8 + 148.8 + 34.8
         expect(totals[:total_tax_liability]).to eq(expected)
+      end
+
+      it "excludes voided payroll items from totals" do
+        create(:payroll_item, :voided,
+          pay_period: pay_period,
+          employee: create(:employee, company: company),
+          gross_pay: 175.00,
+          net_pay: 175.00,
+          withholding_tax: 0.00
+        )
+
+        expect(payload[:totals][:employee_count]).to eq(1)
+        expect(payload[:totals][:gross_pay]).to eq(2400.0)
+        expect(payload[:totals][:net_pay]).to eq(1800.0)
       end
     end
   end

@@ -89,6 +89,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
+                         .not_voided
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)
@@ -111,6 +112,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
+                         .not_voided
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)
@@ -591,7 +593,7 @@ module Api
           pp = find_pay_period_for_report
           return unless pp
 
-          items = pp.payroll_items.where(voided: false)
+          items = pp.payroll_items.not_voided
           check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
@@ -736,7 +738,7 @@ module Api
           saved = CheckSignoffSheet.find_by(pay_period_id: pp.id)
 
           items = pp.payroll_items
-            .where(voided: false)
+            .not_voided
             .joins("INNER JOIN employees ON employees.id = payroll_items.employee_id")
             .select("payroll_items.id, payroll_items.employee_id, payroll_items.check_number, employees.first_name, employees.last_name")
             .order("employees.last_name ASC, employees.first_name ASC")
@@ -944,7 +946,7 @@ module Api
             return [ nil, render(json: { error: "Pay period not found" }, status: :not_found) ]
           end
 
-          items = sorted_payroll_items(pay_period.payroll_items)
+          items = sorted_payroll_items(pay_period.payroll_items.not_voided)
           w2_items = items.reject { |i| i.employment_type == "contractor" }
           contractor_items = items.select { |i| i.employment_type == "contractor" }
 
@@ -1018,7 +1020,7 @@ module Api
             pay_periods = pay_periods.where(pay_date: start_date..end_date)
           end
 
-          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).where.not(employment_type: "contractor")
+          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).not_voided.where.not(employment_type: "contractor")
           employee_ss_total       = items.sum(:social_security_tax)
           employee_medicare_total = items.sum(:medicare_tax)
           employer_ss_total       = items.sum(:employer_social_security_tax)
@@ -1083,9 +1085,9 @@ module Api
             period_description: pp.period_description,
             pay_date: pp.pay_date,
             status: pp.status,
-            employee_count: pp.payroll_items.count,
-            total_gross: pp.payroll_items.sum(:gross_pay),
-            total_net: pp.payroll_items.sum(:net_pay)
+            employee_count: pp.payroll_items.not_voided.count,
+            total_gross: pp.payroll_items.not_voided.sum(:gross_pay),
+            total_net: pp.payroll_items.not_voided.sum(:net_pay)
           }
         end
 
@@ -1097,6 +1099,7 @@ module Api
 
           items = PayrollItem.joins(:pay_period)
                             .where(company_id: current_company_id)
+                            .not_voided
                             .where(pay_periods: {
                               id: reportable_period_ids
                             })
@@ -1128,8 +1131,8 @@ module Api
               id: pp.id,
               period_description: pp.period_description,
               pay_date: pp.pay_date,
-              employee_count: pp.payroll_items.count,
-              total_net: pp.payroll_items.sum(:net_pay)
+              employee_count: pp.payroll_items.not_voided.count,
+              total_net: pp.payroll_items.not_voided.sum(:net_pay)
             }
           end
         end
@@ -1210,29 +1213,28 @@ module Api
         end
 
         def employee_ytd_summary(employee, year = Date.current.year)
-          ytd = employee.ytd_totals_for(year)
           ytd_items = employee_reportable_ytd_items(employee, year)
           {
             year: year,
-            gross_pay: ytd.gross_pay,
+            gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
             custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
-            withholding_tax: ytd.withholding_tax,
-            social_security_tax: ytd.social_security_tax,
-            medicare_tax: ytd.medicare_tax,
-            retirement: ytd.retirement,
-            roth_retirement: ytd.roth_retirement,
-            tips: ytd.tips,
-            tips_paid_out: ytd.tips_paid_out,
-            bonus: ytd.bonus,
+            withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
+            retirement: ytd_items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: ytd_items.sum { |item| item.roth_retirement_payment.to_f },
+            tips: ytd_items.sum { |item| item.reported_tips.to_f },
+            tips_paid_out: ytd_items.sum { |item| item.tips_paid_out.to_f },
+            bonus: ytd_items.sum { |item| item.bonus.to_f },
             total_deductions: ytd_items.sum { |item| item.total_deductions.to_f },
             custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
-            net_pay: ytd.net_pay
+            net_pay: ytd_items.sum { |item| item.net_pay.to_f }
           }
         end
 
         def employee_ytd_row(employee, year, custom_totals = nil)
-          ytd = employee.employee_ytd_totals.find_by(year: year)
-          custom_totals ||= custom_ytd_totals_for_items(employee_reportable_ytd_items(employee, year))
+          ytd_items = employee_reportable_ytd_items(employee, year)
+          custom_totals ||= custom_ytd_totals_for_items(ytd_items)
 
           {
             employee_id: employee.id,
@@ -1241,19 +1243,19 @@ module Api
             name: employee.full_name,
             employment_type: employee.employment_type,
             status: employee.status,
-            gross_pay: ytd&.gross_pay || 0,
+            gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
             custom_earnings_total: custom_totals[:custom_earnings_total],
-            withholding_tax: ytd&.withholding_tax || 0,
-            social_security_tax: ytd&.social_security_tax || 0,
-            medicare_tax: ytd&.medicare_tax || 0,
-            retirement: ytd&.retirement || 0,
-            roth_retirement: ytd&.roth_retirement || 0,
-            tips: ytd&.tips || 0,
-            tips_paid_out: ytd&.tips_paid_out || 0,
-            bonus: ytd&.bonus || 0,
+            withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
+            retirement: ytd_items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: ytd_items.sum { |item| item.roth_retirement_payment.to_f },
+            tips: ytd_items.sum { |item| item.reported_tips.to_f },
+            tips_paid_out: ytd_items.sum { |item| item.tips_paid_out.to_f },
+            bonus: ytd_items.sum { |item| item.bonus.to_f },
             total_deductions: custom_totals[:total_deductions],
             custom_deductions_total: custom_totals[:custom_deductions_total],
-            net_pay: ytd&.net_pay || 0
+            net_pay: ytd_items.sum { |item| item.net_pay.to_f }
           }
         end
 
@@ -1286,7 +1288,7 @@ module Api
 
         def build_pay_period_payroll_items_report(pay_period)
           items = sorted_payroll_items(
-            pay_period.payroll_items.includes(
+            pay_period.payroll_items.not_voided.includes(
               :payroll_item_earnings,
               payroll_item_deductions: :deduction_type,
               employee: :department
@@ -1345,7 +1347,8 @@ module Api
 
           employee.payroll_items
                   .joins(:pay_period)
-                  .where(voided: false, company_id: current_company_id)
+                  .where(company_id: current_company_id)
+                  .not_voided
                   .where(pay_periods: { id: reportable_period_ids })
                   .to_a
         end
@@ -1357,7 +1360,8 @@ module Api
                                            .select(:id)
 
           PayrollItem.joins(:pay_period)
-                     .where(voided: false, company_id: current_company_id)
+                     .where(company_id: current_company_id)
+                     .not_voided
                      .where(pay_periods: { id: reportable_period_ids })
                      .select(:employee_id, :total_deductions, :custom_earnings, :custom_deductions)
                      .to_a

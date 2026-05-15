@@ -151,7 +151,7 @@ module Api
 
             items = selected_items
           else
-            items = base_items.where(voided: false).to_a
+            items = base_items.not_voided.to_a
           end
 
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
@@ -187,6 +187,7 @@ module Api
 
           items = employee.payroll_items
                          .includes(:pay_period)
+                         .not_voided
                          .where(pay_periods: {
                            id: PayPeriod.reportable_committed
                                         .where(company_id: employee.company_id)

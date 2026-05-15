@@ -61,11 +61,11 @@ RSpec.describe PayrollTaxSyncService, type: :service do
       end
     end
 
-    context "when pay period has no payroll items" do
+    context "when pay period has no reportable payroll items" do
       before { pay_period.payroll_items.destroy_all }
 
       it "raises SyncError" do
-        expect { service.sync! }.to raise_error(PayrollTaxSyncService::SyncError, /no payroll items/)
+        expect { service.sync! }.to raise_error(PayrollTaxSyncService::SyncError, /no reportable payroll items/)
       end
     end
 
