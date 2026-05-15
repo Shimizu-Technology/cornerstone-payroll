@@ -664,6 +664,43 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.overtime_hours).to eq(10)
     end
 
+    it "does not recreate employees excluded from this pay period during recalculation" do
+      contractor = Employee.create!(
+        company: company,
+        first_name: "Asia",
+        last_name: "Taylor",
+        email: "asia@example.com",
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "flat_fee",
+        pay_rate: 175.00,
+        pay_frequency: "biweekly",
+        status: "active",
+        hire_date: Date.today - 1.year
+      )
+      pay_period.payroll_items.create!(
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 8,
+        import_source: "mosa_revel"
+      )
+      PayPeriodExcludedEmployee.create!(
+        pay_period: pay_period,
+        employee: contractor,
+        excluded_by: admin_user,
+        reason: "Removed from pay period"
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll"
+
+      expect(response).to have_http_status(:ok)
+      pay_period.reload
+      expect(pay_period.payroll_items.where(employee_id: contractor.id)).not_to exist
+      expect(response.parsed_body.dig("pay_period", "excluded_employee_ids")).to include(contractor.id)
+    end
+
     it "stores YTD values as of the pay date and excludes later committed payroll" do
       pay_period.update!(
         start_date: Date.new(Date.today.year, 1, 1),

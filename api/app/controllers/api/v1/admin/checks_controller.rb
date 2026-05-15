@@ -36,7 +36,7 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:employee, :check_events)
+                             .includes(:check_events, employee: :department)
                              .left_outer_joins(:employee)
                              .with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
@@ -429,6 +429,10 @@ module Api
           [ :check_offset_x, :check_offset_y ].each do |key|
             next unless permitted.key?(key)
             value = permitted[key]
+            if value.blank?
+              permitted[key] = 0
+              next
+            end
             next if value.is_a?(Numeric)
             next if value.to_s.match?(/\A-?\d+(\.\d+)?\z/)
 
@@ -650,6 +654,8 @@ module Api
             pay_period_id: item.pay_period_id,
             employee_id: item.employee_id,
             employee_name: item.employee&.full_name,
+            department_id: item.employee&.department_id,
+            department_name: item.employee&.department&.name,
             check_number: item.check_number,
             net_pay: item.net_pay,
             gross_pay: item.gross_pay,
@@ -722,6 +728,10 @@ module Api
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
           elsif permitted[:check_layout_config].is_a?(Hash)
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
+          end
+
+          [ :check_offset_x, :check_offset_y ].each do |key|
+            permitted[key] = 0 if permitted.key?(key) && permitted[key].blank?
           end
 
           permitted

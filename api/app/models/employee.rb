@@ -35,6 +35,7 @@ class Employee < ApplicationRecord
   belongs_to :company
   belongs_to :department, optional: true
   has_many :payroll_items, dependent: :destroy
+  has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :employee_deductions, dependent: :destroy
   has_many :deduction_types, through: :employee_deductions
   has_many :employee_ytd_totals, dependent: :destroy

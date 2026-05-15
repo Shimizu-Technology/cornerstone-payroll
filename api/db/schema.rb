@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_14_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_16_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -712,6 +712,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_160000) do
     t.index ["resulting_pay_period_id"], name: "index_pay_period_correction_events_on_resulting_pay_period_id"
   end
 
+  create_table "pay_period_excluded_employees", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "excluded_by_id"
+    t.bigint "pay_period_id", null: false
+    t.string "reason"
+    t.datetime "updated_at", null: false
+    t.index ["employee_id"], name: "index_pay_period_excluded_employees_on_employee_id"
+    t.index ["excluded_by_id"], name: "index_pay_period_excluded_employees_on_excluded_by_id"
+    t.index ["pay_period_id", "employee_id"], name: "idx_pay_period_exclusions_on_period_employee", unique: true
+    t.index ["pay_period_id"], name: "index_pay_period_excluded_employees_on_pay_period_id"
+  end
+
   create_table "pay_periods", force: :cascade do |t|
     t.datetime "approved_at"
     t.bigint "approved_by_id"
@@ -1239,6 +1252,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_160000) do
   add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "users", column: "actor_id", on_delete: :nullify
+  add_foreign_key "pay_period_excluded_employees", "employees"
+  add_foreign_key "pay_period_excluded_employees", "pay_periods"
+  add_foreign_key "pay_period_excluded_employees", "users", column: "excluded_by_id"
   add_foreign_key "pay_periods", "companies"
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify

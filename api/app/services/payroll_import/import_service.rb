@@ -76,14 +76,24 @@ module PayrollImport
     # @param force_overwrite [Boolean] allow overwriting non-import existing payroll items
     # @return [Hash] results with success/error counts
     def apply!(matched:, force_overwrite: false)
-      results = { success: [], errors: [] }
+      results = { success: [], skipped: [], errors: [] }
 
       employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
       employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
+      excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
       ActiveRecord::Base.transaction do
         matched.each do |row|
           employee_id = row[:employee_id]
+          if excluded_employee_ids.include?(employee_id)
+            results[:skipped] << {
+              employee_id: employee_id,
+              name: employees_by_id[employee_id]&.full_name,
+              reason: "Excluded from this pay period"
+            }
+            next
+          end
+
           employee = employees_by_id[employee_id]
           next unless employee
 

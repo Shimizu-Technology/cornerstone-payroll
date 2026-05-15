@@ -19,6 +19,8 @@ class PayPeriod < ApplicationRecord
 
   belongs_to :company
   has_many :payroll_items, dependent: :destroy
+  has_many :pay_period_excluded_employees, dependent: :destroy
+  has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
   has_many :time_tracking_imports, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
