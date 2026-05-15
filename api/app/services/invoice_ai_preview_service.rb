@@ -69,6 +69,8 @@ class InvoiceAiPreviewService
       {
         "status": "preview" or "clarification_needed",
         "message": "short staff-facing summary or question",
+        "invoice_billing_profile_id": number or null,
+        "invoice_billing_profile_name": string or null,
         "invoice_recipient_id": number or null,
         "invoice_recipient_name": string or null,
         "new_recipient": {
@@ -98,10 +100,14 @@ class InvoiceAiPreviewService
         ]
       }
 
+      Billing profiles are invoice-from identities. Recipients are bill-to profiles. Do not mix them.
+      Use billing profile ids from the provided billing profile list when the staff asks to invoice from a specific identity; otherwise use the default billing profile.
       Use recipient ids from the provided recipient list when one matches.
-      If the staff asks for a client that is not in the recipient list and gives enough bill-to information to create it, set invoice_recipient_id to null and fill new_recipient.
-      If the recipient is unclear or required recipient details are missing, set invoice_recipient_id and new_recipient to null and ask a clarification question.
+      If the staff asks what clients, customers, or bill-to profiles are saved, answer using only the active invoice recipients, not billing profiles.
+      If the staff asks for a bill-to recipient that is not in the recipient list and gives at least the recipient name, set invoice_recipient_id to null and fill new_recipient. Email and billing address are helpful but optional.
+      If the bill-to recipient is unclear, set invoice_recipient_id and new_recipient to null and ask a clarification question.
       Use numeric quantity and rate values. Do not include currency symbols in numeric fields.
+      Only include payment_terms when the staff explicitly asks for terms or the current preview already has terms they did not ask to remove.
       If the staff is modifying an existing preview, preserve fields they did not ask to change.
       For hourly invoices, use quantity as hours and rate as the hourly rate. If an attachment shows total hours and total/net pay, derive the rate from total divided by hours when no explicit rate is supplied.
       Preserve service dates when supplied. For a date range with daily hourly entries, include each billable date as its own line item when the details are available.
@@ -117,7 +123,10 @@ class InvoiceAiPreviewService
       Staff user: #{user.name}
       Today: #{Date.current.iso8601}
 
-      Active invoice recipients:
+      Active invoice-from billing profiles:
+      #{billing_profile_context}
+
+      Active bill-to invoice recipients:
       #{recipient_context}
 
       Current session preview:
@@ -165,6 +174,25 @@ class InvoiceAiPreviewService
       .then { |rows| JSON.generate(rows) }
   end
 
+  def billing_profile_context
+    active_billing_profiles
+      .ordered
+      .map do |profile|
+        {
+          id: profile.id,
+          name: profile.name,
+          legal_name: profile.legal_name,
+          email: profile.email,
+          phone: profile.phone,
+          website: profile.website,
+          default_payment_terms: profile.default_payment_terms,
+          invoice_prefix: profile.invoice_prefix,
+          is_default: profile.is_default
+        }
+      end
+      .then { |rows| JSON.generate(rows) }
+  end
+
   def image_urls
     @image_urls
   end
@@ -175,6 +203,7 @@ class InvoiceAiPreviewService
 
   def normalize_preview(raw)
     recipient = resolve_recipient(raw)
+    billing_profile = resolve_billing_profile(raw)
     new_recipient = normalize_new_recipient(raw["new_recipient"], recipient)
     recipient_name = recipient&.name || new_recipient&.fetch("name", nil) || raw["invoice_recipient_name"].presence
     line_items = Array(raw["line_items"]).filter_map { |item| normalize_line_item(item) }
@@ -183,46 +212,93 @@ class InvoiceAiPreviewService
     {
       "status" => status,
       "message" => raw["message"].presence || default_message(recipient_name, line_items),
+      "invoice_billing_profile_id" => billing_profile&.id,
+      "invoice_billing_profile_name" => billing_profile&.name,
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient_name,
       "new_recipient" => new_recipient,
       "invoice_date" => normalize_date(raw["invoice_date"]) || Date.current.iso8601,
       "service_period_start" => normalize_date(raw["service_period_start"]),
       "service_period_end" => normalize_date(raw["service_period_end"]),
-      "payment_terms" => raw["payment_terms"].presence || recipient&.payment_terms || new_recipient&.fetch("payment_terms", nil),
+      "payment_terms" => raw["payment_terms"].presence,
       "notes" => raw["notes"].presence,
-      "email_subject" => raw["email_subject"].presence || email_subject_for(recipient_name),
-      "email_body" => raw["email_body"].presence || email_body_for(recipient_name),
+      "email_subject" => raw["email_subject"].presence || email_subject_for(recipient_name, billing_profile),
+      "email_body" => raw["email_body"].presence || email_body_for(recipient_name, billing_profile),
       "line_items" => line_items
     }
   end
 
   def fallback_preview
+    if asks_for_saved_recipients?
+      return saved_recipients_preview
+    end
+
     recipient = detect_recipient_from_message
+    billing_profile = detect_billing_profile_from_message || default_billing_profile
     line_items = detect_line_items_from_message(recipient)
     status = recipient && line_items.any? ? "preview" : "clarification_needed"
 
     {
       "status" => status,
       "message" => default_message(recipient&.name, line_items),
+      "invoice_billing_profile_id" => billing_profile&.id,
+      "invoice_billing_profile_name" => billing_profile&.name,
       "invoice_recipient_id" => recipient&.id,
       "invoice_recipient_name" => recipient&.name,
       "new_recipient" => nil,
       "invoice_date" => Date.current.iso8601,
       "service_period_start" => nil,
       "service_period_end" => nil,
-      "payment_terms" => recipient&.payment_terms,
+      "payment_terms" => nil,
       "notes" => nil,
-      "email_subject" => email_subject_for(recipient&.name),
-      "email_body" => email_body_for(recipient&.name),
+      "email_subject" => email_subject_for(recipient&.name, billing_profile),
+      "email_body" => email_body_for(recipient&.name, billing_profile),
       "line_items" => line_items
+    }
+  end
+
+  def asks_for_saved_recipients?
+    message.match?(/\b(clients?|customers?|recipients?|bill-to)\b/i) &&
+      message.match?(/\b(saved|list|have|available|existing)\b/i)
+  end
+
+  def saved_recipients_preview
+    names = active_recipients.order(:name).limit(RECIPIENT_CONTEXT_LIMIT).pluck(:name)
+    message_text = if names.any?
+      "Saved bill-to recipients: #{names.join(', ')}."
+    else
+      "No saved bill-to recipients yet."
+    end
+
+    {
+      "status" => "clarification_needed",
+      "message" => message_text,
+      "invoice_billing_profile_id" => default_billing_profile&.id,
+      "invoice_billing_profile_name" => default_billing_profile&.name,
+      "invoice_recipient_id" => nil,
+      "invoice_recipient_name" => nil,
+      "new_recipient" => nil,
+      "invoice_date" => Date.current.iso8601,
+      "service_period_start" => nil,
+      "service_period_end" => nil,
+      "payment_terms" => nil,
+      "notes" => nil,
+      "email_subject" => nil,
+      "email_body" => nil,
+      "line_items" => []
     }
   end
 
   def resolve_recipient(raw)
     recipient_id = raw["invoice_recipient_id"].presence
-    recipient = InvoiceRecipient.find_by(id: recipient_id, company_id: company.id, active: true) if recipient_id
+    recipient = InvoiceRecipient.find_by(id: recipient_id, organization_id: company.organization_id, active: true) if recipient_id
     recipient || detect_recipient_from_name(raw["invoice_recipient_name"])
+  end
+
+  def resolve_billing_profile(raw)
+    profile_id = raw["invoice_billing_profile_id"].presence
+    profile = InvoiceBillingProfile.find_by(id: profile_id, organization_id: company.organization_id, active: true) if profile_id
+    profile || detect_billing_profile_from_name(raw["invoice_billing_profile_name"]) || detect_billing_profile_from_message || default_billing_profile
   end
 
   def normalize_new_recipient(raw, existing_recipient)
@@ -247,6 +323,10 @@ class InvoiceAiPreviewService
     detect_recipient_from_name(message)
   end
 
+  def detect_billing_profile_from_message
+    detect_billing_profile_from_name(message)
+  end
+
   def detect_recipient_from_name(text)
     return nil if text.blank?
 
@@ -256,8 +336,25 @@ class InvoiceAiPreviewService
     end
   end
 
+  def detect_billing_profile_from_name(text)
+    return nil if text.blank?
+
+    normalized = text.downcase
+    active_billing_profiles.ordered.find do |profile|
+      normalized.include?(profile.name.downcase)
+    end
+  end
+
   def active_recipients
-    InvoiceRecipient.where(company_id: company.id, active: true)
+    InvoiceRecipient.where(organization_id: company.organization_id, active: true)
+  end
+
+  def active_billing_profiles
+    InvoiceBillingProfile.where(organization_id: company.organization_id, active: true)
+  end
+
+  def default_billing_profile
+    active_billing_profiles.order(Arel.sql("is_default DESC"), :id).first
   end
 
   def detect_line_items_from_message(recipient)
@@ -331,16 +428,16 @@ class InvoiceAiPreviewService
     "Which active invoice recipient should this be billed to?"
   end
 
-  def email_subject_for(recipient_name)
+  def email_subject_for(recipient_name, billing_profile)
     return nil if recipient_name.blank?
 
-    "Invoice from #{company.name}"
+    "Invoice from #{billing_profile&.name || company.name}"
   end
 
-  def email_body_for(recipient_name)
+  def email_body_for(recipient_name, billing_profile)
     return nil if recipient_name.blank?
 
-    "Hi #{recipient_name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{company.name}"
+    "Hi #{recipient_name},\n\nPlease find the attached invoice for your records.\n\nThank you,\n#{billing_profile&.name || company.name}"
   end
 
   def api_key

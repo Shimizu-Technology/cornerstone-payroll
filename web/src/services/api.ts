@@ -2251,8 +2251,29 @@ export const generalTransmittalsApi = {
 export type InvoiceStatus = 'draft' | 'generated' | 'sent' | 'paid' | 'voided' | 'archived';
 export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
 
+export interface InvoiceBillingProfile {
+  id: number;
+  organization_id: number;
+  name: string;
+  legal_name?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  payment_instructions?: string | null;
+  default_payment_terms?: string | null;
+  invoice_prefix?: string | null;
+  remit_to?: string | null;
+  footer_note?: string | null;
+  active: boolean;
+  is_default: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface InvoiceRecipient {
   id: number;
+  organization_id: number;
   company_id: number;
   name: string;
   email?: string | null;
@@ -2281,9 +2302,12 @@ export interface InvoiceLineItem {
 
 export interface Invoice {
   id: number;
+  organization_id: number;
   company_id: number;
   invoice_recipient_id: number;
+  invoice_billing_profile_id: number;
   recipient_name?: string | null;
+  billing_profile_name?: string | null;
   invoice_number: string;
   invoice_date: string;
   service_period_start?: string | null;
@@ -2304,6 +2328,8 @@ export interface Invoice {
   updated_by_id?: number | null;
   updated_by_name?: string | null;
   line_item_count: number;
+  has_snapshot?: boolean;
+  invoice_billing_profile?: InvoiceBillingProfile | null;
   invoice_recipient?: InvoiceRecipient | null;
   line_items?: InvoiceLineItem[];
   created_at: string;
@@ -2324,6 +2350,7 @@ export interface InvoiceRecipientPayload {
 
 export interface InvoicePayload {
   invoice_recipient_id: number;
+  invoice_billing_profile_id?: number;
   invoice_number?: string | null;
   invoice_date: string;
   service_period_start?: string | null;
@@ -2338,9 +2365,27 @@ export interface InvoicePayload {
   }>;
 }
 
+export interface InvoiceBillingProfilePayload {
+  name: string;
+  legal_name?: string | null;
+  website?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  payment_instructions?: string | null;
+  default_payment_terms?: string | null;
+  invoice_prefix?: string | null;
+  remit_to?: string | null;
+  footer_note?: string | null;
+  active?: boolean;
+  is_default?: boolean;
+}
+
 export interface InvoiceAiPreview {
   status: 'preview' | 'clarification_needed';
   message?: string | null;
+  invoice_billing_profile_id?: number | null;
+  invoice_billing_profile_name?: string | null;
   invoice_recipient_id?: number | null;
   invoice_recipient_name?: string | null;
   new_recipient?: {
@@ -2408,6 +2453,19 @@ export const invoiceRecipientsApi = {
     api.patch<{ invoice_recipient: InvoiceRecipient }>(`/admin/invoice_recipients/${id}`, { invoice_recipient: data }),
   delete: (id: number) =>
     api.delete<{ message: string; invoice_recipient?: InvoiceRecipient }>(`/admin/invoice_recipients/${id}`),
+};
+
+export const invoiceBillingProfilesApi = {
+  list: (params?: { active?: boolean }) =>
+    api.get<{ invoice_billing_profiles: InvoiceBillingProfile[] }>('/admin/invoice_billing_profiles', params),
+  get: (id: number) =>
+    api.get<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`),
+  create: (data: InvoiceBillingProfilePayload) =>
+    api.post<{ invoice_billing_profile: InvoiceBillingProfile }>('/admin/invoice_billing_profiles', { invoice_billing_profile: data }),
+  update: (id: number, data: InvoiceBillingProfilePayload) =>
+    api.patch<{ invoice_billing_profile: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`, { invoice_billing_profile: data }),
+  delete: (id: number) =>
+    api.delete<{ message: string; invoice_billing_profile?: InvoiceBillingProfile }>(`/admin/invoice_billing_profiles/${id}`),
 };
 
 export const invoicesApi = {

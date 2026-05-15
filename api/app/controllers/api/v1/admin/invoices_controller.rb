@@ -8,8 +8,8 @@ module Api
 
         def index
           invoices = Invoice
-            .where(company_id: current_company_id)
-            .includes(:invoice_recipient, :line_items, :created_by, :updated_by)
+            .where(organization_id: current_organization_id)
+            .includes(:invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by)
             .recent
 
           invoices = invoices.where(status: params[:status]) if params[:status].present?
@@ -25,6 +25,7 @@ module Api
 
         def create
           invoice = Invoice.new(invoice_attributes)
+          invoice.organization_id = current_organization_id
           invoice.company_id = current_company_id
           invoice.created_by = current_user
           invoice.updated_by = current_user
@@ -60,6 +61,7 @@ module Api
             @invoice.paid_at = nil
             @invoice.voided_at = nil
             @invoice.archived_at = nil
+            @invoice.snapshot = {}
           end
           assign_line_items!(@invoice)
 
@@ -94,7 +96,8 @@ module Api
         def preview_pdf
           return unless ensure_line_items_for_pdf!
 
-          generator = InvoicePdfGenerator.new(@invoice)
+          snapshot = @invoice.draft? ? @invoice.draft_snapshot(actor: current_user) : nil
+          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -106,10 +109,10 @@ module Api
         def generate_pdf
           return unless ensure_line_items_for_pdf!
 
-          generator = InvoicePdfGenerator.new(@invoice)
+          snapshot = @invoice.draft? ? @invoice.generated_snapshot(actor: current_user) : nil
+          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
           pdf_content = generator.generate
-
-          @invoice.mark_generated!(actor: current_user) if @invoice.draft?
+          @invoice.mark_generated!(actor: current_user, snapshot: snapshot) if @invoice.draft?
           send_data pdf_content,
             filename: generator.filename,
             type: "application/pdf",
@@ -124,8 +127,8 @@ module Api
 
         def set_invoice
           @invoice = Invoice
-            .includes(:invoice_recipient, :line_items, :created_by, :updated_by)
-            .find_by(id: params[:id], company_id: current_company_id)
+            .includes(:invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by)
+            .find_by(id: params[:id], organization_id: current_organization_id)
           return if @invoice
 
           render json: { error: "Invoice not found" }, status: :not_found
@@ -134,6 +137,7 @@ module Api
         def invoice_attributes
           raw = params.require(:invoice).permit(
             :invoice_recipient_id,
+            :invoice_billing_profile_id,
             :invoice_number,
             :invoice_date,
             :service_period_start,
@@ -145,11 +149,17 @@ module Api
           )
 
           if raw[:invoice_recipient_id].present?
-            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], company_id: current_company_id)
+            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], organization_id: current_organization_id)
             raise ArgumentError, "Invoice recipient not found" unless recipient
             if inactive_new_recipient?(recipient)
               raise ArgumentError, "Invoice recipient is archived"
             end
+          end
+
+          if raw[:invoice_billing_profile_id].present?
+            profile = InvoiceBillingProfile.find_by(id: raw[:invoice_billing_profile_id], organization_id: current_organization_id)
+            raise ArgumentError, "Invoice billing profile not found" unless profile
+            raise ArgumentError, "Invoice billing profile is archived" unless profile.active? || defined?(@invoice) && @invoice&.invoice_billing_profile_id == profile.id
           end
 
           raw
@@ -229,9 +239,12 @@ module Api
         def invoice_payload(invoice, detailed: false)
           payload = {
             id: invoice.id,
+            organization_id: invoice.organization_id,
             company_id: invoice.company_id,
             invoice_recipient_id: invoice.invoice_recipient_id,
+            invoice_billing_profile_id: invoice.invoice_billing_profile_id,
             recipient_name: invoice.invoice_recipient&.name,
+            billing_profile_name: invoice.invoice_billing_profile&.name,
             invoice_number: invoice.invoice_number,
             invoice_date: invoice.invoice_date,
             service_period_start: invoice.service_period_start,
@@ -248,6 +261,7 @@ module Api
             updated_by_id: invoice.updated_by_id,
             updated_by_name: invoice.updated_by&.name,
             line_item_count: invoice.line_items.size,
+            has_snapshot: invoice.snapshot.present?,
             created_at: invoice.created_at,
             updated_at: invoice.updated_at
           }
@@ -258,6 +272,7 @@ module Api
               payment_terms: invoice.payment_terms,
               email_subject: invoice.email_subject,
               email_body: invoice.email_body,
+              invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
               invoice_recipient: recipient_payload(invoice.invoice_recipient),
               line_items: invoice.line_items.map { |item| line_item_payload(item) }
             )
@@ -271,6 +286,7 @@ module Api
 
           {
             id: recipient.id,
+            organization_id: recipient.organization_id,
             company_id: recipient.company_id,
             name: recipient.name,
             email: recipient.email,
@@ -281,6 +297,28 @@ module Api
             template_type: recipient.template_type,
             notes: recipient.notes,
             active: recipient.active
+          }
+        end
+
+        def billing_profile_payload(profile)
+          return nil unless profile
+
+          {
+            id: profile.id,
+            organization_id: profile.organization_id,
+            name: profile.name,
+            legal_name: profile.legal_name,
+            website: profile.website,
+            phone: profile.phone,
+            email: profile.email,
+            address: profile.address,
+            payment_instructions: profile.payment_instructions,
+            default_payment_terms: profile.default_payment_terms,
+            invoice_prefix: profile.invoice_prefix,
+            remit_to: profile.remit_to,
+            footer_note: profile.footer_note,
+            active: profile.active,
+            is_default: profile.is_default
           }
         end
 

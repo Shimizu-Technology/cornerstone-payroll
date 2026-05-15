@@ -12,7 +12,9 @@ class Invoice < ApplicationRecord
   }.freeze
 
   belongs_to :company
+  belongs_to :organization
   belongs_to :invoice_recipient
+  belongs_to :invoice_billing_profile
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :updated_by, class_name: "User", optional: true
 
@@ -25,14 +27,18 @@ class Invoice < ApplicationRecord
   accepts_nested_attributes_for :line_items, allow_destroy: true
 
   before_validation :normalize_blanks
+  before_validation :default_organization_from_company
+  before_validation :default_billing_profile
   before_validation :assign_invoice_number, on: :create
   before_validation :sync_total_amount
 
-  validates :invoice_number, presence: true, uniqueness: { scope: :company_id }
+  validates :invoice_number, presence: true, uniqueness: { scope: :invoice_billing_profile_id }
   validates :invoice_date, presence: true
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :total_amount, numericality: { greater_than_or_equal_to: 0 }
-  validate :recipient_must_belong_to_company
+  validate :recipient_must_belong_to_organization
+  validate :billing_profile_must_belong_to_organization
+  validate :company_must_belong_to_organization
   validate :must_have_line_items, if: :finalized_status?
 
   scope :recent, -> { order(invoice_date: :desc, created_at: :desc) }
@@ -65,12 +71,25 @@ class Invoice < ApplicationRecord
     %w[generated sent paid voided archived].include?(status)
   end
 
-  def mark_generated!(actor:)
+  SNAPSHOT_VERSION = 1
+
+  def mark_generated!(actor:, snapshot: nil)
+    snapshot_payload = snapshot.presence || generated_snapshot(actor: actor)
     update!(
       status: "generated",
-      generated_at: Time.current,
-      updated_by: actor
+      generated_at: snapshot_payload["generated_at"],
+      updated_by: actor,
+      snapshot: snapshot_payload,
+      snapshot_version: SNAPSHOT_VERSION
     )
+  end
+
+  def draft_snapshot(actor: nil)
+    build_snapshot(actor: actor)
+  end
+
+  def generated_snapshot(actor:)
+    build_snapshot(actor: actor, status: "generated")
   end
 
   def update_status!(next_status, actor:)
@@ -82,7 +101,16 @@ class Invoice < ApplicationRecord
 
     case next_status
     when "draft"
-      update!(status: "draft", generated_at: nil, sent_at: nil, paid_at: nil, voided_at: nil, archived_at: nil, updated_by: actor)
+      update!(
+        status: "draft",
+        generated_at: nil,
+        sent_at: nil,
+        paid_at: nil,
+        voided_at: nil,
+        archived_at: nil,
+        updated_by: actor,
+        snapshot: {}
+      )
     when "generated"
       mark_generated!(actor: actor)
     when "sent"
@@ -112,15 +140,15 @@ class Invoice < ApplicationRecord
 
   def assign_invoice_number
     return if invoice_number.present?
-    return unless company&.persisted?
+    return unless invoice_billing_profile&.persisted?
 
-    company.with_lock do
-      prefix = invoice_recipient&.invoice_prefix.presence || "INV"
-      next_number = self.class.where(company_id: company_id).count + 1
+    invoice_billing_profile.with_lock do
+      prefix = invoice_billing_profile.invoice_prefix.presence || invoice_recipient&.invoice_prefix.presence || "INV"
+      next_number = self.class.where(invoice_billing_profile_id: invoice_billing_profile_id).count + 1
 
       loop do
         candidate = "#{prefix}-#{Time.current.year}-#{next_number.to_s.rjust(4, '0')}"
-        unless self.class.exists?(company_id: company_id, invoice_number: candidate)
+        unless self.class.exists?(invoice_billing_profile_id: invoice_billing_profile_id, invoice_number: candidate)
           self.invoice_number = candidate
           break
         end
@@ -135,11 +163,35 @@ class Invoice < ApplicationRecord
     end
   end
 
-  def recipient_must_belong_to_company
-    return if invoice_recipient.blank? || company_id.blank?
-    return if invoice_recipient.company_id == company_id
+  def default_organization_from_company
+    self.organization ||= company&.organization
+  end
 
-    errors.add(:invoice_recipient, "must belong to the same company")
+  def default_billing_profile
+    return if invoice_billing_profile.present? || organization.blank?
+
+    self.invoice_billing_profile = InvoiceBillingProfile.ensure_default_for!(organization)
+  end
+
+  def recipient_must_belong_to_organization
+    return if invoice_recipient.blank? || organization_id.blank?
+    return if invoice_recipient.organization_id == organization_id
+
+    errors.add(:invoice_recipient, "must belong to the same organization")
+  end
+
+  def billing_profile_must_belong_to_organization
+    return if invoice_billing_profile.blank? || organization_id.blank?
+    return if invoice_billing_profile.organization_id == organization_id
+
+    errors.add(:invoice_billing_profile, "must belong to the same organization")
+  end
+
+  def company_must_belong_to_organization
+    return if company.blank? || organization_id.blank?
+    return if company.organization_id == organization_id
+
+    errors.add(:company, "must belong to the same organization")
   end
 
   def finalized_status?
@@ -150,5 +202,66 @@ class Invoice < ApplicationRecord
     return if line_items.reject(&:marked_for_destruction?).any?
 
     errors.add(:line_items, "must include at least one line item")
+  end
+
+  def build_snapshot(actor:, status: self.status, generated_at: Time.current)
+    {
+      "version" => SNAPSHOT_VERSION,
+      "generated_at" => generated_at.iso8601,
+      "generated_by" => actor && { "id" => actor.id, "name" => actor.name, "email" => actor.email },
+      "invoice" => {
+        "id" => id,
+        "invoice_number" => invoice_number,
+        "invoice_date" => invoice_date&.iso8601,
+        "service_period_start" => service_period_start&.iso8601,
+        "service_period_end" => service_period_end&.iso8601,
+        "status" => status,
+        "payment_terms" => payment_terms,
+        "notes" => notes,
+        "email_subject" => email_subject,
+        "email_body" => email_body,
+        "total_amount" => total_amount.to_s
+      },
+      "billing_profile" => billing_profile_snapshot,
+      "recipient" => recipient_snapshot,
+      "line_items" => line_items.reject(&:marked_for_destruction?).sort_by { |item| [ item.position.to_i, item.id.to_i ] }.map do |item|
+        {
+          "description" => item.description,
+          "quantity" => item.quantity.to_s,
+          "rate" => item.rate.to_s,
+          "amount" => item.amount.to_s,
+          "service_date" => item.service_date&.iso8601,
+          "position" => item.position
+        }
+      end
+    }
+  end
+
+  def billing_profile_snapshot
+    profile = invoice_billing_profile
+    {
+      "id" => profile&.id,
+      "name" => profile&.name,
+      "legal_name" => profile&.legal_name,
+      "website" => profile&.website,
+      "phone" => profile&.phone,
+      "email" => profile&.email,
+      "address" => profile&.address,
+      "payment_instructions" => profile&.payment_instructions,
+      "default_payment_terms" => profile&.default_payment_terms,
+      "remit_to" => profile&.remit_to,
+      "footer_note" => profile&.footer_note
+    }
+  end
+
+  def recipient_snapshot
+    recipient = invoice_recipient
+    {
+      "id" => recipient&.id,
+      "name" => recipient&.name,
+      "email" => recipient&.email,
+      "address" => recipient&.address,
+      "payment_terms" => recipient&.payment_terms
+    }
   end
 end

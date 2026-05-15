@@ -6,26 +6,30 @@ require "prawn/table"
 class InvoicePdfGenerator
   include ActionView::Helpers::NumberHelper
 
-  PAGE_MARGIN = 54
+  PAGE_MARGIN = 48
+  INK = "111827"
+  MUTED = "6B7280"
+  LINE = "D1D5DB"
+  PANEL = "F8FAFC"
+  ACCENT = "0F766E"
 
-  def initialize(invoice)
+  def initialize(invoice, snapshot: nil)
     @invoice = invoice
-    @company = invoice.company
-    @recipient = invoice.invoice_recipient
+    @snapshot = snapshot.presence || invoice.snapshot.presence || invoice.draft_snapshot
   end
 
   def filename
-    number = @invoice.invoice_number.to_s.parameterize.presence || "invoice"
+    number = invoice_data["invoice_number"].to_s.parameterize.presence || "invoice"
     "invoice-#{number}.pdf"
   end
 
   def generate
     Prawn::Document.new(page_size: "LETTER", margin: PAGE_MARGIN) do |pdf|
-      header(pdf)
+      letterhead(pdf)
+      invoice_title(pdf)
       parties(pdf)
-      invoice_meta(pdf)
       line_items(pdf)
-      totals(pdf)
+      totals_and_payment(pdf)
       notes(pdf)
       footer(pdf)
     end.render
@@ -33,46 +37,93 @@ class InvoicePdfGenerator
 
   private
 
-  def header(pdf)
-    pdf.fill_color "111827"
-    pdf.text "INVOICE", size: 28, style: :bold
-    pdf.move_down 8
-    pdf.fill_color "4B5563"
-    pdf.text @company.name.to_s, size: 12, style: :bold
-    company_lines.each { |line| pdf.text line, size: 9 }
-    pdf.fill_color "000000"
+  attr_reader :snapshot
+
+  def invoice_data
+    snapshot.fetch("invoice", {})
+  end
+
+  def billing
+    snapshot.fetch("billing_profile", {})
+  end
+
+  def recipient
+    snapshot.fetch("recipient", {})
+  end
+
+  def line_item_rows
+    Array(snapshot["line_items"])
+  end
+
+  def letterhead(pdf)
+    pdf.fill_color INK
+    pdf.text billing["legal_name"].presence || billing["name"].to_s, size: 17, style: :bold
+    pdf.move_down 4
+    pdf.fill_color MUTED
+    contact_lines.each { |line| pdf.text line, size: 8.5 }
+    pdf.fill_color INK
+
+    pdf.stroke_color LINE
+    pdf.line_width 0.75
+    pdf.stroke_horizontal_rule
+    pdf.move_down 20
+  end
+
+  def invoice_title(pdf)
+    y = pdf.cursor
+    pdf.bounding_box([ pdf.bounds.left, y ], width: 240, height: 76) do
+      pdf.fill_color INK
+      pdf.text "INVOICE", size: 30, style: :bold
+      pdf.move_down 3
+      pdf.fill_color ACCENT
+      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 11, style: :bold
+      pdf.fill_color INK
+    end
+
+    rows = [
+      [ "Invoice Date", format_date(invoice_data["invoice_date"]) ],
+      [ "Service Period", service_period ],
+      [ "Status", invoice_data["status"].to_s.titleize.presence || "Draft" ]
+    ].reject { |_label, value| value.blank? }
+
+    pdf.bounding_box([ pdf.bounds.right - 250, y ], width: 250) do
+      pdf.table(rows, width: 250, cell_style: { size: 9, padding: [ 6, 8 ], border_color: "E5E7EB" }) do
+        columns(0).font_style = :bold
+        columns(0).text_color = "374151"
+        columns(0).width = 95
+        columns(1).width = 155
+      end
+    end
+
+    pdf.move_cursor_to(y - 92)
   end
 
   def parties(pdf)
-    pdf.move_down 28
-    bill_to = ([ "Bill To", @recipient.name ] + @recipient.address.to_s.split("\n") + [ @recipient.email ]).compact_blank.join("\n")
-    from = ([ "From", @company.name ] + company_lines).compact_blank.join("\n")
+    bill_to = labeled_block("Bill To", [
+      recipient["name"],
+      *recipient["address"].to_s.split("\n"),
+      recipient["email"]
+    ])
+    remit_to = labeled_block("Remit To", [
+      billing["remit_to"].presence || billing["legal_name"].presence || billing["name"],
+      *billing["address"].to_s.split("\n"),
+      billing["email"],
+      billing["phone"]
+    ])
 
-    pdf.table([[ bill_to, from ]], cell_style: { borders: [], padding: [ 0, 8, 0, 0 ], size: 10 }) do
-      columns(0).width = 240
-      columns(1).width = 240
+    pdf.table([[ bill_to, remit_to ]], width: pdf.bounds.width, cell_style: { borders: [], padding: [ 0, 16, 0, 0 ], size: 10 }) do
+      columns(0).width = pdf.bounds.width / 2
+      columns(1).width = pdf.bounds.width / 2
     end
+    pdf.move_down 22
   end
 
-  def invoice_meta(pdf)
-    pdf.move_down 24
-    rows = [
-      [ "Invoice #", @invoice.invoice_number ],
-      [ "Invoice Date", format_date(@invoice.invoice_date) ],
-      [ "Service Period", service_period ],
-      [ "Status", @invoice.status.titleize ]
-    ].reject { |_label, value| value.blank? }
-
-    pdf.table(rows, width: pdf.bounds.width, cell_style: { size: 10, padding: [ 6, 8 ], border_color: "E5E7EB" }) do
-      columns(0).font_style = :bold
-      columns(0).text_color = "374151"
-      columns(0).width = 130
-      columns(1).width = pdf.bounds.width - 130
-    end
+  def labeled_block(label, lines)
+    body = lines.compact_blank.join("\n")
+    "#{label.upcase}\n#{body}"
   end
 
   def line_items(pdf)
-    pdf.move_down 24
     rows = [
       [
         { content: "Description", font_style: :bold },
@@ -83,89 +134,125 @@ class InvoicePdfGenerator
       ]
     ]
 
-    @invoice.line_items.each do |item|
+    line_item_rows.each do |item|
       rows << [
-        item.description,
-        format_date(item.service_date),
-        format_decimal(item.quantity),
-        money(item.rate),
-        money(item.amount)
+        item["description"].to_s,
+        format_date(item["service_date"]),
+        format_decimal(item["quantity"]),
+        money(item["rate"]),
+        money(item["amount"])
       ]
     end
 
-    pdf.table(rows, header: true, width: line_items_table_width, cell_style: { size: 9, padding: [ 8, 7 ], border_color: "E5E7EB" }) do
-      row(0).background_color = "F3F4F6"
-      row(0).text_color = "111827"
-      columns(0).width = 206
-      columns(1).width = 74
-      columns(2).width = 52
-      columns(3).width = 78
-      columns(4).width = 80
+    table_width = pdf.bounds.width
+    date_width = 74
+    quantity_width = 52
+    rate_width = 78
+    amount_width = 80
+
+    pdf.table(rows, header: true, width: table_width, cell_style: { size: 9, padding: [ 9, 8 ], border_color: "E5E7EB" }) do
+      row(0).background_color = "ECFDF5"
+      row(0).text_color = "064E3B"
+      columns(0).width = table_width - date_width - quantity_width - rate_width - amount_width
+      columns(1).width = date_width
+      columns(2).width = quantity_width
+      columns(3).width = rate_width
+      columns(4).width = amount_width
       columns(2..4).align = :right
     end
   end
 
-  def totals(pdf)
-    pdf.move_down 12
-    pdf.bounding_box([ pdf.bounds.right - 180, pdf.cursor ], width: 180) do
-      pdf.table([[ "Total", money(@invoice.total_amount) ]], width: 180, cell_style: { size: 12, padding: [ 8, 8 ], border_color: "D1D5DB" }) do
-        columns(0).font_style = :bold
+  def totals_and_payment(pdf)
+    pdf.move_down 14
+    total = money(invoice_data["total_amount"])
+    payment_text = visible_payment_instructions
+    terms = invoice_data["payment_terms"].presence
+
+    if payment_text.present? || terms.present?
+      pdf.table(
+        [[
+          { content: payment_block(payment_text, terms) },
+          { content: "Total Due\n#{total}", align: :right }
+        ]],
+        width: pdf.bounds.width,
+        cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10 }
+      ) do
+        columns(0).width = pdf.bounds.width - 180
+        columns(1).width = 180
+        columns(0).background_color = PANEL
+        columns(1).background_color = "F0FDFA"
         columns(1).font_style = :bold
-        columns(1).align = :right
+      end
+    else
+      pdf.bounding_box([ pdf.bounds.right - 180, pdf.cursor ], width: 180) do
+        pdf.table([[ { content: "Total Due\n#{total}", align: :right } ]], width: 180, cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10, background_color: "F0FDFA", font_style: :bold })
       end
     end
+  end
+
+  def payment_block(payment_text, terms)
+    parts = []
+    parts << "Payment Instructions\n#{payment_text}" if payment_text.present?
+    parts << "\nTerms\n#{terms}" if terms.present?
+    parts.join("\n")
+  end
+
+  def visible_payment_instructions
+    text = billing["payment_instructions"].to_s.strip.presence
+    return nil if text == "Please remit payment according to the instructions on this invoice."
+
+    text
   end
 
   def notes(pdf)
-    if @invoice.payment_terms.present?
-      pdf.move_down 28
-      pdf.fill_color "374151"
-      pdf.text "Payment Terms", size: 11, style: :bold
-      pdf.fill_color "111827"
-      pdf.text @invoice.payment_terms, size: 10
-    end
+    return if invoice_data["notes"].blank?
 
-    return if @invoice.notes.blank?
-
-    pdf.move_down 16
+    pdf.move_down 18
+    pdf.fill_color INK
+    pdf.text "Notes", size: 10, style: :bold
+    pdf.move_down 4
     pdf.fill_color "374151"
-    pdf.text "Notes", size: 11, style: :bold
-    pdf.fill_color "111827"
-    pdf.text @invoice.notes, size: 10
+    pdf.text invoice_data["notes"], size: 9, leading: 2
+    pdf.fill_color INK
   end
 
   def footer(pdf)
+    generated_at = snapshot["generated_at"].presence
+    note = billing["footer_note"].presence || "Generated by Cornerstone Payroll."
+    footer_text = [ note, generated_at && "Generated #{format_timestamp(generated_at)}" ].compact.join(" | ")
+
     pdf.repeat(:all) do
       pdf.bounding_box([ pdf.bounds.left, 24 ], width: pdf.bounds.width, height: 20) do
         pdf.fill_color "9CA3AF"
-        pdf.text "Generated by Cornerstone Payroll", size: 8, align: :center
-        pdf.fill_color "000000"
+        pdf.text footer_text, size: 8, align: :center
+        pdf.fill_color INK
       end
     end
   end
 
-  def line_items_table_width
-    490
-  end
-
-  def company_lines
+  def contact_lines
     [
-      @company.address_line1,
-      @company.address_line2,
-      [ @company.city, @company.state, @company.zip ].compact_blank.join(", ").presence,
-      @company.email,
-      @company.phone
-    ].compact_blank
+      billing["address"],
+      [ billing["phone"], billing["email"], billing["website"] ].compact_blank.join(" | ").presence
+    ].compact_blank.flat_map { |line| line.to_s.split("\n") }
   end
 
   def service_period
-    return nil if @invoice.service_period_start.blank? && @invoice.service_period_end.blank?
-
-    [ format_date(@invoice.service_period_start), format_date(@invoice.service_period_end) ].compact_blank.join(" - ")
+    [ format_date(invoice_data["service_period_start"]), format_date(invoice_data["service_period_end"]) ].compact_blank.join(" - ").presence
   end
 
   def format_date(value)
-    value&.strftime("%m/%d/%Y")
+    return nil if value.blank?
+
+    Date.parse(value.to_s).strftime("%m/%d/%Y")
+  rescue Date::Error
+    value.to_s
+  end
+
+  def format_timestamp(value)
+    Time.zone.parse(value.to_s).strftime("%m/%d/%Y %I:%M %p")
+  rescue ArgumentError
+    value.to_s
   end
 
   def format_decimal(value)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_14_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -495,6 +495,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
     t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'invoice_created'::character varying::text, 'archived'::character varying::text])", name: "check_invoice_chat_sessions_status"
   end
 
+  create_table "invoice_billing_profiles", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.text "address"
+    t.datetime "created_at", null: false
+    t.text "default_payment_terms"
+    t.string "email"
+    t.text "footer_note"
+    t.boolean "is_default", default: false, null: false
+    t.string "invoice_prefix"
+    t.string "legal_name"
+    t.string "name", null: false
+    t.bigint "organization_id", null: false
+    t.text "payment_instructions"
+    t.string "phone"
+    t.string "remit_to"
+    t.datetime "updated_at", null: false
+    t.string "website"
+    t.index ["organization_id", "is_default"], name: "index_invoice_billing_profiles_one_default_per_org", unique: true, where: "(is_default = true)"
+    t.index ["organization_id", "name"], name: "index_invoice_billing_profiles_on_organization_id_and_name", unique: true
+    t.index ["organization_id"], name: "index_invoice_billing_profiles_on_organization_id"
+  end
+
   create_table "invoice_line_items", force: :cascade do |t|
     t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "created_at", null: false
@@ -519,11 +541,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
     t.string "invoice_prefix"
     t.string "name", null: false
     t.text "notes"
+    t.bigint "organization_id", null: false
     t.text "payment_terms"
     t.string "template_type", default: "standard", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "name"], name: "index_invoice_recipients_on_company_id_and_name"
     t.index ["company_id"], name: "index_invoice_recipients_on_company_id"
+    t.index ["organization_id", "name"], name: "index_invoice_recipients_on_org_name"
+    t.index ["organization_id"], name: "index_invoice_recipients_on_organization_id"
   end
 
   create_table "invoices", force: :cascade do |t|
@@ -534,26 +559,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
     t.text "email_body"
     t.string "email_subject"
     t.datetime "generated_at"
+    t.bigint "invoice_billing_profile_id", null: false
     t.date "invoice_date", null: false
     t.string "invoice_number", null: false
     t.bigint "invoice_recipient_id", null: false
     t.text "notes"
+    t.bigint "organization_id", null: false
     t.datetime "paid_at"
     t.text "payment_terms"
     t.datetime "sent_at"
     t.date "service_period_end"
     t.date "service_period_start"
+    t.jsonb "snapshot", default: {}, null: false
+    t.integer "snapshot_version", default: 1, null: false
     t.string "status", default: "draft", null: false
     t.decimal "total_amount", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
     t.datetime "voided_at"
     t.index ["company_id", "invoice_date"], name: "index_invoices_on_company_id_and_invoice_date"
-    t.index ["company_id", "invoice_number"], name: "index_invoices_on_company_id_and_invoice_number", unique: true
     t.index ["company_id", "status"], name: "index_invoices_on_company_id_and_status"
     t.index ["company_id"], name: "index_invoices_on_company_id"
     t.index ["created_by_id"], name: "index_invoices_on_created_by_id"
+    t.index ["invoice_billing_profile_id", "invoice_number"], name: "index_invoices_on_billing_profile_invoice_number", unique: true
+    t.index ["invoice_billing_profile_id"], name: "index_invoices_on_invoice_billing_profile_id"
     t.index ["invoice_recipient_id"], name: "index_invoices_on_invoice_recipient_id"
+    t.index ["organization_id", "invoice_date"], name: "index_invoices_on_org_invoice_date"
+    t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
+    t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text, 'sent'::character varying::text, 'paid'::character varying::text, 'voided'::character varying::text, 'archived'::character varying::text])", name: "check_invoices_status"
   end
@@ -1182,10 +1215,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_110000) do
   add_foreign_key "invoice_chat_sessions", "invoices"
   add_foreign_key "invoice_chat_sessions", "users", column: "created_by_id"
   add_foreign_key "invoice_chat_sessions", "users", column: "updated_by_id"
+  add_foreign_key "invoice_billing_profiles", "organizations"
   add_foreign_key "invoice_line_items", "invoices"
   add_foreign_key "invoice_recipients", "companies"
+  add_foreign_key "invoice_recipients", "organizations"
   add_foreign_key "invoices", "companies"
+  add_foreign_key "invoices", "invoice_billing_profiles"
   add_foreign_key "invoices", "invoice_recipients"
+  add_foreign_key "invoices", "organizations"
   add_foreign_key "invoices", "users", column: "created_by_id"
   add_foreign_key "invoices", "users", column: "updated_by_id"
   add_foreign_key "loan_transactions", "employee_loans"

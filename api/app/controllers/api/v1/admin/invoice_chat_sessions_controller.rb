@@ -59,8 +59,7 @@ module Api
         end
 
         def restore
-          restored_status = @session.invoice_id.present? ? "invoice_created" : "active"
-          @session.update!(archived: false, status: restored_status, updated_by: current_user)
+          @session.update!(archived: false, status: "active", updated_by: current_user)
           render json: { invoice_chat_session: session_payload(@session.reload, detailed: true) }
         end
 
@@ -86,7 +85,8 @@ module Api
 
           InvoiceChatSession.transaction do
             @session.lock!
-            raise ArgumentError, "Cannot send messages to a non-active session" unless @session.status == "active"
+            raise ArgumentError, "Cannot send messages to an archived session" if @session.archived? || @session.status == "archived"
+            @session.status = "active" if @session.status == "invoice_created"
 
             user_message = @session.messages.create!(role: "user", content: content, image_urls: image_urls)
             version = @session.store_preview!(preview, actor: current_user)
@@ -123,9 +123,9 @@ module Api
             @session.lock!
             raise ArgumentError, "Cannot confirm an archived session" if @session.archived? || @session.status == "archived"
 
-            if @session.status == "invoice_created" && @session.invoice_id.present?
-              invoice = Invoice.find_by(id: @session.invoice_id, company_id: current_company_id)
-              raise ArgumentError, "Invoice already created for this session but could not be found" unless invoice
+            if (created_invoice_id = current_preview_created_invoice_id)
+              invoice = Invoice.find_by(id: created_invoice_id, organization_id: current_organization_id)
+              raise ArgumentError, "Invoice already created for this preview but could not be found" unless invoice
               next
             end
 
@@ -134,14 +134,17 @@ module Api
             @session.update!(
               invoice: invoice,
               invoice_recipient_id: invoice.invoice_recipient_id,
-              status: "invoice_created",
+              status: "active",
               updated_by: current_user
             )
             created_invoice = true
             @session.messages.create!(
               role: "assistant",
-              content: "Created draft invoice #{invoice.invoice_number}.",
-              preview: preview,
+              content: "Created draft invoice #{invoice.invoice_number}. You can keep using this chat for the next invoice.",
+              preview: preview.merge(
+                "created_invoice_id" => invoice.id,
+                "created_invoice_number" => invoice.invoice_number
+              ),
               preview_version: @session.current_preview_version,
               has_preview: true
             )
@@ -165,7 +168,8 @@ module Api
 
           InvoiceChatSession.transaction do
             @session.lock!
-            raise ArgumentError, "Cannot restore previews on a non-active session" unless @session.status == "active"
+            raise ArgumentError, "Cannot restore previews on an archived session" if @session.archived? || @session.status == "archived"
+            @session.status = "active" if @session.status == "invoice_created"
 
             version = @session.store_preview!(message.preview, actor: current_user)
             @session.messages.create!(
@@ -206,7 +210,7 @@ module Api
         def session_attributes
           raw = params.fetch(:invoice_chat_session, ActionController::Parameters.new).permit(:title, :invoice_recipient_id)
           if raw[:invoice_recipient_id].present?
-            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], company_id: current_company_id, active: true)
+            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], organization_id: current_organization_id, active: true)
             raise ArgumentError, "Invoice recipient not found" unless recipient
           end
           raw
@@ -221,12 +225,14 @@ module Api
           raise ArgumentError, "Preview must include at least one line item" if line_items.empty?
 
           invoice = Invoice.new(
+            organization_id: current_organization_id,
             company_id: current_company_id,
             invoice_recipient: recipient,
+            invoice_billing_profile: billing_profile_from_preview!(preview),
             invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
             service_period_start: parse_preview_date(preview["service_period_start"]),
             service_period_end: parse_preview_date(preview["service_period_end"]),
-            payment_terms: preview["payment_terms"].presence || recipient.payment_terms,
+            payment_terms: preview["payment_terms"].presence,
             notes: preview["notes"].presence,
             email_subject: preview["email_subject"].presence,
             email_body: preview["email_body"].presence,
@@ -240,11 +246,21 @@ module Api
           invoice
         end
 
+        def current_preview_created_invoice_id
+          created_message = @session.messages.where(
+            role: "assistant",
+            has_preview: true,
+            preview_version: @session.current_preview_version
+          ).where.not("preview ->> 'created_invoice_id' IS NULL").last
+
+          created_message&.preview&.dig("created_invoice_id")
+        end
+
         def recipient_from_preview!(preview)
           if preview["invoice_recipient_id"].present?
             recipient = InvoiceRecipient.find_by(
               id: preview["invoice_recipient_id"],
-              company_id: current_company_id,
+              organization_id: current_organization_id,
               active: true
             )
             raise ArgumentError, "Invoice recipient not found" unless recipient
@@ -255,7 +271,22 @@ module Api
           attrs = new_recipient_attributes_from_preview(preview["new_recipient"])
           raise ArgumentError, "Invoice recipient not found" if attrs.blank?
 
-          InvoiceRecipient.create!(attrs.merge(company_id: current_company_id, active: true))
+          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, company_id: current_company_id, active: true))
+        end
+
+        def billing_profile_from_preview!(preview)
+          if preview["invoice_billing_profile_id"].present?
+            profile = InvoiceBillingProfile.find_by(
+              id: preview["invoice_billing_profile_id"],
+              organization_id: current_organization_id,
+              active: true
+            )
+            raise ArgumentError, "Invoice billing profile not found" unless profile
+
+            return profile
+          end
+
+          InvoiceBillingProfile.ensure_default_for!(current_organization)
         end
 
         def new_recipient_attributes_from_preview(raw)
@@ -369,9 +400,12 @@ module Api
         def invoice_payload(invoice)
           {
             id: invoice.id,
+            organization_id: invoice.organization_id,
             company_id: invoice.company_id,
             invoice_recipient_id: invoice.invoice_recipient_id,
+            invoice_billing_profile_id: invoice.invoice_billing_profile_id,
             recipient_name: invoice.invoice_recipient&.name,
+            billing_profile_name: invoice.invoice_billing_profile&.name,
             invoice_number: invoice.invoice_number,
             invoice_date: invoice.invoice_date,
             service_period_start: invoice.service_period_start,
@@ -393,6 +427,7 @@ module Api
             updated_by_name: invoice.updated_by&.name,
             line_item_count: invoice.line_items.size,
             invoice_recipient: recipient_payload(invoice.invoice_recipient),
+            invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
             line_items: invoice.line_items.map { |item| invoice_line_item_payload(item) },
             created_at: invoice.created_at,
             updated_at: invoice.updated_at
@@ -404,6 +439,7 @@ module Api
 
           {
             id: recipient.id,
+            organization_id: recipient.organization_id,
             company_id: recipient.company_id,
             name: recipient.name,
             email: recipient.email,
@@ -414,6 +450,28 @@ module Api
             template_type: recipient.template_type,
             notes: recipient.notes,
             active: recipient.active
+          }
+        end
+
+        def billing_profile_payload(profile)
+          return nil unless profile
+
+          {
+            id: profile.id,
+            organization_id: profile.organization_id,
+            name: profile.name,
+            legal_name: profile.legal_name,
+            website: profile.website,
+            phone: profile.phone,
+            email: profile.email,
+            address: profile.address,
+            payment_instructions: profile.payment_instructions,
+            default_payment_terms: profile.default_payment_terms,
+            invoice_prefix: profile.invoice_prefix,
+            remit_to: profile.remit_to,
+            footer_note: profile.footer_note,
+            active: profile.active,
+            is_default: profile.is_default
           }
         end
 

@@ -26,10 +26,32 @@ RSpec.describe InvoiceAiPreviewService do
       "quantity" => 1.0,
       "rate" => 1000.0
     )
-    expect(preview["payment_terms"]).to eq("Due on receipt")
+    expect(preview["payment_terms"]).to be_nil
     expect(preview["email_subject"]).to eq("Invoice from #{company.name}")
     expect(preview["email_body"]).to include("Hi Shimizu Technology")
     expect(preview["email_body"]).to end_with(company.name)
+  end
+
+  it "answers saved recipient questions without mixing in billing profiles" do
+    company = create(:company)
+    user = create(:user, company: company)
+    create(:invoice_billing_profile, organization: company.organization, name: "Shimizu Technology", is_default: true)
+    create(:invoice_recipient, company: company, name: "Marianas Open")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return(nil)
+
+    preview = described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "What clients do we have saved?"
+    ).call
+
+    expect(preview["status"]).to eq("clarification_needed")
+    expect(preview["message"]).to include("Saved bill-to recipients: Marianas Open")
+    expect(preview["message"]).not_to include("Shimizu Technology")
   end
 
   it "drops zero-quantity AI line items before marking a preview ready" do
@@ -230,6 +252,43 @@ RSpec.describe InvoiceAiPreviewService do
     ).call
 
     expect(request_body["model"]).to eq("openai/gpt-5.5")
+  end
+
+  it "includes billing profiles in the AI context and normalizes the selected sender" do
+    company = create(:company)
+    user = create(:user, company: company)
+    recipient = create(:invoice_recipient, company: company, name: "Marianas Open")
+    profile = create(:invoice_billing_profile, organization: company.organization, name: "Shimizu Technology", invoice_prefix: "ST")
+    session = create(:invoice_chat_session, company: company, created_by: user, updated_by: user)
+    response = {
+      "status" => "preview",
+      "message" => "Ready for review.",
+      "invoice_billing_profile_id" => profile.id,
+      "invoice_recipient_id" => recipient.id,
+      "line_items" => [
+        { "description" => "Software service", "quantity" => 1, "rate" => 1000 }
+      ]
+    }
+    request_body = nil
+
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("OPENROUTER_API_KEY").and_return("test-key")
+    allow(HTTParty).to receive(:post) do |_url, options|
+      request_body = JSON.parse(options.fetch(:body))
+      double("HTTParty::Response", success?: true, dig: response.to_json)
+    end
+
+    preview = described_class.new(
+      company: company,
+      user: user,
+      session: session,
+      message: "Invoice Marianas Open from Shimizu Technology"
+    ).call
+
+    expect(request_body.dig("messages", 1, "content")).to include("Active invoice-from billing profiles")
+    expect(preview["invoice_billing_profile_id"]).to eq(profile.id)
+    expect(preview["invoice_billing_profile_name"]).to eq("Shimizu Technology")
+    expect(preview["email_subject"]).to eq("Invoice from Shimizu Technology")
   end
 
   it "bounds deterministic recipient matching to avoid scanning every recipient" do
