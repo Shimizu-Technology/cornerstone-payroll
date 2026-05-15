@@ -47,7 +47,7 @@ class PayrollTaxSyncPayloadBuilder
   end
 
   def line_items_payload
-    pay_period.payroll_items.includes(:employee).map do |item|
+    reportable_items.includes(:employee).map do |item|
       {
         payroll_item_id: item.id,
         employee_id: item.employee_id,
@@ -72,7 +72,7 @@ class PayrollTaxSyncPayloadBuilder
   end
 
   def totals_payload
-    items = pay_period.payroll_items
+    items = reportable_items
     {
       employee_count: items.size,
       gross_pay: items.sum(:gross_pay).to_f,
@@ -90,5 +90,9 @@ class PayrollTaxSyncPayloadBuilder
         items.sum(:employer_medicare_tax)
       ).to_f
     }
+  end
+
+  def reportable_items
+    pay_period.payroll_items.not_voided
   end
 end

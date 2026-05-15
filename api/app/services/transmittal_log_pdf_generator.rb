@@ -89,7 +89,7 @@ class TransmittalLogPdfGenerator
 
     # 1) Payroll checks
     check_numbers = pay_period.payroll_items
-      .where(voided: false)
+      .not_voided
       .where.not(check_number: nil)
       .pluck(:check_number)
       .sort_by(&:to_i)
@@ -170,7 +170,7 @@ class TransmittalLogPdfGenerator
   end
 
   def render_tax_obligations(pdf)
-    items = pay_period.payroll_items.where(voided: false)
+    items = pay_period.payroll_items.not_voided
     total_fit  = items.sum(:withholding_tax)
     emp_ss     = items.sum(:social_security_tax)
     er_ss      = items.sum(:employer_social_security_tax)

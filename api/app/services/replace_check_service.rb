@@ -319,6 +319,7 @@ class ReplaceCheckService
     pay_period_id = @payroll_item.pay_period_id
     @payroll_item.employee.payroll_items
       .joins(:pay_period)
+      .not_voided
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
                      .where(company_id: @payroll_item.company_id,
@@ -336,6 +337,7 @@ class ReplaceCheckService
     pay_period_id = @payroll_item.pay_period_id
     scope = @payroll_item.employee.payroll_items
       .joins(:pay_period)
+      .not_voided
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
                      .where(company_id: @payroll_item.company_id,

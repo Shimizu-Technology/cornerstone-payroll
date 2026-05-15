@@ -638,16 +638,17 @@ export function PayPeriodDetail() {
   const canImportTimeTracking = isDraft && canEditPayPeriod;
 
   // Summaries
-  const contractorItems = payrollItems.filter(i => i.employment_type === 'contractor');
-  const totalGross = payrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
-  const totalWithholding = payrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
-  const totalAddlWH = payrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
-  const totalSS = payrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
-  const totalMedicare = payrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
-  const totalDeductions = payrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
-  const totalNet = payrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
-  const totalEmployerSS = payrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
-  const totalEmployerMedicare = payrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
+  const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
+  const totalGross = reportablePayrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
+  const totalWithholding = reportablePayrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
+  const totalAddlWH = reportablePayrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
+  const totalSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
+  const totalMedicare = reportablePayrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
+  const totalDeductions = reportablePayrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
+  const totalNet = reportablePayrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
+  const totalEmployerSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
+  const totalEmployerMedicare = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
   const totalDRTDeposit = totalWithholding;
 
   // Detect FIT-deposit override: if the user has edited the auto-FIT
@@ -668,11 +669,11 @@ export function PayPeriodDetail() {
       ? { calculated: totalWithholding, deposited: fitDepositAmount, delta: fitDepositAmount - totalWithholding }
       : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
-  const totalCustomEarnings = payrollItems.reduce(
+  const totalCustomEarnings = reportablePayrollItems.reduce(
     (sum, item) => sum + (item.custom_earnings || []).reduce((itemSum, earning) => itemSum + toNumber(earning.amount), 0),
     0
   );
-  const totalCustomDeductions = payrollItems.reduce(
+  const totalCustomDeductions = reportablePayrollItems.reduce(
     (sum, item) => sum + (item.custom_deductions || []).reduce((itemSum, deduction) => itemSum + toNumber(deduction.amount), 0),
     0
   );
@@ -1896,12 +1897,12 @@ export function PayPeriodDetail() {
                   })()}
                   {/* Totals */}
                   {(() => {
-                    const totalTips = payrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
-                    const totalTipsPaidOut = payrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
-                    const totalLoans = payrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
+                    const totalTips = reportablePayrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
+                    const totalTipsPaidOut = reportablePayrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
+                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
                     return (
                       <TableRow className="bg-gray-50 font-bold border-t-2">
-                        <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({payrollItems.length} employees)</TableCell>
+                        <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({reportablePayrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
                         {hasCustomDeductions && <TableCell className="text-right text-red-600">{totalCustomDeductions > 0 ? formatCurrency(totalCustomDeductions) : '—'}</TableCell>}

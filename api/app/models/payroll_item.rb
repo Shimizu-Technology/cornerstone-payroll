@@ -66,7 +66,8 @@ class PayrollItem < ApplicationRecord
   # Check-related scopes
   # ---------------------------------------------------------------------------
   scope :with_check_number,  -> { where.not(check_number: nil) }
-  scope :checks_only,        -> { with_check_number.where(voided: false) }
+  scope :not_voided,         -> { where(voided: false) }
+  scope :checks_only,        -> { with_check_number.not_voided }
   scope :voided_checks,      -> { where(voided: true) }
   scope :printed,            -> { where.not(check_printed_at: nil) }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
