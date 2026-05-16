@@ -24,6 +24,52 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(admin_user)
   end
 
+  describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items" do
+    let(:create_params) do
+      {
+        employee_id: employee.id,
+        payroll_item: {
+          employment_type: employee.employment_type,
+          pay_rate: employee.pay_rate,
+          hours_worked: 8,
+          overtime_hours: 0,
+          holiday_hours: 0,
+          pto_hours: 0
+        }
+      }
+    end
+
+    before do
+      payroll_item.destroy!
+    end
+
+    it "clears an existing exclusion when the employee is re-added" do
+      exclusion = PayPeriodExcludedEmployee.create!(pay_period: pay_period, employee: employee, excluded_by: admin_user)
+
+      expect {
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params
+      }.to change(PayrollItem, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(PayPeriodExcludedEmployee.where(id: exclusion.id)).not_to exist
+      expect(pay_period.payroll_items.where(employee_id: employee.id)).to exist
+    end
+
+    it "rolls back the payroll item if clearing the exclusion fails" do
+      exclusion = PayPeriodExcludedEmployee.create!(pay_period: pay_period, employee: employee, excluded_by: admin_user)
+      allow_any_instance_of(PayPeriodExcludedEmployee).to receive(:destroy!)
+        .and_raise(ActiveRecord::RecordNotDestroyed.new("Could not clear exclusion", exclusion))
+
+      expect {
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params
+      }.not_to change(PayrollItem, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(PayPeriodExcludedEmployee.where(id: exclusion.id)).to exist
+      expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
+    end
+  end
+
   describe "DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
     it "records the employee as excluded from the pay period" do
       expect {
