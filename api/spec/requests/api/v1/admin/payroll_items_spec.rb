@@ -68,6 +68,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(PayPeriodExcludedEmployee.where(id: exclusion.id)).to exist
       expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
     end
+
+    it "returns a validation response if a concurrent add creates the same payroll item" do
+      allow_any_instance_of(PayrollItem).to receive(:save!)
+        .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
+
+      expect {
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params
+      }.not_to change(PayrollItem, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("duplicate key value")
+    end
   end
 
   describe "DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
