@@ -207,6 +207,40 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.withholding_tax).to be <= available_pay
     end
 
+    it "removes itemized deduction rows that are capped to zero on recalculation" do
+      employee.update!(additional_withholding: 0)
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Cash Advance",
+        category: "post_tax",
+        sub_category: "other",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.update!(
+        hours_worked: 1,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 100.0,
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+
+      payroll_item.calculate!
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 

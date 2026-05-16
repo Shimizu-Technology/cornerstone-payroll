@@ -433,7 +433,11 @@ class PayrollCalculator
       break unless amount.positive?
     end
 
-    payroll_item.payroll_item_deductions.target.delete_if { |deduction| deduction.amount.to_f.zero? && deduction.new_record? }
+    payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_f.zero? }.each do |deduction|
+      deduction.destroy! if deduction.persisted?
+      payroll_item.payroll_item_deductions.target.delete(deduction)
+    end
+
     amount
   end
 
