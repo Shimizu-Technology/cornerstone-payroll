@@ -1088,6 +1088,8 @@ module Api
 
           company = Company.find(current_company_id)
           [ QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate, nil ]
+        rescue ActiveRecord::RecordNotFound
+          [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
         rescue ArgumentError => e
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
         end
