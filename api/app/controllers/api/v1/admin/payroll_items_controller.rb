@@ -62,7 +62,7 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
