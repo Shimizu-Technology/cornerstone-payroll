@@ -444,7 +444,7 @@ module Api
           elsif permitted[:check_layout_config].is_a?(Hash)
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
           end
-          permitted[:active_printer_profile_id] = nil
+          permitted[:active_printer_profile_id] = nil if printer_calibration_settings_changed?(permitted)
 
           if @company.update(permitted)
             render json: { check_settings: company_check_settings_json(@company) }
@@ -698,6 +698,20 @@ module Api
             active_printer_profile_id: company.active_printer_profile_id,
             active_printer_profile_name: company.active_printer_profile&.name
           }
+        end
+
+        def printer_calibration_settings_changed?(permitted)
+          return true if permitted.key?(:check_stock_type) && permitted[:check_stock_type].to_s != @company.check_stock_type.to_s
+          return true if permitted.key?(:check_offset_x) && BigDecimal(permitted[:check_offset_x].to_s) != @company.check_offset_x.to_d
+          return true if permitted.key?(:check_offset_y) && BigDecimal(permitted[:check_offset_y].to_s) != @company.check_offset_y.to_d
+
+          if permitted.key?(:check_layout_config)
+            current_layout = JSON.parse((@company.check_layout_config || {}).to_json)
+            next_layout = JSON.parse((permitted[:check_layout_config] || {}).to_json)
+            return true if next_layout != current_layout
+          end
+
+          false
         end
 
         def check_settings_preview_company(company)

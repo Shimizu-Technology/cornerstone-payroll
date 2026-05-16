@@ -637,6 +637,38 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to be_nil
     end
 
+    it "keeps the active printer profile when saving unrelated settings" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Saved Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        check_layout_config: {}
+      )
+      company.update!(
+        active_printer_profile: profile,
+        check_stock_type: profile.check_stock_type,
+        check_offset_x: profile.check_offset_x,
+        check_offset_y: profile.check_offset_y,
+        check_layout_config: profile.check_layout_config
+      )
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: "0.000",
+          check_offset_y: "0.000",
+          check_stock_type: "bottom_check",
+          check_layout_config: {},
+          bank_name: "Bank of Guam",
+          auto_create_fit_check: true
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.active_printer_profile_id).to eq(profile.id)
+      expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to eq(profile.id)
+    end
+
     it "allows accountants to update check settings for their assigned companies" do
       accountant_user = User.create!(
         company: company,
