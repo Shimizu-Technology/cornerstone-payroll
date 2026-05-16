@@ -442,8 +442,6 @@ class PayrollCalculator
   end
 
   def sync_aggregate_deductions_from_itemized!
-    return unless payroll_item.payroll_item_deductions.any?
-
     payroll_item.loan_payment = payroll_item.payroll_item_deductions.sum do |deduction|
       deduction.deduction_type&.loan? ? deduction.amount.to_f : 0.0
     end.round(2)
