@@ -183,6 +183,30 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to be >= 0.0
     end
 
+    it "caps remaining deductions so total deductions reconcile with zero net pay" do
+      payroll_item.update!(
+        hours_worked: 1,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 250.0,
+        custom_deductions: [
+          { "label" => "Cash Advance", "amount" => 75.0 }
+        ]
+      )
+
+      described_class.for(employee, payroll_item).calculate
+
+      available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
+      expect(payroll_item.total_deductions).to eq(available_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+      expect(payroll_item.gross_pay - payroll_item.total_deductions + payroll_item.non_taxable_pay.to_f).to eq(0.0)
+      expect(payroll_item.custom_deductions_total).to eq(0.0)
+      expect(payroll_item.withholding_tax).to be <= available_pay
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 

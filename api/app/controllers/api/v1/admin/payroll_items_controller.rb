@@ -92,7 +92,7 @@ module Api
           end
 
           ActiveRecord::Base.transaction do
-            PayPeriodExcludedEmployee.find_or_create_by!(
+            PayPeriodExcludedEmployee.create_or_find_by!(
               pay_period: @pay_period,
               employee: @payroll_item.employee
             ) do |exclusion|
