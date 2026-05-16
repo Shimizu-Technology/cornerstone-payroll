@@ -295,6 +295,46 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to eq(0.0)
     end
 
+    it "does not use employer contribution records to absorb employee deduction excess" do
+      employee.update!(
+        additional_withholding: 0,
+        employer_retirement_match_rate: 0.5
+      )
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Employee Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.update!(
+        hours_worked: 10,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 150.0,
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+
+      employer_match = payroll_item.payroll_item_deductions.find(&:employer_contribution?)
+      expect(employer_match.amount).to eq(50.0)
+      expect(payroll_item.loan_payment).to eq(0.0)
+      expect(payroll_item.withholding_tax).to eq(92.35)
+      expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 
