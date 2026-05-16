@@ -375,9 +375,11 @@ class PayrollCalculator
     excess = (payroll_item.total_deductions.to_f - available_pay).round(2)
     return unless excess.positive?
 
+    had_itemized_deductions = payroll_item.payroll_item_deductions.any?
+
     remaining = reduce_custom_deductions_by!(excess)
     remaining = reduce_payroll_item_deductions_by!(remaining)
-    sync_aggregate_deductions_from_itemized!
+    sync_aggregate_deductions_from_itemized! if had_itemized_deductions
 
     [
       :additional_withholding,
