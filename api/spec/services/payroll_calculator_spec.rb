@@ -335,6 +335,31 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to eq(0.0)
     end
 
+    it "preserves import-sourced loan mirrors when there are no itemized deductions" do
+      employee.update!(additional_withholding: 0)
+      payroll_item.update!(
+        hours_worked: 10,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 100.0,
+        loan_deduction: 30.0,
+        loan_payment: 30.0,
+        import_source: "mosa_revel",
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+      expect(payroll_item.loan_payment).to eq(30.0)
+      expect(payroll_item.withholding_tax).to eq(62.35)
+      expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 
