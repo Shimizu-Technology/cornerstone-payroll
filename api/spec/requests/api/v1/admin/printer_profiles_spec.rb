@@ -154,4 +154,24 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_name")).to be_nil
     end
   end
+
+  describe "DELETE /api/v1/admin/printer_profiles/:id" do
+    it "deletes an active profile and clears company active references" do
+      profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Shared Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      company.update!(active_printer_profile: profile)
+
+      expect {
+        delete "/api/v1/admin/printer_profiles/#{profile.id}"
+      }.to change { PrinterProfile.exists?(profile.id) }.from(true).to(false)
+
+      expect(response).to have_http_status(:no_content)
+      expect(company.reload.active_printer_profile_id).to be_nil
+    end
+  end
 end

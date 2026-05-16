@@ -1260,7 +1260,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_100000) do
   add_foreign_key "pay_periods", "companies"
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
-  add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
+  add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_imports", "pay_periods"
