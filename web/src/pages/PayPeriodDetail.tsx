@@ -1034,7 +1034,8 @@ export function PayPeriodDetail() {
         {/* Missing Employees Warning */}
         {isCalculated && (() => {
           const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-          const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id));
+          const excludedEmployeeIds = new Set(payPeriod.excluded_employee_ids || []);
+          const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id) && !excludedEmployeeIds.has(emp.id));
           if (missingEmployees.length === 0) return null;
           return (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
@@ -2246,7 +2247,25 @@ export function PayPeriodDetail() {
         item={editingItem}
         onSaved={handlePayrollItemSaved}
         onRemoved={(id) => {
+          const removedItem = payrollItems.find((item) => item.id === id);
           setPayrollItems((prev) => prev.filter((item) => item.id !== id));
+          if (removedItem) {
+            setPayPeriod((prev) => prev ? {
+              ...prev,
+              excluded_employee_ids: Array.from(new Set([...(prev.excluded_employee_ids || []), removedItem.employee_id])),
+            } : prev);
+            const employeeKey = String(removedItem.employee_id);
+            setHoursMap((prev) => {
+              const next = { ...prev };
+              delete next[employeeKey];
+              return next;
+            });
+            setAdditionalEmployeeIds((prev) => {
+              const next = new Set(prev);
+              next.delete(removedItem.employee_id);
+              return next;
+            });
+          }
           setEditingItem(null);
         }}
         contractorPayType={editingItem ? employeeLookup.get(editingItem.employee_id)?.contractor_pay_type as 'hourly' | 'flat_fee' | undefined : undefined}

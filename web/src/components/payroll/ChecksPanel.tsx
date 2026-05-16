@@ -615,7 +615,14 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-gray-900">{item.employee_name}</td>
+                  <td className="px-3 py-2 text-gray-900">
+                    <div className="space-y-0.5">
+                      <div>{item.employee_name}</div>
+                      {item.department_name && (
+                        <div className="text-xs text-gray-500">{item.department_name}</div>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">
                     {formatCurrency(item.net_pay)}
                   </td>

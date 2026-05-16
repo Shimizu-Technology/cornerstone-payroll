@@ -56,12 +56,14 @@ module Api
           sync_pay_rate_from_employee(@payroll_item, employee)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
-          if @payroll_item.save
+          if save_payroll_item_and_clear_exclusion(@payroll_item, employee)
             @payroll_item.calculate! if params[:auto_calculate]
             render json: { payroll_item: payroll_item_json(@payroll_item) }, status: :created
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id
@@ -89,8 +91,20 @@ module Api
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
 
-          @payroll_item.destroy
+          ActiveRecord::Base.transaction do
+            PayPeriodExcludedEmployee.create_or_find_by!(
+              pay_period: @pay_period,
+              employee: @payroll_item.employee
+            ) do |exclusion|
+              exclusion.excluded_by = current_user
+              exclusion.reason = "Removed from pay period"
+            end
+            @payroll_item.destroy!
+          end
+
           head :no_content
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate
@@ -138,6 +152,17 @@ module Api
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs
+        end
+
+        def save_payroll_item_and_clear_exclusion(payroll_item, employee)
+          return false unless payroll_item.valid?
+
+          ActiveRecord::Base.transaction do
+            payroll_item.save!
+            @pay_period.pay_period_excluded_employees.where(employee_id: employee.id).find_each(&:destroy!)
+          end
+
+          true
         end
 
         def payroll_item_json(item, detailed: false)

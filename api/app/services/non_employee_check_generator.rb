@@ -299,7 +299,6 @@ class NonEmployeeCheckGenerator
     rows << ["Check #", check.check_number || "—"]
     rows << ["Date", check_date_str]
     rows << ["Type", check_type_label]
-    rows << ["Status", check.check_status.to_s.capitalize]
     rows
   end
 
