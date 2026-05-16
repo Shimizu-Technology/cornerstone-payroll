@@ -1421,28 +1421,70 @@ export interface QuarterlyCompliancePacketReport {
     form_500_policy: string;
     notes: string[];
   };
+  source_rules: {
+    guam_track: string;
+    federal_track: string;
+    form_941_guam_lines_2_3: string;
+    schedule_b: string;
+  };
+  pay_periods: {
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    employee_count: number;
+    gross_pay: number;
+    guam_withholding: number;
+    federal_941_liability: number;
+  }[];
   form_500: {
+    policy: string;
     total_guam_withholding: number;
-    deposits: { pay_period_id: number; pay_date: string; amount: number; status: string }[];
+    deposits: {
+      pay_period_id: number;
+      pay_date: string;
+      quarter_ending: string;
+      amount: number;
+      status: string;
+      payment_date: string | null;
+      confirmation_number: string | null;
+      receipt_attached: boolean;
+    }[];
   };
   w1: {
+    filing_channel: string;
+    quarter_ending_month: number;
+    quarter_ending_year: number;
     total_guam_withholding: number;
     daily_liabilities: { pay_date: string; month: number; amount: number }[];
     monthly_liabilities: { month: string; month_number: number; amount: number }[];
+    credits_adjustments: number | null;
+    balance_due_or_overpayment: number | null;
+    filing_status: string;
     tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
     filing_steps: string[];
   };
   swica: {
+    filing_channel: string;
+    filing_status: string;
     employees: {
       employee_id: number;
       name: string;
       ssn_last_four: string | null;
+      status: string;
+      termination_date: string | null;
       swica_wages: number;
       reported_tips: number;
       non_taxable_pay: number;
       guam_withholding: number;
+      social_security_wages: number;
+      social_security_tips: number;
+      medicare_wages_tips: number;
+      pay_dates: string[];
     }[];
     totals: { employee_count: number; total_wages: number; total_tax_withheld: number };
+    upload_export_ready: boolean;
+    upload_export_note: string;
     tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
     filing_steps: string[];
   };
@@ -1457,6 +1499,17 @@ export interface QuarterlyCompliancePacketReport {
     filing_steps: string[];
   };
   review_checks: { key: string; status: string; message: string }[];
+  component_taxability: {
+    category: string;
+    label: string;
+    amount: number;
+    guam_withholding_wages: boolean;
+    swica_wages: boolean;
+    social_security_wages: boolean;
+    social_security_tips: boolean;
+    medicare_wages_tips: boolean;
+    non_taxable: boolean;
+  }[];
 }
 
 export const reportsApi = {

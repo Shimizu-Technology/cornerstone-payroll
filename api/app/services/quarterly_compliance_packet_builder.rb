@@ -107,7 +107,7 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def pay_period_rows
-    pay_periods.map do |period|
+    @pay_period_rows ||= pay_periods.map do |period|
       period_items = payroll_items.select { |item| item.pay_period_id == period.id }
       {
         id: period.id,
@@ -142,81 +142,88 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def w1_section
-    daily = liability_rows_by_pay_date(:withholding_tax)
-    {
-      filing_channel: "GuamTax.com Quarterly -> W-1",
-      quarter_ending_month: quarter_end.month,
-      quarter_ending_year: year,
-      daily_liabilities: daily,
-      monthly_liabilities: monthly_totals(daily, :amount),
-      total_guam_withholding: money(daily.sum { |row| row[:amount].to_f }),
-      credits_adjustments: nil,
-      balance_due_or_overpayment: nil,
-      filing_status: "not_started",
-      tie_out: tie_out(
-        label: "W-1 Guam withholding",
-        expected: payroll_items.sum(&:withholding_tax),
-        actual: daily.sum { |row| row[:amount].to_f }
-      ),
-      filing_steps: [
-        "Log in to GuamTax.com.",
-        "Choose Quarterly, then W-1.",
-        "File the W-1 for #{quarter_end.strftime('%B %Y')}.",
-        "Enter withholding liability by actual pay date from this worksheet.",
-        "Review Form 500 payments retrieved by GuamTax.",
-        "Record the filing confirmation and attach proof in Cornerstone Payroll."
-      ]
-    }
+    @w1_section ||= begin
+      daily = liability_rows_by_pay_date(:withholding_tax)
+      {
+        filing_channel: "GuamTax.com Quarterly -> W-1",
+        quarter_ending_month: quarter_end.month,
+        quarter_ending_year: year,
+        daily_liabilities: daily,
+        monthly_liabilities: monthly_totals(daily, :amount),
+        total_guam_withholding: money(daily.sum { |row| row[:amount].to_f }),
+        credits_adjustments: nil,
+        balance_due_or_overpayment: nil,
+        filing_status: "not_started",
+        tie_out: tie_out(
+          label: "W-1 Guam withholding",
+          expected: payroll_items.sum(&:withholding_tax),
+          actual: daily.sum { |row| row[:amount].to_f }
+        ),
+        filing_steps: [
+          "Log in to GuamTax.com.",
+          "Choose Quarterly, then W-1.",
+          "File the W-1 for #{quarter_end.strftime('%B %Y')}.",
+          "Enter withholding liability by actual pay date from this worksheet.",
+          "Review Form 500 payments retrieved by GuamTax.",
+          "Record the filing confirmation and attach proof in Cornerstone Payroll."
+        ]
+      }
+    end
   end
 
   def swica_section
-    employees = employee_rows
-    {
-      filing_channel: "GuamTax.com Quarterly -> SWICA (SW-2)",
-      filing_status: "not_started",
-      employees: employees,
-      totals: {
-        employee_count: employees.length,
-        total_wages: money(employees.sum { |row| row[:swica_wages].to_f }),
-        total_tax_withheld: money(employees.sum { |row| row[:guam_withholding].to_f })
-      },
-      upload_export_ready: false,
-      upload_export_note: "The packet prepares the employee detail. ASCII SWICA upload-file generation should follow after field-length validation against the current SWICA booklet.",
-      filing_steps: [
-        "Log in to GuamTax.com.",
-        "Choose Quarterly, then SWICA (SW-2).",
-        "Use File SWICA for manual entry or Upload SWICA once an upload file is generated.",
-        "Confirm employee count, total wages, and total tax withheld against this worksheet.",
-        "Record the filing confirmation and attach proof in Cornerstone Payroll."
-      ],
-      tie_out: tie_out(
-        label: "SWICA wages and withholding",
-        expected: payroll_items.sum(&:gross_pay),
-        actual: employees.sum { |row| row[:swica_wages].to_f }
-      )
-    }
+    @swica_section ||= begin
+      employees = employee_rows
+      {
+        filing_channel: "GuamTax.com Quarterly -> SWICA (SW-2)",
+        filing_status: "not_started",
+        employees: employees,
+        totals: {
+          employee_count: employees.length,
+          total_wages: money(employees.sum { |row| row[:swica_wages].to_f }),
+          total_tax_withheld: money(employees.sum { |row| row[:guam_withholding].to_f })
+        },
+        upload_export_ready: false,
+        upload_export_note: "The packet prepares the employee detail. ASCII SWICA upload-file generation should follow after field-length validation against the current SWICA booklet.",
+        filing_steps: [
+          "Log in to GuamTax.com.",
+          "Choose Quarterly, then SWICA (SW-2).",
+          "Use File SWICA for manual entry or Upload SWICA once an upload file is generated.",
+          "Confirm employee count, total wages, and total tax withheld against this worksheet.",
+          "Record the filing confirmation and attach proof in Cornerstone Payroll."
+        ],
+        tie_out: tie_out(
+          label: "SWICA wages and withholding",
+          expected: payroll_items.sum(&:gross_pay),
+          actual: employees.sum { |row| row[:swica_wages].to_f }
+        )
+      }
+    end
   end
 
   def federal_941_section
-    report = Form941GuAggregator.new(company, year, quarter).generate
-    {
-      filing_channel: "IRS Form 941",
-      filing_status: "not_started",
-      report: report,
-      deposit_schedule: {
-        suggested_schedule: suggested_federal_deposit_schedule,
-        schedule_b_required: suggested_federal_deposit_schedule == "semiweekly",
-        firm_payment_policy: "pay_each_pay_period",
-        note: "Firm payment policy can be earlier than the IRS deposit schedule. Schedule B is based on liability dates, not payment dates."
-      },
-      filing_steps: [
-        "Prepare IRS Form 941 for #{report.dig(:meta, :quarter_label)}.",
-        "For Guam employers, leave lines 2 and 3 blank unless employees are subject to U.S. federal income tax withholding.",
-        "Enter Social Security wages, Social Security tips, Medicare wages/tips, and Additional Medicare from this worksheet.",
-        "Complete Part 2 using monthly liability or Schedule B as required.",
-        "Record filing/payment confirmations and attach proof in Cornerstone Payroll."
-      ]
-    }
+    @federal_941_section ||= begin
+      report = Form941GuAggregator.new(company, year, quarter).generate
+      schedule = suggested_federal_deposit_schedule
+      {
+        filing_channel: "IRS Form 941",
+        filing_status: "not_started",
+        report: report,
+        deposit_schedule: {
+          suggested_schedule: schedule,
+          schedule_b_required: schedule == "semiweekly",
+          firm_payment_policy: "pay_each_pay_period",
+          note: "Firm payment policy can be earlier than the IRS deposit schedule. Schedule B is based on liability dates, not payment dates."
+        },
+        filing_steps: [
+          "Prepare IRS Form 941 for #{report.dig(:meta, :quarter_label)}.",
+          "For Guam employers, leave lines 2 and 3 blank unless employees are subject to U.S. federal income tax withholding.",
+          "Enter Social Security wages, Social Security tips, Medicare wages/tips, and Additional Medicare from this worksheet.",
+          "Complete Part 2 using monthly liability or Schedule B as required.",
+          "Record filing/payment confirmations and attach proof in Cornerstone Payroll."
+        ]
+      }
+    end
   end
 
   def employee_rows
@@ -243,22 +250,24 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def component_taxability
-    earnings = payroll_items.flat_map(&:payroll_item_earnings)
-    grouped = earnings.group_by { |earning| [ earning.category, earning.label ] }
-    grouped.map do |(category, label), rows|
-      amount = rows.sum(&:amount)
-      {
-        category: category,
-        label: label,
-        amount: money(amount),
-        guam_withholding_wages: taxable_earning_category?(category),
-        swica_wages: taxable_earning_category?(category),
-        social_security_wages: ss_wage_category?(category),
-        social_security_tips: category == "tips",
-        medicare_wages_tips: taxable_earning_category?(category),
-        non_taxable: non_taxable_category?(category)
-      }
-    end.sort_by { |row| [ row[:category], row[:label] ] }
+    @component_taxability ||= begin
+      earnings = payroll_items.flat_map(&:payroll_item_earnings)
+      grouped = earnings.group_by { |earning| [ earning.category, earning.label ] }
+      grouped.map do |(category, label), rows|
+        amount = rows.sum(&:amount)
+        {
+          category: category,
+          label: label,
+          amount: money(amount),
+          guam_withholding_wages: taxable_earning_category?(category),
+          swica_wages: taxable_earning_category?(category),
+          social_security_wages: ss_wage_category?(category),
+          social_security_tips: category == "tips",
+          medicare_wages_tips: taxable_earning_category?(category),
+          non_taxable: non_taxable_category?(category)
+        }
+      end.sort_by { |row| [ row[:category], row[:label] ] }
+    end
   end
 
   def review_checks
