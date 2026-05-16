@@ -2,23 +2,23 @@
 
 # Form941GuAggregator
 #
-# Generates quarterly 941-GU style summary data from committed payroll items
-# for a given company, year, and quarter.
+# Generates quarterly federal Form 941 worksheet data from committed payroll
+# items for a given Guam company, year, and quarter.
 #
-# The Guam Form 941-GU mirrors the federal Form 941 and is filed with the
-# Guam Department of Revenue and Taxation (DoRT). This aggregator produces
-# structured data suitable for UI display and CSV/JSON export.
+# Current IRS Form 941 instructions say employers in Guam skip lines 2 and 3
+# unless they have employees subject to U.S. income tax withholding. Guam wage
+# withholding belongs in the Form 500/W-1 track, not on Form 941.
 #
-# === 941-GU Line Reference ===
+# === Federal Form 941 Line Reference ===
 # Line 1  – Number of employees who received wages in the quarter
-# Line 2  – Total wages, tips, and other compensation (gross pay)
-# Line 3  – Total Guam income tax withheld (withholding_tax)
+# Line 2  – Skipped for Guam employers by default
+# Line 3  – Skipped for Guam employers by default
 # Line 5a – Taxable social security wages × 12.4% (employee 6.2% + employer 6.2%)
 # Line 5b – Taxable social security tips × 12.4%  [placeholder – tips tracked separately]
 # Line 5c – Taxable Medicare wages × 2.9% (employee 1.45% + employer 1.45%)
 # Line 5d – Additional Medicare Tax wages (wages over $200K threshold per employee)
 # Line 5e – Total SS + Medicare taxes (5a + 5b + 5c + 5d)
-# Line 6  – Total taxes before adjustments (line 3 + line 5e)
+# Line 6  – Total taxes before adjustments (line 5e; line 3 skipped)
 # Line 7  – Adjustment: fractions of cents             [PLACEHOLDER]
 # Line 8  – Adjustment: sick pay                        [PLACEHOLDER]
 # Line 9  – Adjustment: tips / group-term life          [PLACEHOLDER]
@@ -59,7 +59,7 @@ class Form941GuAggregator
     raise ArgumentError, "quarter must be 1–4" unless (1..4).cover?(@quarter)
   end
 
-  # Returns the full 941-GU structured report hash.
+  # Returns the full federal Form 941 structured report hash.
   def generate
     # Fail fast for unsupported SS wage-base years.
     ss_wage_base
@@ -67,14 +67,17 @@ class Form941GuAggregator
     items = qualifying_payroll_items
     records = items.to_a
 
-    # --- Line 2 breakdowns ---
+    # --- Payroll detail retained for Guam W-1/SWICA tie-out context ---
     total_gross          = sum(records, :gross_pay)
     total_reported_tips  = sum(records, :reported_tips)
-    # `gross_pay` already includes reported tips in the payroll calculators.
-    line2_total_compensation = total_gross.round(2)
 
-    # --- Line 3 ---
-    total_fit_withheld   = sum(records, :withholding_tax)
+    # --- Form 941 lines 2 and 3 ---
+    # Guam employers skip these by default unless they have employees subject
+    # to U.S. federal income tax withholding. Guam withholding is tracked in
+    # the Form 500/W-1 workflow.
+    line2_total_compensation = nil
+    line3_fit_withheld = nil
+    guam_withholding_total = sum(records, :withholding_tax)
 
     # --- Line 5a / 5b: split SS wages and tips using actual wage-base ordering ---
     prior_ss_taxable_wages = prior_ss_taxable_wages_by_employee
@@ -104,9 +107,9 @@ class Form941GuAggregator
     line5e = (ss_combined_total + ss_tips_combined + medicare_combined_total + add_medicare_tax).round(2)
 
     # --- Line 6 ---
-    line6  = (total_fit_withheld + line5e).round(2)
+    line6  = line5e.round(2)
 
-    # Monthly liability breakdown (for Form 941-GU Schedule B equivalent)
+    # Monthly liability breakdown (for Form 941 Part 2 / Schedule B support)
     monthly_liability = monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
     monthly_total_liability = monthly_liability.sum { |month| month[:total_liability].to_f }.round(2)
 
@@ -126,7 +129,7 @@ class Form941GuAggregator
 
     {
       meta: {
-        report_type:    "form_941_gu",
+        report_type:    "federal_form_941",
         company_id:     company.id,
         company_name:   company.name,
         ein:            company.ein,
@@ -141,7 +144,9 @@ class Form941GuAggregator
           "Line 7 auto-computes fractions-of-cents adjustment when monthly liability rounding differs from quarter totals.",
           "Line 7 fractions-of-cents uses (monthly Schedule B total - line 6); positive means monthly liability exceeds line 6, negative means it is lower.",
           "Lines 8–9 (adjustments) are PLACEHOLDER: enter manually before filing.",
-          "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with DoRT deposits.",
+          "Lines 2 and 3 are skipped by default for Guam employers unless employees are subject to U.S. federal income tax withholding.",
+          "Guam wage withholding is tracked through Form 500/W-1 and surfaced in tax_detail.guam_withholding_for_w1.",
+          "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with federal deposit records.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
           "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
           "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
@@ -157,8 +162,8 @@ class Form941GuAggregator
       },
       lines: {
         line1_employee_count:              employee_count,
-        line2_wages_tips_other:            line2_total_compensation.to_f,
-        line3_fit_withheld:                total_fit_withheld.to_f,
+        line2_wages_tips_other:            line2_total_compensation,
+        line3_fit_withheld:                line3_fit_withheld,
 
         line5a_ss_wages:                   taxable_ss_wages.to_f,
         line5a_ss_combined_tax:            ss_combined_total.to_f,
@@ -184,7 +189,7 @@ class Form941GuAggregator
       tax_detail: {
         gross_wages:                  total_gross.to_f,
         reported_tips:                total_reported_tips.to_f,
-        fit_withheld:                 total_fit_withheld.to_f,
+        fit_withheld:                 nil,
         ss_employee:                  ss_employee_total.to_f,
         ss_employer:                  ss_employer_total.to_f,
         ss_wages_combined:            ss_combined_total.to_f,
@@ -194,7 +199,8 @@ class Form941GuAggregator
         medicare_employer:            medicare_employer_total.to_f,
         medicare_combined:            medicare_combined_total.to_f,
         additional_medicare_employee: add_medicare_tax.to_f,
-        total_employee_taxes:         (total_fit_withheld + ss_employee_total + medicare_employee_total + add_medicare_tax).round(2).to_f,
+        guam_withholding_for_w1:      guam_withholding_total.to_f,
+        total_employee_taxes:         (ss_employee_total + medicare_employee_total + add_medicare_tax).round(2).to_f,
         total_employer_taxes:         (ss_employer_total + medicare_employer_total).round(2).to_f
       },
       monthly_liability: monthly_liability
@@ -255,7 +261,8 @@ class Form941GuAggregator
 
   # Monthly breakdown: total tax liability per calendar month in the quarter.
   # Useful for determining whether the company is a monthly or semiweekly depositor.
-  # Must reconcile to line 6 total (FIT + line 5e), including SS tips and Additional Medicare.
+  # Must reconcile to line 6 total (line 5e for Guam employers), including SS
+  # tips and Additional Medicare.
   def monthly_liability_breakdown(records, monthly_add_medicare_wages, monthly_ss_allocations)
     months = (1..3).map { |i| quarter_start_date >> (i - 1) }
     month_map = records.group_by { |item| item.pay_period.pay_date.beginning_of_month.to_date }
@@ -263,7 +270,7 @@ class Form941GuAggregator
     months.map do |month_start|
       month_end = month_start.end_of_month
       month_items = month_map[month_start] || []
-      month_fit              = sum(month_items, :withholding_tax)
+      month_guam_withholding = sum(month_items, :withholding_tax)
       month_gross            = sum(month_items, :gross_pay)
       month_ss_wages         = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
       month_ss_tips          = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]
@@ -272,13 +279,14 @@ class Form941GuAggregator
       month_medicare         = (month_gross * MEDICARE_RATE_COMBINED).round(2)
       month_add_med          = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
 
-      total = (month_fit + month_ss_combined + month_ss_tips_combined + month_medicare + month_add_med).round(2)
+      total = (month_ss_combined + month_ss_tips_combined + month_medicare + month_add_med).round(2)
 
       {
         month:        month_start.strftime("%B %Y"),
         month_start:  month_start.iso8601,
         month_end:    month_end.iso8601,
-        fit_withheld: month_fit.to_f,
+        fit_withheld: nil,
+        guam_withholding_for_w1: month_guam_withholding.to_f,
         ss_combined:  month_ss_combined.to_f,
         ss_tips_combined: month_ss_tips_combined.to_f,
         medicare_combined: month_medicare.to_f,

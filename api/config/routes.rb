@@ -194,6 +194,8 @@ Rails.application.routes.draw do
         get "reports/tax_summary_xlsx", to: "reports#tax_summary_xlsx"
         get "reports/ytd_summary", to: "reports#ytd_summary"
         get "reports/ytd_summary_xlsx", to: "reports#ytd_summary_xlsx"
+        get "reports/quarterly_compliance_packet", to: "reports#quarterly_compliance_packet"
+        get "reports/quarterly_compliance_packet_xlsx", to: "reports#quarterly_compliance_packet_xlsx"
         get "reports/form_941_gu", to: "reports#form_941_gu"
         get "reports/form_941_gu_xlsx", to: "reports#form_941_gu_xlsx"
         get "reports/w2_gu", to: "reports#w2_gu"
