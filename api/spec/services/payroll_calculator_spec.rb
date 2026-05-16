@@ -139,6 +139,227 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.additional_withholding).to eq(0)
     end
 
+    it "does not let extra W-4 withholding create a negative normal paycheck" do
+      employee.update!(additional_withholding: 66.0)
+      payroll_item.update!(
+        hours_worked: 0,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        custom_earnings: []
+      )
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(0.0)
+      expect(payroll_item.additional_withholding).to eq(0.0)
+      expect(payroll_item.total_deductions).to eq(0.0)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
+    it "reapplies W-4 extra withholding when hours arrive after a zero-pay calculation" do
+      employee.update!(additional_withholding: 66.0)
+      payroll_item.update!(
+        hours_worked: 0,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        custom_earnings: []
+      )
+
+      described_class.for(employee, payroll_item).calculate
+      payroll_item.save!
+      expect(payroll_item.reload.additional_withholding).to eq(0.0)
+
+      payroll_item.update!(hours_worked: 10)
+      described_class.for(employee.reload, payroll_item.reload).calculate
+
+      expect(payroll_item.additional_withholding).to eq(66.0)
+      expect(payroll_item.total_deductions).to be >= 66.0
+      expect(payroll_item.net_pay).to be >= 0.0
+    end
+
+    it "caps remaining deductions so total deductions reconcile with zero net pay" do
+      payroll_item.update!(
+        hours_worked: 1,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 250.0,
+        custom_deductions: [
+          { "label" => "Cash Advance", "amount" => 75.0 }
+        ]
+      )
+
+      described_class.for(employee, payroll_item).calculate
+
+      available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
+      expect(payroll_item.total_deductions).to eq(available_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+      expect(payroll_item.gross_pay - payroll_item.total_deductions + payroll_item.non_taxable_pay.to_f).to eq(0.0)
+      expect(payroll_item.custom_deductions_total).to eq(0.0)
+      expect(payroll_item.withholding_tax).to be <= available_pay
+    end
+
+    it "removes itemized deduction rows that are capped to zero on recalculation" do
+      employee.update!(additional_withholding: 0)
+      deduction_type = DeductionType.create!(
+        company: company,
+        name: "Cash Advance",
+        category: "post_tax",
+        sub_category: "other",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: deduction_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.update!(
+        hours_worked: 1,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 100.0,
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+      expect(payroll_item.loan_payment).to eq(0.0)
+      expect(payroll_item.insurance_payment).to eq(0.0)
+
+      payroll_item.calculate!
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+      expect(payroll_item.loan_payment).to eq(0.0)
+      expect(payroll_item.insurance_payment).to eq(0.0)
+    end
+
+    it "zeros loan and insurance mirrors when capped itemized deductions are removed" do
+      employee.update!(additional_withholding: 0)
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Employee Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      insurance_type = DeductionType.create!(
+        company: company,
+        name: "Medical Insurance",
+        category: "post_tax",
+        sub_category: "insurance",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: insurance_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.update!(
+        hours_worked: 1,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 250.0,
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+      expect(payroll_item.loan_payment).to eq(0.0)
+      expect(payroll_item.insurance_payment).to eq(0.0)
+      expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
+    it "does not use employer contribution records to absorb employee deduction excess" do
+      employee.update!(
+        additional_withholding: 0,
+        employer_retirement_match_rate: 0.5
+      )
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Employee Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 75.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.update!(
+        hours_worked: 10,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 150.0,
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+
+      employer_match = payroll_item.payroll_item_deductions.find(&:employer_contribution?)
+      expect(employer_match.amount).to eq(50.0)
+      expect(payroll_item.loan_payment).to eq(0.0)
+      expect(payroll_item.withholding_tax).to eq(92.35)
+      expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
+    it "preserves import-sourced loan mirrors when there are no itemized deductions" do
+      employee.update!(additional_withholding: 0)
+      payroll_item.update!(
+        hours_worked: 10,
+        overtime_hours: 0,
+        holiday_hours: 0,
+        pto_hours: 0,
+        bonus: 0,
+        reported_tips: 0,
+        withholding_tax_override: 100.0,
+        loan_deduction: 30.0,
+        loan_payment: 30.0,
+        import_source: "mosa_revel",
+        custom_deductions: []
+      )
+
+      payroll_item.calculate!
+
+      expect(payroll_item.reload.payroll_item_deductions).to be_empty
+      expect(payroll_item.loan_payment).to eq(30.0)
+      expect(payroll_item.withholding_tax).to eq(62.35)
+      expect(payroll_item.total_deductions).to eq(payroll_item.gross_pay)
+      expect(payroll_item.net_pay).to eq(0.0)
+    end
+
     it "treats tips paid out as a deduction that reduces net pay only" do
       payroll_item.tips_paid_out = 50.0
 

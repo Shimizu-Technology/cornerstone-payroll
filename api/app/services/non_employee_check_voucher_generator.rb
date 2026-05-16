@@ -50,7 +50,7 @@ class NonEmployeeCheckVoucherGenerator
     rows = [
       [ "Payable To", check.payable_to, "Check #", check.check_number.presence || "Unassigned" ],
       [ "Payment Date", format_date(check.effective_payment_date), "Amount", fd(check.amount) ],
-      [ "Payment Type", check_type_label, "Status", check.check_status.to_s.titleize ],
+      [ "Payment Type", check_type_label, "", "" ],
       [ "Tax/Reporting Period", period_label.presence || "N/A", "Due Date", format_date(check.due_date) ],
       [ "Reference #", check.reference_number.presence || "N/A", "Confirmation #", check.confirmation_number.presence || "N/A" ]
     ]

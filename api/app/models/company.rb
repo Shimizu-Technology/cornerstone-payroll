@@ -6,6 +6,7 @@ class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
 
   belongs_to :organization
+  belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
 
   has_many :departments, dependent: :destroy
   has_many :employees, dependent: :destroy

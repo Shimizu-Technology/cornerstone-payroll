@@ -58,6 +58,21 @@ RSpec.describe PunchEntry, type: :model do
     expect(entry).to be_missing_core_punch
   end
 
+  it "subtracts the lunch break when all four primary punches are present" do
+    entry = described_class.create!(
+      timecard: timecard,
+      card_day: 21,
+      date: Date.new(2026, 4, 21),
+      clock_in: "08:05",
+      lunch_out: "13:07",
+      lunch_in: "14:11",
+      clock_out: "17:28"
+    )
+
+    expect(entry.hours_worked).to eq(8.32)
+    expect(entry.calculated_hours).to eq(8.32)
+  end
+
   it "flags a trailing third in punch without a matching out punch" do
     entry = described_class.create!(
       timecard: timecard,

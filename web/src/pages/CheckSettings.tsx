@@ -33,6 +33,38 @@ function checkSettingsSnapshot(values: {
   return JSON.stringify(values);
 }
 
+function parseOffsetInput(value: string): number {
+  const trimmed = value.trim();
+  if (trimmed === '') return 0;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) throw new Error('X and Y offsets must be numbers.');
+  return parsed;
+}
+
+function comparableOffset(value: string): string | null {
+  try {
+    return parseOffsetInput(value).toFixed(3);
+  } catch {
+    return null;
+  }
+}
+
+function stableLayoutJson(value: unknown): string {
+  if (!value || typeof value !== 'object') return '{}';
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (!input || typeof input !== 'object') return input;
+
+    return Object.keys(input as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = normalize((input as Record<string, unknown>)[key]);
+        return acc;
+      }, {});
+  };
+  return JSON.stringify(normalize(value));
+}
+
 export function CheckSettingsPage() {
   const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -59,6 +91,8 @@ export function CheckSettingsPage() {
   const [generatingTestCheck, setGeneratingTestCheck] = useState(false);
   const [testCheckPreviewUrl, setTestCheckPreviewUrl] = useState<string | null>(null);
   const [testCheckPreviewFilename, setTestCheckPreviewFilename] = useState('test_check.pdf');
+  const [activePrinterProfileId, setActivePrinterProfileId] = useState<number | null>(null);
+  const [activePrinterProfileName, setActivePrinterProfileName] = useState<string | null>(null);
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
@@ -110,6 +144,8 @@ export function CheckSettingsPage() {
     setMemoTemplate(nextMemoTemplate);
     setAutoCreateFitCheck(nextAutoCreateFitCheck);
     setNextCheckNumber(String(s.next_check_number));
+    setActivePrinterProfileId(s.active_printer_profile_id ?? null);
+    setActivePrinterProfileName(s.active_printer_profile_name ?? null);
     setSavedSettingsSnapshot(checkSettingsSnapshot({
       stockType: s.check_stock_type,
       offsetX: nextOffsetX,
@@ -133,6 +169,16 @@ export function CheckSettingsPage() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedCheckSettings]);
+
+  useEffect(() => {
+    if (!activePrinterProfileId) {
+      setActivePrinterProfileName(null);
+      return;
+    }
+
+    const activeProfile = profiles.find((profile) => profile.id === activePrinterProfileId);
+    if (activeProfile) setActivePrinterProfileName(activeProfile.name);
+  }, [activePrinterProfileId, profiles]);
 
   useEffect(() => {
     if (!hasUnsavedCheckSettings) return;
@@ -175,6 +221,7 @@ export function CheckSettingsPage() {
     try {
       const data = await printerProfilesApi.list();
       setProfiles(data.printer_profiles);
+      setActivePrinterProfileId(data.active_printer_profile_id ?? null);
     } catch {
       // Non-critical — profiles section just stays empty
     }
@@ -259,8 +306,8 @@ export function CheckSettingsPage() {
 
       const data = await checksApi.updateSettings({
         check_stock_type: stockType,
-        check_offset_x: parseFloat(offsetX),
-        check_offset_y: parseFloat(offsetY),
+        check_offset_x: parseOffsetInput(offsetX),
+        check_offset_y: parseOffsetInput(offsetY),
         bank_name: bankName.trim() || null,
         bank_address: bankAddress.trim() || null,
         check_memo_template: memoTemplate.trim() || null,
@@ -327,8 +374,8 @@ export function CheckSettingsPage() {
 
   const currentDraftCheckSettings = (layoutConfig: Record<string, unknown>) => ({
     check_stock_type: stockType,
-    check_offset_x: parseFloat(offsetX),
-    check_offset_y: parseFloat(offsetY),
+    check_offset_x: parseOffsetInput(offsetX),
+    check_offset_y: parseOffsetInput(offsetY),
     bank_name: bankName.trim() || null,
     bank_address: bankAddress.trim() || null,
     check_memo_template: memoTemplate.trim() || null,
@@ -398,8 +445,8 @@ export function CheckSettingsPage() {
         description: newProfileDescription.trim() || null,
         notes: newProfileNotes.trim() || null,
         check_stock_type: stockType,
-        check_offset_x: parseFloat(offsetX),
-        check_offset_y: parseFloat(offsetY),
+        check_offset_x: parseOffsetInput(offsetX),
+        check_offset_y: parseOffsetInput(offsetY),
         check_layout_config: layoutConfig,
       });
       setNewProfileName('');
@@ -428,8 +475,25 @@ export function CheckSettingsPage() {
       applySettingsToForm(data.check_settings);
       await loadCheckLayout(data.check_settings.check_stock_type);
       setSuccess(`Applied profile "${profile.name}". Settings are now active.`);
+      await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply profile');
+    }
+  };
+
+  const handleClearActiveProfile = async () => {
+    if (!window.confirm('Stop using a saved printer profile for this client? Current check settings will stay as-is.')) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const data = await printerProfilesApi.clearActive();
+      setActivePrinterProfileId(null);
+      setActivePrinterProfileName(null);
+      setSettings((current) => current ? { ...current, ...data.check_settings } : current);
+      setSuccess('No printer profile is selected for this client. Current check settings were kept.');
+      await loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear active printer profile');
     }
   };
 
@@ -477,8 +541,8 @@ export function CheckSettingsPage() {
     try {
       await printerProfilesApi.update(profile.id, {
         check_stock_type: stockType,
-        check_offset_x: parseFloat(offsetX),
-        check_offset_y: parseFloat(offsetY),
+        check_offset_x: parseOffsetInput(offsetX),
+        check_offset_y: parseOffsetInput(offsetY),
         check_layout_config: layoutConfig,
       });
       setSuccess(`Profile "${profile.name}" updated with current settings.`);
@@ -498,7 +562,9 @@ export function CheckSettingsPage() {
     setOffsetX('0.000');
     setOffsetY('0.000');
     setLayoutOverridesJson('{}');
-    setSuccess('Printer profile calibration cleared. Click Save Settings to make it active.');
+    setActivePrinterProfileId(null);
+    setActivePrinterProfileName(null);
+    setSuccess('Calibration draft reset to defaults. Click Save Settings to make it active without a saved printer profile.');
     setError(null);
   };
 
@@ -543,10 +609,24 @@ export function CheckSettingsPage() {
                 an office printer once and reuse it across clients. <span className="font-medium">Use This Printer</span>
                 {' '}applies the profile to the active client only.
               </p>
+              <p className="mt-2 text-sm">
+                {activePrinterProfileId ? (
+                  <span className="inline-flex items-center rounded-md border border-green-200 bg-green-50 px-2 py-1 font-medium text-green-800">
+                    Active printer: {activePrinterProfileName || profiles.find((profile) => profile.id === activePrinterProfileId)?.name || 'Selected profile'}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700">
+                    No saved printer profile selected
+                  </span>
+                )}
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handleClearActiveProfile} disabled={!activePrinterProfileId}>
+                Use No Printer Profile
+              </Button>
               <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
-                Clear Profile Settings
+                Reset Calibration Draft
               </Button>
               <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
                 {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
@@ -596,8 +676,20 @@ export function CheckSettingsPage() {
               <p className="text-sm text-gray-400 italic">No printer profiles saved yet. Save your current settings as a profile to get started.</p>
             )}
 
-            {profiles.map((profile) => (
-              <div key={profile.id} className="rounded-lg border p-3 hover:bg-gray-50 transition-colors">
+            {profiles.map((profile) => {
+              const currentOffsetX = comparableOffset(offsetX);
+              const currentOffsetY = comparableOffset(offsetY);
+              const profileValuesMatchCurrent =
+                profile.check_stock_type === stockType &&
+                currentOffsetX !== null &&
+                currentOffsetY !== null &&
+                Number(profile.check_offset_x).toFixed(3) === currentOffsetX &&
+                Number(profile.check_offset_y).toFixed(3) === currentOffsetY &&
+                stableLayoutJson(profile.check_layout_config || {}) === stableLayoutJson(parsedLayoutOverrides || {});
+              const profileMatchesCurrent = activePrinterProfileId === profile.id;
+              const hasCustomLayout = stableLayoutJson(profile.check_layout_config || {}) !== '{}';
+              return (
+              <div key={profile.id} className={`rounded-lg border p-3 transition-colors ${profileMatchesCurrent ? 'border-blue-300 bg-blue-50/50' : 'hover:bg-gray-50'}`}>
                 {editingProfileId === profile.id ? (
                   <div className="space-y-2">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -627,12 +719,21 @@ export function CheckSettingsPage() {
                         {profile.is_default && (
                           <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Default</span>
                         )}
+                        {profileMatchesCurrent && (
+                          <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">Active for this client</span>
+                        )}
+                        {!profileMatchesCurrent && profileValuesMatchCurrent && (
+                          <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">Matches current settings</span>
+                        )}
                       </div>
                       {profile.description && (
                         <p className="text-sm text-gray-500 mt-0.5">{profile.description}</p>
                       )}
                       <p className="text-xs text-gray-400 mt-1 font-mono">
                         X: {Number(profile.check_offset_x).toFixed(3)} &nbsp; Y: {Number(profile.check_offset_y).toFixed(3)} &nbsp; Stock: {profile.check_stock_type === 'first_hawaiian_4up' ? 'FHB 4-Up' : profile.check_stock_type === 'top_check' ? 'Top' : 'Bottom'}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Layout: {hasCustomLayout ? 'Customized check face' : 'Default check face'}
                       </p>
                       {profile.notes && (
                         <div className="mt-2 rounded bg-amber-50 border border-amber-200 px-2 py-1.5">
@@ -643,7 +744,7 @@ export function CheckSettingsPage() {
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
                       <Button size="sm" onClick={() => handleApplyProfile(profile)}>
-                        Use This Printer
+                        {profileMatchesCurrent ? 'Using This Printer' : 'Use This Printer'}
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
                         Overwrite with Current
@@ -675,7 +776,8 @@ export function CheckSettingsPage() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 

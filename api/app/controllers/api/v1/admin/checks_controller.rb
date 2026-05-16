@@ -36,7 +36,7 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:employee, :check_events)
+                             .includes(:check_events, employee: :department)
                              .left_outer_joins(:employee)
                              .with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
@@ -429,6 +429,10 @@ module Api
           [ :check_offset_x, :check_offset_y ].each do |key|
             next unless permitted.key?(key)
             value = permitted[key]
+            if value.blank?
+              permitted[key] = 0
+              next
+            end
             next if value.is_a?(Numeric)
             next if value.to_s.match?(/\A-?\d+(\.\d+)?\z/)
 
@@ -440,6 +444,7 @@ module Api
           elsif permitted[:check_layout_config].is_a?(Hash)
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
           end
+          permitted[:active_printer_profile_id] = nil if printer_calibration_settings_changed?(permitted)
 
           if @company.update(permitted)
             render json: { check_settings: company_check_settings_json(@company) }
@@ -650,6 +655,8 @@ module Api
             pay_period_id: item.pay_period_id,
             employee_id: item.employee_id,
             employee_name: item.employee&.full_name,
+            department_id: item.employee&.department_id,
+            department_name: item.employee&.department&.name,
             check_number: item.check_number,
             net_pay: item.net_pay,
             gross_pay: item.gross_pay,
@@ -687,8 +694,24 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
-            check_layout_config: company.check_layout_config || {}
+            check_layout_config: company.check_layout_config || {},
+            active_printer_profile_id: company.active_printer_profile_id,
+            active_printer_profile_name: company.active_printer_profile&.name
           }
+        end
+
+        def printer_calibration_settings_changed?(permitted)
+          return true if permitted.key?(:check_stock_type) && permitted[:check_stock_type].to_s != @company.check_stock_type.to_s
+          return true if permitted.key?(:check_offset_x) && BigDecimal(permitted[:check_offset_x].to_s) != @company.check_offset_x.to_d
+          return true if permitted.key?(:check_offset_y) && BigDecimal(permitted[:check_offset_y].to_s) != @company.check_offset_y.to_d
+
+          if permitted.key?(:check_layout_config)
+            current_layout = JSON.parse((@company.check_layout_config || {}).to_json)
+            next_layout = JSON.parse((permitted[:check_layout_config] || {}).to_json)
+            return true if next_layout != current_layout
+          end
+
+          false
         end
 
         def check_settings_preview_company(company)
@@ -722,6 +745,10 @@ module Api
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
           elsif permitted[:check_layout_config].is_a?(Hash)
             permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
+          end
+
+          [ :check_offset_x, :check_offset_y ].each do |key|
+            permitted[key] = 0 if permitted.key?(key) && permitted[key].blank?
           end
 
           permitted

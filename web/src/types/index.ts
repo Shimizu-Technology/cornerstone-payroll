@@ -226,6 +226,7 @@ export interface PayPeriod {
   end_date: string;
   pay_date: string;
   status: PayPeriodStatus;
+  excluded_employee_ids?: number[];
   notes?: string;
   period_description?: string;
   created_by_id?: number;
@@ -646,6 +647,8 @@ export interface CheckItem {
   pay_period_id: number;
   employee_id: number;
   employee_name: string;
+  department_id?: number | null;
+  department_name?: string | null;
   check_number: string | null;
   net_pay: number;
   gross_pay: number;
@@ -684,6 +687,8 @@ export interface CheckSettings {
   check_memo_template: string | null;
   auto_create_fit_check: boolean;
   check_layout_config: Record<string, unknown>;
+  active_printer_profile_id: number | null;
+  active_printer_profile_name: string | null;
 }
 
 export interface CheckLayoutPageMetadata {

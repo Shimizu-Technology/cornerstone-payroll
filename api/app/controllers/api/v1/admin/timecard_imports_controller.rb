@@ -44,6 +44,7 @@ module Api
           return render json: { error: "No mappings provided" }, status: :unprocessable_entity if mappings.empty?
 
           results = { applied: [], skipped: [], errors: [] }
+          excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
           ActiveRecord::Base.transaction do
             mappings.each do |mapping|
@@ -53,6 +54,10 @@ module Api
               employee = Employee.active.find_by(id: eid, company_id: current_company_id)
               unless employee
                 results[:errors] << { employee_id: eid, error: "Employee not found or inactive" }
+                next
+              end
+              if excluded_employee_ids.include?(employee.id)
+                results[:skipped] << { employee_id: employee.id, reason: "Excluded from this pay period" }
                 next
               end
 

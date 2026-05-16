@@ -224,6 +224,7 @@ module Api
           #    (don't auto-create hourly employees not present in the import)
           # 3. Otherwise, include all active employees for normal payroll runs/recalculations
           submitted_employee_ids = submitted_payroll_employee_ids
+          excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id)
           employee_ids = if params[:employee_ids].present?
             Array(params[:employee_ids]) | submitted_employee_ids
           elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
@@ -234,6 +235,7 @@ module Api
           else
             Employee.active.where(company_id: current_company_id).pluck(:id)
           end
+          employee_ids = employee_ids.map(&:to_i).uniq - excluded_employee_ids
 
           results = { success: [], errors: [] }
 
@@ -937,6 +939,7 @@ module Api
             json[:payroll_items] = pay_period.payroll_items.includes(employee: :department).map do |item|
               payroll_item_json(item)
             end
+            json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
           end
 
           json

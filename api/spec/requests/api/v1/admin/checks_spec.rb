@@ -456,7 +456,33 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       get "/api/v1/admin/companies/check_settings"
       expect(response).to have_http_status(:ok)
       json = response.parsed_body["check_settings"]
-      expect(json).to include("next_check_number", "check_stock_type", "check_offset_x", "check_offset_y", "check_layout_config")
+      expect(json).to include(
+        "next_check_number",
+        "check_stock_type",
+        "check_offset_x",
+        "check_offset_y",
+        "check_layout_config",
+        "active_printer_profile_id",
+        "active_printer_profile_name"
+      )
+    end
+
+    it "includes the active printer profile when one is selected" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Front Desk Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      company.update!(active_printer_profile: profile)
+
+      get "/api/v1/admin/companies/check_settings"
+
+      expect(response).to have_http_status(:ok)
+      json = response.parsed_body.fetch("check_settings")
+      expect(json.fetch("active_printer_profile_id")).to eq(profile.id)
+      expect(json.fetch("active_printer_profile_name")).to eq("Front Desk Printer")
     end
   end
 
@@ -583,6 +609,15 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
 
   describe "PATCH /api/v1/admin/companies/check_settings" do
     it "updates offset, stock type, and layout overrides" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Saved Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0
+      )
+      company.update!(active_printer_profile: profile)
+
       patch "/api/v1/admin/companies/check_settings",
         params: {
           check_offset_x: 0.1,
@@ -598,6 +633,40 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(company.reload.check_offset_x).to be_within(0.001).of(0.1)
       expect(company.reload.check_stock_type).to eq("top_check")
       expect(company.reload.check_layout_config.dig("check_face", "date", "x")).to eq(480.0)
+      expect(company.active_printer_profile_id).to be_nil
+      expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to be_nil
+    end
+
+    it "keeps the active printer profile when saving unrelated settings" do
+      profile = PrinterProfile.create!(
+        organization: company.organization,
+        name: "Saved Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        check_layout_config: {}
+      )
+      company.update!(
+        active_printer_profile: profile,
+        check_stock_type: profile.check_stock_type,
+        check_offset_x: profile.check_offset_x,
+        check_offset_y: profile.check_offset_y,
+        check_layout_config: profile.check_layout_config
+      )
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: "0.000",
+          check_offset_y: "0.000",
+          check_stock_type: "bottom_check",
+          check_layout_config: {},
+          bank_name: "Bank of Guam",
+          auto_create_fit_check: true
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.active_printer_profile_id).to eq(profile.id)
+      expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to eq(profile.id)
     end
 
     it "allows accountants to update check settings for their assigned companies" do
