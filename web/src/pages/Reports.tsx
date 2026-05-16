@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, YtdSummaryParams } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -1604,7 +1604,204 @@ function EmployerLiabilityPanel() {
   );
 }
 
-// ─── Form 941-GU Panel ────────────────────────────────────────────────────────
+// ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
+
+function QuarterlyCompliancePacketPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
+  const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState(currentQuarter);
+  const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.quarterlyCompliancePacket(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.quarterlyCompliancePacketXlsx(year, quarter);
+      triggerDownload(blob, filename || `quarterly_compliance_packet_${year}_q${quarter}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
+    }
+  }
+
+  const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Quarterly Compliance Packet</CardTitle>
+          <CardDescription>
+            Pay-date based Guam and federal filing packet for Form 500, W-1, SWICA, Federal Form 941, and tie-out review.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="qcp-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="qcp-year"
+                value={year}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="qcp-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <select
+                id="qcp-quarter"
+                value={quarter}
+                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="1">Q1 (Jan-Mar)</option>
+                <option value="2">Q2 (Apr-Jun)</option>
+                <option value="3">Q3 (Jul-Sep)</option>
+                <option value="4">Q4 (Oct-Dec)</option>
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading...' : 'Generate Packet'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
+              {exportingXlsx ? 'Exporting...' : 'Download Excel'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>{report.meta.company_name} - {report.meta.quarter_label}</CardTitle>
+              <CardDescription>
+                Pay-date basis: {report.meta.quarter_start} to {report.meta.quarter_end} | Official due {report.due_dates.official_due_date} | Internal target {report.due_dates.internal_target_date}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">Form 500 / W-1</p>
+                  <p className="mt-1 text-xl font-semibold">{fmt(report.w1.total_guam_withholding)}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">SWICA Wages</p>
+                  <p className="mt-1 text-xl font-semibold">{fmt(report.swica.totals.total_wages)}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">SWICA Employees</p>
+                  <p className="mt-1 text-xl font-semibold">{report.swica.totals.employee_count}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">Review Checks</p>
+                  <p className="mt-1 text-xl font-semibold">{reviewNeedsAttention === 0 ? 'Ready' : `${reviewNeedsAttention} review`}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">W-1 Liability By Month</CardTitle>
+                <CardDescription>Enter liabilities in GuamTax by actual pay date and reconcile to Form 500 deposits.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Month</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.w1.monthly_liabilities.map((row) => (
+                      <TableRow key={row.month_number}>
+                        <TableCell>{row.month}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(row.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Federal Form 941</CardTitle>
+                <CardDescription>{report.federal_941.deposit_schedule.note}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Suggested deposit schedule</span>
+                    <span className="font-medium capitalize">{report.federal_941.deposit_schedule.suggested_schedule}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Schedule B required</span>
+                    <span className="font-medium">{report.federal_941.deposit_schedule.schedule_b_required ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Line 5e SS/Medicare</span>
+                    <span className="font-medium tabular-nums">{fmt(report.federal_941.report.lines.line5e_total_ss_medicare)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Lines 2 and 3</span>
+                    <span className="font-medium">Skipped for Guam</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Review Checks</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {report.review_checks.map((check) => (
+                  <div key={check.key} className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
+                    <p className="text-sm text-gray-700">{check.message}</p>
+                    <Badge variant={check.status === 'ok' ? 'success' : 'warning'}>{check.status}</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
 function Form941GuPanel() {
   const currentYear = new Date().getFullYear();
@@ -1636,7 +1833,7 @@ function Form941GuPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.form941GuXlsx(year, quarter);
-      triggerDownload(blob, filename || `form_941_gu_${year}_q${quarter}.xlsx`);
+      triggerDownload(blob, filename || `federal_form_941_${year}_q${quarter}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1650,9 +1847,9 @@ function Form941GuPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Form 941-GU Quarterly Report</CardTitle>
+          <CardTitle className="text-lg">Federal Form 941 Worksheet</CardTitle>
           <CardDescription>
-            Guam Employer's Quarterly Federal Tax Return — mirrors federal Form 941 for DRT filing.
+            Federal Form 941 worksheet for Guam employers. Lines 2 and 3 are skipped unless employees are subject to U.S. income tax withholding.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1701,7 +1898,7 @@ function Form941GuPanel() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Form 941-GU — {report.meta.quarter_label}</CardTitle>
+              <CardTitle>Federal Form 941 — {report.meta.quarter_label}</CardTitle>
               <CardDescription>
                 {report.employer_info.name} &bull; EIN: {report.employer_info.ein || '—'} &bull;{' '}
                 {report.meta.pay_periods_included} pay period{report.meta.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
@@ -1729,15 +1926,15 @@ function Form941GuPanel() {
                       </tr>
                       <tr className="border-b">
                         <td className="px-4 py-2 font-mono text-gray-500">2</td>
-                        <td className="px-4 py-2">Wages, tips, and other compensation</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line2_wages_tips_other)}</td>
+                        <td className="px-4 py-2">Wages, tips, and other compensation (skipped for Guam)</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line2_wages_tips_other)}</td>
                         <td className="px-4 py-2 text-right"></td>
                       </tr>
                       <tr className="border-b">
                         <td className="px-4 py-2 font-mono text-gray-500">3</td>
-                        <td className="px-4 py-2">Federal income tax withheld</td>
+                        <td className="px-4 py-2">Federal income tax withheld (skipped for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line3_fit_withheld)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line3_fit_withheld)}</td>
                       </tr>
                       <tr className="border-b bg-gray-50">
                         <td className="px-4 py-2 font-mono text-gray-500">5a</td>
@@ -1771,7 +1968,7 @@ function Form941GuPanel() {
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
                         <td className="px-4 py-2 font-mono text-gray-500">6</td>
-                        <td className="px-4 py-2">Total taxes before adjustments (line 3 + 5e)</td>
+                        <td className="px-4 py-2">Total taxes before adjustments (line 5e for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line6_total_taxes_before_adj)}</td>
                       </tr>
@@ -1836,7 +2033,7 @@ function Form941GuPanel() {
                         <thead>
                           <tr className="bg-gray-50 border-b">
                             <th className="text-left px-4 py-2 font-medium text-gray-600">Month</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">FIT Withheld</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">Guam W-1 Withholding</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">SS Combined</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">Medicare Combined</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">Addtl Medicare</th>
@@ -1847,7 +2044,7 @@ function Form941GuPanel() {
                           {report.monthly_liability.map((m) => (
                             <tr key={m.month} className="border-b last:border-0">
                               <td className="px-4 py-2">{m.month}</td>
-                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.fit_withheld)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.guam_withholding_for_w1 ?? 0)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.ss_combined + m.ss_tips_combined)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.medicare_combined)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.add_medicare_tax)}</td>
@@ -2153,9 +2350,9 @@ function Form1099NecPanel() {
 
 // ─── Report Tiles ─────────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
+type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'quarterly-compliance-packet' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'quarterly-compliance-packet', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
@@ -2195,6 +2392,16 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'quarterly-compliance-packet',
+    title: 'Quarterly Compliance Packet',
+    description: 'Pay-date based W-1, SWICA, Form 500, and Federal 941 tie-out packet',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -2240,8 +2447,8 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
   },
   {
     id: '941-gu',
-    title: 'Form 941-GU Quarterly',
-    description: 'Quarterly federal tax return for Guam employers (DRT filing)',
+    title: 'Federal Form 941',
+    description: 'Federal Form 941 worksheet for Guam employers',
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -2307,6 +2514,7 @@ export function Reports() {
         {activeReport === 'checks-payments-register' && <ChecksPaymentsRegisterPanel />}
         {activeReport === 'employee-pay-history' && <EmployeePayHistoryPanel />}
         {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
+        {activeReport === 'quarterly-compliance-packet' && <QuarterlyCompliancePacketPanel />}
         {activeReport === 'ytd-summary' && <YtdSummaryPanel />}
         {activeReport === 'employer-liability' && <EmployerLiabilityPanel />}
         {activeReport === 'w2-gu' && <W2GuPanel />}

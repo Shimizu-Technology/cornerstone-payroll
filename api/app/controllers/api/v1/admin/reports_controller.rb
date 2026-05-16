@@ -13,7 +13,8 @@ module Api
           tax_summary: "Payroll tax withholding summary used to review Guam/federal payroll tax liability for the selected year or quarter.",
           ytd_summary: "Year-to-date payroll totals by worker for the selected tax year.",
           employee_pay_history: "Paycheck history for an individual worker, including recent pay periods and year-to-date totals.",
-          form_941_gu: "Quarterly 941-GU preparation workbook summarizing wages, withholding, FICA, and monthly tax liability.",
+          form_941_gu: "Federal Form 941 preparation worksheet for Guam employers, with Guam-specific line 2/3 skip handling and FICA liability detail.",
+          quarterly_compliance_packet: "Quarterly Guam and federal payroll filing packet covering Form 500, W-1, SWICA, Federal Form 941, and review tie-outs.",
           w2_gu: "W-2GU preparation workbook for W-2 employees for the selected tax year.",
           form_1099_nec: "1099-NEC preparation workbook for contractor compensation and filing readiness.",
           installment_loans: "Employee installment loan balances and transaction history as of the selected date."
@@ -175,13 +176,15 @@ module Api
         end
 
         # GET /api/v1/admin/reports/form_941_gu
-        # Quarterly 941-GU style payroll tax report for Guam DoRT filing.
+        # Federal Form 941 worksheet. The legacy route name is preserved for
+        # frontend/API compatibility while the report output uses current Guam
+        # employer handling.
         #
         # Params:
         #   year    [Integer] – tax year (defaults to current year)
         #   quarter [Integer] – 1, 2, 3, or 4 (required)
         #
-        # Response: structured JSON mirroring 941-GU line items.
+        # Response: structured JSON mirroring federal Form 941 line items.
         # Placeholders (nil values) indicate fields requiring manual entry before filing.
         def form_941_gu
           raw_year = params[:year]
@@ -228,13 +231,30 @@ module Api
           company = Company.find(current_company_id)
           report = Form941GuAggregator.new(company, year, quarter).generate
           send_spreadsheet!(
-            filename: "form_941_gu_#{year}_q#{quarter}.xlsx",
+            filename: "federal_form_941_#{year}_q#{quarter}.xlsx",
             sheets: form_941_gu_sheets(report)
           )
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def quarterly_compliance_packet
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          render json: { report: report_data }
+        end
+
+        def quarterly_compliance_packet_xlsx
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          send_spreadsheet!(
+            filename: "quarterly_compliance_packet_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.xlsx",
+            sheets: quarterly_compliance_packet_sheets(report_data)
+          )
         end
 
         # GET /api/v1/admin/reports/w2_gu
@@ -1053,6 +1073,25 @@ module Api
           [ report_data, nil ]
         end
 
+        def build_quarterly_compliance_packet_data
+          raw_year = params[:year]
+          year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
+          quarter = params[:quarter]&.to_i
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
+          end
+
+          unless quarter && (1..4).cover?(quarter)
+            return [ nil, render(json: { error: "quarter is required and must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
+          end
+
+          company = Company.find(current_company_id)
+          [ QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate, nil ]
+        rescue ArgumentError => e
+          [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
+        end
+
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
         def build_w2_gu_report_data
@@ -1706,7 +1745,7 @@ module Api
           monthly = Array(report[:monthly_liability])
           [
             {
-              name: "941-GU Lines",
+              name: "Federal 941 Lines",
               rows: [ [ "Line", "Amount" ] ] + lines.map { |key, value| [ key.to_s.humanize, value ] }
             },
             {
@@ -1715,10 +1754,71 @@ module Api
             },
             {
               name: "Monthly Liability",
-              rows: [ [ "Month", "FIT", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Total" ] ] +
-                monthly.map { |row| [ row[:month], row[:fit_withheld], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability] ] }
+              rows: [ [ "Month", "Guam Withholding For W-1", "SS Wages Combined", "SS Tips Combined", "Medicare Combined", "Additional Medicare", "Federal Liability Total" ] ] +
+                monthly.map { |row| [ row[:month], row[:guam_withholding_for_w1], row[:ss_combined], row[:ss_tips_combined], row[:medicare_combined], row[:add_medicare_tax], row[:total_liability] ] }
             },
-            report_info_sheet(report, title: "Form 941-GU", description: REPORT_DESCRIPTIONS[:form_941_gu])
+            report_info_sheet(report, title: "Federal Form 941", description: REPORT_DESCRIPTIONS[:form_941_gu])
+          ]
+        end
+
+        def quarterly_compliance_packet_sheets(report)
+          form500_deposits = Array(report.dig(:form_500, :deposits))
+          w1_daily = Array(report.dig(:w1, :daily_liabilities))
+          w1_monthly = Array(report.dig(:w1, :monthly_liabilities))
+          swica_employees = Array(report.dig(:swica, :employees))
+          component_rows = Array(report[:component_taxability])
+          federal_lines = report.dig(:federal_941, :report, :lines) || {}
+          checks = Array(report[:review_checks])
+
+          [
+            {
+              name: "Packet Summary",
+              rows: [
+                [ "Field", "Value" ],
+                [ "Company", report.dig(:meta, :company_name) ],
+                [ "EIN", report.dig(:meta, :ein) ],
+                [ "Quarter", report.dig(:meta, :quarter_label) ],
+                [ "Period Basis", report.dig(:meta, :period_basis) ],
+                [ "Official Due Date", report.dig(:due_dates, :official_due_date) ],
+                [ "Internal Target Date", report.dig(:due_dates, :internal_target_date) ],
+                [ "Pay Periods Included", report.dig(:meta, :pay_periods_included) ]
+              ]
+            },
+            {
+              name: "Form 500 Deposits",
+              rows: [ [ "Pay Period ID", "Pay Date", "Quarter Ending", "Amount", "Status", "Payment Date", "Confirmation", "Receipt Attached" ] ] +
+                form500_deposits.map { |row| [ row[:pay_period_id], row[:pay_date], row[:quarter_ending], row[:amount], row[:status], row[:payment_date], row[:confirmation_number], row[:receipt_attached] ] }
+            },
+            {
+              name: "W-1 Daily",
+              rows: [ [ "Pay Date", "Month", "Guam Withholding Liability" ] ] +
+                w1_daily.map { |row| [ row[:pay_date], row[:month], row[:amount] ] }
+            },
+            {
+              name: "W-1 Monthly",
+              rows: [ [ "Month", "Month Number", "Guam Withholding Liability" ] ] +
+                w1_monthly.map { |row| [ row[:month], row[:month_number], row[:amount] ] }
+            },
+            {
+              name: "SWICA Detail",
+              rows: [ [ "Employee", "SSN Last 4", "Status", "Termination Date", "SWICA Wages", "Reported Tips", "Non-Taxable Pay", "Guam Withholding", "Pay Dates" ] ] +
+                swica_employees.map { |row| [ row[:name], row[:ssn_last_four], row[:status], row[:termination_date], row[:swica_wages], row[:reported_tips], row[:non_taxable_pay], row[:guam_withholding], Array(row[:pay_dates]).join(", ") ] }
+            },
+            {
+              name: "Federal 941",
+              rows: [ [ "Line", "Amount" ] ] + federal_lines.map { |key, value| [ key.to_s.humanize, value ] }
+            },
+            {
+              name: "Taxability Map",
+              rows: [ [ "Category", "Label", "Amount", "Guam Wages", "SWICA Wages", "SS Wages", "SS Tips", "Medicare Wages", "Non-Taxable" ] ] +
+                component_rows.map { |row| [ row[:category], row[:label], row[:amount], row[:guam_withholding_wages], row[:swica_wages], row[:social_security_wages], row[:social_security_tips], row[:medicare_wages_tips], row[:non_taxable] ] }
+            },
+            {
+              name: "Review Checks",
+              rows: [ [ "Check", "Status", "Message" ] ] +
+                checks.map { |row| [ row[:key], row[:status], row[:message] ] }
+            },
+            report_info_sheet(report, title: "Quarterly Compliance Packet", description: REPORT_DESCRIPTIONS[:quarterly_compliance_packet])
           ]
         end
 

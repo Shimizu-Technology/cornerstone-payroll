@@ -83,7 +83,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       body = response.parsed_body["report"]
 
-      expect(body["meta"]["report_type"]).to eq("form_941_gu")
+      expect(body["meta"]["report_type"]).to eq("federal_form_941")
       expect(body["meta"]["year"]).to eq(2025)
       expect(body["meta"]["quarter"]).to eq(1)
       expect(body["meta"]["quarter_label"]).to eq("Q1 2025")
@@ -96,13 +96,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       lines = response.parsed_body.dig("report", "lines")
       expect(lines["line1_employee_count"]).to eq(0)
-      expect(lines["line2_wages_tips_other"].to_f).to eq(3000.0)
-      expect(lines["line3_fit_withheld"].to_f).to eq(200.0)
+      expect(lines["line2_wages_tips_other"]).to be_nil
+      expect(lines["line3_fit_withheld"]).to be_nil
       expect(lines["line5a_ss_combined_tax"].to_f).to eq(372.0)  # 186 + 186
       expect(lines["line5c_medicare_combined_tax"].to_f).to eq(87.0) # 43.5 + 43.5
     end
 
-    it "includes reported tips in line2_wages_tips_other" do
+    it "keeps Guam employers' Form 941 line 2 skipped even when tips exist" do
       create(:payroll_item,
         pay_period:                   pay_period_q1,
         employee:                     create(:employee, company: company, department: department),
@@ -117,7 +117,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 1 }
 
       lines = response.parsed_body.dig("report", "lines")
-      expect(lines["line2_wages_tips_other"].to_f).to eq(4000.0) # gross_pay already includes reported_tips
+      expect(lines["line2_wages_tips_other"]).to be_nil
+      expect(response.parsed_body.dig("report", "tax_detail", "gross_wages").to_f).to eq(4000.0)
     end
 
     it "includes tax_detail and monthly_liability" do
@@ -156,7 +157,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/form_941_gu", params: { year: 2025, quarter: 3 }
       expect(response).to have_http_status(:ok)
       lines = response.parsed_body.dig("report", "lines")
-      expect(lines["line2_wages_tips_other"].to_f).to eq(0.0)
+      expect(lines["line2_wages_tips_other"]).to be_nil
       expect(lines["line1_employee_count"]).to eq(0)
     end
 
@@ -191,6 +192,74 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       lines = response.parsed_body.dig("report", "lines")
       expect(lines["line1_employee_count"]).to eq(1)
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/quarterly_compliance_packet" do
+    let!(:pay_period_q1) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 3, 16),
+        end_date: Date.new(2026, 3, 29),
+        pay_date: Date.new(2026, 4, 2))
+    end
+
+    let!(:pay_period_q2) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 16))
+    end
+
+    before do
+      create(:payroll_item,
+        pay_period: pay_period_q1,
+        employee: employee,
+        company: company,
+        gross_pay: 1000.00,
+        withholding_tax: 80.00,
+        social_security_tax: 62.00,
+        employer_social_security_tax: 62.00,
+        medicare_tax: 14.50,
+        employer_medicare_tax: 14.50)
+
+      item = create(:payroll_item,
+        pay_period: pay_period_q2,
+        employee: employee,
+        company: company,
+        gross_pay: 1200.00,
+        withholding_tax: 90.00,
+        social_security_tax: 74.40,
+        employer_social_security_tax: 74.40,
+        medicare_tax: 17.40,
+        employer_medicare_tax: 17.40,
+        reported_tips: 100.00,
+        non_taxable_pay: 25.00)
+      item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", amount: 1100.00)
+      item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 100.00)
+      item.payroll_item_earnings.create!(category: "non_taxable", label: "Non-Taxable Pay", amount: 25.00)
+    end
+
+    it "builds a Q2 packet by pay date, not period end date" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body["report"]
+
+      expect(report.dig("meta", "period_basis")).to eq("pay_date")
+      expect(report.dig("meta", "pay_periods_included")).to eq(2)
+      expect(report.dig("w1", "total_guam_withholding").to_f).to eq(170.0)
+      expect(report.dig("swica", "totals", "employee_count")).to eq(1)
+      expect(report.dig("swica", "totals", "total_wages").to_f).to eq(2200.0)
+      expect(report.dig("federal_941", "report", "lines", "line2_wages_tips_other")).to be_nil
+      expect(report.dig("federal_941", "deposit_schedule", "firm_payment_policy")).to eq("pay_each_pay_period")
+    end
+
+    it "returns 422 for invalid quarter" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 5 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
     end
   end
 

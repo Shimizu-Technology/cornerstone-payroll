@@ -88,7 +88,7 @@ RSpec.describe Form941GuAggregator do
 
     describe "meta section" do
       it "includes correct report metadata" do
-        expect(report[:meta][:report_type]).to eq("form_941_gu")
+        expect(report[:meta][:report_type]).to eq("federal_form_941")
         expect(report[:meta][:year]).to eq(2025)
         expect(report[:meta][:quarter]).to eq(2)
         expect(report[:meta][:quarter_label]).to eq("Q2 2025")
@@ -120,14 +120,12 @@ RSpec.describe Form941GuAggregator do
         expect(lines[:line1_employee_count]).to eq(0)
       end
 
-      it "line2: sums wages + tips + other compensation" do
-        # Gross pay is already the source of truth for wages/tips compensation.
-        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
+      it "line2: is skipped for Guam employers by default" do
+        expect(lines[:line2_wages_tips_other]).to be_nil
       end
 
-      it "line3: sums FIT withheld" do
-        # 100 + 75 + 100 = 275
-        expect(lines[:line3_fit_withheld]).to eq(275.0)
+      it "line3: is skipped for Guam employers by default" do
+        expect(lines[:line3_fit_withheld]).to be_nil
       end
 
       it "line5a: combined SS tax (employee + employer)" do
@@ -159,8 +157,7 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "line6: total taxes before adjustments (line3 + line5e)" do
-        line5e = lines[:line5e_total_ss_medicare]
-        expect(lines[:line6_total_taxes_before_adj]).to eq((275.0 + line5e).round(2))
+        expect(lines[:line6_total_taxes_before_adj]).to eq(lines[:line5e_total_ss_medicare])
       end
 
       it "excludes voided payroll items from quarterly totals" do
@@ -175,10 +172,11 @@ RSpec.describe Form941GuAggregator do
           employer_medicare_tax: 145.00,
           reported_tips: 500.00)
 
-        expect(lines[:line2_wages_tips_other]).to eq(5500.0)
-        expect(lines[:line3_fit_withheld]).to eq(275.0)
+        expect(lines[:line2_wages_tips_other]).to be_nil
+        expect(lines[:line3_fit_withheld]).to be_nil
         expect(lines[:line5c_medicare_combined_tax]).to eq(159.5)
-        expect(report[:tax_detail][:total_employee_taxes]).to eq(695.75)
+        expect(report[:tax_detail][:guam_withholding_for_w1]).to eq(275.0)
+        expect(report[:tax_detail][:total_employee_taxes]).to eq(420.75)
       end
 
       it "placeholder lines are nil" do
@@ -215,8 +213,8 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "totals employee-side taxes" do
-        # FIT: 275 + SS emp: 341 + Medicare emp: 79.75 + Add Medicare: 0 = 695.75
-        expect(detail[:total_employee_taxes]).to eq(695.75)
+        expect(detail[:guam_withholding_for_w1]).to eq(275.0)
+        expect(detail[:total_employee_taxes]).to eq(420.75)
       end
 
       it "totals employer-side taxes" do
@@ -256,24 +254,26 @@ RSpec.describe Form941GuAggregator do
 
       it "calculates April liability" do
         april = breakdown[0]
-        # FIT: 175, SS wages: (2000-50)+1500, SS tips: 50, Medicare base: 3500
-        expect(april[:fit_withheld].to_f).to eq(175.0)
+        # Guam W-1 withholding: 175, SS wages: (2000-50)+1500, SS tips: 50, Medicare base: 3500
+        expect(april[:fit_withheld]).to be_nil
+        expect(april[:guam_withholding_for_w1].to_f).to eq(175.0)
         expect(april[:ss_combined].to_f).to eq(427.8)
         expect(april[:ss_tips_combined].to_f).to eq(6.2)
         expect(april[:medicare_combined].to_f).to eq(101.5)
         expect(april[:add_medicare_tax].to_f).to eq(0.0)
-        expect(april[:total_liability].to_f).to eq(710.5)
+        expect(april[:total_liability].to_f).to eq(535.5)
       end
 
       it "calculates May liability" do
         may = breakdown[1]
-        # FIT: 100, SS wages: 2000-25, SS tips: 25, Medicare base: 2000
-        expect(may[:fit_withheld].to_f).to eq(100.0)
+        # Guam W-1 withholding: 100, SS wages: 2000-25, SS tips: 25, Medicare base: 2000
+        expect(may[:fit_withheld]).to be_nil
+        expect(may[:guam_withholding_for_w1].to_f).to eq(100.0)
         expect(may[:ss_combined].to_f).to eq(244.9)
         expect(may[:ss_tips_combined].to_f).to eq(3.1)
         expect(may[:medicare_combined].to_f).to eq(58.0)
         expect(may[:add_medicare_tax].to_f).to eq(0.0)
-        expect(may[:total_liability].to_f).to eq(406.0)
+        expect(may[:total_liability].to_f).to eq(306.0)
       end
 
       it "June has zero liability (no committed pay periods)" do
@@ -289,7 +289,6 @@ RSpec.describe Form941GuAggregator do
       it "keeps each month total aligned with the published rounded fields" do
         breakdown.each do |month|
           published_total = (
-            month[:fit_withheld].to_f +
             month[:ss_combined].to_f +
             month[:ss_tips_combined].to_f +
             month[:medicare_combined].to_f +
@@ -320,7 +319,8 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include draft pay period wages in line2" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
+        expect(report[:tax_detail][:gross_wages]).to eq(5500.0)
+        expect(report[:lines][:line2_wages_tips_other]).to be_nil
       end
     end
 
@@ -342,7 +342,8 @@ RSpec.describe Form941GuAggregator do
       end
 
       it "does not include Q1 wages in Q2 report" do
-        expect(report[:lines][:line2_wages_tips_other]).to eq(5500.0)
+        expect(report[:tax_detail][:gross_wages]).to eq(5500.0)
+        expect(report[:lines][:line2_wages_tips_other]).to be_nil
       end
     end
   end
