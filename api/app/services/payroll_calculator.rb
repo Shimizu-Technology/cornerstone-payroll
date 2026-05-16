@@ -264,6 +264,8 @@ class PayrollCalculator
   end
 
   def calculate_net_pay
+    cap_deductions_to_available_pay!
+
     payroll_item.net_pay = (
       payroll_item.gross_pay -
       payroll_item.total_deductions +
@@ -364,6 +366,86 @@ class PayrollCalculator
     reduction = [ excess, payroll_item.additional_withholding.to_f ].min
     payroll_item.additional_withholding = (payroll_item.additional_withholding.to_f - reduction).round(2)
     payroll_item.total_deductions = (payroll_item.total_deductions.to_f - reduction).round(2)
+  end
+
+  def cap_deductions_to_available_pay!
+    return if payroll_item.correction_entry?
+
+    available_pay = (payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f).round(2)
+    excess = (payroll_item.total_deductions.to_f - available_pay).round(2)
+    return unless excess.positive?
+
+    remaining = reduce_custom_deductions_by!(excess)
+    remaining = reduce_payroll_item_deductions_by!(remaining)
+    sync_aggregate_deductions_from_itemized!
+
+    [
+      :additional_withholding,
+      :withholding_tax,
+      :roth_retirement_payment,
+      :retirement_payment,
+      :loan_payment,
+      :insurance_payment,
+      :medicare_tax,
+      :social_security_tax,
+      :tips_paid_out
+    ].each do |field|
+      remaining = reduce_numeric_deduction_field_by!(field, remaining)
+      break unless remaining.positive?
+    end
+
+    payroll_item.total_deductions = [ (payroll_item.total_deductions.to_f - (excess - remaining)).round(2), available_pay ].min
+  end
+
+  def reduce_numeric_deduction_field_by!(field, amount)
+    return amount unless amount.positive?
+
+    current = payroll_item.public_send(field).to_f
+    reduction = [ current, amount ].min
+    payroll_item.public_send("#{field}=", (current - reduction).round(2))
+    (amount - reduction).round(2)
+  end
+
+  def reduce_custom_deductions_by!(amount)
+    return amount unless amount.positive?
+
+    deductions = Array(payroll_item.custom_deductions).map(&:dup)
+    deductions.reverse_each do |deduction|
+      current = deduction["amount"].to_f
+      reduction = [ current, amount ].min
+      deduction["amount"] = (current - reduction).round(2)
+      amount = (amount - reduction).round(2)
+      break unless amount.positive?
+    end
+
+    payroll_item.custom_deductions = deductions.select { |deduction| deduction["amount"].to_f.positive? }
+    amount
+  end
+
+  def reduce_payroll_item_deductions_by!(amount)
+    return amount unless amount.positive?
+
+    payroll_item.payroll_item_deductions.reverse_each do |deduction|
+      current = deduction.amount.to_f
+      reduction = [ current, amount ].min
+      deduction.amount = (current - reduction).round(2)
+      amount = (amount - reduction).round(2)
+      break unless amount.positive?
+    end
+
+    payroll_item.payroll_item_deductions.target.delete_if { |deduction| deduction.amount.to_f.zero? && deduction.new_record? }
+    amount
+  end
+
+  def sync_aggregate_deductions_from_itemized!
+    return unless payroll_item.payroll_item_deductions.any?
+
+    payroll_item.loan_payment = payroll_item.payroll_item_deductions.sum do |deduction|
+      deduction.deduction_type&.loan? ? deduction.amount.to_f : 0.0
+    end.round(2)
+    payroll_item.insurance_payment = payroll_item.payroll_item_deductions.sum do |deduction|
+      deduction.deduction_type&.sub_category == "insurance" ? deduction.amount.to_f : 0.0
+    end.round(2)
   end
 
   def sync_additional_withholding_from_employee!
