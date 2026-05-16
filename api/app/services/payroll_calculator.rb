@@ -425,7 +425,9 @@ class PayrollCalculator
   def reduce_payroll_item_deductions_by!(amount)
     return amount unless amount.positive?
 
-    payroll_item.payroll_item_deductions.reverse_each do |deduction|
+    employee_deductions = payroll_item.payroll_item_deductions.select { |deduction| deduction.pre_tax? || deduction.post_tax? }
+
+    employee_deductions.reverse_each do |deduction|
       current = deduction.amount.to_f
       reduction = [ current, amount ].min
       deduction.amount = (current - reduction).round(2)
@@ -433,7 +435,7 @@ class PayrollCalculator
       break unless amount.positive?
     end
 
-    payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_f.zero? }.each do |deduction|
+    employee_deductions.select { |deduction| deduction.amount.to_f.zero? }.each do |deduction|
       deduction.destroy! if deduction.persisted?
       payroll_item.payroll_item_deductions.target.delete(deduction)
     end
