@@ -263,6 +263,51 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/reports/quarterly_compliance_packet official PDFs" do
+    let!(:pay_period_q2) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 16))
+    end
+
+    before do
+      company.update!(ein: "12-3456789")
+      employee.update!(ssn_encrypted: "123-45-6789")
+      item = create(:payroll_item,
+        pay_period: pay_period_q2,
+        employee: employee,
+        company: company,
+        gross_pay: 1200.00,
+        withholding_tax: 90.00,
+        social_security_tax: 74.40,
+        employer_social_security_tax: 74.40,
+        medicare_tax: 17.40,
+        employer_medicare_tax: 17.40,
+        reported_tips: 100.00)
+      item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", amount: 1100.00)
+      item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 100.00)
+    end
+
+    {
+      "quarterly_compliance_packet_form_941_pdf" => "federal_form_941_2026_q2.pdf",
+      "quarterly_compliance_packet_schedule_b_pdf" => "federal_form_941_schedule_b_2026_q2.pdf",
+      "quarterly_compliance_packet_w1_pdf" => "guam_w1_2026_q2.pdf",
+      "quarterly_compliance_packet_swica_pdf" => "guam_sw2_2026_q2.pdf"
+    }.each do |endpoint, filename|
+      it "returns a prefilled official PDF from #{endpoint}" do
+        get "/api/v1/admin/reports/#{endpoint}", params: { year: 2026, quarter: 2 }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.content_type).to include("application/pdf")
+        expect(response.headers["Content-Disposition"]).to include("attachment")
+        expect(response.headers["Content-Disposition"]).to include(filename)
+        expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+      end
+    end
+  end
+
   describe "GET /api/v1/admin/reports/w2_gu" do
     let!(:pay_period_2025) do
       create(:pay_period, :committed,

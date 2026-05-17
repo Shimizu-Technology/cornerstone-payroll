@@ -31,6 +31,17 @@ The key operating rules are:
 - The app should still calculate and display the legal deposit schedule, because early/pay-period deposits are a firm policy rather than the rule itself.
 - Quarterly work should be internally targeted for completion in the first week after quarter end, even though the official due date is generally the last day of the month after quarter end.
 
+## Implementation Note - 2026-05-17
+
+The first implementation slice creates the pay-date based quarterly compliance packet and adds prefilled official PDF downloads for:
+
+- IRS Form 941
+- IRS Schedule B for Form 941
+- Guam W-1 Employer's Quarterly Tax Return
+- Guam SW-2 Employer Quarterly State Wage Report
+
+The app uses stored official PDF templates and overlays calculated packet data onto them, similar to the existing Form 500 workflow. The Guam W-1 and SWICA/SW-2 PDFs are intended as staff review aids and filing guides because GuamTax is still the filing system of record. Staff should download/review the PDF, then enter or upload the same values in GuamTax and save the filing confirmation back to the packet workflow when that task layer is added.
+
 ## Core Product Model
 
 ### Quarterly Compliance Packet

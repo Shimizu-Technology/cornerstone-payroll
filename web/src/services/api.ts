@@ -1557,6 +1557,14 @@ export const reportsApi = {
     api.get<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet', { year, quarter }),
   quarterlyCompliancePacketXlsx: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_xlsx', { year, quarter }),
+  quarterlyCompliancePacketForm941Pdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_form_941_pdf', { year, quarter }),
+  quarterlyCompliancePacketScheduleBPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_schedule_b_pdf', { year, quarter }),
+  quarterlyCompliancePacketW1Pdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_w1_pdf', { year, quarter }),
+  quarterlyCompliancePacketSwicaPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_pdf', { year, quarter }),
   ytdSummary: (params?: YtdSummaryParams) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', params),
   ytdSummaryXlsx: (params?: YtdSummaryParams) =>
