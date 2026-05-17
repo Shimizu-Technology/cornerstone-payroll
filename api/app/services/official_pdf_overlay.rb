@@ -95,6 +95,16 @@ class OfficialPdfOverlay
     [ left, [ y1, y2 ].min, right, [ y1, y2 ].max ]
   end
 
+  def split_rect_horizontally(rect, count, gap: 0.0)
+    left, bottom, right, top = normalize_rect(rect)
+    width = ((right - left) - (gap * (count - 1))) / count.to_f
+
+    count.times.map do |index|
+      item_left = left + (index * (width + gap))
+      [ item_left, bottom, item_left + width, top ]
+    end
+  end
+
   def blank_value?(value)
     value.nil? || value.to_s.strip.empty?
   end

@@ -1407,6 +1407,11 @@ export interface QuarterlyCompliancePacketReport {
     report_type: string;
     company_name: string;
     ein: string;
+    company_address_line1?: string | null;
+    company_address_line2?: string | null;
+    company_city?: string | null;
+    company_state?: string | null;
+    company_zip?: string | null;
     year: number;
     quarter: number;
     quarter_label: string;
@@ -1434,7 +1439,13 @@ export interface QuarterlyCompliancePacketReport {
     pay_date: string;
     employee_count: number;
     gross_pay: number;
+    net_pay: number;
+    deductions: number;
     guam_withholding: number;
+    social_security_tax: number;
+    medicare_tax: number;
+    employer_social_security_tax: number;
+    employer_medicare_tax: number;
     federal_941_liability: number;
   }[];
   form_500: {
@@ -1473,10 +1484,18 @@ export interface QuarterlyCompliancePacketReport {
       ssn_last_four: string | null;
       status: string;
       termination_date: string | null;
+      gross_pay: number;
+      net_pay: number;
+      deductions: number;
       swica_wages: number;
       reported_tips: number;
       non_taxable_pay: number;
       guam_withholding: number;
+      social_security_tax: number;
+      employer_social_security_tax: number;
+      medicare_tax: number;
+      employer_medicare_tax: number;
+      federal_941_liability: number;
       social_security_wages: number;
       social_security_tips: number;
       medicare_wages_tips: number;
@@ -1498,7 +1517,7 @@ export interface QuarterlyCompliancePacketReport {
     };
     filing_steps: string[];
   };
-  review_checks: { key: string; status: string; message: string }[];
+  review_checks: { key: string; status: string; message: string; details?: Record<string, unknown>; href?: string | null }[];
   component_taxability: {
     category: string;
     label: string;
@@ -1510,6 +1529,25 @@ export interface QuarterlyCompliancePacketReport {
     medicare_wages_tips: boolean;
     non_taxable: boolean;
   }[];
+}
+
+export type QuarterlyOfficialFormType = 'form_941' | 'schedule_b' | 'w1' | 'swica';
+
+export interface QuarterlyOfficialFormFields {
+  form_type: QuarterlyOfficialFormType;
+  title: string;
+  company_name?: string;
+  ein?: string;
+  company_address?: string;
+  company_address_line1?: string;
+  company_address_line2?: string;
+  company_city?: string;
+  company_state?: string;
+  company_zip?: string;
+  lines?: Record<string, number | string | null>;
+  daily_liabilities?: { pay_date: string; amount: number; month?: number }[];
+  total_guam_withholding?: number | string;
+  employees?: Array<Record<string, string | number | null | string[]>>;
 }
 
 export const reportsApi = {
@@ -1565,6 +1603,12 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_w1_pdf', { year, quarter }),
   quarterlyCompliancePacketSwicaPdf: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_pdf', { year, quarter }),
+  quarterlyCompliancePacketOfficialFormDefaults: (year: number, quarter: number, formType: QuarterlyOfficialFormType) =>
+    api.get<{ data: QuarterlyOfficialFormFields }>('/admin/reports/quarterly_compliance_packet_official_form_defaults', { year, quarter, form_type: formType }),
+  quarterlyCompliancePacketOfficialFormPreview: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
+    api.postBlob('/admin/reports/quarterly_compliance_packet_official_form_preview', { year, quarter, form_type: formType, fields }),
+  quarterlyCompliancePacketOfficialFormDownload: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
+    api.postBlob('/admin/reports/quarterly_compliance_packet_official_form_download', { year, quarter, form_type: formType, fields }),
   ytdSummary: (params?: YtdSummaryParams) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', params),
   ytdSummaryXlsx: (params?: YtdSummaryParams) =>

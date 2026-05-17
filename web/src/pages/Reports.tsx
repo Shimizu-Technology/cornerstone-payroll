@@ -1,4 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import {
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, YtdSummaryParams } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -50,6 +51,15 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium uppercase text-gray-500">{label}</span>
+      {children}
+    </label>
+  );
 }
 
 function SortableTh({
@@ -1614,7 +1624,7 @@ function QuarterlyCompliancePacketPanel() {
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
-  const [exportingPdf, setExportingPdf] = useState<string | null>(null);
+  const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
 
@@ -1642,31 +1652,6 @@ function QuarterlyCompliancePacketPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingXlsx(false);
-    }
-  }
-
-  async function downloadOfficialForm(form: 'form-941' | 'schedule-b' | 'w1' | 'swica') {
-    setExportingPdf(form);
-    setError(null);
-    try {
-      const downloaders = {
-        'form-941': reportsApi.quarterlyCompliancePacketForm941Pdf,
-        'schedule-b': reportsApi.quarterlyCompliancePacketScheduleBPdf,
-        w1: reportsApi.quarterlyCompliancePacketW1Pdf,
-        swica: reportsApi.quarterlyCompliancePacketSwicaPdf,
-      };
-      const fallbackNames = {
-        'form-941': `federal_form_941_${year}_q${quarter}.pdf`,
-        'schedule-b': `federal_form_941_schedule_b_${year}_q${quarter}.pdf`,
-        w1: `guam_w1_${year}_q${quarter}.pdf`,
-        swica: `guam_sw2_${year}_q${quarter}.pdf`,
-      };
-      const { blob, filename } = await downloaders[form](year, quarter);
-      triggerDownload(blob, filename || fallbackNames[form]);
-    } catch (err) {
-      setError(extractErrorMessage(err));
-    } finally {
-      setExportingPdf(null);
     }
   }
 
@@ -1756,38 +1741,34 @@ function QuarterlyCompliancePacketPanel() {
             <CardHeader>
               <CardTitle className="text-base">Official Forms</CardTitle>
               <CardDescription>
-                Download prefilled official PDFs for review. Guam W-1 and SWICA still need to be filed in GuamTax.
+                Review editable values first, then preview the official PDF before printing or downloading. Guam W-1 and SWICA still need to be filed in GuamTax.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-3">
                 <Button
                   variant="outline"
-                  onClick={() => downloadOfficialForm('form-941')}
-                  disabled={exportingPdf !== null}
+                  onClick={() => setReviewFormType('form_941')}
                 >
-                  {exportingPdf === 'form-941' ? 'Preparing...' : 'Download 941 PDF'}
+                  Review 941
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => downloadOfficialForm('schedule-b')}
-                  disabled={exportingPdf !== null}
+                  onClick={() => setReviewFormType('schedule_b')}
                 >
-                  {exportingPdf === 'schedule-b' ? 'Preparing...' : 'Download Schedule B'}
+                  Review Schedule B
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => downloadOfficialForm('w1')}
-                  disabled={exportingPdf !== null}
+                  onClick={() => setReviewFormType('w1')}
                 >
-                  {exportingPdf === 'w1' ? 'Preparing...' : 'Download W-1 PDF'}
+                  Review W-1
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => downloadOfficialForm('swica')}
-                  disabled={exportingPdf !== null}
+                  onClick={() => setReviewFormType('swica')}
                 >
-                  {exportingPdf === 'swica' ? 'Preparing...' : 'Download SW-2 PDF'}
+                  Review SW-2
                 </Button>
               </div>
             </CardContent>
@@ -1854,17 +1835,304 @@ function QuarterlyCompliancePacketPanel() {
             <CardContent>
               <div className="space-y-2">
                 {report.review_checks.map((check) => (
-                  <div key={check.key} className="flex items-start justify-between gap-4 rounded-md border px-3 py-2">
-                    <p className="text-sm text-gray-700">{check.message}</p>
-                    <Badge variant={check.status === 'ok' ? 'success' : 'warning'}>{check.status}</Badge>
+                  <div key={check.key} className="rounded-md border px-3 py-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm text-gray-700">{check.message}</p>
+                        {check.details ? (
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                            {Object.entries(check.details).map(([key, value]) => (
+                              <span key={key}>{key.replaceAll('_', ' ')}: <span className="font-medium text-gray-700">{String(value ?? 'blank')}</span></span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {check.href ? <Link to={check.href} className="mt-2 inline-block text-xs font-medium text-primary-700">Open source records</Link> : null}
+                      </div>
+                      <Badge variant={check.status === 'ok' ? 'success' : 'warning'}>{check.status}</Badge>
+                    </div>
                   </div>
                 ))}
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Employee Reconciliation</CardTitle>
+              <CardDescription>Per-employee totals for SWICA, W-1, and Federal Form 941 tie-out review.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead className="text-right">Gross</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
+                    <TableHead className="text-right">Deductions</TableHead>
+                    <TableHead className="text-right">FIT</TableHead>
+                    <TableHead className="text-right">SS</TableHead>
+                    <TableHead className="text-right">Medicare</TableHead>
+                    <TableHead className="text-right">941 Liability</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.swica.employees.map((employee) => (
+                    <TableRow key={employee.employee_id}>
+                      <TableCell>{employee.name}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.gross_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.net_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.deductions)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.guam_withholding)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.social_security_tax + employee.employer_social_security_tax)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.medicare_tax + employee.employer_medicare_tax)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.federal_941_liability)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </>
       )}
+      {reviewFormType && (
+        <QuarterlyOfficialFormModal
+          year={year}
+          quarter={quarter}
+          formType={reviewFormType}
+          onClose={() => setReviewFormType(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function QuarterlyOfficialFormModal({
+  year,
+  quarter,
+  formType,
+  onClose,
+}: {
+  year: number;
+  quarter: number;
+  formType: QuarterlyOfficialFormType;
+  onClose: () => void;
+}) {
+  const [fields, setFields] = useState<QuarterlyOfficialFormFields | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewFilename, setPreviewFilename] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    setPreviewUrl(null);
+    setPreviewBlob(null);
+    void reportsApi.quarterlyCompliancePacketOfficialFormDefaults(year, quarter, formType)
+      .then((res) => {
+        if (active) setFields(res.data);
+      })
+      .catch((err) => {
+        if (active) setError(extractErrorMessage(err));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [formType, quarter, year]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function updateField(key: keyof QuarterlyOfficialFormFields, value: string) {
+    setFields((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function updateLine(key: string, value: string) {
+    setFields((prev) => (prev ? { ...prev, lines: { ...(prev.lines || {}), [key]: value } } : prev));
+  }
+
+  function updateDaily(index: number, value: string) {
+    setFields((prev) => {
+      if (!prev?.daily_liabilities) return prev;
+      const daily = [...prev.daily_liabilities];
+      daily[index] = { ...daily[index], amount: Number(value) };
+      return { ...prev, daily_liabilities: daily };
+    });
+  }
+
+  function updateEmployee(index: number, key: string, value: string) {
+    setFields((prev) => {
+      if (!prev?.employees) return prev;
+      const employees = [...prev.employees];
+      employees[index] = { ...employees[index], [key]: key === 'name' ? value : Number(value) };
+      return { ...prev, employees };
+    });
+  }
+
+  async function previewPdf() {
+    if (!fields) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const file = await reportsApi.quarterlyCompliancePacketOfficialFormPreview(year, quarter, formType, fields);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = URL.createObjectURL(file.blob);
+      setPreviewUrl(url);
+      setPreviewBlob(file.blob);
+      setPreviewFilename(file.filename || `${formType}_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function downloadPdf() {
+    if (!fields) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const file = await reportsApi.quarterlyCompliancePacketOfficialFormDownload(year, quarter, formType, fields);
+      triggerDownload(file.blob, file.filename || `${formType}_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function downloadPreview() {
+    if (!previewBlob) return;
+    triggerDownload(previewBlob, previewFilename || `${formType}_${year}_q${quarter}.pdf`);
+  }
+
+  function printPreview() {
+    if (!previewUrl) return;
+    const printWindow = window.open(previewUrl, '_blank');
+    printWindow?.addEventListener('load', () => printWindow.print());
+  }
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
+      <div className="fixed inset-0 z-[61] flex items-center justify-center p-4">
+        <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between border-b px-6 py-5">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Official Form'}</h2>
+              <p className="mt-1 text-sm text-gray-500">Review and adjust the filing values, then preview the official PDF before downloading or printing.</p>
+            </div>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(420px,0.9fr)_1.1fr]">
+            <div className="overflow-y-auto bg-gray-50 p-6">
+              {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+              {loading || !fields ? (
+                <div className="rounded-md border bg-white p-6 text-sm text-gray-500">Loading form values...</div>
+              ) : (
+                <div className="space-y-5">
+                  <section className="rounded-md border bg-white p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Company Name">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_name || ''} onChange={(e) => updateField('company_name', e.target.value)} />
+                      </Field>
+                      <Field label="EIN">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.ein || ''} onChange={(e) => updateField('ein', e.target.value)} />
+                      </Field>
+                      <Field label="Address Line 1">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line1 || fields.company_address || ''} onChange={(e) => updateField('company_address_line1', e.target.value)} />
+                      </Field>
+                      <Field label="Address Line 2">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line2 || ''} onChange={(e) => updateField('company_address_line2', e.target.value)} />
+                      </Field>
+                      <Field label="City">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_city || ''} onChange={(e) => updateField('company_city', e.target.value)} />
+                      </Field>
+                      <Field label="State">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_state || ''} onChange={(e) => updateField('company_state', e.target.value)} />
+                      </Field>
+                      <Field label="ZIP">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_zip || ''} onChange={(e) => updateField('company_zip', e.target.value)} />
+                      </Field>
+                    </div>
+                  </section>
+
+                  {fields.lines ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">941 Lines</h3>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {Object.entries(fields.lines).filter(([, value]) => value !== null).map(([key, value]) => (
+                          <Field key={key} label={key.replaceAll('_', ' ')}>
+                            <input className="h-9 w-full rounded-md border px-3 text-sm" value={String(value ?? '')} onChange={(e) => updateLine(key, e.target.value)} />
+                          </Field>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {fields.daily_liabilities ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">Pay-Date Liabilities</h3>
+                      <div className="mt-3 space-y-2">
+                        {fields.daily_liabilities.map((row, index) => (
+                          <div key={`${row.pay_date}-${index}`} className="grid grid-cols-[1fr_140px] gap-3">
+                            <input className="h-9 rounded-md border px-3 text-sm" value={row.pay_date} readOnly />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={row.amount} onChange={(e) => updateDaily(index, e.target.value)} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {fields.employees ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">SWICA Employees</h3>
+                      <div className="mt-3 space-y-3">
+                        {fields.employees.map((employee, index) => (
+                          <div key={`${employee.employee_id}-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
+                            <input className="h-9 rounded-md border px-3 text-sm md:col-span-3" value={String(employee.name || '')} onChange={(e) => updateEmployee(index, 'name', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.swica_wages || 0)} onChange={(e) => updateEmployee(index, 'swica_wages', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.guam_withholding || 0)} onChange={(e) => updateEmployee(index, 'guam_withholding', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.reported_tips || 0)} onChange={(e) => updateEmployee(index, 'reported_tips', e.target.value)} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-h-0 flex-col border-l">
+              <div className="flex items-center justify-end gap-3 border-b bg-white px-4 py-3">
+                <Button variant="outline" onClick={previewPdf} disabled={working || !fields}>Preview PDF</Button>
+                <Button variant="outline" onClick={downloadPdf} disabled={working || !fields}>Download PDF</Button>
+                <Button variant="outline" onClick={printPreview} disabled={!previewUrl}>Print</Button>
+                <Button variant="outline" onClick={downloadPreview} disabled={!previewBlob}>Download Preview</Button>
+              </div>
+              <div className="min-h-0 flex-1 bg-gray-200">
+                {previewUrl ? (
+                  <iframe src={previewUrl} title={fields?.title || 'Official form preview'} className="h-full w-full border-0 bg-white" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-gray-500">Preview the PDF after reviewing the values.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
   );
 }
 

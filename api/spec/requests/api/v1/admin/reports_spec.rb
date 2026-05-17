@@ -306,6 +306,47 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
       end
     end
+
+    it "returns editable official form defaults with split employer address fields" do
+      company.update!(
+        address_line1: "1780 Admiral Sherman Boulevard",
+        city: "Tiyan",
+        state: "GU",
+        zip: "96913"
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet_official_form_defaults",
+        params: { year: 2026, quarter: 2, form_type: "form_941" }
+
+      expect(response).to have_http_status(:ok)
+      data = response.parsed_body["data"]
+      expect(data["ein"]).to eq("12-3456789")
+      expect(data["company_address_line1"]).to eq("1780 Admiral Sherman Boulevard")
+      expect(data["company_city"]).to eq("Tiyan")
+      expect(data["company_state"]).to eq("GU")
+      expect(data["company_zip"]).to eq("96913")
+    end
+
+    it "previews official PDFs using reviewed field overrides" do
+      post "/api/v1/admin/reports/quarterly_compliance_packet_official_form_preview",
+        params: {
+          year: 2026,
+          quarter: 2,
+          form_type: "schedule_b",
+          fields: {
+            company_name: "Reviewed Company Name",
+            ein: "98-7654321",
+            daily_liabilities: [
+              { pay_date: "2026-04-16", amount: 125.25 }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("inline")
+      expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
   end
 
   describe "GET /api/v1/admin/reports/w2_gu" do

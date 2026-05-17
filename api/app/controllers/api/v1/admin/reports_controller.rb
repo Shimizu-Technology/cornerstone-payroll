@@ -285,6 +285,25 @@ module Api
           )
         end
 
+        def quarterly_compliance_packet_official_form_defaults
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          render json: {
+            data: quarterly_compliance_official_form_defaults(report_data, params[:form_type])
+          }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def quarterly_compliance_packet_official_form_preview
+          send_quarterly_compliance_official_form_from_params!(disposition: "inline")
+        end
+
+        def quarterly_compliance_packet_official_form_download
+          send_quarterly_compliance_official_form_from_params!(disposition: "attachment")
+        end
+
         # GET /api/v1/admin/reports/w2_gu
         # Annual W-2GU summary data for filing preparation.
         # Params:
@@ -1132,6 +1151,85 @@ module Api
             disposition: "attachment"
         rescue OfficialPdfOverlay::TemplateUnavailableError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def send_quarterly_compliance_official_form_from_params!(disposition:)
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          config = quarterly_compliance_official_form_config(params[:form_type])
+          fields = params[:fields].present? ? params.require(:fields).permit!.to_h : {}
+          send_data config.fetch(:generator).new(report: report_data, fields: fields).generate,
+            filename: "#{config.fetch(:filename_prefix)}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
+            type: "application/pdf",
+            disposition: disposition
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def quarterly_compliance_official_form_config(form_type)
+          {
+            "form_941" => { generator: QuarterlyComplianceOfficialForms::Form941, filename_prefix: "federal_form_941" },
+            "schedule_b" => { generator: QuarterlyComplianceOfficialForms::ScheduleB, filename_prefix: "federal_form_941_schedule_b" },
+            "w1" => { generator: QuarterlyComplianceOfficialForms::W1, filename_prefix: "guam_w1" },
+            "swica" => { generator: QuarterlyComplianceOfficialForms::Sw2, filename_prefix: "guam_sw2" }
+          }.fetch(form_type.to_s) { raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica" }
+        end
+
+        def quarterly_compliance_official_form_defaults(report, form_type)
+          case form_type.to_s
+          when "form_941"
+            {
+              form_type: "form_941",
+              title: "Federal Form 941",
+              **quarterly_compliance_company_fields(report),
+              lines: report.dig(:federal_941, :report, :lines)
+            }
+          when "schedule_b"
+            {
+              form_type: "schedule_b",
+              title: "Federal Form 941 Schedule B",
+              **quarterly_compliance_company_fields(report),
+              daily_liabilities: Array(report[:pay_periods]).group_by { |period| period[:pay_date] }.map do |pay_date, periods|
+                {
+                  pay_date: pay_date,
+                  amount: periods.sum { |period| period[:federal_941_liability].to_f }
+                }
+              end.sort_by { |row| row[:pay_date] }
+            }
+          when "w1"
+            {
+              form_type: "w1",
+              title: "Guam W-1",
+              **quarterly_compliance_company_fields(report),
+              daily_liabilities: report.dig(:w1, :daily_liabilities),
+              total_guam_withholding: report.dig(:w1, :total_guam_withholding)
+            }
+          when "swica"
+            {
+              form_type: "swica",
+              title: "Guam SW-2",
+              **quarterly_compliance_company_fields(report),
+              employees: report.dig(:swica, :employees)
+            }
+          else
+            raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica"
+          end
+        end
+
+        def quarterly_compliance_company_fields(report)
+          {
+            company_name: report.dig(:meta, :company_name),
+            ein: report.dig(:meta, :ein),
+            company_address: report.dig(:federal_941, :report, :employer_info, :address),
+            company_address_line1: report.dig(:meta, :company_address_line1),
+            company_address_line2: report.dig(:meta, :company_address_line2),
+            company_city: report.dig(:meta, :company_city),
+            company_state: report.dig(:meta, :company_state),
+            company_zip: report.dig(:meta, :company_zip)
+          }
         end
 
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
