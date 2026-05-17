@@ -406,13 +406,27 @@ module QuarterlyComplianceOfficialForms
 
     def draw_employee_row(pdf, employee, index)
       y = 416.0 - (index * 33.0)
-      draw_text_box(pdf, [ 36, y - 17, 164, y ], employee[:ssn_last_four].present? ? "XXX-XX-#{employee[:ssn_last_four]}" : "", size: 7)
+      draw_text_box(pdf, [ 36, y - 17, 164, y ], employee_ssn(employee), size: 7)
       draw_text_box(pdf, [ 168, y - 17, 360, y ], employee[:name], size: 7)
       draw_text_box(pdf, [ 365, y - 15, 522, y ], "", size: 6.5)
       draw_text_box(pdf, [ 365, y - 32, 522, y - 17 ], "", size: 6.5)
       draw_text_box(pdf, [ 526, y - 17, 626, y ], employee[:status].to_s.first&.upcase || "A", size: 7, align: :center)
       draw_text_box(pdf, [ 630, y - 17, 750, y ], money_string(employee[:swica_wages]), size: 7, align: :right)
       draw_text_box(pdf, [ 754, y - 17, 870, y ], money_string(employee[:guam_withholding]), size: 7, align: :right)
+    end
+
+    def employee_ssn(employee)
+      digits = employee_ssn_digits.fetch(employee[:employee_id].to_i, nil)
+      return "" if digits.blank?
+
+      "#{digits[0, 3]}-#{digits[3, 2]}-#{digits[5, 4]}"
+    end
+
+    def employee_ssn_digits
+      @employee_ssn_digits ||= begin
+        employee_ids = employee_pages.flatten.filter_map { |employee| employee[:employee_id] }
+        Employee.where(company_id: meta[:company_id], id: employee_ids).index_with(&:ssn_digits).transform_keys(&:id)
+      end
     end
   end
 end
