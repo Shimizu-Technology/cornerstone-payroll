@@ -1614,6 +1614,7 @@ function QuarterlyCompliancePacketPanel() {
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
 
@@ -1641,6 +1642,31 @@ function QuarterlyCompliancePacketPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingXlsx(false);
+    }
+  }
+
+  async function downloadOfficialForm(form: 'form-941' | 'schedule-b' | 'w1' | 'swica') {
+    setExportingPdf(form);
+    setError(null);
+    try {
+      const downloaders = {
+        'form-941': reportsApi.quarterlyCompliancePacketForm941Pdf,
+        'schedule-b': reportsApi.quarterlyCompliancePacketScheduleBPdf,
+        w1: reportsApi.quarterlyCompliancePacketW1Pdf,
+        swica: reportsApi.quarterlyCompliancePacketSwicaPdf,
+      };
+      const fallbackNames = {
+        'form-941': `federal_form_941_${year}_q${quarter}.pdf`,
+        'schedule-b': `federal_form_941_schedule_b_${year}_q${quarter}.pdf`,
+        w1: `guam_w1_${year}_q${quarter}.pdf`,
+        swica: `guam_sw2_${year}_q${quarter}.pdf`,
+      };
+      const { blob, filename } = await downloaders[form](year, quarter);
+      triggerDownload(blob, filename || fallbackNames[form]);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(null);
     }
   }
 
@@ -1722,6 +1748,47 @@ function QuarterlyCompliancePacketPanel() {
                   <p className="text-sm text-gray-500">Review Checks</p>
                   <p className="mt-1 text-xl font-semibold">{reviewNeedsAttention === 0 ? 'Ready' : `${reviewNeedsAttention} review`}</p>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Official Forms</CardTitle>
+              <CardDescription>
+                Download prefilled official PDFs for review. Guam W-1 and SWICA still need to be filed in GuamTax.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => downloadOfficialForm('form-941')}
+                  disabled={exportingPdf !== null}
+                >
+                  {exportingPdf === 'form-941' ? 'Preparing...' : 'Download 941 PDF'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => downloadOfficialForm('schedule-b')}
+                  disabled={exportingPdf !== null}
+                >
+                  {exportingPdf === 'schedule-b' ? 'Preparing...' : 'Download Schedule B'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => downloadOfficialForm('w1')}
+                  disabled={exportingPdf !== null}
+                >
+                  {exportingPdf === 'w1' ? 'Preparing...' : 'Download W-1 PDF'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => downloadOfficialForm('swica')}
+                  disabled={exportingPdf !== null}
+                >
+                  {exportingPdf === 'swica' ? 'Preparing...' : 'Download SW-2 PDF'}
+                </Button>
               </div>
             </CardContent>
           </Card>

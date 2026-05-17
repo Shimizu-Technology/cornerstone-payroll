@@ -257,6 +257,34 @@ module Api
           )
         end
 
+        def quarterly_compliance_packet_form_941_pdf
+          send_quarterly_compliance_official_form!(
+            generator: QuarterlyComplianceOfficialForms::Form941,
+            filename_prefix: "federal_form_941"
+          )
+        end
+
+        def quarterly_compliance_packet_schedule_b_pdf
+          send_quarterly_compliance_official_form!(
+            generator: QuarterlyComplianceOfficialForms::ScheduleB,
+            filename_prefix: "federal_form_941_schedule_b"
+          )
+        end
+
+        def quarterly_compliance_packet_w1_pdf
+          send_quarterly_compliance_official_form!(
+            generator: QuarterlyComplianceOfficialForms::W1,
+            filename_prefix: "guam_w1"
+          )
+        end
+
+        def quarterly_compliance_packet_swica_pdf
+          send_quarterly_compliance_official_form!(
+            generator: QuarterlyComplianceOfficialForms::Sw2,
+            filename_prefix: "guam_sw2"
+          )
+        end
+
         # GET /api/v1/admin/reports/w2_gu
         # Annual W-2GU summary data for filing preparation.
         # Params:
@@ -1092,6 +1120,18 @@ module Api
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
         rescue ArgumentError => e
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
+        end
+
+        def send_quarterly_compliance_official_form!(generator:, filename_prefix:)
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          send_data generator.new(report: report_data).generate,
+            filename: "#{filename_prefix}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # Shared year validation + aggregation for W-2GU exports (CSV/PDF).
