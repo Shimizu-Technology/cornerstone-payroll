@@ -57,7 +57,7 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def payroll_items
-    @payroll_items ||= PayrollItem.includes(:payroll_item_earnings, :employee, :pay_period)
+    @payroll_items ||= PayrollItem.includes(:payroll_item_earnings, :payroll_item_deductions, :employee, :pay_period)
                                   .joins(:employee, :pay_period)
                                   .merge(pay_periods)
                                   .not_voided
@@ -73,6 +73,11 @@ class QuarterlyCompliancePacketBuilder
       company_id: company.id,
       company_name: company.name,
       ein: company.ein,
+      company_address_line1: company.address_line1,
+      company_address_line2: company.address_line2,
+      company_city: company.city,
+      company_state: company.state,
+      company_zip: company.zip,
       year: year,
       quarter: quarter,
       quarter_label: "Q#{quarter} #{year}",
@@ -116,7 +121,13 @@ class QuarterlyCompliancePacketBuilder
         pay_date: period.pay_date.iso8601,
         employee_count: period_items.map(&:employee_id).uniq.count,
         gross_pay: money(period_items.sum(&:gross_pay)),
+        net_pay: money(period_items.sum(&:net_pay)),
+        deductions: money(deductions_total(period_items)),
         guam_withholding: money(period_items.sum(&:withholding_tax)),
+        social_security_tax: money(period_items.sum(&:social_security_tax)),
+        medicare_tax: money(period_items.sum(&:medicare_tax)),
+        employer_social_security_tax: money(period_items.sum(&:employer_social_security_tax)),
+        employer_medicare_tax: money(period_items.sum(&:employer_medicare_tax)),
         federal_941_liability: money(federal_liability_for_items(period_items))
       }
     end
@@ -237,10 +248,18 @@ class QuarterlyCompliancePacketBuilder
         ssn_last_four: employee.ssn_last_four,
         status: employee.status,
         termination_date: employee.termination_date&.iso8601,
+        gross_pay: money(gross),
+        net_pay: money(items.sum(&:net_pay)),
+        deductions: money(deductions_total(items)),
         swica_wages: money(gross),
         reported_tips: money(items.sum(&:reported_tips)),
         non_taxable_pay: money(items.sum(&:non_taxable_pay)),
         guam_withholding: money(items.sum(&:withholding_tax)),
+        social_security_tax: money(items.sum(&:social_security_tax)),
+        employer_social_security_tax: money(items.sum(&:employer_social_security_tax)),
+        medicare_tax: money(items.sum(&:medicare_tax)),
+        employer_medicare_tax: money(items.sum(&:employer_medicare_tax)),
+        federal_941_liability: money(federal_liability_for_items(items)),
         social_security_wages: money(items.sum { |item| [ item.gross_pay.to_f - item.reported_tips.to_f, 0 ].max }),
         social_security_tips: money(items.sum(&:reported_tips)),
         medicare_wages_tips: money(gross),
@@ -272,16 +291,59 @@ class QuarterlyCompliancePacketBuilder
 
   def review_checks
     checks = []
-    checks << review_check("pay_date_basis", true, "Packet uses committed payroll selected by pay date/check date.")
-    checks << review_check("w1_ties_to_payroll", w1_section[:tie_out][:status] == "ok", "W-1 withholding ties to quarterly Guam withholding.")
-    checks << review_check("swica_excludes_zero_pay", true, "SWICA detail excludes employees with no quarter wages/withholding.")
-    checks << review_check("component_taxability_present", component_taxability.any?, "Pay component taxability map is present for payroll items with earnings detail.")
-    checks << review_check("form_941_lines_2_3_skipped", federal_941_section.dig(:report, :lines, :line2_wages_tips_other).nil? && federal_941_section.dig(:report, :lines, :line3_fit_withheld).nil?, "Form 941 lines 2 and 3 are skipped by default for Guam employers.")
+    checks << review_check(
+      "pay_date_basis",
+      true,
+      "Packet uses committed payroll selected by pay date/check date.",
+      details: {
+        basis: "pay_date",
+        quarter_start: quarter_start.iso8601,
+        quarter_end: quarter_end.iso8601,
+        pay_periods_included: pay_periods.count
+      },
+      href: "/pay-periods"
+    )
+    checks << review_check(
+      "w1_ties_to_payroll",
+      w1_section[:tie_out][:status] == "ok",
+      "W-1 withholding ties to quarterly Guam withholding.",
+      details: w1_section[:tie_out].slice(:expected, :actual, :difference),
+      href: "/pay-periods"
+    )
+    checks << review_check(
+      "swica_excludes_zero_pay",
+      true,
+      "SWICA detail excludes employees with no quarter wages/withholding.",
+      details: {
+        employee_count: swica_section.dig(:totals, :employee_count),
+        total_wages: swica_section.dig(:totals, :total_wages),
+        total_tax_withheld: swica_section.dig(:totals, :total_tax_withheld)
+      },
+      href: "/employees"
+    )
+    checks << review_check(
+      "component_taxability_present",
+      component_taxability.any?,
+      "Pay component taxability map is present for payroll items with earnings detail.",
+      details: { mapped_components: component_taxability.length },
+      href: "/pay-periods"
+    )
+    checks << review_check(
+      "form_941_lines_2_3_skipped",
+      federal_941_section.dig(:report, :lines, :line2_wages_tips_other).nil? && federal_941_section.dig(:report, :lines, :line3_fit_withheld).nil?,
+      "Form 941 lines 2 and 3 are skipped by default for Guam employers.",
+      details: {
+        line2: federal_941_section.dig(:report, :lines, :line2_wages_tips_other),
+        line3: federal_941_section.dig(:report, :lines, :line3_fit_withheld),
+        line5e: federal_941_section.dig(:report, :lines, :line5e_total_ss_medicare),
+        line12: federal_941_section.dig(:report, :lines, :line12_total_after_credits)
+      }
+    )
     checks
   end
 
-  def review_check(key, ok, message)
-    { key: key, status: ok ? "ok" : "needs_review", message: message }
+  def review_check(key, ok, message, details: {}, href: nil)
+    { key: key, status: ok ? "ok" : "needs_review", message: message, details: details, href: href }
   end
 
   def liability_rows_by_pay_date(column)
@@ -310,6 +372,14 @@ class QuarterlyCompliancePacketBuilder
       items.sum(&:employer_social_security_tax).to_f +
       items.sum(&:medicare_tax).to_f +
       items.sum(&:employer_medicare_tax).to_f
+  end
+
+  def deductions_total(items)
+    items.sum do |item|
+      gross = item.gross_pay.to_f
+      taxes = item.withholding_tax.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
+      [ gross - item.net_pay.to_f - taxes, 0 ].max
+    end
   end
 
   def suggested_federal_deposit_schedule

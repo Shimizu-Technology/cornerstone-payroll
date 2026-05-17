@@ -4,10 +4,11 @@ module QuarterlyComplianceOfficialForms
   MONTHS_BY_QUARTER = QuarterlyCompliancePacketBuilder::MONTHS_BY_QUARTER
 
   class BaseForm < OfficialPdfOverlay
-    attr_reader :report
+    attr_reader :report, :fields
 
-    def initialize(report:, template_path:, page_sizes:)
+    def initialize(report:, template_path:, page_sizes:, fields: {})
       @report = report.deep_symbolize_keys
+      @fields = fields.to_h.deep_symbolize_keys
       super(template_path: template_path, page_sizes: page_sizes)
     end
 
@@ -18,11 +19,11 @@ module QuarterlyComplianceOfficialForms
     end
 
     def company_name
-      meta[:company_name].to_s
+      fields[:company_name].presence || meta[:company_name].to_s
     end
 
     def ein
-      meta[:ein].to_s
+      fields[:ein].presence || meta[:ein].to_s
     end
 
     def year
@@ -43,7 +44,35 @@ module QuarterlyComplianceOfficialForms
     end
 
     def company_address
-      company_address_lines.first.to_s
+      fields[:company_address].presence || company_address_lines.first.to_s
+    end
+
+    def company_address_line1
+      fields[:company_address_line1].presence || meta[:company_address_line1].to_s.presence || company_address
+    end
+
+    def company_address_line2
+      fields[:company_address_line2].presence || meta[:company_address_line2].to_s
+    end
+
+    def company_city
+      fields[:company_city].presence || meta[:company_city].to_s
+    end
+
+    def company_state
+      fields[:company_state].presence || meta[:company_state].to_s
+    end
+
+    def company_zip
+      fields[:company_zip].presence || meta[:company_zip].to_s
+    end
+
+    def company_city_state
+      [ company_city, company_state ].compact_blank.join(", ")
+    end
+
+    def line_value(key)
+      fields.dig(:lines, key) || fields[key] || report.dig(:federal_941, :report, :lines, key)
     end
 
     def amount_fields(pdf, dollar_rect, cent_rect, value, size: 8.5)
@@ -104,8 +133,8 @@ module QuarterlyComplianceOfficialForms
       quarter_total: [ [ 230.4, 526.968, 331.2, 540.969 ], [ 338.4, 526.968, 359.25, 540.969 ] ]
     }.freeze
 
-    def initialize(report:)
-      super(report: report, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ])
+    def initialize(report:, fields: {})
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ])
     end
 
     private
@@ -118,16 +147,17 @@ module QuarterlyComplianceOfficialForms
     end
 
     def draw_page_one(pdf)
-      prefix, suffix = ein_parts(ein)
-      draw_text_box(pdf, HEADER[:ein_prefix], prefix, size: 10, align: :center)
-      draw_text_box(pdf, HEADER[:ein_suffix], suffix, size: 10, align: :center)
+      draw_ein_digits(pdf, split_rect_horizontally(HEADER[:ein_prefix], 2) + split_rect_horizontally(HEADER[:ein_suffix], 7))
       draw_text_box(pdf, HEADER[:name], company_name, size: 9)
-      draw_text_box(pdf, HEADER[:address], company_address, size: 8)
+      draw_text_box(pdf, HEADER[:address], [ company_address_line1, company_address_line2 ].compact_blank.join(" "), size: 8)
+      draw_text_box(pdf, HEADER[:city], company_city, size: 8)
+      draw_text_box(pdf, HEADER[:state], company_state, size: 8, align: :center)
+      draw_text_box(pdf, HEADER[:zip], company_zip, size: 8, align: :center)
       draw_checkbox(pdf, HEADER[:quarters][quarter - 1], true)
 
       lines = report.dig(:federal_941, :report, :lines) || {}
       LINE_RECTS.each do |key, rects|
-        value = lines[key]
+        value = line_value(key)
         next if value.nil?
 
         if rects.last.nil?
@@ -139,12 +169,10 @@ module QuarterlyComplianceOfficialForms
     end
 
     def draw_page_two(pdf)
-      prefix, suffix = ein_parts(ein)
       draw_text_box(pdf, PAGE2[:name], company_name, size: 8.5)
-      draw_text_box(pdf, PAGE2[:ein_prefix], prefix, size: 8.5, align: :center)
-      draw_text_box(pdf, PAGE2[:ein_suffix], suffix, size: 8.5, align: :center)
+      draw_ein_digits(pdf, split_rect_horizontally(PAGE2[:ein_prefix], 2) + split_rect_horizontally(PAGE2[:ein_suffix], 7))
 
-      line12 = report.dig(:federal_941, :report, :lines, :line12_total_after_credits).to_f
+      line12 = line_value(:line12_total_after_credits).to_f
       schedule = report.dig(:federal_941, :deposit_schedule, :suggested_schedule)
       schedule_b_required = report.dig(:federal_941, :deposit_schedule, :schedule_b_required)
       draw_checkbox(pdf, PAGE2[:under_2500], line12 < 2500)
@@ -158,6 +186,12 @@ module QuarterlyComplianceOfficialForms
         amount_fields(pdf, PAGE2.fetch(:"month#{index + 1}").first, PAGE2.fetch(:"month#{index + 1}").last, row[:total_liability])
       end
       amount_fields(pdf, PAGE2[:quarter_total].first, PAGE2[:quarter_total].last, line12)
+    end
+
+    def draw_ein_digits(pdf, rects)
+      ein_digits(ein).each_with_index do |digit, index|
+        draw_text_box(pdf, rects[index], digit, size: 7, align: :center, min_font_size: 5)
+      end
     end
   end
 
@@ -193,8 +227,8 @@ module QuarterlyComplianceOfficialForms
     }.freeze
     QUARTER_TOTAL = [ [ 453.6, 49.968, 545.2, 65.967 ], [ 554.4, 49.968, 574.0, 65.967 ] ].freeze
 
-    def initialize(report:)
-      super(report: report, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
+    def initialize(report:, fields: {})
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
     end
 
     private
@@ -221,11 +255,29 @@ module QuarterlyComplianceOfficialForms
     end
 
     def federal_daily_liability
-      Array(report[:pay_periods]).map do |period|
-        next unless Date.parse(period[:pay_date].to_s).month.in?(quarter_months)
+      return editable_daily_liability if fields[:daily_liabilities].present?
 
-        { pay_date: period[:pay_date], month: Date.parse(period[:pay_date].to_s).month, amount: period[:federal_941_liability] }
-      end.compact
+      grouped = Array(report[:pay_periods])
+        .select { |period| Date.parse(period[:pay_date].to_s).month.in?(quarter_months) }
+        .group_by { |period| period[:pay_date] }
+
+      grouped.map do |pay_date, periods|
+        {
+          pay_date: pay_date,
+          month: Date.parse(pay_date.to_s).month,
+          amount: periods.sum { |period| period[:federal_941_liability].to_f }
+        }
+      end.sort_by { |row| row[:pay_date] }
+    end
+
+    def editable_daily_liability
+      Array(fields[:daily_liabilities]).map do |row|
+        pay_date = row[:pay_date]
+        parsed = Date.parse(pay_date.to_s)
+        next unless parsed.month.in?(quarter_months)
+
+        { pay_date: pay_date, month: parsed.month, amount: row[:amount].to_f }
+      end.compact.sort_by { |row| row[:pay_date] }
     end
 
     def quarter_months
@@ -289,8 +341,8 @@ module QuarterlyComplianceOfficialForms
       line3: [ 483.278259, 203.065994, 555.465332, 213.378433 ]
     }.freeze
 
-    def initialize(report:)
-      super(report: report, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
+    def initialize(report:, fields: {})
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
     end
 
     private
@@ -299,10 +351,10 @@ module QuarterlyComplianceOfficialForms
       draw_text_box(pdf, HEADER[:name], company_name, size: 8)
       draw_text_box(pdf, HEADER[:quarter_end], quarter_end.strftime("%m/%d/%Y"), size: 8, align: :center)
       draw_text_box(pdf, HEADER[:ein], ein, size: 8, align: :center)
-      draw_text_box(pdf, HEADER[:address], company_address, size: 7.5)
-      draw_text_box(pdf, HEADER[:city_state_zip], "", size: 7.5)
+      draw_text_box(pdf, HEADER[:address], [ company_address_line1, company_address_line2 ].compact_blank.join(" "), size: 7.5)
+      draw_text_box(pdf, HEADER[:city_state_zip], [ company_city_state, company_zip ].compact_blank.join(" "), size: 7.5)
 
-      daily = Array(report.dig(:w1, :daily_liabilities))
+      daily = Array(fields[:daily_liabilities].presence || report.dig(:w1, :daily_liabilities))
       totals = Hash.new(0.0)
       daily.each do |row|
         month_index = quarter_months.index(row[:month].to_i) + 1
@@ -311,7 +363,7 @@ module QuarterlyComplianceOfficialForms
         draw_text_box(pdf, w1_day_rect(month_index, day), money_string(row[:amount]), size: 6.8, align: :right)
       end
 
-      total = report.dig(:w1, :total_guam_withholding).to_f
+      total = fields[:total_guam_withholding].presence || report.dig(:w1, :total_guam_withholding).to_f
       draw_text_box(pdf, TOTALS[:line1], money_string(total), size: 7, align: :right)
       draw_text_box(pdf, TOTALS[:line3], money_string(total), size: 7, align: :right)
     end
@@ -369,11 +421,12 @@ module QuarterlyComplianceOfficialForms
       page_total: [ 831.879761, 588.999878, 873.130005, 607.749939 ]
     }.freeze
 
-    def initialize(report:)
+    def initialize(report:, fields: {})
       symbolized_report = report.deep_symbolize_keys
-      @employee_pages = Array(symbolized_report.dig(:swica, :employees)).each_slice(EMPLOYEES_PER_PAGE).to_a
+      symbolized_fields = fields.to_h.deep_symbolize_keys
+      @employee_pages = Array(symbolized_fields[:employees].presence || symbolized_report.dig(:swica, :employees)).each_slice(EMPLOYEES_PER_PAGE).to_a
       @employee_pages = [ [] ] if @employee_pages.empty?
-      super(report: symbolized_report, template_path: TEMPLATE_PATH, page_sizes: @employee_pages.map { PAGE_SIZE })
+      super(report: symbolized_report, fields: symbolized_fields, template_path: TEMPLATE_PATH, page_sizes: @employee_pages.map { PAGE_SIZE })
     end
 
     def generate
@@ -392,16 +445,29 @@ module QuarterlyComplianceOfficialForms
     end
 
     def draw_header(pdf, page_number)
-      totals = report.dig(:swica, :totals) || {}
+      totals = swica_totals
       draw_text_box(pdf, HEADER[:ein], ein, size: 8)
       draw_text_box(pdf, HEADER[:quarter_end], quarter_end.strftime("%m/%d/%Y"), size: 8)
       draw_text_box(pdf, HEADER[:name], company_name, size: 8)
-      draw_text_box(pdf, HEADER[:address], company_address, size: 7.5)
+      draw_text_box(pdf, HEADER[:address], [ company_address_line1, company_address_line2 ].compact_blank.join(" "), size: 7.5)
+      draw_text_box(pdf, HEADER[:city_state], company_city_state, size: 7.5)
+      draw_text_box(pdf, HEADER[:zip], company_zip, size: 7.5)
       draw_text_box(pdf, HEADER[:employee_count], totals[:employee_count], size: 8, align: :center)
       draw_text_box(pdf, HEADER[:total_wages], money_string(totals[:total_wages]), size: 8, align: :right)
       draw_text_box(pdf, HEADER[:total_withheld], money_string(totals[:total_tax_withheld]), size: 8, align: :right)
       draw_text_box(pdf, HEADER[:page_current], page_number, size: 8, align: :center)
       draw_text_box(pdf, HEADER[:page_total], employee_pages.length, size: 8, align: :center)
+    end
+
+    def swica_totals
+      employees = employee_pages.flatten
+      return report.dig(:swica, :totals) || {} if fields[:employees].blank?
+
+      {
+        employee_count: employees.length,
+        total_wages: employees.sum { |employee| employee[:swica_wages].to_f },
+        total_tax_withheld: employees.sum { |employee| employee[:guam_withholding].to_f }
+      }
     end
 
     def draw_employee_row(pdf, employee, index)
