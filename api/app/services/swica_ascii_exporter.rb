@@ -3,6 +3,17 @@
 class SwicaAsciiExporter
   RECORD_LENGTH = 275
 
+  # Guam DRT SWICA booklet, Code W wage record:
+  # - positions 78-112: "City and State or U.S. Possession" (single 35-char field)
+  # - positions 113-117: Foreign Postal Code, blank for Guam/U.S. addresses
+  # - positions 118-126: ZIP Code
+  CITY_STATE_POSITION = 78
+  CITY_STATE_LENGTH = 35
+  FOREIGN_POSTAL_CODE_POSITION = 113
+  FOREIGN_POSTAL_CODE_LENGTH = 5
+  ZIP_POSITION = 118
+  ZIP_LENGTH = 9
+
   def initialize(report)
     @report = report.deep_symbolize_keys
     @company_id = @report.dig(:meta, :company_id)
@@ -35,8 +46,9 @@ class SwicaAsciiExporter
     put(fields, 2, digits(employee.ssn_digits).presence || "000000000", length: 9, align: :right, pad: "0")
     put(fields, 11, employee.full_name.upcase, length: 27)
     put(fields, 38, employee.address_line1.to_s.upcase, length: 40)
-    put(fields, 78, [ employee.city, employee.state.presence || "GU" ].compact_blank.join(" ").upcase, length: 35)
-    put(fields, 118, digits(employee.zip), length: 9)
+    put(fields, CITY_STATE_POSITION, [ employee.city, employee.state.presence || "GU" ].compact_blank.join(" ").upcase, length: CITY_STATE_LENGTH)
+    put(fields, FOREIGN_POSTAL_CODE_POSITION, "", length: FOREIGN_POSTAL_CODE_LENGTH)
+    put(fields, ZIP_POSITION, digits(employee.zip), length: ZIP_LENGTH)
     put(fields, 127, employee.status == "terminated" ? "T" : "A")
     put(fields, 128, employee.termination_date&.strftime("%m%d%y").to_s, length: 6)
     put(fields, 134, quarter.to_s)
