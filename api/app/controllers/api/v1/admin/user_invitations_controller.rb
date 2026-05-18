@@ -9,7 +9,11 @@ module Api
         # POST /api/v1/admin/user_invitations
         def create
           permitted = invitation_params
-          if permitted[:role] == "super_admin" && !current_user&.super_admin?
+          requested_role = requested_invitation_role
+          if requested_role == "super_admin" && !current_user&.super_admin?
+            return render json: { error: "Cannot assign that role" }, status: :forbidden
+          end
+          unless UserInvitation.roles.key?(requested_role)
             return render json: { error: "Cannot assign that role" }, status: :forbidden
           end
 
@@ -22,7 +26,7 @@ module Api
             invited_by_id: current_user_id,
             email: permitted[:email],
             name: permitted[:name],
-            role: permitted[:role],
+            role: requested_role,
             token: SecureRandom.hex(32),
             invited_at: Time.current,
             expires_at: 7.days.from_now
@@ -48,7 +52,11 @@ module Api
         private
 
         def invitation_params
-          params.require(:invitation).permit(:email, :name, :role)
+          params.require(:invitation).permit(:email, :name)
+        end
+
+        def requested_invitation_role
+          params.dig(:invitation, :role).to_s
         end
 
         def frontend_url

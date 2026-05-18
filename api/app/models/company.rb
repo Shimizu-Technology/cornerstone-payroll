@@ -78,12 +78,26 @@ class Company < ApplicationRecord
         next_number += 1
       end
 
-      conn = self.class.connection
-      case_clauses = assignments.map { |id, number|
-        "WHEN #{conn.quote(id)} THEN #{conn.quote(number)}"
-      }.join(" ")
-      PayrollItem.where(id: items.map(&:id))
-                 .update_all(Arel.sql("check_number = CASE id #{case_clauses} END"))
+      timestamp = Time.current
+      rows = items.map do |item|
+        {
+          id: item.id,
+          company_id: item.company_id,
+          employee_id: item.employee_id,
+          employment_type: item.employment_type,
+          pay_period_id: item.pay_period_id,
+          pay_rate: item.pay_rate,
+          created_at: item.created_at,
+          updated_at: timestamp,
+          check_number: assignments.fetch(item.id)
+        }
+      end
+      PayrollItem.upsert_all(
+        rows,
+        unique_by: :id,
+        update_only: [ :check_number, :updated_at ],
+        record_timestamps: false
+      )
 
       assigned = items.size
       update_column(:next_check_number, next_number)
