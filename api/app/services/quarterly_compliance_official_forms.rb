@@ -354,10 +354,9 @@ module QuarterlyComplianceOfficialForms
       draw_text_box(pdf, HEADER[:address], [ company_address_line1, company_address_line2 ].compact_blank.join(" "), size: 7.5)
       draw_text_box(pdf, HEADER[:city_state_zip], [ company_city_state, company_zip ].compact_blank.join(" "), size: 7.5)
 
-      daily = Array(fields[:daily_liabilities].presence || report.dig(:w1, :daily_liabilities))
       totals = Hash.new(0.0)
-      daily.each do |row|
-        month_index = quarter_months.index(row[:month].to_i) + 1
+      w1_daily_liability.each do |row|
+        month_index = quarter_months.index(row[:month]) + 1
         day = Date.parse(row[:pay_date].to_s).day
         totals[month_index] += row[:amount].to_f
         draw_text_box(pdf, w1_day_rect(month_index, day), money_string(row[:amount]), size: 6.8, align: :right)
@@ -370,6 +369,16 @@ module QuarterlyComplianceOfficialForms
 
     def quarter_months
       MONTHS_BY_QUARTER.fetch(quarter)
+    end
+
+    def w1_daily_liability
+      Array(fields[:daily_liabilities].presence || report.dig(:w1, :daily_liabilities)).map do |row|
+        pay_date = row[:pay_date]
+        parsed = Date.parse(pay_date.to_s)
+        next unless parsed.month.in?(quarter_months)
+
+        { pay_date: pay_date, month: parsed.month, amount: row[:amount].to_f }
+      end.compact.sort_by { |row| row[:pay_date] }
     end
 
     def w1_day_rect(month_index, day)
