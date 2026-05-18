@@ -18,22 +18,33 @@ class QuarterlyCompliancePacket < ApplicationRecord
   before_validation :set_due_dates, on: :create
 
   def self.find_or_create_for!(company:, year:, quarter:, user: nil)
-    packet = find_or_initialize_by(company: company, year: year.to_i, quarter: quarter.to_i)
-    packet.assigned_to ||= user if user&.staff_member?
-    packet.save! if packet.new_record? || packet.changed?
+    normalized_year = year.to_i
+    normalized_quarter = quarter.to_i
+    packet = create_with(assigned_to: user&.staff_member? ? user : nil)
+      .find_or_create_by!(company: company, year: normalized_year, quarter: normalized_quarter)
+    packet.ensure_default_tasks!
+    packet
+  rescue ActiveRecord::RecordNotUnique
+    packet = find_by!(company: company, year: normalized_year, quarter: normalized_quarter)
     packet.ensure_default_tasks!
     packet
   end
 
   def ensure_default_tasks!
     TASK_TYPES.each do |task_type|
-      quarterly_compliance_tasks.find_or_create_by!(task_type: task_type) do |task|
-        task.status = "not_started"
-        task.due_date = official_due_date
-        task.internal_target_date = internal_target_date
-        task.assigned_to = assigned_to
-      end
+      create_default_task!(task_type)
     end
+  end
+
+  def create_default_task!(task_type)
+    quarterly_compliance_tasks.create_with(
+      status: "not_started",
+      due_date: official_due_date,
+      internal_target_date: internal_target_date,
+      assigned_to: assigned_to
+    ).find_or_create_by!(task_type: task_type)
+  rescue ActiveRecord::RecordNotUnique
+    quarterly_compliance_tasks.find_by!(task_type: task_type)
   end
 
   def workflow_payload
