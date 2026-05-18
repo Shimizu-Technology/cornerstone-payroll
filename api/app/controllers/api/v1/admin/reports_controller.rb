@@ -19,6 +19,21 @@ module Api
           form_1099_nec: "1099-NEC preparation workbook for contractor compensation and filing readiness.",
           installment_loans: "Employee installment loan balances and transaction history as of the selected date."
         }.freeze
+        OFFICIAL_FORM_STRING_LIMIT = 250
+        OFFICIAL_FORM_DAILY_LIABILITY_LIMIT = 120
+        OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT = 500
+        OFFICIAL_FORM_COMPANY_FIELDS = %i[
+          company_name ein company_address company_address_line1 company_address_line2
+          company_city company_state company_zip
+        ].freeze
+        OFFICIAL_FORM_941_LINE_FIELDS = %i[
+          line1_employee_count line5a_ss_wages line5a_ss_combined_tax
+          line5b_ss_tips line5b_ss_tips_combined_tax line5c_medicare_wages
+          line5c_medicare_combined_tax line5d_add_medicare_wages
+          line5d_add_medicare_tax line5e_total_ss_medicare
+          line6_total_taxes_before_adj line7_adj_fractions_cents
+          line10_total_taxes_after_adj line12_total_after_credits
+        ].freeze
 
         # GET /api/v1/admin/reports/dashboard
         # Dashboard stats and metrics
@@ -1158,7 +1173,7 @@ module Api
           return error_response if error_response
 
           config = quarterly_compliance_official_form_config(params[:form_type])
-          fields = params[:fields].present? ? params.require(:fields).permit!.to_h : {}
+          fields = quarterly_compliance_official_form_fields(params[:form_type])
           send_data config.fetch(:generator).new(report: report_data, fields: fields).generate,
             filename: "#{config.fetch(:filename_prefix)}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
             type: "application/pdf",
@@ -1176,6 +1191,66 @@ module Api
             "w1" => { generator: QuarterlyComplianceOfficialForms::W1, filename_prefix: "guam_w1" },
             "swica" => { generator: QuarterlyComplianceOfficialForms::Sw2, filename_prefix: "guam_sw2" }
           }.fetch(form_type.to_s) { raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica" }
+        end
+
+        def quarterly_compliance_official_form_fields(form_type)
+          raw_fields = params[:fields]
+          return {} if raw_fields.blank?
+          raise ArgumentError, "fields must be an object" unless raw_fields.respond_to?(:permit)
+
+          fields = case form_type.to_s
+          when "form_941"
+            raw_fields.permit(*OFFICIAL_FORM_COMPANY_FIELDS, lines: OFFICIAL_FORM_941_LINE_FIELDS).to_h
+          when "schedule_b"
+            raw_fields.permit(*OFFICIAL_FORM_COMPANY_FIELDS, daily_liabilities: [ :pay_date, :amount ]).to_h
+          when "w1"
+            raw_fields.permit(*OFFICIAL_FORM_COMPANY_FIELDS, :total_guam_withholding, daily_liabilities: [ :pay_date, :amount ]).to_h
+          when "swica"
+            raw_fields.permit(
+              *OFFICIAL_FORM_COMPANY_FIELDS,
+              employees: [
+                :employee_id, :name, :ssn_last_four, :status, :termination_date,
+                :gross_pay, :net_pay, :deductions, :swica_wages, :reported_tips,
+                :non_taxable_pay, :guam_withholding, :social_security_tax,
+                :employer_social_security_tax, :medicare_tax, :employer_medicare_tax,
+                :federal_941_liability, :social_security_wages, :social_security_tips,
+                :medicare_wages_tips, { pay_dates: [] }
+              ]
+            ).to_h
+          else
+            raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica"
+          end
+
+          validate_official_form_fields!(fields)
+          validate_official_form_row_limits!(fields)
+          fields
+        end
+
+        def validate_official_form_fields!(value)
+          case value
+          when Hash
+            value.each_value { |child| validate_official_form_fields!(child) }
+          when Array
+            value.each { |child| validate_official_form_fields!(child) }
+          when String
+            raise ArgumentError, "fields contain a value longer than #{OFFICIAL_FORM_STRING_LIMIT} characters" if value.length > OFFICIAL_FORM_STRING_LIMIT
+          when Numeric, NilClass, TrueClass, FalseClass
+            true
+          else
+            raise ArgumentError, "fields contain an unsupported value type"
+          end
+        end
+
+        def validate_official_form_row_limits!(fields)
+          daily_count = Array(fields["daily_liabilities"]).length
+          if daily_count > OFFICIAL_FORM_DAILY_LIABILITY_LIMIT
+            raise ArgumentError, "daily_liabilities cannot include more than #{OFFICIAL_FORM_DAILY_LIABILITY_LIMIT} rows"
+          end
+
+          employee_count = Array(fields["employees"]).length
+          if employee_count > OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT
+            raise ArgumentError, "employees cannot include more than #{OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT} rows"
+          end
         end
 
         def quarterly_compliance_official_form_defaults(report, form_type)

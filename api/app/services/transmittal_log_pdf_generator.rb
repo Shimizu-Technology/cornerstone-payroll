@@ -55,16 +55,14 @@ class TransmittalLogPdfGenerator
     pdf.font_size(11) { pdf.text company.name }
     left_bottom = pdf.cursor
 
-    right_bottom = y_start
     pdf.font_size(9) do
       pdf.bounding_box([pdf.bounds.width - 200, y_start], width: 200) do
         pdf.text "Received by: _____________________"
         pdf.move_down 6
         pdf.text "Date Rec'd: ______________________"
-        right_bottom = pdf.cursor
       end
     end
-    pdf.move_cursor_to([left_bottom, right_bottom].min - 12)
+    pdf.move_cursor_to(left_bottom - 12)
   end
 
   def render_dates(pdf)

@@ -347,6 +347,24 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.headers["Content-Disposition"]).to include("inline")
       expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
     end
+
+    it "rejects oversized official form field overrides" do
+      post "/api/v1/admin/reports/quarterly_compliance_packet_official_form_preview",
+        params: {
+          year: 2026,
+          quarter: 2,
+          form_type: "w1",
+          fields: {
+            company_name: "A" * 251,
+            daily_liabilities: [
+              { pay_date: "2026-04-16", amount: 125.25 }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("longer than")
+    end
   end
 
   describe "GET /api/v1/admin/reports/w2_gu" do

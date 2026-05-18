@@ -62,5 +62,30 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(employee_row[:federal_941_liability]).to eq(48.0)
       expect(report.dig(:federal_941, :report, :lines, :line5d_add_medicare_tax)).to eq(4.5)
     end
+
+    it "includes Additional Medicare Tax in the federal deposit schedule lookback" do
+      lookback_period = create_committed_period(
+        start_date: Date.new(2025, 6, 1),
+        end_date: Date.new(2025, 6, 14),
+        pay_date: Date.new(2025, 6, 20)
+      )
+
+      create(:payroll_item,
+        company: company,
+        employee: employee,
+        pay_period: lookback_period,
+        gross_pay: 1_700_000.00,
+        net_pay: 0,
+        withholding_tax: 0,
+        social_security_tax: 0,
+        employer_social_security_tax: 0,
+        medicare_tax: 24_650.00,
+        employer_medicare_tax: 24_650.00)
+
+      report = described_class.new(company, 2026, 2).generate
+
+      expect(report.dig(:federal_941, :deposit_schedule, :suggested_schedule)).to eq("semiweekly")
+      expect(report.dig(:federal_941, :deposit_schedule, :schedule_b_required)).to be(true)
+    end
   end
 end
