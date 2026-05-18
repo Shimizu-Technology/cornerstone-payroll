@@ -381,40 +381,51 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def additional_medicare_tax_by_item_id
-    @additional_medicare_tax_by_item_id ||= begin
-      allocations = Hash.new(0.0)
+    @additional_medicare_tax_by_item_id ||= additional_medicare_tax_allocations(payroll_items)
+  end
 
-      payroll_items.group_by(&:employee_id).each do |employee_id, employee_items|
-        running_wages = prior_medicare_wages_by_employee[employee_id].to_f
+  def additional_medicare_tax_allocations(items)
+    Array(items).group_by { |item| [ item.employee_id, item.pay_period.pay_date.year ] }.each_with_object(Hash.new(0.0)) do |((employee_id, _tax_year), employee_items), allocations|
+      running_wages = prior_medicare_wages_by_employee_before(employee_items.map { |item| item.pay_period.pay_date }.min)[employee_id].to_f
 
-        employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-          previous_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
-          running_wages += item.gross_pay.to_f
-          current_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
-          taxable_excess = (current_excess - previous_excess).round(2)
-          next unless taxable_excess.positive?
+      employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
+        previous_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
+        running_wages += item.gross_pay.to_f
+        current_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
+        taxable_excess = (current_excess - previous_excess).round(2)
+        next unless taxable_excess.positive?
 
-          allocations[item.id] = (taxable_excess * Form941GuAggregator::ADD_MEDICARE_RATE).round(2)
-        end
+        allocations[item.id] = (taxable_excess * Form941GuAggregator::ADD_MEDICARE_RATE).round(2)
       end
+    end
+  end
 
-      allocations
+  def prior_medicare_wages_by_employee_before(date)
+    @prior_medicare_wages_by_employee_before ||= {}
+    @prior_medicare_wages_by_employee_before[date] ||= begin
+      tax_year_start = Date.new(date.year, 1, 1)
+
+      PayrollItem.joins(:pay_period)
+                 .where(company_id: company.id)
+                 .not_voided
+                 .where.not(employment_type: "contractor")
+                 .where(pay_periods: {
+                   id: PayPeriod.reportable_committed
+                     .where(company_id: company.id, pay_date: tax_year_start...date)
+                     .select(:id)
+                 })
+                 .group(:employee_id)
+                 .sum(:gross_pay)
+                 .transform_values(&:to_f)
     end
   end
 
   def prior_medicare_wages_by_employee
-    @prior_medicare_wages_by_employee ||= PayrollItem.joins(:pay_period)
-                                                     .where(company_id: company.id)
-                                                     .not_voided
-                                                     .where.not(employment_type: "contractor")
-                                                     .where(pay_periods: {
-                                                       id: PayPeriod.reportable_committed
-                                                         .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start)
-                                                         .select(:id)
-                                                     })
-                                                     .group(:employee_id)
-                                                     .sum(:gross_pay)
-                                                     .transform_values(&:to_f)
+    prior_medicare_wages_by_employee_before(quarter_start)
+  end
+
+  def additional_medicare_tax_for_lookback_items(items)
+    additional_medicare_tax_allocations(items).values.sum
   end
 
   def deductions_total(items)
@@ -430,14 +441,17 @@ class QuarterlyCompliancePacketBuilder
     lookback_end = Date.new(year - 1, 6, 30)
     lookback_periods = PayPeriod.reportable_committed
                                 .where(company_id: company.id, pay_date: lookback_start..lookback_end)
-    lookback_items = PayrollItem.joins(:pay_period)
+    lookback_items = PayrollItem.includes(:pay_period)
+                                .joins(:pay_period)
                                 .where(pay_periods: { id: lookback_periods.select(:id) })
                                 .not_voided
                                 .where.not(employment_type: "contractor")
-    liability = lookback_items.sum(:social_security_tax).to_f +
-      lookback_items.sum(:employer_social_security_tax).to_f +
-      lookback_items.sum(:medicare_tax).to_f +
-      lookback_items.sum(:employer_medicare_tax).to_f
+                                .to_a
+    liability = lookback_items.sum(&:social_security_tax).to_f +
+      lookback_items.sum(&:employer_social_security_tax).to_f +
+      lookback_items.sum(&:medicare_tax).to_f +
+      lookback_items.sum(&:employer_medicare_tax).to_f +
+      additional_medicare_tax_for_lookback_items(lookback_items)
     liability > 50_000 ? "semiweekly" : "monthly"
   end
 
