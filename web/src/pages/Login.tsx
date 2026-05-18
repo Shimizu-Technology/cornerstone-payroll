@@ -101,6 +101,8 @@ export function Login() {
 
           <SignIn
             routing="hash"
+            forceRedirectUrl="/app"
+            fallbackRedirectUrl="/app"
             appearance={{
               elements: {
                 rootBox: 'mx-auto w-full',

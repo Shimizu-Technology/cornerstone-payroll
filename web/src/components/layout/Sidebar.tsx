@@ -250,9 +250,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       {/* Logo */}
       <div className="border-b border-neutral-200/70 px-3 py-5">
         <NavLink
-          to="/app"
+          to="/"
           onClick={onNavigate}
-          aria-label="Go to app home"
+          aria-label="Go to public home page"
           className={cn(
             'flex items-center rounded-2xl transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
             collapsed ? 'justify-center p-1' : 'gap-3 px-3 py-1'

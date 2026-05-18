@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Banknote, CalendarCheck2, FileBarChart2, UserPlus2, Users, Wallet } from 'lucide-react';
+import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -23,18 +23,18 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="group overflow-hidden hover:-translate-y-0.5 hover:border-primary-200/80">
       <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <p className="text-sm font-medium text-neutral-500">{title}</p>
-          <div className="rounded-xl bg-primary-50 p-2 text-primary-700">{icon}</div>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-sm font-semibold text-neutral-500">{title}</p>
+          <div className="rounded-2xl bg-primary-50 p-2.5 text-primary-700 ring-1 ring-primary-100 transition-colors group-hover:bg-primary-100">{icon}</div>
         </div>
         {loading ? (
-          <div className="mt-3 h-9 animate-pulse rounded bg-neutral-100" />
+          <div className="mt-4 h-9 animate-pulse rounded-xl bg-neutral-100" />
         ) : (
-          <p className="mt-3 text-3xl font-semibold tracking-tight text-neutral-900">{value}</p>
+          <p className="mt-4 font-display text-3xl font-extrabold tracking-tight text-neutral-950">{value}</p>
         )}
-        {subtitle && <p className="mt-1.5 text-sm text-neutral-500">{subtitle}</p>}
+        {subtitle && <p className="mt-1.5 text-sm leading-5 text-neutral-500">{subtitle}</p>}
       </CardContent>
     </Card>
   );
@@ -64,6 +64,16 @@ export function Dashboard() {
 
   const currentPayPeriod = stats?.current_pay_period;
   const statusConfig = currentPayPeriod ? payPeriodStatusConfig[currentPayPeriod.status as PayPeriodStatus] : null;
+  const payDateLabel = currentPayPeriod
+    ? new Date(currentPayPeriod.pay_date).toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      })
+    : null;
+  const payPeriodSteps = ['draft', 'calculated', 'approved', 'committed'];
+  const activeStepIndex = currentPayPeriod ? payPeriodSteps.indexOf(currentPayPeriod.status) : -1;
 
   return (
     <div>
@@ -80,21 +90,48 @@ export function Dashboard() {
           </div>
         )}
 
-        <Card className="mb-8 overflow-hidden border-primary-200/70 bg-gradient-to-r from-white to-primary-50/70">
-          <CardContent className="py-7">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+        <Card className="mb-8 overflow-hidden border-primary-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4f8ff_52%,#fff8eb_100%)]">
+          <CardContent className="relative p-0">
+            <div className="absolute right-0 top-0 h-52 w-52 translate-x-1/3 -translate-y-1/3 rounded-full bg-primary-200/50 blur-3xl" />
+            <div className="absolute bottom-0 right-24 h-40 w-40 translate-y-1/2 rounded-full bg-accent-200/45 blur-3xl" />
+            <div className="relative grid gap-8 p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-8">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Payroll overview</p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Everything ready for this pay cycle</h2>
-                <p className="mt-2 text-sm text-neutral-600">
-                  Review your current period, run payroll operations, and export required tax reports from one place.
+                <p className="inline-flex rounded-full border border-primary-200 bg-white/70 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-primary-800">
+                  Payroll command center
                 </p>
+                <h2 className="mt-4 max-w-3xl font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance lg:text-4xl">
+                  Run the pay cycle with fewer handoffs and a clearer audit trail.
+                </h2>
+                <p className="mt-3 max-w-2xl text-base leading-7 text-neutral-600">
+                  Start with the current period, then move through checks, reports, and Guam compliance from one operational workspace.
+                </p>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <Button onClick={() => navigate(currentPayPeriod ? `/pay-periods/${currentPayPeriod.id}` : '/pay-periods')}>
+                    {currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                  <Button variant="secondary" onClick={() => navigate('/reports')}>Open reports</Button>
+                  <Button variant="ghost" onClick={() => navigate('/employees/new')}>Add employee</Button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="secondary" onClick={() => navigate('/employees/new')}>
-                  Add employee
-                </Button>
-                <Button onClick={() => navigate('/reports')}>Open reports</Button>
+
+              <div className="rounded-[1.15rem] border border-white/80 bg-white/78 p-5 shadow-sm shadow-primary-100/60">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Next best action</p>
+                <div className="mt-4 flex items-start gap-3">
+                  <div className="rounded-2xl bg-success-50 p-2.5 text-success-600 ring-1 ring-success-100">
+                    <ClipboardCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="font-display text-lg font-bold text-neutral-950">
+                      {currentPayPeriod ? statusConfig?.label ?? 'Review pay period' : 'Set up the next pay period'}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-neutral-500">
+                      {currentPayPeriod
+                        ? `${currentPayPeriod.employee_count} employees, ${formatCurrency(currentPayPeriod.total_net)} net pay currently in view.`
+                        : 'Create the period first, then add or import employee payroll items.'}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </CardContent>
@@ -129,10 +166,13 @@ export function Dashboard() {
           />
         </div>
 
-        <Card className="mt-8">
+        <Card className="mt-8 overflow-hidden">
           <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle>Current Pay Period</CardTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <CardTitle>Current Pay Period</CardTitle>
+                <p className="mt-1 text-sm text-neutral-500">A guided view of where this payroll stands.</p>
+              </div>
               {currentPayPeriod && statusConfig && (
                 <Badge
                   variant={
@@ -152,39 +192,57 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="h-16 animate-pulse rounded-xl bg-neutral-100" />
+              <div className="h-32 animate-pulse rounded-2xl bg-neutral-100" />
             ) : currentPayPeriod ? (
-              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <div>
-                  <p className="text-lg font-semibold tracking-tight text-neutral-900">{currentPayPeriod.period_description}</p>
-                  <p className="text-sm text-neutral-500">
-                    Pay date:{' '}
-                    {new Date(currentPayPeriod.pay_date).toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
+                  <p className="font-display text-xl font-bold tracking-tight text-neutral-950">{currentPayPeriod.period_description}</p>
+                  <p className="mt-1 text-sm text-neutral-500">Pay date: {payDateLabel}</p>
+
+                  <div className="mt-6 grid gap-3 sm:grid-cols-4">
+                    {payPeriodSteps.map((step, index) => {
+                      const isDone = index <= activeStepIndex;
+                      return (
+                        <div key={step} className="flex items-center gap-2 rounded-2xl border border-neutral-200 bg-neutral-50/70 px-3 py-2">
+                          <span className={`flex h-6 w-6 items-center justify-center rounded-full ${isDone ? 'bg-primary-700 text-white' : 'bg-white text-neutral-400 ring-1 ring-neutral-200'}`}>
+                            {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
+                          </span>
+                          <span className={`text-xs font-bold uppercase tracking-[0.1em] ${isDone ? 'text-neutral-900' : 'text-neutral-400'}`}>{step}</span>
+                        </div>
+                      );
                     })}
-                  </p>
-                  <p className="mt-1 text-sm text-neutral-500">
-                    {currentPayPeriod.employee_count} employees • {formatCurrency(currentPayPeriod.total_gross)} gross •{' '}
-                    {formatCurrency(currentPayPeriod.total_net)} net
-                  </p>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>
-                    View details
-                  </Button>
-                  {currentPayPeriod.status === 'draft' && (
-                    <Button onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Process payroll</Button>
-                  )}
+
+                <div className="rounded-2xl border border-neutral-200 bg-neutral-50/80 p-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-neutral-500">Employees</p>
+                      <p className="font-display text-xl font-bold text-neutral-950">{currentPayPeriod.employee_count}</p>
+                    </div>
+                    <div>
+                      <p className="text-neutral-500">Gross</p>
+                      <p className="font-display text-xl font-bold text-neutral-950">{formatCurrency(currentPayPeriod.total_gross)}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-neutral-500">Net payroll</p>
+                      <p className="font-display text-2xl font-extrabold text-success-700">{formatCurrency(currentPayPeriod.total_net)}</p>
+                    </div>
+                  </div>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <Button size="sm" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Open period</Button>
+                    {currentPayPeriod.status === 'draft' && (
+                      <Button size="sm" variant="secondary" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Process payroll</Button>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 px-4 py-8 text-center">
-                <CalendarCheck2 className="mb-2 h-6 w-6 text-neutral-400" />
-                <p className="text-sm text-neutral-600">No active pay period</p>
-                <Button className="mt-4" onClick={() => navigate('/pay-periods')}>
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 px-4 py-10 text-center">
+                <CalendarCheck2 className="mb-3 h-7 w-7 text-neutral-400" />
+                <p className="font-display text-lg font-bold text-neutral-900">No active pay period</p>
+                <p className="mt-1 max-w-md text-sm text-neutral-500">Create a pay period to start collecting hours, deductions, checks, and reports.</p>
+                <Button className="mt-5" onClick={() => navigate('/pay-periods')}>
                   Create pay period
                 </Button>
               </div>
@@ -219,48 +277,35 @@ export function Dashboard() {
           </Card>
         )}
 
-        <div className="mt-8 grid gap-6 md:grid-cols-3">
-          <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={() => navigate('/employees/new')}>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-primary-100 p-3 text-primary-700">
-                  <UserPlus2 className="h-5 w-5" />
+        <div className="mt-8 grid gap-5 md:grid-cols-3">
+          {[
+            { title: 'Add Employee', body: 'Register a worker before the next run.', icon: <UserPlus2 className="h-5 w-5" />, href: '/employees/new', tone: 'primary' },
+            { title: 'Run Payroll', body: 'Open pay periods and continue processing.', icon: <Wallet className="h-5 w-5" />, href: '/pay-periods', tone: 'success' },
+            { title: 'Guam Reports', body: 'Export registers, tax summaries, and compliance packets.', icon: <Landmark className="h-5 w-5" />, href: '/reports', tone: 'accent' },
+          ].map((action) => (
+            <Card key={action.title} className="group cursor-pointer overflow-hidden hover:-translate-y-1 hover:border-primary-200" onClick={() => navigate(action.href)}>
+              <CardContent className="pt-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`rounded-2xl p-3 ring-1 ${
+                      action.tone === 'success'
+                        ? 'bg-success-50 text-success-600 ring-success-100'
+                        : action.tone === 'accent'
+                          ? 'bg-accent-50 text-accent-700 ring-accent-100'
+                          : 'bg-primary-50 text-primary-700 ring-primary-100'
+                    }`}>
+                      {action.icon}
+                    </div>
+                    <div>
+                      <p className="font-display font-bold text-neutral-950">{action.title}</p>
+                      <p className="mt-1 text-sm leading-5 text-neutral-500">{action.body}</p>
+                    </div>
+                  </div>
+                  <ArrowRight className="mt-1 h-4 w-4 text-neutral-300 transition-transform group-hover:translate-x-1 group-hover:text-primary-600" />
                 </div>
-                <div>
-                  <p className="font-medium text-neutral-900">Add Employee</p>
-                  <p className="text-sm text-neutral-500">Register a new employee</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={() => navigate('/pay-periods')}>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-success-100 p-3 text-success-600">
-                  <Wallet className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="font-medium text-neutral-900">Run Payroll</p>
-                  <p className="text-sm text-neutral-500">Process the current period</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={() => navigate('/reports')}>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-4">
-                <div className="rounded-xl bg-primary-100 p-3 text-primary-700">
-                  <FileBarChart2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <p className="font-medium text-neutral-900">View Reports</p>
-                  <p className="text-sm text-neutral-500">Payroll and tax exports</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
         {stats?.ytd_totals && stats.ytd_totals.gross_pay > 0 && (

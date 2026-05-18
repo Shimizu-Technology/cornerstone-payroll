@@ -219,6 +219,8 @@ class R2StorageService
   end
 
   def configured?
+    return false if Rails.env.test? && ENV["R2_USE_REMOTE_IN_TEST"] != "true"
+
     ENV["R2_ACCOUNT_ID"].present? &&
       ENV["R2_ACCESS_KEY_ID"].present? &&
       ENV["R2_SECRET_ACCESS_KEY"].present?

@@ -17,7 +17,7 @@ function formatTime(t: string | null | undefined): string {
   return `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
 }
 
-const PUNCH_TIME_FIELDS = ['clock_in', 'lunch_out', 'lunch_in', 'clock_out', 'in3', 'out3'] as const;
+type PunchTimeField = 'clock_in' | 'lunch_out' | 'lunch_in' | 'clock_out' | 'in3' | 'out3';
 
 function parseTimeMinutes(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -29,7 +29,7 @@ function parseTimeMinutes(value: string | null | undefined): number | null {
   return hours * 60 + minutes;
 }
 
-function calculatePunchHours(entry: Pick<PunchEntryData, typeof PUNCH_TIME_FIELDS[number]>): number | null {
+function calculatePunchHours(entry: Pick<PunchEntryData, PunchTimeField>): number | null {
   const clockIn = parseTimeMinutes(entry.clock_in);
   const lunchOut = parseTimeMinutes(entry.lunch_out);
   const lunchIn = parseTimeMinutes(entry.lunch_in);
