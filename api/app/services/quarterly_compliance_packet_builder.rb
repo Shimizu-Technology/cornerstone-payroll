@@ -368,10 +368,53 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def federal_liability_for_items(items)
-    items.sum(&:social_security_tax).to_f +
+    base_liability = items.sum(&:social_security_tax).to_f +
       items.sum(&:employer_social_security_tax).to_f +
       items.sum(&:medicare_tax).to_f +
       items.sum(&:employer_medicare_tax).to_f
+
+    (base_liability + additional_medicare_tax_for_items(items)).round(2)
+  end
+
+  def additional_medicare_tax_for_items(items)
+    items.sum { |item| additional_medicare_tax_by_item_id[item.id].to_f }
+  end
+
+  def additional_medicare_tax_by_item_id
+    @additional_medicare_tax_by_item_id ||= begin
+      allocations = Hash.new(0.0)
+
+      payroll_items.group_by(&:employee_id).each do |employee_id, employee_items|
+        running_wages = prior_medicare_wages_by_employee[employee_id].to_f
+
+        employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
+          previous_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
+          running_wages += item.gross_pay.to_f
+          current_excess = [ running_wages - Form941GuAggregator::ADD_MEDICARE_THRESHOLD, 0.0 ].max
+          taxable_excess = (current_excess - previous_excess).round(2)
+          next unless taxable_excess.positive?
+
+          allocations[item.id] = (taxable_excess * Form941GuAggregator::ADD_MEDICARE_RATE).round(2)
+        end
+      end
+
+      allocations
+    end
+  end
+
+  def prior_medicare_wages_by_employee
+    @prior_medicare_wages_by_employee ||= PayrollItem.joins(:pay_period)
+                                                     .where(company_id: company.id)
+                                                     .not_voided
+                                                     .where.not(employment_type: "contractor")
+                                                     .where(pay_periods: {
+                                                       id: PayPeriod.reportable_committed
+                                                         .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start)
+                                                         .select(:id)
+                                                     })
+                                                     .group(:employee_id)
+                                                     .sum(:gross_pay)
+                                                     .transform_values(&:to_f)
   end
 
   def deductions_total(items)
