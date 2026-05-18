@@ -94,10 +94,10 @@ module Api
         filing.updated_by = current_user
         payload = form500_params.to_h.deep_symbolize_keys
         filing.fields = merge_with_defaults(defaults_payload, payload.except(:pay_period_id, :status, :payment_date, :payment_amount, :confirmation_number, :receipt_attached, :tracking_notes), preserve_blank_strings: true)
-        filing.status = payload[:status] if payload[:status].present?
-        filing.payment_date = payload[:payment_date] if payload[:payment_date].present?
-        filing.payment_amount = payload[:payment_amount] if payload[:payment_amount].present?
-        filing.confirmation_number = payload[:confirmation_number] if payload[:confirmation_number].present?
+        filing.status = payload[:status].presence || "prepared" if payload.key?(:status)
+        filing.payment_date = payload[:payment_date].presence if payload.key?(:payment_date)
+        filing.payment_amount = payload[:payment_amount].presence if payload.key?(:payment_amount)
+        filing.confirmation_number = payload[:confirmation_number].presence if payload.key?(:confirmation_number)
         filing.receipt_attached = ActiveModel::Type::Boolean.new.cast(payload[:receipt_attached]) unless payload[:receipt_attached].nil?
         filing.notes = payload[:tracking_notes] if payload.key?(:tracking_notes)
         filing.save!
