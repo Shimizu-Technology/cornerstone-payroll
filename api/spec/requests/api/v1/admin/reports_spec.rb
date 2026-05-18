@@ -276,6 +276,13 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.dig("task", "status")).to eq("filed")
       expect(response.parsed_body.dig("task", "filing_confirmation_number")).to eq("W1-ABC-123")
       expect(response.parsed_body.dig("task", "proof_attached")).to eq(true)
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "not_started" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("not_started")
     end
 
     it "returns 422 for invalid quarter" do
@@ -348,6 +355,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(first_record[1, 9]).to eq("123456789")
       expect(first_record[133]).to eq("2")
       expect(first_record[274]).to eq("S")
+    end
+
+    it "returns 422 instead of 500 when SWICA export encounters stale employee rows" do
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Dr",
+        city: "Tamuning",
+        state: "GU",
+        zip: "96913"
+      )
+      exporter = instance_double(SwicaAsciiExporter)
+      allow(SwicaAsciiExporter).to receive(:new).and_return(exporter)
+      allow(exporter).to receive(:filename).and_return("swica_2026_q2.txt")
+      allow(exporter).to receive(:generate).and_raise(KeyError, "key not found: 123")
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("key not found")
     end
 
     it "returns editable official form defaults with split employer address fields" do

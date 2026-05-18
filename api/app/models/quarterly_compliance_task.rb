@@ -50,8 +50,10 @@ class QuarterlyComplianceTask < ApplicationRecord
   private
 
   def infer_status_from_dates
+    return unless will_save_change_to_filed_at? || will_save_change_to_paid_at?
+
     self.status = "filed_and_paid" if filed_at.present? && paid_at.present? && status.in?(%w[not_started in_progress ready_to_file filed paid])
-    self.status = "filed" if filed_at.present? && status.in?(%w[not_started in_progress ready_to_file])
-    self.status = "paid" if paid_at.present? && status.in?(%w[not_started in_progress ready_to_file])
+    self.status = "filed" if filed_at.present? && paid_at.blank? && status.in?(%w[not_started in_progress ready_to_file])
+    self.status = "paid" if paid_at.present? && filed_at.blank? && status.in?(%w[not_started in_progress ready_to_file])
   end
 end

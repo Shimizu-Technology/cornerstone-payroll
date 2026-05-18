@@ -403,14 +403,17 @@ class QuarterlyCompliancePacketBuilder
   def swica_upload_validation
     @swica_upload_validation ||= begin
       errors = []
+      employees_map = Employee.where(company_id: company.id, id: employee_rows.map { |row| row[:employee_id] }).index_by(&:id)
+
       employee_rows.each do |row|
-        employee = Employee.find_by(id: row[:employee_id], company_id: company.id)
+        employee = employees_map[row[:employee_id]]
         errors << "#{row[:name]} is missing a valid 9-digit SSN" unless employee&.valid_filing_ssn?
         errors << "#{row[:name]} is missing address line 1" if employee&.address_line1.blank?
         errors << "#{row[:name]} is missing city" if employee&.city.blank?
         errors << "#{row[:name]} is missing ZIP" if employee&.zip.blank?
       end
-      duplicate_ssns = Employee.where(company_id: company.id, id: employee_rows.map { |row| row[:employee_id] }).map(&:ssn_digits).compact.tally.select { |_ssn, count| count > 1 }.keys
+
+      duplicate_ssns = employees_map.values.map(&:ssn_digits).compact.tally.select { |_ssn, count| count > 1 }.keys
       errors << "Duplicate SSNs detected for this quarter" if duplicate_ssns.any?
       {
         ready: errors.empty?,
