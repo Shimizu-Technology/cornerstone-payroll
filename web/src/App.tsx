@@ -1,40 +1,41 @@
-import { useEffect } from 'react';
+import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider } from '@/contexts/CompanyContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
-import { Dashboard } from '@/pages/Dashboard';
-import { EmployeeList } from '@/pages/employees/EmployeeList';
-import { EmployeeForm } from '@/pages/employees/EmployeeForm';
-import { Departments } from '@/pages/Departments';
-import { PayPeriods } from '@/pages/PayPeriods';
-import { PayPeriodDetail } from '@/pages/PayPeriodDetail';
-import { Reports } from '@/pages/Reports';
-import { ChecksPayments } from '@/pages/ChecksPayments';
-import { ClientDashboard } from '@/pages/client/ClientDashboard';
-import { ClientPayPeriods } from '@/pages/client/ClientPayPeriods';
-import { ClientPayPeriodDetail } from '@/pages/client/ClientPayPeriodDetail';
-import { ClientReports } from '@/pages/client/ClientReports';
-import { ClientDocuments } from '@/pages/client/ClientDocuments';
-import { Form500Page } from '@/pages/Form500Page';
-import { AdminClientDocumentsPage } from '@/pages/AdminClientDocumentsPage';
-import TaxConfigs from '@/pages/TaxConfigs';
-import { Users } from '@/pages/Users';
-import { Organizations } from '@/pages/Organizations';
-import { AuditLogs } from '@/pages/AuditLogs';
-import { CheckSettingsPage } from '@/pages/CheckSettings';
-import EmployeeLoans from '@/pages/EmployeeLoans';
-import { Clients } from '@/pages/Clients';
-import { TimecardOcrTool } from '@/pages/TimecardOcrTool';
-import { GeneralTransmittals } from '@/pages/GeneralTransmittals';
-import { InvoiceMaker } from '@/pages/InvoiceMaker';
-import PayrollReminders from '@/pages/PayrollReminders';
-import { TimeTrackingSources } from '@/pages/TimeTrackingSources';
-import { Login } from '@/pages/Login';
-import { Invite } from '@/pages/Invite';
-import { PublicHome } from '@/pages/PublicHome';
+
+const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
+const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
+const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
+const Departments = lazy(() => import('@/pages/Departments').then((module) => ({ default: module.Departments })));
+const PayPeriods = lazy(() => import('@/pages/PayPeriods').then((module) => ({ default: module.PayPeriods })));
+const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
+const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
+const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
+const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard').then((module) => ({ default: module.ClientDashboard })));
+const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').then((module) => ({ default: module.ClientPayPeriods })));
+const ClientPayPeriodDetail = lazy(() => import('@/pages/client/ClientPayPeriodDetail').then((module) => ({ default: module.ClientPayPeriodDetail })));
+const ClientReports = lazy(() => import('@/pages/client/ClientReports').then((module) => ({ default: module.ClientReports })));
+const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then((module) => ({ default: module.ClientDocuments })));
+const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
+const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
+const TaxConfigs = lazy(() => import('@/pages/TaxConfigs'));
+const Users = lazy(() => import('@/pages/Users').then((module) => ({ default: module.Users })));
+const Organizations = lazy(() => import('@/pages/Organizations').then((module) => ({ default: module.Organizations })));
+const AuditLogs = lazy(() => import('@/pages/AuditLogs').then((module) => ({ default: module.AuditLogs })));
+const CheckSettingsPage = lazy(() => import('@/pages/CheckSettings').then((module) => ({ default: module.CheckSettingsPage })));
+const EmployeeLoans = lazy(() => import('@/pages/EmployeeLoans'));
+const Clients = lazy(() => import('@/pages/Clients').then((module) => ({ default: module.Clients })));
+const TimecardOcrTool = lazy(() => import('@/pages/TimecardOcrTool').then((module) => ({ default: module.TimecardOcrTool })));
+const GeneralTransmittals = lazy(() => import('@/pages/GeneralTransmittals').then((module) => ({ default: module.GeneralTransmittals })));
+const InvoiceMaker = lazy(() => import('@/pages/InvoiceMaker').then((module) => ({ default: module.InvoiceMaker })));
+const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
+const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
+const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
+const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
+const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
 
 // Environment flag to bypass auth in development
 const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
@@ -202,11 +203,61 @@ function PostHogIdentify() {
   return null;
 }
 
+function PageLoader() {
+  return (
+    <div className="flex min-h-[320px] items-center justify-center px-6 py-12">
+      <div className="inline-flex items-center gap-3 rounded-full border border-neutral-200 bg-white/85 px-4 py-2 text-sm font-medium text-neutral-600 shadow-sm shadow-neutral-200/70">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary-600" />
+        Loading workspace
+      </div>
+    </div>
+  );
+}
+
+class RouteErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Route render failed:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-neutral-50 px-4 py-12">
+          <div className="max-w-md rounded-[1.35rem] border border-neutral-200 bg-white p-6 text-center shadow-[0_18px_45px_-32px_rgba(15,23,42,0.45)]">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary-700">Cornerstone Payroll</p>
+            <h1 className="mt-3 font-display text-2xl font-extrabold tracking-tight text-neutral-950">Something went wrong</h1>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              Refresh the page to reload the workspace. If this keeps happening, contact support with the page you were opening.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="mt-5 inline-flex items-center justify-center rounded-full bg-primary-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-800"
+            >
+              Reload page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 function AppRoutes() {
   const { isClient } = useAuth();
 
   return (
-    <Routes>
+    <RouteErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
       {/* Public routes */}
       <Route path="/" element={<PublicHome />} />
       <Route path="/login" element={<Login />} />
@@ -250,7 +301,9 @@ function AppRoutes() {
 
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/app" replace />} />
-    </Routes>
+        </Routes>
+      </Suspense>
+    </RouteErrorBoundary>
   );
 }
 
