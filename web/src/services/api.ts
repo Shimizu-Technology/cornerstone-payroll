@@ -1350,8 +1350,8 @@ export interface Form941GuReport {
   };
   lines: {
     line1_employee_count: number;
-    line2_wages_tips_other: number;
-    line3_fit_withheld: number;
+    line2_wages_tips_other: number | null;
+    line3_fit_withheld: number | null;
     line5a_ss_wages: number;
     line5a_ss_combined_tax: number;
     line5b_ss_tips: number;
@@ -1374,7 +1374,8 @@ export interface Form941GuReport {
   tax_detail: {
     gross_wages: number;
     reported_tips: number;
-    fit_withheld: number;
+    fit_withheld: number | null;
+    guam_withholding_for_w1: number;
     ss_employee: number;
     ss_employer: number;
     ss_wages_combined: number;
@@ -1391,13 +1392,162 @@ export interface Form941GuReport {
     month: string;
     month_start: string;
     month_end: string;
-    fit_withheld: number;
+    fit_withheld: number | null;
+    guam_withholding_for_w1?: number;
     ss_combined: number;
     ss_tips_combined: number;
     medicare_combined: number;
     add_medicare_tax: number;
     total_liability: number;
   }[];
+}
+
+export interface QuarterlyCompliancePacketReport {
+  meta: {
+    report_type: string;
+    company_name: string;
+    ein: string;
+    company_address_line1?: string | null;
+    company_address_line2?: string | null;
+    company_city?: string | null;
+    company_state?: string | null;
+    company_zip?: string | null;
+    year: number;
+    quarter: number;
+    quarter_label: string;
+    quarter_start: string;
+    quarter_end: string;
+    period_basis: string;
+    pay_periods_included: number;
+  };
+  due_dates: {
+    official_due_date: string;
+    internal_target_date: string;
+    form_500_policy: string;
+    notes: string[];
+  };
+  source_rules: {
+    guam_track: string;
+    federal_track: string;
+    form_941_guam_lines_2_3: string;
+    schedule_b: string;
+  };
+  pay_periods: {
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    employee_count: number;
+    gross_pay: number;
+    net_pay: number;
+    deductions: number;
+    guam_withholding: number;
+    social_security_tax: number;
+    medicare_tax: number;
+    employer_social_security_tax: number;
+    employer_medicare_tax: number;
+    federal_941_liability: number;
+  }[];
+  form_500: {
+    policy: string;
+    total_guam_withholding: number;
+    deposits: {
+      pay_period_id: number;
+      pay_date: string;
+      quarter_ending: string;
+      amount: number;
+      status: string;
+      payment_date: string | null;
+      confirmation_number: string | null;
+      receipt_attached: boolean;
+    }[];
+  };
+  w1: {
+    filing_channel: string;
+    quarter_ending_month: number;
+    quarter_ending_year: number;
+    total_guam_withholding: number;
+    daily_liabilities: { pay_date: string; month: number; amount: number }[];
+    monthly_liabilities: { month: string; month_number: number; amount: number }[];
+    credits_adjustments: number | null;
+    balance_due_or_overpayment: number | null;
+    filing_status: string;
+    tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
+    filing_steps: string[];
+  };
+  swica: {
+    filing_channel: string;
+    filing_status: string;
+    employees: {
+      employee_id: number;
+      name: string;
+      ssn_last_four: string | null;
+      status: string;
+      termination_date: string | null;
+      gross_pay: number;
+      net_pay: number;
+      deductions: number;
+      swica_wages: number;
+      reported_tips: number;
+      non_taxable_pay: number;
+      guam_withholding: number;
+      social_security_tax: number;
+      employer_social_security_tax: number;
+      medicare_tax: number;
+      employer_medicare_tax: number;
+      federal_941_liability: number;
+      social_security_wages: number;
+      social_security_tips: number;
+      medicare_wages_tips: number;
+      pay_dates: string[];
+    }[];
+    totals: { employee_count: number; total_wages: number; total_tax_withheld: number };
+    upload_export_ready: boolean;
+    upload_export_note: string;
+    tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
+    filing_steps: string[];
+  };
+  federal_941: {
+    report: Form941GuReport;
+    deposit_schedule: {
+      suggested_schedule: string;
+      schedule_b_required: boolean;
+      firm_payment_policy: string;
+      note: string;
+    };
+    filing_steps: string[];
+  };
+  review_checks: { key: string; status: string; message: string; details?: Record<string, unknown>; href?: string | null }[];
+  component_taxability: {
+    category: string;
+    label: string;
+    amount: number;
+    guam_withholding_wages: boolean;
+    swica_wages: boolean;
+    social_security_wages: boolean;
+    social_security_tips: boolean;
+    medicare_wages_tips: boolean;
+    non_taxable: boolean;
+  }[];
+}
+
+export type QuarterlyOfficialFormType = 'form_941' | 'schedule_b' | 'w1' | 'swica';
+
+export interface QuarterlyOfficialFormFields {
+  form_type: QuarterlyOfficialFormType;
+  title: string;
+  company_name?: string;
+  ein?: string;
+  company_address?: string;
+  company_address_line1?: string;
+  company_address_line2?: string;
+  company_city?: string;
+  company_state?: string;
+  company_zip?: string;
+  lines?: Record<string, number | string | null>;
+  daily_liabilities?: { pay_date: string; amount: number; month?: number }[];
+  total_guam_withholding?: number | string;
+  employees?: Array<Record<string, string | number | null | string[]>>;
 }
 
 export const reportsApi = {
@@ -1441,6 +1591,24 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/tax_summary_pdf', { year, quarter }),
   taxSummaryXlsx: (year: number, quarter?: number) =>
     api.getBlobWithParams('/admin/reports/tax_summary_xlsx', { year, quarter }),
+  quarterlyCompliancePacket: (year: number, quarter: number) =>
+    api.get<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet', { year, quarter }),
+  quarterlyCompliancePacketXlsx: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_xlsx', { year, quarter }),
+  quarterlyCompliancePacketForm941Pdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_form_941_pdf', { year, quarter }),
+  quarterlyCompliancePacketScheduleBPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_schedule_b_pdf', { year, quarter }),
+  quarterlyCompliancePacketW1Pdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_w1_pdf', { year, quarter }),
+  quarterlyCompliancePacketSwicaPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_pdf', { year, quarter }),
+  quarterlyCompliancePacketOfficialFormDefaults: (year: number, quarter: number, formType: QuarterlyOfficialFormType) =>
+    api.get<{ data: QuarterlyOfficialFormFields }>('/admin/reports/quarterly_compliance_packet_official_form_defaults', { year, quarter, form_type: formType }),
+  quarterlyCompliancePacketOfficialFormPreview: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
+    api.postBlob('/admin/reports/quarterly_compliance_packet_official_form_preview', { year, quarter, form_type: formType, fields }),
+  quarterlyCompliancePacketOfficialFormDownload: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>
+    api.postBlob('/admin/reports/quarterly_compliance_packet_official_form_download', { year, quarter, form_type: formType, fields }),
   ytdSummary: (params?: YtdSummaryParams) =>
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', params),
   ytdSummaryXlsx: (params?: YtdSummaryParams) =>
@@ -1461,7 +1629,7 @@ export const reportsApi = {
     api.get<W2GuFilingReadinessResponse>('/admin/reports/w2_gu_filing_readiness', { year }),
   w2GuMarkReady: (year: number, notes?: string) =>
     api.post<W2GuMarkReadyResponse>('/admin/reports/w2_gu_mark_ready', { year, notes }),
-  // Form 941-GU Quarterly Report
+  // Federal Form 941 worksheet (legacy route name kept for compatibility)
   form941Gu: (year: number, quarter: number) =>
     api.get<{ report: Form941GuReport }>('/admin/reports/form_941_gu', { year, quarter }),
   form941GuXlsx: (year: number, quarter: number) =>

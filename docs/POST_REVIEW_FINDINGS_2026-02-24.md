@@ -110,6 +110,21 @@ Status values:
 
 ## Verification Log
 
+### 2026-05-16
+
+- Switched back to `main` and fast-forwarded from `origin/main` after the pay-period settings branch was merged.
+- Ran a broad follow-up review across permissions/scoping, client portal employee maintenance, payroll calculation/reporting, check settings, printer profiles, timecard imports, Guam DRT/Form 500/Form 941-GU/W-2GU workflow, and likely reporting performance hotspots.
+- Verified frontend type safety with `npm run typecheck` in `web/`.
+- Verified focused backend coverage with rbenv Ruby 3.3.7 and Bundler 4.0.7:
+  - `bundle exec rspec spec/requests/api/v1/admin/users_spec.rb spec/requests/api/v1/admin/companies_spec.rb spec/requests/api/v1/client/employees_spec.rb spec/requests/api/v1/admin/timecards_spec.rb spec/requests/api/v1/admin/time_tracking_imports_spec.rb spec/requests/api/v1/admin/printer_profiles_spec.rb spec/requests/api/v1/admin/checks_spec.rb spec/services/payroll_calculator_spec.rb`
+  - Result: `131 examples, 0 failures`.
+- Noted that the standalone timecard OCR apply path can re-add an employee who was explicitly excluded from a pay period. The newer live time tracking import path already respects exclusions, but `Api::V1::Admin::TimecardsController#apply_to_payroll` does not currently check `pay_period_excluded_employees` before creating or updating payroll items.
+- Noted that client portal employee create/update remains a high-trust direct-edit workflow. Clients can update payroll/tax-sensitive employee fields directly, and the edit/load path can return full SSNs. This may be acceptable if the product policy is direct client maintenance, but it differs from earlier approval-first planning notes.
+- Noted that committed pay periods still enqueue tax sync even when CST ingest is not configured, so missing `CST_INGEST_URL` can surface as a failed sync instead of a disabled/not-configured state.
+- Noted a small amount of legacy EFTPS wording/fallback handling still exists in visible/default copy. Most current Guam DRT work is FIT-only and Treasurer-of-Guam/Form-500-oriented, but new operator-facing copy should avoid suggesting EFTPS for Guam wage withholding.
+- Noted that check settings and next-check-number endpoints are available to staff-level users through the admin checks controller. This may match current operations, but check stock, bank, layout, memo, auto-create FIT check, and check-number sequencing settings are high-impact and may warrant a manager/admin-only policy decision later.
+- Noted that company listing performance has already been improved, but reports/dashboard endpoints still include several separate aggregate queries and some Ruby-side JSON total aggregation. This is not urgent at current scale, but should be profiled after QuickBooks historical import volume is loaded.
+
 ### 2026-02-24
 
 - Created initial findings log from code review.

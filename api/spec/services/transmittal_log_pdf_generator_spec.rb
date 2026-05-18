@@ -1,0 +1,54 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+require "pdf/reader"
+
+RSpec.describe TransmittalLogPdfGenerator do
+  let(:company) { create(:company, name: "AIRE Services") }
+  let(:department) { create(:department, company: company) }
+  let(:employee) { create(:employee, company: company, department: department) }
+  let(:pay_period) do
+    create(:pay_period, :committed,
+      company: company,
+      start_date: Date.new(2026, 4, 1),
+      end_date: Date.new(2026, 4, 14),
+      pay_date: Date.new(2026, 4, 16))
+  end
+
+  before do
+    create(:payroll_item, :with_check,
+      company: company,
+      employee: employee,
+      pay_period: pay_period,
+      check_number: "1007",
+      gross_pay: 1200.00,
+      withholding_tax: 50.52,
+      social_security_tax: 74.40,
+      employer_social_security_tax: 74.40,
+      medicare_tax: 17.40,
+      employer_medicare_tax: 17.40)
+
+    create(:non_employee_check,
+      company: company,
+      pay_period: pay_period,
+      payable_to: "Treasurer of Guam",
+      amount: 50.52,
+      memo: "FIT Withholding - PPE 04/14/2026 - Form 500")
+  end
+
+  it "keeps a normal pay-period transmittal on one page" do
+    pdf = described_class.new(
+      pay_period,
+      preparer_name: "Cornerstone Tax Services",
+      notes: [
+        "FICA Obligation (Social Security & Medicare): $183.60",
+        "EFTPS payment to be done by client"
+      ]
+    ).generate
+    reader = PDF::Reader.new(StringIO.new(pdf))
+
+    expect(reader.page_count).to eq(1)
+    expect(reader.pages.first.text).to include("Documents Provided to Client")
+    expect(reader.pages.first.text).to include("Employer Tax Obligations")
+  end
+end
