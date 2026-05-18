@@ -1,4 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,7 +15,7 @@ import {
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, YtdSummaryParams } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -50,6 +51,15 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium uppercase text-gray-500">{label}</span>
+      {children}
+    </label>
+  );
 }
 
 function SortableTh({
@@ -1604,7 +1614,529 @@ function EmployerLiabilityPanel() {
   );
 }
 
-// ─── Form 941-GU Panel ────────────────────────────────────────────────────────
+// ─── Quarterly Compliance Packet Panel ───────────────────────────────────────
+
+function QuarterlyCompliancePacketPanel() {
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
+  const currentQuarter = Math.ceil((new Date().getMonth() + 1) / 3);
+  const [year, setYear] = useState(currentYear);
+  const [quarter, setQuarter] = useState(currentQuarter);
+  const [loading, setLoading] = useState(false);
+  const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
+
+  async function loadReport() {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    try {
+      const res = await reportsApi.quarterlyCompliancePacket(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function downloadXlsx() {
+    setExportingXlsx(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.quarterlyCompliancePacketXlsx(year, quarter);
+      triggerDownload(blob, filename || `quarterly_compliance_packet_${year}_q${quarter}.xlsx`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingXlsx(false);
+    }
+  }
+
+  const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Quarterly Compliance Packet</CardTitle>
+          <CardDescription>
+            Pay-date based Guam and federal filing packet for Form 500, W-1, SWICA, Federal Form 941, and tie-out review.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="qcp-year" className="text-sm font-medium text-gray-700">Year</label>
+              <select
+                id="qcp-year"
+                value={year}
+                onChange={(e) => { setYear(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="qcp-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+              <select
+                id="qcp-quarter"
+                value={quarter}
+                onChange={(e) => { setQuarter(Number(e.target.value)); setReport(null); setError(null); }}
+                disabled={loading}
+                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="1">Q1 (Jan-Mar)</option>
+                <option value="2">Q2 (Apr-Jun)</option>
+                <option value="3">Q3 (Jul-Sep)</option>
+                <option value="4">Q4 (Oct-Dec)</option>
+              </select>
+            </div>
+            <Button onClick={loadReport} disabled={loading}>
+              {loading ? 'Loading...' : 'Generate Packet'}
+            </Button>
+            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
+              {exportingXlsx ? 'Exporting...' : 'Download Excel'}
+            </Button>
+          </div>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+        </CardContent>
+      </Card>
+
+      {report && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>{report.meta.company_name} - {report.meta.quarter_label}</CardTitle>
+              <CardDescription>
+                Pay-date basis: {report.meta.quarter_start} to {report.meta.quarter_end} | Official due {report.due_dates.official_due_date} | Internal target {report.due_dates.internal_target_date}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-4">
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">Form 500 / W-1</p>
+                  <p className="mt-1 text-xl font-semibold">{fmt(report.w1.total_guam_withholding)}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">SWICA Wages</p>
+                  <p className="mt-1 text-xl font-semibold">{fmt(report.swica.totals.total_wages)}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">SWICA Employees</p>
+                  <p className="mt-1 text-xl font-semibold">{report.swica.totals.employee_count}</p>
+                </div>
+                <div className="rounded-md border p-4">
+                  <p className="text-sm text-gray-500">Review Checks</p>
+                  <p className="mt-1 text-xl font-semibold">{reviewNeedsAttention === 0 ? 'Ready' : `${reviewNeedsAttention} review`}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Official Forms</CardTitle>
+              <CardDescription>
+                Review editable values first, then preview the official PDF before printing or downloading. Guam W-1 and SWICA still need to be filed in GuamTax.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setReviewFormType('form_941')}
+                >
+                  Review 941
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setReviewFormType('schedule_b')}
+                >
+                  Review Schedule B
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setReviewFormType('w1')}
+                >
+                  Review W-1
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setReviewFormType('swica')}
+                >
+                  Review SW-2
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">W-1 Liability By Month</CardTitle>
+                <CardDescription>Enter liabilities in GuamTax by actual pay date and reconcile to Form 500 deposits.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Month</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {report.w1.monthly_liabilities.map((row) => (
+                      <TableRow key={row.month_number}>
+                        <TableCell>{row.month}</TableCell>
+                        <TableCell className="text-right tabular-nums">{fmt(row.amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Federal Form 941</CardTitle>
+                <CardDescription>{report.federal_941.deposit_schedule.note}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Suggested deposit schedule</span>
+                    <span className="font-medium capitalize">{report.federal_941.deposit_schedule.suggested_schedule}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Schedule B required</span>
+                    <span className="font-medium">{report.federal_941.deposit_schedule.schedule_b_required ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Line 5e SS/Medicare</span>
+                    <span className="font-medium tabular-nums">{fmt(report.federal_941.report.lines.line5e_total_ss_medicare)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Lines 2 and 3</span>
+                    <span className="font-medium">Skipped for Guam</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Review Checks</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {report.review_checks.map((check) => (
+                  <div key={check.key} className="rounded-md border px-3 py-2">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm text-gray-700">{check.message}</p>
+                        {check.details ? (
+                          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                            {Object.entries(check.details).map(([key, value]) => (
+                              <span key={key}>{key.replaceAll('_', ' ')}: <span className="font-medium text-gray-700">{String(value ?? 'blank')}</span></span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {check.href ? <Link to={check.href} className="mt-2 inline-block text-xs font-medium text-primary-700">Open source records</Link> : null}
+                      </div>
+                      <Badge variant={check.status === 'ok' ? 'success' : 'warning'}>{check.status}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Employee Reconciliation</CardTitle>
+              <CardDescription>Per-employee totals for SWICA, W-1, and Federal Form 941 tie-out review.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead className="text-right">Gross</TableHead>
+                    <TableHead className="text-right">Net</TableHead>
+                    <TableHead className="text-right">Deductions</TableHead>
+                    <TableHead className="text-right">Guam W/H</TableHead>
+                    <TableHead className="text-right">SS</TableHead>
+                    <TableHead className="text-right">Medicare</TableHead>
+                    <TableHead className="text-right">941 Liability</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.swica.employees.map((employee) => (
+                    <TableRow key={employee.employee_id}>
+                      <TableCell>{employee.name}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.gross_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.net_pay)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.deductions)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.guam_withholding)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.social_security_tax + employee.employer_social_security_tax)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.medicare_tax + employee.employer_medicare_tax)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmt(employee.federal_941_liability)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      )}
+      {reviewFormType && (
+        <QuarterlyOfficialFormModal
+          year={year}
+          quarter={quarter}
+          formType={reviewFormType}
+          onClose={() => setReviewFormType(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function QuarterlyOfficialFormModal({
+  year,
+  quarter,
+  formType,
+  onClose,
+}: {
+  year: number;
+  quarter: number;
+  formType: QuarterlyOfficialFormType;
+  onClose: () => void;
+}) {
+  const [fields, setFields] = useState<QuarterlyOfficialFormFields | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewFilename, setPreviewFilename] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    setPreviewUrl(null);
+    setPreviewBlob(null);
+    void reportsApi.quarterlyCompliancePacketOfficialFormDefaults(year, quarter, formType)
+      .then((res) => {
+        if (active) setFields(res.data);
+      })
+      .catch((err) => {
+        if (active) setError(extractErrorMessage(err));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [formType, quarter, year]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  function updateField(key: keyof QuarterlyOfficialFormFields, value: string) {
+    setFields((prev) => (prev ? { ...prev, [key]: value } : prev));
+  }
+
+  function updateLine(key: string, value: string) {
+    setFields((prev) => (prev ? { ...prev, lines: { ...(prev.lines || {}), [key]: value } } : prev));
+  }
+
+  function updateDaily(index: number, value: string) {
+    setFields((prev) => {
+      if (!prev?.daily_liabilities) return prev;
+      const daily = [...prev.daily_liabilities];
+      daily[index] = { ...daily[index], amount: Number(value) };
+      return { ...prev, daily_liabilities: daily };
+    });
+  }
+
+  function updateEmployee(index: number, key: string, value: string) {
+    setFields((prev) => {
+      if (!prev?.employees) return prev;
+      const employees = [...prev.employees];
+      employees[index] = { ...employees[index], [key]: key === 'name' ? value : Number(value) };
+      return { ...prev, employees };
+    });
+  }
+
+  async function previewPdf() {
+    if (!fields) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const file = await reportsApi.quarterlyCompliancePacketOfficialFormPreview(year, quarter, formType, fields);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = URL.createObjectURL(file.blob);
+      setPreviewUrl(url);
+      setPreviewBlob(file.blob);
+      setPreviewFilename(file.filename || `${formType}_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function downloadPdf() {
+    if (!fields) return;
+    setWorking(true);
+    setError(null);
+    try {
+      const file = await reportsApi.quarterlyCompliancePacketOfficialFormDownload(year, quarter, formType, fields);
+      triggerDownload(file.blob, file.filename || `${formType}_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function downloadPreview() {
+    if (!previewBlob) return;
+    triggerDownload(previewBlob, previewFilename || `${formType}_${year}_q${quarter}.pdf`);
+  }
+
+  function printPreview() {
+    if (!previewUrl) return;
+    const printWindow = window.open(previewUrl, '_blank');
+    printWindow?.addEventListener('load', () => printWindow.print());
+  }
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
+      <div className="fixed inset-0 z-[61] flex items-center justify-center p-3 xl:p-5">
+        <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between border-b px-6 py-4">
+            <div>
+              <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Official Form'}</h2>
+              <p className="mt-1 text-sm text-gray-500">Review and adjust the filing values, then preview the official PDF before downloading or printing.</p>
+            </div>
+            <Button variant="outline" onClick={onClose}>Close</Button>
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
+            <div className="overflow-y-auto bg-gray-50 p-5">
+              {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+              {loading || !fields ? (
+                <div className="rounded-md border bg-white p-6 text-sm text-gray-500">Loading form values...</div>
+              ) : (
+                <div className="space-y-5">
+                  <section className="rounded-md border bg-white p-4">
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <Field label="Company Name">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_name || ''} onChange={(e) => updateField('company_name', e.target.value)} />
+                      </Field>
+                      <Field label="EIN">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.ein || ''} onChange={(e) => updateField('ein', e.target.value)} />
+                      </Field>
+                      <Field label="Address Line 1">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line1 || fields.company_address || ''} onChange={(e) => updateField('company_address_line1', e.target.value)} />
+                      </Field>
+                      <Field label="Address Line 2">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_address_line2 || ''} onChange={(e) => updateField('company_address_line2', e.target.value)} />
+                      </Field>
+                      <Field label="City">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_city || ''} onChange={(e) => updateField('company_city', e.target.value)} />
+                      </Field>
+                      <Field label="State">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_state || ''} onChange={(e) => updateField('company_state', e.target.value)} />
+                      </Field>
+                      <Field label="ZIP">
+                        <input className="h-9 w-full rounded-md border px-3 text-sm" value={fields.company_zip || ''} onChange={(e) => updateField('company_zip', e.target.value)} />
+                      </Field>
+                    </div>
+                  </section>
+
+                  {fields.lines ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">941 Lines</h3>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {Object.entries(fields.lines).filter(([, value]) => value !== null).map(([key, value]) => (
+                          <Field key={key} label={key.replaceAll('_', ' ')}>
+                            <input className="h-9 w-full rounded-md border px-3 text-sm" value={String(value ?? '')} onChange={(e) => updateLine(key, e.target.value)} />
+                          </Field>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {fields.daily_liabilities ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">Pay-Date Liabilities</h3>
+                      <div className="mt-3 space-y-2">
+                        {fields.daily_liabilities.map((row, index) => (
+                          <div key={`${row.pay_date}-${index}`} className="grid grid-cols-[1fr_140px] gap-3">
+                            <input className="h-9 rounded-md border px-3 text-sm" value={row.pay_date} readOnly />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={row.amount} onChange={(e) => updateDaily(index, e.target.value)} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {fields.employees ? (
+                    <section className="rounded-md border bg-white p-4">
+                      <h3 className="text-sm font-semibold text-gray-900">SWICA Employees</h3>
+                      <div className="mt-3 space-y-3">
+                        {fields.employees.map((employee, index) => (
+                          <div key={`${employee.employee_id}-${index}`} className="grid gap-2 rounded-md border p-3 md:grid-cols-3">
+                            <input className="h-9 rounded-md border px-3 text-sm md:col-span-3" value={String(employee.name || '')} onChange={(e) => updateEmployee(index, 'name', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.swica_wages || 0)} onChange={(e) => updateEmployee(index, 'swica_wages', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.guam_withholding || 0)} onChange={(e) => updateEmployee(index, 'guam_withholding', e.target.value)} />
+                            <input className="h-9 rounded-md border px-3 text-sm text-right" value={String(employee.reported_tips || 0)} onChange={(e) => updateEmployee(index, 'reported_tips', e.target.value)} />
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            <div className="flex min-h-0 flex-col border-l">
+              <div className="flex flex-wrap items-center justify-end gap-3 border-b bg-white px-4 py-3">
+                <Button variant="outline" onClick={previewPdf} disabled={working || !fields}>Preview PDF</Button>
+                <Button variant="outline" onClick={downloadPdf} disabled={working || !fields}>Download PDF</Button>
+                <Button variant="outline" onClick={printPreview} disabled={!previewUrl}>Print</Button>
+                <Button variant="outline" onClick={downloadPreview} disabled={!previewBlob}>Download Preview</Button>
+              </div>
+              <div className="min-h-0 flex-1 bg-gray-200">
+                {previewUrl ? (
+                  <iframe src={previewUrl} title={fields?.title || 'Official form preview'} className="h-full w-full border-0 bg-white" />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-gray-500">Preview the PDF after reviewing the values.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+// ─── Federal Form 941 Panel ──────────────────────────────────────────────────
 
 function Form941GuPanel() {
   const currentYear = new Date().getFullYear();
@@ -1636,7 +2168,7 @@ function Form941GuPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.form941GuXlsx(year, quarter);
-      triggerDownload(blob, filename || `form_941_gu_${year}_q${quarter}.xlsx`);
+      triggerDownload(blob, filename || `federal_form_941_${year}_q${quarter}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1650,9 +2182,9 @@ function Form941GuPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Form 941-GU Quarterly Report</CardTitle>
+          <CardTitle className="text-lg">Federal Form 941 Worksheet</CardTitle>
           <CardDescription>
-            Guam Employer's Quarterly Federal Tax Return — mirrors federal Form 941 for DRT filing.
+            Federal Form 941 worksheet for Guam employers. Lines 2 and 3 are skipped unless employees are subject to U.S. income tax withholding.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1701,7 +2233,7 @@ function Form941GuPanel() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Form 941-GU — {report.meta.quarter_label}</CardTitle>
+              <CardTitle>Federal Form 941 — {report.meta.quarter_label}</CardTitle>
               <CardDescription>
                 {report.employer_info.name} &bull; EIN: {report.employer_info.ein || '—'} &bull;{' '}
                 {report.meta.pay_periods_included} pay period{report.meta.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
@@ -1729,15 +2261,15 @@ function Form941GuPanel() {
                       </tr>
                       <tr className="border-b">
                         <td className="px-4 py-2 font-mono text-gray-500">2</td>
-                        <td className="px-4 py-2">Wages, tips, and other compensation</td>
-                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line2_wages_tips_other)}</td>
+                        <td className="px-4 py-2">Wages, tips, and other compensation (skipped for Guam)</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line2_wages_tips_other)}</td>
                         <td className="px-4 py-2 text-right"></td>
                       </tr>
                       <tr className="border-b">
                         <td className="px-4 py-2 font-mono text-gray-500">3</td>
-                        <td className="px-4 py-2">Federal income tax withheld</td>
+                        <td className="px-4 py-2">Federal income tax withheld (skipped for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
-                        <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line3_fit_withheld)}</td>
+                        <td className="px-4 py-2 text-right tabular-nums">{fmtOrPlaceholder(report.lines.line3_fit_withheld)}</td>
                       </tr>
                       <tr className="border-b bg-gray-50">
                         <td className="px-4 py-2 font-mono text-gray-500">5a</td>
@@ -1771,7 +2303,7 @@ function Form941GuPanel() {
                       </tr>
                       <tr className="border-b font-medium bg-blue-50">
                         <td className="px-4 py-2 font-mono text-gray-500">6</td>
-                        <td className="px-4 py-2">Total taxes before adjustments (line 3 + 5e)</td>
+                        <td className="px-4 py-2">Total taxes before adjustments (line 5e for Guam)</td>
                         <td className="px-4 py-2 text-right"></td>
                         <td className="px-4 py-2 text-right tabular-nums">{fmt(report.lines.line6_total_taxes_before_adj)}</td>
                       </tr>
@@ -1836,7 +2368,7 @@ function Form941GuPanel() {
                         <thead>
                           <tr className="bg-gray-50 border-b">
                             <th className="text-left px-4 py-2 font-medium text-gray-600">Month</th>
-                            <th className="text-right px-4 py-2 font-medium text-gray-600">FIT Withheld</th>
+                            <th className="text-right px-4 py-2 font-medium text-gray-600">Guam W-1 Withholding</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">SS Combined</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">Medicare Combined</th>
                             <th className="text-right px-4 py-2 font-medium text-gray-600">Addtl Medicare</th>
@@ -1847,7 +2379,7 @@ function Form941GuPanel() {
                           {report.monthly_liability.map((m) => (
                             <tr key={m.month} className="border-b last:border-0">
                               <td className="px-4 py-2">{m.month}</td>
-                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.fit_withheld)}</td>
+                              <td className="px-4 py-2 text-right tabular-nums">{fmt(m.guam_withholding_for_w1 ?? 0)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.ss_combined + m.ss_tips_combined)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.medicare_combined)}</td>
                               <td className="px-4 py-2 text-right tabular-nums">{fmt(m.add_medicare_tax)}</td>
@@ -2153,9 +2685,9 @@ function Form1099NecPanel() {
 
 // ─── Report Tiles ─────────────────────────────────────────────────────────────
 
-type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
+type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'quarterly-compliance-packet' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
 
-const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
+const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'quarterly-compliance-packet', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
 const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
   {
@@ -2195,6 +2727,16 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'quarterly-compliance-packet',
+    title: 'Quarterly Compliance Packet',
+    description: 'Pay-date based W-1, SWICA, Form 500, and Federal 941 tie-out packet',
+    icon: (
+      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -2240,8 +2782,8 @@ const reports: { id: ReportId; title: string; description: string; icon: ReactNo
   },
   {
     id: '941-gu',
-    title: 'Form 941-GU Quarterly',
-    description: 'Quarterly federal tax return for Guam employers (DRT filing)',
+    title: 'Federal Form 941',
+    description: 'Federal Form 941 worksheet for Guam employers',
     icon: (
       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
@@ -2307,6 +2849,7 @@ export function Reports() {
         {activeReport === 'checks-payments-register' && <ChecksPaymentsRegisterPanel />}
         {activeReport === 'employee-pay-history' && <EmployeePayHistoryPanel />}
         {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
+        {activeReport === 'quarterly-compliance-packet' && <QuarterlyCompliancePacketPanel />}
         {activeReport === 'ytd-summary' && <YtdSummaryPanel />}
         {activeReport === 'employer-liability' && <EmployerLiabilityPanel />}
         {activeReport === 'w2-gu' && <W2GuPanel />}
