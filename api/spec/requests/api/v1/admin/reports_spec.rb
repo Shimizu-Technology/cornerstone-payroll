@@ -285,6 +285,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.dig("task", "status")).to eq("not_started")
     end
 
+    it "recovers from a concurrent packet provisioning uniqueness race" do
+      packet = QuarterlyCompliancePacket.create!(company: company, year: 2026, quarter: 2)
+      allow(QuarterlyCompliancePacket).to receive(:create_with).and_raise(ActiveRecord::RecordNotUnique.new("duplicate packet"))
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "workflow", "id")).to eq(packet.id)
+    end
+
     it "returns 422 for invalid quarter" do
       get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 5 }
 
