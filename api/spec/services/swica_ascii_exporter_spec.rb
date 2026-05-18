@@ -51,5 +51,23 @@ RSpec.describe SwicaAsciiExporter do
       expect(record[117, 9]).to eq("96913".ljust(9))
       expect(record[274]).to eq("S")
     end
+
+    it "normalizes non-ASCII employee text before fixed-width output" do
+      employee.update!(
+        first_name: "José",
+        last_name: "Muña",
+        address_line1: "123 Chålan Pågo",
+        city: "Hagåtña"
+      )
+
+      record = described_class.new(report).generate.lines.first.chomp
+
+      expect(record.length).to eq(275)
+      expect(record.bytesize).to eq(275)
+      expect(record).to be_ascii_only
+      expect(record[10, 27]).to include("JOSE MUNA")
+      expect(record[37, 40]).to include("123 CHALAN PAGO")
+      expect(record[77, 35]).to include("HAGATNA GU")
+    end
   end
 end

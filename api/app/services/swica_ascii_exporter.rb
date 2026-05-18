@@ -65,9 +65,13 @@ class SwicaAsciiExporter
   end
 
   def put(fields, one_based_position, value, length: 1, align: :left, pad: " ")
-    text = value.to_s[0, length]
+    text = ascii(value)[0, length]
     text = align == :right ? text.rjust(length, pad) : text.ljust(length, pad)
     text.chars.each_with_index { |char, index| fields[one_based_position - 1 + index] = char }
+  end
+
+  def ascii(value)
+    ActiveSupport::Inflector.transliterate(value.to_s).encode("ASCII", invalid: :replace, undef: :replace, replace: "?")
   end
 
   def cents(value)
@@ -79,7 +83,7 @@ class SwicaAsciiExporter
   end
 
   def validate_record_lengths!(rows)
-    bad = rows.find { |row| row.length != RECORD_LENGTH }
-    raise ArgumentError, "SWICA record length must be #{RECORD_LENGTH} characters" if bad
+    bad = rows.find { |row| row.length != RECORD_LENGTH || row.bytesize != RECORD_LENGTH }
+    raise ArgumentError, "SWICA record length must be #{RECORD_LENGTH} ASCII bytes" if bad
   end
 end
