@@ -6,7 +6,7 @@ const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
     <div
       ref={ref}
       className={cn(
-        'rounded-[1.35rem] border border-white/70 bg-white/92 shadow-[0_18px_45px_-32px_rgba(15,23,42,0.45)] ring-1 ring-neutral-950/[0.025] backdrop-blur-sm transition-all duration-200',
+        'rounded-[1.35rem] border border-neutral-200/80 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.52)] ring-1 ring-neutral-950/[0.04] backdrop-blur-sm transition-all duration-200',
         className
       )}
       {...props}
@@ -41,7 +41,7 @@ const CardDescription = forwardRef<HTMLParagraphElement, HTMLAttributes<HTMLPara
   ({ className, ...props }, ref) => (
     <p
       ref={ref}
-      className={cn('text-sm leading-relaxed text-neutral-500', className)}
+      className={cn('text-sm leading-relaxed text-neutral-600', className)}
       {...props}
     />
   )
