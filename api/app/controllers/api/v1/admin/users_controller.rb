@@ -29,13 +29,15 @@ module Api
         # POST /api/v1/admin/users
         def create
           permitted = create_params
-          unless role_manageable?(permitted[:role])
+          requested_role = requested_user_role.presence
+          unless role_manageable?(requested_role)
             return render json: { error: "Cannot assign that role" }, status: :forbidden
           end
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
           user = User.new(permitted)
+          user.role = requested_role
           user.company_id = current_user.company_id
           user.organization = current_user.organization
           user.clerk_id = "pending_#{SecureRandom.uuid}"
@@ -70,7 +72,8 @@ module Api
         # PATCH /api/v1/admin/users/:id
         def update
           permitted = user_params
-          requested_role = permitted[:role].presence || @user.role
+          role_provided = params.dig(:user, :role).present?
+          requested_role = role_provided ? requested_user_role : @user.role
           unless role_manageable?(requested_role)
             return render json: { error: "Cannot assign that role" }, status: :forbidden
           end
@@ -78,18 +81,20 @@ module Api
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
 
-          if @user.id == current_user_id && permitted.key?(:role) && requested_role != @user.role
+          if @user.id == current_user_id && role_provided && requested_role != @user.role
             return render json: { error: "Cannot change your own role" }, status: :unprocessable_entity
           end
 
-          if @user.organization_admin? && permitted.key?(:role) && !organization_admin_role?(requested_role)
+          if @user.organization_admin? && role_provided && !organization_admin_role?(requested_role)
             if active_peer_admins(@user).none?
               return render json: { error: "Cannot demote the last active admin" }, status: :unprocessable_entity
             end
           end
 
           ActiveRecord::Base.transaction do
-            @user.update!(permitted)
+            @user.assign_attributes(permitted)
+            @user.role = requested_role if role_provided
+            @user.save!
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
           end
 
@@ -181,11 +186,15 @@ module Api
         end
 
         def create_params
-          params.require(:user).permit(:email, :name, :role, company_ids: [])
+          params.require(:user).permit(:email, :name, company_ids: [])
         end
 
         def user_params
-          params.require(:user).permit(:email, :name, :role, :active, company_ids: [])
+          params.require(:user).permit(:email, :name, :active, company_ids: [])
+        end
+
+        def requested_user_role
+          params.dig(:user, :role).to_s
         end
 
         def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:)

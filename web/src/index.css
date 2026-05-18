@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -27,6 +28,18 @@
   --color-neutral-900: #0f172a;
   --color-neutral-950: #020617;
 
+  /* Accent - warm operational highlight */
+  --color-accent-50: #fff8eb;
+  --color-accent-100: #ffedc6;
+  --color-accent-200: #ffd889;
+  --color-accent-300: #ffbd4c;
+  --color-accent-400: #ff9f1c;
+  --color-accent-500: #f47f0b;
+  --color-accent-600: #d95f06;
+  --color-accent-700: #b44209;
+  --color-accent-800: #92330e;
+  --color-accent-900: #782c0f;
+
   /* Semantic */
   --color-success-50: #ecfdf3;
   --color-success-100: #d1fae5;
@@ -51,7 +64,7 @@ body,
 }
 
 html {
-  font-family: "Plus Jakarta Sans", "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: "Source Sans 3", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   scroll-behavior: smooth;
@@ -62,13 +75,29 @@ body {
   min-height: 100vh;
   color: #0f172a;
   background:
-    radial-gradient(1200px 520px at -10% -10%, rgba(47, 127, 247, 0.11), transparent 60%),
-    radial-gradient(900px 420px at 110% -5%, rgba(16, 185, 129, 0.09), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(248, 250, 252, 0.92)),
+    radial-gradient(1000px 520px at -10% -12%, rgba(29, 95, 210, 0.14), transparent 60%),
+    radial-gradient(780px 420px at 108% -6%, rgba(244, 127, 11, 0.10), transparent 58%),
+    radial-gradient(900px 520px at 50% 116%, rgba(16, 185, 129, 0.08), transparent 64%),
     #f8fafc;
 }
 
 * {
   box-sizing: border-box;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-display {
+  font-family: "Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif;
+}
+
+.text-balance {
+  text-wrap: balance;
 }
 
 ::selection {

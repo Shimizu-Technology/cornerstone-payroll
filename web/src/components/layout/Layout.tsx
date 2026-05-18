@@ -91,7 +91,7 @@ export function Layout() {
   }, [activeCompanyId]);
 
   return (
-    <div className="flex h-screen bg-transparent">
+    <div className="flex h-screen bg-transparent text-neutral-950">
       <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -108,7 +108,7 @@ export function Layout() {
           <div className="h-9 w-9" />
         </div>
 
-        <main className="relative flex-1 overflow-y-auto" aria-live="polite">
+        <main className="relative flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
           <div
             className={`min-h-full transition-opacity duration-200 ease-out ${
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'
