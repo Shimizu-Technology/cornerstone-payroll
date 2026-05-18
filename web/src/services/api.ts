@@ -1464,7 +1464,7 @@ export interface QuarterlyCompliancePacketReport {
       pay_period_id: number;
       pay_date: string;
       quarter_ending: string;
-      amount: number;
+      amount: number | null;
       status: string;
       payment_date: string | null;
       confirmation_number: string | null;
@@ -1472,6 +1472,7 @@ export interface QuarterlyCompliancePacketReport {
       notes?: string | null;
     }[];
     total_confirmed_payments?: number;
+    unconfirmed_amount_count?: number;
     unreconciled_balance?: number;
   };
   w1: {

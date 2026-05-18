@@ -153,12 +153,11 @@ class QuarterlyCompliancePacketBuilder
   def form_500_section
     deposits = pay_period_rows.map do |period|
       filing = form500_filings_by_pay_period_id[period[:id]]
-      amount = filing&.payment_amount || period[:guam_withholding]
       {
         pay_period_id: period[:id],
         pay_date: period[:pay_date],
         quarter_ending: quarter_end.iso8601,
-        amount: money(amount),
+        amount: filing&.payment_amount.nil? ? nil : money(filing.payment_amount),
         expected_amount: period[:guam_withholding],
         status: filing&.status || "needs_payment_confirmation",
         payment_date: filing&.payment_date&.iso8601,
@@ -171,8 +170,9 @@ class QuarterlyCompliancePacketBuilder
     {
       policy: "per_pay_period",
       total_guam_withholding: money(payroll_items.sum(&:withholding_tax)),
-      total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? }.sum { |row| row[:amount].to_f }),
-      unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? }.sum { |row| row[:amount].to_f }),
+      total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
+      unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
+      unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
       deposits: deposits
     }
   end
@@ -349,11 +349,12 @@ class QuarterlyCompliancePacketBuilder
     )
     checks << review_check(
       "form_500_payments_reconciled",
-      form_500_section[:unreconciled_balance].to_f.zero?,
+      form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
       "Form 500 payment confirmations reconcile to quarterly Guam withholding.",
       details: {
         expected_withholding: form_500_section[:total_guam_withholding],
         confirmed_payments: form_500_section[:total_confirmed_payments],
+        unconfirmed_amount_count: form_500_section[:unconfirmed_amount_count],
         unreconciled_balance: form_500_section[:unreconciled_balance]
       },
       href: "/pay-periods"

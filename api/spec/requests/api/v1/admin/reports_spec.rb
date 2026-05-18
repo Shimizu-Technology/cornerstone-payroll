@@ -295,6 +295,37 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.dig("report", "workflow", "id")).to eq(packet.id)
     end
 
+    it "does not count Form 500 payment-date-only rows as reconciled payments" do
+      pay_period_q1.create_form500_filing!(
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        fields: Form500Generator.default_fields(company: company, pay_period: pay_period_q1),
+        status: "paid",
+        payment_date: Date.new(2026, 4, 3),
+        payment_amount: nil
+      )
+      pay_period_q2.create_form500_filing!(
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        fields: Form500Generator.default_fields(company: company, pay_period: pay_period_q2),
+        status: "paid",
+        payment_date: Date.new(2026, 4, 17),
+        payment_amount: nil
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      form500 = response.parsed_body.dig("report", "form_500")
+      check = response.parsed_body.dig("report", "review_checks").find { |row| row["key"] == "form_500_payments_reconciled" }
+      expect(form500["total_confirmed_payments"].to_f).to eq(0.0)
+      expect(form500["unconfirmed_amount_count"]).to eq(2)
+      expect(form500["unreconciled_balance"].to_f).to eq(170.0)
+      expect(check["status"]).to eq("needs_review")
+    end
+
     it "returns 422 for invalid quarter" do
       get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 5 }
 
