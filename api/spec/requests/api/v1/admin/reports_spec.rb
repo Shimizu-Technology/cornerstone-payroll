@@ -256,6 +256,28 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("federal_941", "deposit_schedule", "firm_payment_policy")).to eq("pay_each_pay_period")
     end
 
+    it "creates a persistent workflow packet with default filing tasks" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      workflow = response.parsed_body.dig("report", "workflow")
+      expect(workflow["tasks"].map { |task| task["task_type"] }).to contain_exactly("form_500", "w1", "swica", "federal_941", "schedule_b")
+
+      task = workflow["tasks"].find { |row| row["task_type"] == "w1" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          status: "filed",
+          filing_confirmation_number: "W1-ABC-123",
+          proof_attached: true
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+      expect(response.parsed_body.dig("task", "filing_confirmation_number")).to eq("W1-ABC-123")
+      expect(response.parsed_body.dig("task", "proof_attached")).to eq(true)
+    end
+
     it "returns 422 for invalid quarter" do
       get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 5 }
 
@@ -305,6 +327,27 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.headers["Content-Disposition"]).to include(filename)
         expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
       end
+    end
+
+    it "exports a validated SWICA ASCII wage file" do
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Dr",
+        city: "Tamuning",
+        state: "GU",
+        zip: "96913"
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Content-Disposition"]).to include("swica_2026_q2.txt")
+      first_record = response.body.lines.first.chomp
+      expect(first_record.length).to eq(275)
+      expect(first_record[0]).to eq("W")
+      expect(first_record[1, 9]).to eq("123456789")
+      expect(first_record[133]).to eq("2")
+      expect(first_record[274]).to eq("S")
     end
 
     it "returns editable official form defaults with split employer address fields" do

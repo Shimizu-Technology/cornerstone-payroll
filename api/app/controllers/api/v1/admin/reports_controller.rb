@@ -300,6 +300,38 @@ module Api
           )
         end
 
+        def quarterly_compliance_packet_swica_ascii
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          unless report_data.dig(:swica, :upload_export_ready)
+            return render json: {
+              error: report_data.dig(:swica, :upload_export_note),
+              details: report_data.dig(:swica, :upload_validation_errors)
+            }, status: :unprocessable_entity
+          end
+
+          exporter = SwicaAsciiExporter.new(report_data)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/plain; charset=us-ascii",
+            disposition: "attachment"
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def update_quarterly_compliance_packet_task
+          task = QuarterlyComplianceTask.joins(:quarterly_compliance_packet)
+            .where(quarterly_compliance_packets: { company_id: current_company_id })
+            .find(params[:id])
+          task.update!(quarterly_compliance_task_params)
+          render json: { task: task.workflow_payload }
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Task not found" }, status: :not_found
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
+        end
+
         def quarterly_compliance_packet_official_form_defaults
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
@@ -1149,11 +1181,28 @@ module Api
           end
 
           company = Company.find(current_company_id)
+          QuarterlyCompliancePacket.find_or_create_for!(company: company, year: year, quarter: quarter, user: current_user)
           [ QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
         rescue ArgumentError => e
           [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
+        end
+
+        def quarterly_compliance_task_params
+          params.require(:task).permit(
+            :status,
+            :due_date,
+            :internal_target_date,
+            :filed_at,
+            :paid_at,
+            :payment_amount,
+            :filing_confirmation_number,
+            :payment_confirmation_number,
+            :proof_attached,
+            :notes,
+            data: {}
+          )
         end
 
         def send_quarterly_compliance_official_form!(generator:, filename_prefix:)

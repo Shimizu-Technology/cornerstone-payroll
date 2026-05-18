@@ -16,7 +16,7 @@ import {
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -1625,6 +1625,8 @@ function QuarterlyCompliancePacketPanel() {
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingSwica, setExportingSwica] = useState(false);
+  const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<QuarterlyCompliancePacketReport | null>(null);
@@ -1653,6 +1655,41 @@ function QuarterlyCompliancePacketPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingXlsx(false);
+    }
+  }
+
+  async function downloadSwicaAscii() {
+    setExportingSwica(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.quarterlyCompliancePacketSwicaAscii(year, quarter);
+      triggerDownload(blob, filename || `swica_${year}_q${quarter}.txt`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingSwica(false);
+    }
+  }
+
+  async function updateTask(task: QuarterlyComplianceTask, updates: Partial<QuarterlyComplianceTask>) {
+    setSavingTaskId(task.id);
+    setError(null);
+    try {
+      const res = await reportsApi.updateQuarterlyComplianceTask(task.id, updates);
+      setReport((current) => {
+        if (!current?.workflow) return current;
+        return {
+          ...current,
+          workflow: {
+            ...current.workflow,
+            tasks: current.workflow.tasks.map((existing) => existing.id === task.id ? res.task : existing),
+          },
+        };
+      });
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setSavingTaskId(null);
     }
   }
 
@@ -1738,6 +1775,60 @@ function QuarterlyCompliancePacketPanel() {
             </CardContent>
           </Card>
 
+          {report.workflow && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Quarterly Filing Workflow</CardTitle>
+                <CardDescription>
+                  Track filing/payment status, confirmations, proof, and review readiness for this company and quarter.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {report.workflow.tasks.map((task) => (
+                    <div key={task.id} className="rounded-2xl border border-neutral-200 bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-neutral-950">{task.title}</p>
+                          <p className="mt-1 text-xs text-neutral-500">
+                            Due {task.due_date || report.due_dates.official_due_date} · Target {task.internal_target_date || report.due_dates.internal_target_date}
+                          </p>
+                        </div>
+                        <Badge variant={task.status.includes('filed') || task.status === 'paid' ? 'success' : task.status === 'needs_review' || task.status === 'exception' ? 'warning' : 'outline'}>
+                          {task.status.replaceAll('_', ' ')}
+                        </Badge>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <label className="text-xs font-semibold text-neutral-500">
+                          Status
+                          <select
+                            value={task.status}
+                            disabled={savingTaskId === task.id}
+                            onChange={(e) => updateTask(task, { status: e.target.value })}
+                            className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
+                          >
+                            {['not_started', 'in_progress', 'needs_review', 'ready_to_file', 'filed', 'paid', 'filed_and_paid', 'not_required', 'exception'].map((status) => (
+                              <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-neutral-500">
+                          Confirmation #
+                          <input
+                            defaultValue={task.filing_confirmation_number || ''}
+                            disabled={savingTaskId === task.id}
+                            onBlur={(e) => updateTask(task, { filing_confirmation_number: e.target.value })}
+                            className="mt-1 h-9 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-900"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Official Forms</CardTitle>
@@ -1771,7 +1862,26 @@ function QuarterlyCompliancePacketPanel() {
                 >
                   Review SW-2
                 </Button>
+                <Button
+                  variant="outline"
+                  onClick={downloadSwicaAscii}
+                  disabled={exportingSwica || !report.swica.upload_export_ready}
+                  title={report.swica.upload_export_note}
+                >
+                  {exportingSwica ? 'Exporting...' : 'Download SWICA Upload'}
+                </Button>
               </div>
+              {!report.swica.upload_export_ready && (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <p className="font-semibold">SWICA upload is not ready yet.</p>
+                  <p className="mt-1">{report.swica.upload_export_note}</p>
+                  {report.swica.upload_validation_errors?.length ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-5">
+                      {report.swica.upload_validation_errors.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
             </CardContent>
           </Card>
 
