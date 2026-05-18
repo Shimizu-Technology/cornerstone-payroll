@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
@@ -2836,8 +2837,12 @@ const reportCategories: Array<{ id: ReportCategory; label: string }> = [
   { id: 'annual', label: 'Annual filing' },
 ];
 
-const FAVORITES_KEY = 'cornerstone-report-favorites';
-const RECENTS_KEY = 'cornerstone-report-recents';
+const FAVORITES_KEY_PREFIX = 'cornerstone-report-favorites';
+const RECENTS_KEY_PREFIX = 'cornerstone-report-recents';
+
+function reportStorageKey(prefix: string, scope: string) {
+  return `${prefix}:${scope}`;
+}
 
 function readStoredReportIds(key: string): ReportId[] {
   try {
@@ -2952,34 +2957,48 @@ function EmptyReportSearch({ onClear }: { onClear: () => void }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export function Reports() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const reportParam = searchParams.get('report');
-  const initialReport = reports.some((report) => report.id === reportParam) ? (reportParam as ReportId) : null;
-  const [activeReport, setActiveReport] = useState<ReportId | null>(initialReport);
+  const activeReport = reports.some((report) => report.id === reportParam) ? (reportParam as ReportId) : null;
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<ReportCategory>('all');
-  const [favorites, setFavorites] = useState<ReportId[]>(() => readStoredReportIds(FAVORITES_KEY));
-  const [recentReports, setRecentReports] = useState<ReportId[]>(() => readStoredReportIds(RECENTS_KEY));
+  const storageScope = user
+    ? `org-${user.organization_id ?? 'none'}:company-${user.company_id}:user-${user.id}`
+    : 'anonymous';
+  const favoritesKey = reportStorageKey(FAVORITES_KEY_PREFIX, storageScope);
+  const recentsKey = reportStorageKey(RECENTS_KEY_PREFIX, storageScope);
+  const [favoritesState, setFavoritesState] = useState(() => ({
+    key: favoritesKey,
+    ids: readStoredReportIds(favoritesKey),
+  }));
+  const [recentReportsState, setRecentReportsState] = useState(() => ({
+    key: recentsKey,
+    ids: readStoredReportIds(recentsKey),
+  }));
+  const favorites = favoritesState.key === favoritesKey ? favoritesState.ids : readStoredReportIds(favoritesKey);
+  const recentReports = recentReportsState.key === recentsKey ? recentReportsState.ids : readStoredReportIds(recentsKey);
 
   const activeReportDefinition = reports.find((report) => report.id === activeReport) || null;
 
   const openReport = (reportId: ReportId) => {
-    setActiveReport(reportId);
     setSearchParams({ report: reportId });
-    setRecentReports((current) => {
-      const next = [reportId, ...current.filter((id) => id !== reportId)].slice(0, 4);
-      writeStoredReportIds(RECENTS_KEY, next);
-      return next;
+    setRecentReportsState((current) => {
+      const currentIds = current.key === recentsKey ? current.ids : readStoredReportIds(recentsKey);
+      const next = [reportId, ...currentIds.filter((id) => id !== reportId)].slice(0, 4);
+      writeStoredReportIds(recentsKey, next);
+      return { key: recentsKey, ids: next };
     });
   };
 
   const toggleFavorite = (reportId: ReportId) => {
-    setFavorites((current) => {
-      const next = current.includes(reportId)
-        ? current.filter((id) => id !== reportId)
-        : [reportId, ...current];
-      writeStoredReportIds(FAVORITES_KEY, next);
-      return next;
+    setFavoritesState((current) => {
+      const currentIds = current.key === favoritesKey ? current.ids : readStoredReportIds(favoritesKey);
+      const next = currentIds.includes(reportId)
+        ? currentIds.filter((id) => id !== reportId)
+        : [reportId, ...currentIds];
+      writeStoredReportIds(favoritesKey, next);
+      return { key: favoritesKey, ids: next };
     });
   };
 
@@ -3136,7 +3155,6 @@ export function Reports() {
                 <Button
                   variant="secondary"
                   onClick={() => {
-                    setActiveReport(null);
                     setSearchParams({});
                   }}
                 >
