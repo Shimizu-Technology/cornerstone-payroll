@@ -2024,9 +2024,9 @@ function QuarterlyOfficialFormModal({
   return createPortal(
     <>
       <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
-      <div className="fixed inset-0 z-[61] flex items-center justify-center p-4">
-        <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-          <div className="flex items-start justify-between border-b px-6 py-5">
+      <div className="fixed inset-0 z-[61] flex items-center justify-center p-3 xl:p-5">
+        <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between border-b px-6 py-4">
             <div>
               <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Official Form'}</h2>
               <p className="mt-1 text-sm text-gray-500">Review and adjust the filing values, then preview the official PDF before downloading or printing.</p>
@@ -2034,8 +2034,8 @@ function QuarterlyOfficialFormModal({
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(420px,0.9fr)_1.1fr]">
-            <div className="overflow-y-auto bg-gray-50 p-6">
+          <div className="grid min-h-0 flex-1 gap-0 overflow-hidden lg:grid-cols-[minmax(400px,0.48fr)_1.52fr]">
+            <div className="overflow-y-auto bg-gray-50 p-5">
               {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
               {loading || !fields ? (
                 <div className="rounded-md border bg-white p-6 text-sm text-gray-500">Loading form values...</div>
@@ -2114,7 +2114,7 @@ function QuarterlyOfficialFormModal({
             </div>
 
             <div className="flex min-h-0 flex-col border-l">
-              <div className="flex items-center justify-end gap-3 border-b bg-white px-4 py-3">
+              <div className="flex flex-wrap items-center justify-end gap-3 border-b bg-white px-4 py-3">
                 <Button variant="outline" onClick={previewPdf} disabled={working || !fields}>Preview PDF</Button>
                 <Button variant="outline" onClick={downloadPdf} disabled={working || !fields}>Download PDF</Button>
                 <Button variant="outline" onClick={printPreview} disabled={!previewUrl}>Print</Button>

@@ -58,3 +58,34 @@ RSpec.describe QuarterlyComplianceOfficialForms::ScheduleB do
     end
   end
 end
+
+RSpec.describe QuarterlyComplianceOfficialForms::W1 do
+  describe "#generate" do
+    it "derives liability months from pay dates when reviewed rows omit month" do
+      report = {
+        meta: {
+          company_name: "Cornerstone Tax Services",
+          ein: "12-3456789",
+          year: 2026,
+          quarter: 2,
+          quarter_end: "2026-06-30"
+        },
+        w1: {
+          daily_liabilities: [],
+          total_guam_withholding: 125.25
+        }
+      }
+      fields = {
+        daily_liabilities: [
+          { pay_date: "2026-04-16", amount: 125.25 },
+          { pay_date: "2026-07-01", amount: 999.0 }
+        ],
+        total_guam_withholding: 125.25
+      }
+
+      pdf = described_class.new(report: report, fields: fields).generate
+
+      expect(pdf.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+    end
+  end
+end
