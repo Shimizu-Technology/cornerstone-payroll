@@ -135,14 +135,10 @@ RSpec.describe Employee, type: :model do
   end
 
   describe "address validation" do
-    it "requires mailing address fields for W-2 employees" do
+    it "allows W-2 employees to be saved without mailing address fields" do
       employee = build(:employee, address_line1: "", city: "", state: "", zip: "")
 
-      expect(employee).not_to be_valid
-      expect(employee.errors[:address_line1]).to include("can't be blank")
-      expect(employee.errors[:city]).to include("can't be blank")
-      expect(employee.errors[:state]).to include("can't be blank")
-      expect(employee.errors[:zip]).to include("can't be blank")
+      expect(employee).to be_valid
     end
 
     it "does not require mailing address fields for contractors" do

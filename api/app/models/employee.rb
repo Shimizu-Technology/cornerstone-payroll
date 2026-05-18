@@ -71,7 +71,6 @@ class Employee < ApplicationRecord
     validates :w4_dependent_credit, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
-    validates :address_line1, :city, :state, :zip, presence: true
   end
 
   scope :active, -> { where(status: "active") }
