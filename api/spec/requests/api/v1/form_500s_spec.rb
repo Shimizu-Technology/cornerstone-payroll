@@ -127,6 +127,50 @@ RSpec.describe "Api::V1::Form500s", type: :request do
     )
   end
 
+  it "allows saved payment tracking fields to be cleared" do
+    data = Form500Generator.default_fields(company: company, pay_period: pay_period)
+
+    post "/api/v1/form_500s/save", params: {
+      form_500: data.merge(
+        pay_period_id: pay_period.id,
+        status: "paid",
+        payment_date: "2026-05-07",
+        payment_amount: "125.40",
+        confirmation_number: "PAY-123",
+        receipt_attached: true,
+        tracking_notes: "Paid through GuamTax"
+      )
+    }
+
+    expect(response).to have_http_status(:ok)
+    filing = pay_period.reload.form500_filing
+    expect(filing.status).to eq("paid")
+    expect(filing.payment_date).to eq(Date.new(2026, 5, 7))
+    expect(filing.payment_amount.to_f).to eq(125.40)
+    expect(filing.confirmation_number).to eq("PAY-123")
+
+    post "/api/v1/form_500s/save", params: {
+      form_500: data.merge(
+        pay_period_id: pay_period.id,
+        status: "",
+        payment_date: "",
+        payment_amount: "",
+        confirmation_number: "",
+        receipt_attached: false,
+        tracking_notes: ""
+      )
+    }
+
+    expect(response).to have_http_status(:ok)
+    filing.reload
+    expect(filing.status).to eq("prepared")
+    expect(filing.payment_date).to be_nil
+    expect(filing.payment_amount).to be_nil
+    expect(filing.confirmation_number).to be_nil
+    expect(filing.receipt_attached).to eq(false)
+    expect(filing.notes).to eq("")
+  end
+
   it "does not overwrite the saved filing when previewing unsaved edits" do
     pay_period.create_form500_filing!(
       company: company,
