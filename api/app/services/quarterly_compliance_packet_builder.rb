@@ -151,30 +151,32 @@ class QuarterlyCompliancePacketBuilder
   end
 
   def form_500_section
-    deposits = pay_period_rows.map do |period|
-      filing = form500_filings_by_pay_period_id[period[:id]]
+    @form_500_section ||= begin
+      deposits = pay_period_rows.map do |period|
+        filing = form500_filings_by_pay_period_id[period[:id]]
+        {
+          pay_period_id: period[:id],
+          pay_date: period[:pay_date],
+          quarter_ending: quarter_end.iso8601,
+          amount: filing&.payment_amount.nil? ? nil : money(filing.payment_amount),
+          expected_amount: period[:guam_withholding],
+          status: filing&.status || "needs_payment_confirmation",
+          payment_date: filing&.payment_date&.iso8601,
+          confirmation_number: filing&.confirmation_number,
+          receipt_attached: filing&.receipt_attached || false,
+          notes: filing&.notes
+        }
+      end
+
       {
-        pay_period_id: period[:id],
-        pay_date: period[:pay_date],
-        quarter_ending: quarter_end.iso8601,
-        amount: filing&.payment_amount.nil? ? nil : money(filing.payment_amount),
-        expected_amount: period[:guam_withholding],
-        status: filing&.status || "needs_payment_confirmation",
-        payment_date: filing&.payment_date&.iso8601,
-        confirmation_number: filing&.confirmation_number,
-        receipt_attached: filing&.receipt_attached || false,
-        notes: filing&.notes
+        policy: "per_pay_period",
+        total_guam_withholding: money(payroll_items.sum(&:withholding_tax)),
+        total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
+        unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
+        unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
+        deposits: deposits
       }
     end
-
-    {
-      policy: "per_pay_period",
-      total_guam_withholding: money(payroll_items.sum(&:withholding_tax)),
-      total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
-      unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
-      unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
-      deposits: deposits
-    }
   end
 
   def w1_section
