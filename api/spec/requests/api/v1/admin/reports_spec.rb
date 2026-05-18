@@ -285,6 +285,40 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response.parsed_body.dig("task", "status")).to eq("not_started")
     end
 
+    it "downgrades filed_and_paid status when one completion date is cleared" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "form_500" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          status: "filed_and_paid",
+          filed_at: "2026-04-30T10:00:00Z",
+          paid_at: "2026-04-30T10:05:00Z"
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed_and_paid")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { paid_at: nil }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          filed_at: nil,
+          paid_at: "2026-04-30T10:05:00Z",
+          status: "filed_and_paid"
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+    end
+
     it "recovers from a concurrent packet provisioning uniqueness race" do
       packet = QuarterlyCompliancePacket.create!(company: company, year: 2026, quarter: 2)
       allow(QuarterlyCompliancePacket).to receive(:create_with).and_raise(ActiveRecord::RecordNotUnique.new("duplicate packet"))
