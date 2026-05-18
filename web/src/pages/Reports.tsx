@@ -1,6 +1,6 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
@@ -2683,202 +2684,529 @@ function Form1099NecPanel() {
   );
 }
 
-// ─── Report Tiles ─────────────────────────────────────────────────────────────
+// ─── Reports Center ───────────────────────────────────────────────────────────
 
 type ReportId = 'payroll-register' | 'checks-payments-register' | 'employee-pay-history' | 'tax-withholding-summary' | 'quarterly-compliance-packet' | 'ytd-summary' | 'employer-liability' | 'w2-gu' | '1099-nec' | '941-gu';
+type ReportCategory = 'all' | 'payroll' | 'tax-compliance' | 'people' | 'checks' | 'annual';
+
+interface ReportDefinition {
+  id: ReportId;
+  title: string;
+  description: string;
+  category: Exclude<ReportCategory, 'all'>;
+  basis: string;
+  frequency: string;
+  outputs: string[];
+  cta: string;
+  featured?: boolean;
+  icon: ReactNode;
+}
 
 const PANELS_WITH_UI: ReportId[] = ['payroll-register', 'checks-payments-register', 'employee-pay-history', 'tax-withholding-summary', 'quarterly-compliance-packet', 'ytd-summary', 'employer-liability', 'w2-gu', '1099-nec', '941-gu'];
 
-const reports: { id: ReportId; title: string; description: string; icon: ReactNode }[] = [
-  {
-    id: 'payroll-register',
-    title: 'Payroll Register',
-    description: 'Complete payroll details for a selected pay period',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'checks-payments-register',
-    title: 'Checks & Payments Register',
-    description: 'Standalone non-pay-period checks and payments by payee, date, type, and check number',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14h6m-7 4h8M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6" />
-      </svg>
-    ),
-  },
-  {
-    id: 'employee-pay-history',
-    title: 'Employee Pay History',
-    description: 'Individual employee pay records over time',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'tax-withholding-summary',
-    title: 'Tax Withholding Summary',
-    description: 'Quarterly tax withholding totals for filing',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
+function reportIcon(path: ReactNode) {
+  return (
+    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      {path}
+    </svg>
+  );
+}
+
+const reports: ReportDefinition[] = [
   {
     id: 'quarterly-compliance-packet',
     title: 'Quarterly Compliance Packet',
-    description: 'Pay-date based W-1, SWICA, Form 500, and Federal 941 tie-out packet',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />
-      </svg>
-    ),
+    description: 'W-1, SWICA, Form 500, and Federal 941 tie-out packet for firm review.',
+    category: 'tax-compliance',
+    basis: 'Pay date quarter',
+    frequency: 'Quarterly',
+    outputs: ['Packet', 'Excel', 'Official PDFs'],
+    cta: 'Open packet',
+    featured: true,
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />),
+  },
+  {
+    id: 'payroll-register',
+    title: 'Payroll Register',
+    description: 'Complete payroll detail for one committed pay period, including hours, taxes, deductions, and net pay.',
+    category: 'payroll',
+    basis: 'Pay period',
+    frequency: 'Each run',
+    outputs: ['PDF', 'CSV', 'Excel'],
+    cta: 'Select pay period',
+    featured: true,
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />),
   },
   {
     id: 'ytd-summary',
     title: 'Year-to-Date Summary',
-    description: 'YTD totals for all employees',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    ),
+    description: 'Year-to-date wage, tax, and deduction totals across employees.',
+    category: 'payroll',
+    basis: 'Calendar year',
+    frequency: 'Year-to-date',
+    outputs: ['Excel', 'On-screen'],
+    cta: 'Review YTD',
+    featured: true,
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />),
   },
   {
-    id: 'employer-liability',
-    title: 'Employer Tax Liability',
-    description: 'Employer portion of payroll taxes',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'w2-gu',
-    title: 'W-2GU Annual Report',
-    description: 'Guam territorial W-2 preparation summary for DRT filing',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    id: '1099-nec',
-    title: '1099-NEC Annual Report',
-    description: 'Nonemployee compensation summary for 1099 contractor filing',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
+    id: 'tax-withholding-summary',
+    title: 'Tax Withholding Summary',
+    description: 'Quarterly withholding totals for Guam filing and internal review.',
+    category: 'tax-compliance',
+    basis: 'Quarter',
+    frequency: 'Quarterly',
+    outputs: ['PDF', 'CSV', 'Excel'],
+    cta: 'Review taxes',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />),
   },
   {
     id: '941-gu',
     title: 'Federal Form 941',
-    description: 'Federal Form 941 worksheet for Guam employers',
-    icon: (
-      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-      </svg>
-    ),
+    description: 'Federal Form 941 worksheet for Guam employers and quarterly tie-out.',
+    category: 'tax-compliance',
+    basis: 'Quarter',
+    frequency: 'Quarterly',
+    outputs: ['Excel', 'On-screen'],
+    cta: 'Open 941',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />),
+  },
+  {
+    id: 'employer-liability',
+    title: 'Employer Tax Liability',
+    description: 'Employer Social Security and Medicare liability totals by year or quarter.',
+    category: 'tax-compliance',
+    basis: 'Pay date',
+    frequency: 'Monthly/Quarterly',
+    outputs: ['Excel', 'On-screen'],
+    cta: 'Open liability',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.7 0-3 .9-3 2s1.3 2 3 2 3 .9 3 2-1.3 2-3 2m0-8c1.1 0 2.1.4 2.6 1M12 8V7m0 1v8m0 0v1m0-1c-1.1 0-2.1-.4-2.6-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />),
+  },
+  {
+    id: 'employee-pay-history',
+    title: 'Employee Pay History',
+    description: 'Individual employee pay records over time for pay history review.',
+    category: 'people',
+    basis: 'Employee',
+    frequency: 'As needed',
+    outputs: ['Excel', 'On-screen'],
+    cta: 'Choose employee',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />),
+  },
+  {
+    id: 'checks-payments-register',
+    title: 'Checks & Payments Register',
+    description: 'Standalone non-pay-period checks and payments by payee, date, type, and check number.',
+    category: 'checks',
+    basis: 'Check date',
+    frequency: 'As needed',
+    outputs: ['PDF', 'On-screen'],
+    cta: 'Review checks',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14h6m-7 4h8M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6" />),
+  },
+  {
+    id: 'w2-gu',
+    title: 'W-2GU Annual Report',
+    description: 'Guam territorial W-2 preparation summary and filing readiness checks.',
+    category: 'annual',
+    basis: 'Calendar year',
+    frequency: 'Annual',
+    outputs: ['PDF', 'CSV', 'Excel'],
+    cta: 'Prepare W-2GU',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />),
+  },
+  {
+    id: '1099-nec',
+    title: '1099-NEC Annual Report',
+    description: 'Nonemployee compensation summary for contractor 1099 filing.',
+    category: 'annual',
+    basis: 'Calendar year',
+    frequency: 'Annual',
+    outputs: ['PDF', 'Excel'],
+    cta: 'Prepare 1099s',
+    icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.4-1.9M17 20H7m10 0v-2c0-.7-.1-1.3-.4-1.9M7 20H2v-2a3 3 0 015.4-1.9M7 20v-2c0-.7.1-1.3.4-1.9m0 0a5 5 0 019.2 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />),
   },
 ];
+
+const reportCategories: Array<{ id: ReportCategory; label: string }> = [
+  { id: 'all', label: 'All reports' },
+  { id: 'payroll', label: 'Payroll' },
+  { id: 'tax-compliance', label: 'Tax & compliance' },
+  { id: 'people', label: 'Employees' },
+  { id: 'checks', label: 'Checks' },
+  { id: 'annual', label: 'Annual filing' },
+];
+
+const FAVORITES_KEY_PREFIX = 'cornerstone-report-favorites';
+const RECENTS_KEY_PREFIX = 'cornerstone-report-recents';
+
+function reportStorageKey(prefix: string, scope: string) {
+  return `${prefix}:${scope}`;
+}
+
+function readStoredReportIds(key: string): ReportId[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is ReportId => reports.some((report) => report.id === id));
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredReportIds(key: string, ids: ReportId[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(ids));
+  } catch {
+    // Ignore storage failures; reports remain usable without personalization.
+  }
+}
+
+function ReportMetaChips({ report }: { report: ReportDefinition }) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">Basis: {report.basis}</span>
+      <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">{report.frequency}</span>
+      <span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-semibold text-primary-700">{report.outputs.join(' · ')}</span>
+    </div>
+  );
+}
+
+function FavoriteButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={active ? 'Remove from favorites' : 'Add to favorites'}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-full border transition-colors ${
+        active
+          ? 'border-accent-200 bg-accent-50 text-accent-700'
+          : 'border-neutral-200 bg-white text-neutral-400 hover:border-accent-200 hover:text-accent-700'
+      }`}
+    >
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.5 3.6a.6.6 0 011 0l2.4 4.9 5.4.8a.6.6 0 01.3 1l-3.9 3.8.9 5.4a.6.6 0 01-.9.6L12 17.6l-4.8 2.5a.6.6 0 01-.9-.6l.9-5.4-3.9-3.8a.6.6 0 01.3-1l5.4-.8 2.5-4.9z" />
+      </svg>
+    </button>
+  );
+}
+
+function ReportLibraryRow({
+  report,
+  active,
+  favorite,
+  onOpen,
+  onToggleFavorite,
+}: {
+  report: ReportDefinition;
+  active: boolean;
+  favorite: boolean;
+  onOpen: () => void;
+  onToggleFavorite: () => void;
+}) {
+  return (
+    <Card
+      className={`cursor-pointer overflow-hidden transition-all hover:-translate-y-0.5 hover:border-primary-200 ${active ? 'border-primary-300 bg-primary-50/45' : ''}`}
+      onClick={onOpen}
+    >
+      <CardContent className="p-5">
+        <div className="flex items-start gap-4">
+          <div className={`rounded-2xl p-3 ring-1 ${active ? 'bg-primary-100 text-primary-700 ring-primary-200' : 'bg-primary-50 text-primary-700 ring-primary-100'}`}>
+            {report.icon}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-base font-extrabold tracking-tight text-neutral-950">{report.title}</h3>
+                <p className="mt-1 text-sm leading-6 text-neutral-500">{report.description}</p>
+              </div>
+              <FavoriteButton active={favorite} onClick={onToggleFavorite} />
+            </div>
+            <ReportMetaChips report={report} />
+            <div className="mt-4 flex items-center justify-between gap-3 border-t border-neutral-100 pt-4">
+              <span className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{reportCategories.find((category) => category.id === report.category)?.label}</span>
+              <Button size="sm" variant={active ? 'primary' : 'outline'} onClick={(event) => { event.stopPropagation(); onOpen(); }}>
+                {active ? 'Selected' : report.cta}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyReportSearch({ onClear }: { onClear: () => void }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center px-6 py-10 text-center">
+        <div className="rounded-2xl bg-neutral-100 p-3 text-neutral-500">
+          {reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" />)}
+        </div>
+        <h3 className="mt-4 font-display text-lg font-extrabold text-neutral-950">No reports found</h3>
+        <p className="mt-1 max-w-md text-sm text-neutral-500">Try a different search term or switch back to all report categories.</p>
+        <Button className="mt-5" variant="secondary" onClick={onClear}>Clear filters</Button>
+      </CardContent>
+    </Card>
+  );
+}
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export function Reports() {
-  const [activeReport, setActiveReport] = useState<ReportId | null>(null);
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reportParam = searchParams.get('report');
+  const activeReport = reports.some((report) => report.id === reportParam) ? (reportParam as ReportId) : null;
+  const [query, setQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<ReportCategory>('all');
+  const storageScope = user
+    ? `org-${user.organization_id ?? 'none'}:company-${user.company_id}:user-${user.id}`
+    : 'anonymous';
+  const favoritesKey = reportStorageKey(FAVORITES_KEY_PREFIX, storageScope);
+  const recentsKey = reportStorageKey(RECENTS_KEY_PREFIX, storageScope);
+  const [favoritesState, setFavoritesState] = useState(() => ({
+    key: favoritesKey,
+    ids: readStoredReportIds(favoritesKey),
+  }));
+  const [recentReportsState, setRecentReportsState] = useState(() => ({
+    key: recentsKey,
+    ids: readStoredReportIds(recentsKey),
+  }));
+  const favorites = favoritesState.key === favoritesKey ? favoritesState.ids : readStoredReportIds(favoritesKey);
+  const recentReports = recentReportsState.key === recentsKey ? recentReportsState.ids : readStoredReportIds(recentsKey);
+
+  const activeReportDefinition = reports.find((report) => report.id === activeReport) || null;
+
+  const openReport = (reportId: ReportId) => {
+    setSearchParams({ report: reportId });
+    setRecentReportsState((current) => {
+      const currentIds = current.key === recentsKey ? current.ids : readStoredReportIds(recentsKey);
+      const next = [reportId, ...currentIds.filter((id) => id !== reportId)].slice(0, 4);
+      writeStoredReportIds(recentsKey, next);
+      return { key: recentsKey, ids: next };
+    });
+  };
+
+  const toggleFavorite = (reportId: ReportId) => {
+    setFavoritesState((current) => {
+      const currentIds = current.key === favoritesKey ? current.ids : readStoredReportIds(favoritesKey);
+      const next = currentIds.includes(reportId)
+        ? currentIds.filter((id) => id !== reportId)
+        : [reportId, ...currentIds];
+      writeStoredReportIds(favoritesKey, next);
+      return { key: favoritesKey, ids: next };
+    });
+  };
+
+  const filteredReports = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return reports.filter((report) => {
+      const matchesCategory = activeCategory === 'all' || report.category === activeCategory;
+      const matchesQuery = !needle || [
+        report.title,
+        report.description,
+        report.basis,
+        report.frequency,
+        report.outputs.join(' '),
+      ].join(' ').toLowerCase().includes(needle);
+      return matchesCategory && matchesQuery;
+    });
+  }, [activeCategory, query]);
+
+  const favoriteReports = favorites.map((id) => reports.find((report) => report.id === id)).filter((report): report is ReportDefinition => Boolean(report));
+  const recentReportDefinitions = recentReports.map((id) => reports.find((report) => report.id === id)).filter((report): report is ReportDefinition => Boolean(report));
+  const recommendedReports = favoriteReports.length > 0 ? favoriteReports.slice(0, 3) : reports.filter((report) => report.featured);
+
+  const renderActivePanel = () => {
+    if (activeReport === 'payroll-register') return <PayrollRegisterPanel />;
+    if (activeReport === 'checks-payments-register') return <ChecksPaymentsRegisterPanel />;
+    if (activeReport === 'employee-pay-history') return <EmployeePayHistoryPanel />;
+    if (activeReport === 'tax-withholding-summary') return <TaxSummaryPanel />;
+    if (activeReport === 'quarterly-compliance-packet') return <QuarterlyCompliancePacketPanel />;
+    if (activeReport === 'ytd-summary') return <YtdSummaryPanel />;
+    if (activeReport === 'employer-liability') return <EmployerLiabilityPanel />;
+    if (activeReport === 'w2-gu') return <W2GuPanel />;
+    if (activeReport === '1099-nec') return <Form1099NecPanel />;
+    if (activeReport === '941-gu') return <Form941GuPanel />;
+    if (activeReport && !PANELS_WITH_UI.includes(activeReport)) {
+      return (
+        <Card>
+          <CardHeader>
+            <CardTitle>{reports.find((r) => r.id === activeReport)?.title}</CardTitle>
+            <CardDescription>This report is not yet available in the UI.</CardDescription>
+          </CardHeader>
+        </Card>
+      );
+    }
+    return null;
+  };
 
   return (
     <div>
-      <Header
-        title="Reports"
-        description="Generate payroll and tax reports"
-      />
+      <Header title="Reports" description="Find, prepare, and export payroll and Guam compliance reports." />
 
-      <div className="p-8 space-y-8">
-        {/* Report tiles */}
-        <div className="grid items-stretch gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {reports.map((report) => {
-            const isActive = activeReport === report.id;
-            return (
-              <Card
-                key={report.id}
-                className={`flex h-full cursor-pointer flex-col transition-colors ${isActive ? 'border-primary-500 bg-primary-50' : 'hover:border-primary-300'}`}
-                onClick={() => setActiveReport(isActive ? null : report.id)}
-              >
-                <CardHeader className="flex-1">
-                  <div className="flex items-start gap-4">
-                    <div className={`p-2 rounded-lg ${isActive ? 'bg-primary-200 text-primary-700' : 'bg-primary-100 text-primary-600'}`}>
-                      {report.icon}
-                    </div>
-                    <div>
-                      <CardTitle className="text-base">{report.title}</CardTitle>
-                      <CardDescription className="mt-1">{report.description}</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="mt-auto">
-                  <Button
-                    variant={isActive ? 'primary' : 'outline'}
-                    size="sm"
-                    className="w-full"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveReport(isActive ? null : report.id);
-                    }}
+      <div className="space-y-8 p-6 lg:p-8">
+        <Card className="overflow-hidden border-primary-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4f8ff_55%,#fff8eb_100%)]">
+          <CardContent className="p-6 lg:p-7">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Reports center</p>
+                <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance">Everything payroll teams need to file, reconcile, and review.</h2>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
+                  Search the report library, open a focused setup panel, and export packet-ready payroll records. Report basis and output formats are shown up front so operators know exactly what they are running.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm shadow-primary-100/70">
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-neutral-500">Recommended workflow</p>
+                <div className="mt-3 space-y-2 text-sm text-neutral-600">
+                  <p><span className="font-bold text-neutral-950">1.</span> Pick a report or packet.</p>
+                  <p><span className="font-bold text-neutral-950">2.</span> Confirm period, quarter, or employee.</p>
+                  <p><span className="font-bold text-neutral-950">3.</span> Preview, reconcile, then export.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+              <label className="relative block">
+                <span className="sr-only">Search reports</span>
+                <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+                  {reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" />)}
+                </span>
+                <input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search by report name, basis, output, or filing type…"
+                  className="h-12 w-full rounded-full border border-neutral-200 bg-white/90 pl-12 pr-4 text-sm font-medium text-neutral-900 shadow-sm shadow-neutral-200/50 outline-none transition focus:border-primary-300 focus:ring-2 focus:ring-primary-100"
+                />
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {reportCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setActiveCategory(category.id)}
+                    className={`rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+                      activeCategory === category.id
+                        ? 'bg-primary-700 text-white shadow-sm shadow-primary-700/20'
+                        : 'border border-neutral-200 bg-white/85 text-neutral-600 hover:border-primary-200 hover:text-primary-800'
+                    }`}
                   >
-                    {isActive ? 'Hide Report' : 'Generate Report'}
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                    {category.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* Active report panel */}
-        {activeReport === 'payroll-register' && <PayrollRegisterPanel />}
-        {activeReport === 'checks-payments-register' && <ChecksPaymentsRegisterPanel />}
-        {activeReport === 'employee-pay-history' && <EmployeePayHistoryPanel />}
-        {activeReport === 'tax-withholding-summary' && <TaxSummaryPanel />}
-        {activeReport === 'quarterly-compliance-packet' && <QuarterlyCompliancePacketPanel />}
-        {activeReport === 'ytd-summary' && <YtdSummaryPanel />}
-        {activeReport === 'employer-liability' && <EmployerLiabilityPanel />}
-        {activeReport === 'w2-gu' && <W2GuPanel />}
-        {activeReport === '1099-nec' && <Form1099NecPanel />}
-        {activeReport === '941-gu' && <Form941GuPanel />}
+        <section aria-labelledby="recommended-reports-heading">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 id="recommended-reports-heading" className="font-display text-xl font-extrabold tracking-tight text-neutral-950">
+                {favoriteReports.length > 0 ? 'Favorite reports' : 'Recommended reports'}
+              </h2>
+              <p className="text-sm text-neutral-500">
+                {favoriteReports.length > 0 ? 'Pinned reports appear here for quick access.' : 'Start with the reports most firms use during payroll and quarterly filing.'}
+              </p>
+            </div>
+            {recentReportDefinitions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-bold text-neutral-500">Recent:</span>
+                {recentReportDefinitions.map((report) => (
+                  <button key={report.id} type="button" onClick={() => openReport(report.id)} className="rounded-full bg-neutral-100 px-3 py-1 font-semibold text-neutral-600 transition-colors hover:bg-primary-50 hover:text-primary-700">
+                    {report.title}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-        {/* Placeholder for other reports not yet wired */}
-        {activeReport && !PANELS_WITH_UI.includes(activeReport) && (
-          <Card>
-            <CardHeader>
-              <CardTitle>{reports.find((r) => r.id === activeReport)?.title}</CardTitle>
-              <CardDescription>This report is not yet available in the UI.</CardDescription>
-            </CardHeader>
-          </Card>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {recommendedReports.map((report) => (
+              <ReportLibraryRow
+                key={report.id}
+                report={report}
+                active={activeReport === report.id}
+                favorite={favorites.includes(report.id)}
+                onOpen={() => openReport(report.id)}
+                onToggleFavorite={() => toggleFavorite(report.id)}
+              />
+            ))}
+          </div>
+        </section>
+
+        {activeReportDefinition && (
+          <section aria-labelledby="active-report-heading" className="scroll-mt-6">
+            <div className="mb-4 rounded-[1.35rem] border border-primary-200 bg-white/90 p-5 shadow-sm shadow-primary-100/60">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="rounded-2xl bg-primary-100 p-3 text-primary-700 ring-1 ring-primary-200">{activeReportDefinition.icon}</div>
+                  <div>
+                    <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-primary-700">Selected report</p>
+                    <h2 id="active-report-heading" className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">{activeReportDefinition.title}</h2>
+                    <p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-500">{activeReportDefinition.description}</p>
+                    <ReportMetaChips report={activeReportDefinition} />
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSearchParams({});
+                  }}
+                >
+                  Close report
+                </Button>
+              </div>
+            </div>
+            {renderActivePanel()}
+          </section>
         )}
 
-        {/* Coming Soon */}
-        <Card>
+        <section aria-labelledby="report-library-heading">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 id="report-library-heading" className="font-display text-xl font-extrabold tracking-tight text-neutral-950">Report library</h2>
+              <p className="text-sm text-neutral-500">{filteredReports.length} report{filteredReports.length === 1 ? '' : 's'} available</p>
+            </div>
+            {(query || activeCategory !== 'all') && (
+              <Button variant="ghost" size="sm" onClick={() => { setQuery(''); setActiveCategory('all'); }}>
+                Clear filters
+              </Button>
+            )}
+          </div>
+
+          {filteredReports.length === 0 ? (
+            <EmptyReportSearch onClear={() => { setQuery(''); setActiveCategory('all'); }} />
+          ) : (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {filteredReports.map((report) => (
+                <ReportLibraryRow
+                  key={report.id}
+                  report={report}
+                  active={activeReport === report.id}
+                  favorite={favorites.includes(report.id)}
+                  onOpen={() => openReport(report.id)}
+                  onToggleFavorite={() => toggleFavorite(report.id)}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <Card className="border-dashed">
           <CardHeader>
-            <CardTitle>Coming Soon</CardTitle>
-            <CardDescription>Additional reports for future releases</CardDescription>
+            <CardTitle>Planned reports</CardTitle>
+            <CardDescription>Additional exports queued for future releases.</CardDescription>
           </CardHeader>
           <CardContent>
-            <ul className="space-y-2 text-sm text-gray-600">
-              <li className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-gray-300 rounded-full" />
-                General Ledger Export
-              </li>
-            </ul>
+            <div className="flex items-center gap-3 rounded-2xl bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+              <span className="h-2 w-2 rounded-full bg-neutral-300" />
+              General Ledger Export
+            </div>
           </CardContent>
         </Card>
       </div>
