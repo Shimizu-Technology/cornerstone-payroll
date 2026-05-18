@@ -1869,7 +1869,7 @@ function QuarterlyCompliancePacketPanel() {
                     <TableHead className="text-right">Gross</TableHead>
                     <TableHead className="text-right">Net</TableHead>
                     <TableHead className="text-right">Deductions</TableHead>
-                    <TableHead className="text-right">FIT</TableHead>
+                    <TableHead className="text-right">Guam W/H</TableHead>
                     <TableHead className="text-right">SS</TableHead>
                     <TableHead className="text-right">Medicare</TableHead>
                     <TableHead className="text-right">941 Liability</TableHead>
