@@ -316,7 +316,7 @@ module Api
             filename: exporter.filename,
             type: "text/plain; charset=us-ascii",
             disposition: "attachment"
-        rescue ArgumentError => e
+        rescue ArgumentError, KeyError => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
