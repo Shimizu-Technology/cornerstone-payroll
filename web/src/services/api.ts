@@ -1432,6 +1432,15 @@ export interface QuarterlyCompliancePacketReport {
     form_941_guam_lines_2_3: string;
     schedule_b: string;
   };
+  workflow?: {
+    id: number;
+    status: string;
+    assigned_to: string | null;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    notes: string | null;
+    tasks: QuarterlyComplianceTask[];
+  } | null;
   pay_periods: {
     id: number;
     start_date: string;
@@ -1460,7 +1469,10 @@ export interface QuarterlyCompliancePacketReport {
       payment_date: string | null;
       confirmation_number: string | null;
       receipt_attached: boolean;
+      notes?: string | null;
     }[];
+    total_confirmed_payments?: number;
+    unreconciled_balance?: number;
   };
   w1: {
     filing_channel: string;
@@ -1504,6 +1516,7 @@ export interface QuarterlyCompliancePacketReport {
     totals: { employee_count: number; total_wages: number; total_tax_withheld: number };
     upload_export_ready: boolean;
     upload_export_note: string;
+    upload_validation_errors?: string[];
     tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
     filing_steps: string[];
   };
@@ -1529,6 +1542,26 @@ export interface QuarterlyCompliancePacketReport {
     medicare_wages_tips: boolean;
     non_taxable: boolean;
   }[];
+}
+
+export interface QuarterlyComplianceTask {
+  id: number;
+  task_type: string;
+  title: string;
+  status: string;
+  due_date: string | null;
+  internal_target_date: string | null;
+  assigned_to: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  filed_at: string | null;
+  paid_at: string | null;
+  payment_amount: number | null;
+  filing_confirmation_number: string | null;
+  payment_confirmation_number: string | null;
+  proof_attached: boolean;
+  notes: string | null;
+  data: Record<string, unknown>;
 }
 
 export type QuarterlyOfficialFormType = 'form_941' | 'schedule_b' | 'w1' | 'swica';
@@ -1603,6 +1636,10 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_w1_pdf', { year, quarter }),
   quarterlyCompliancePacketSwicaPdf: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_pdf', { year, quarter }),
+  quarterlyCompliancePacketSwicaAscii: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_swica_ascii', { year, quarter }),
+  updateQuarterlyComplianceTask: (id: number, task: Partial<QuarterlyComplianceTask>) =>
+    api.patch<{ task: QuarterlyComplianceTask }>(`/admin/reports/quarterly_compliance_packet_task/${id}`, { task }),
   quarterlyCompliancePacketOfficialFormDefaults: (year: number, quarter: number, formType: QuarterlyOfficialFormType) =>
     api.get<{ data: QuarterlyOfficialFormFields }>('/admin/reports/quarterly_compliance_packet_official_form_defaults', { year, quarter, form_type: formType }),
   quarterlyCompliancePacketOfficialFormPreview: (year: number, quarter: number, formType: QuarterlyOfficialFormType, fields: QuarterlyOfficialFormFields) =>

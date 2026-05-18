@@ -22,6 +22,7 @@ class QuarterlyCompliancePacketBuilder
       meta: meta,
       due_dates: due_dates,
       source_rules: source_rules,
+      workflow: workflow_section,
       pay_periods: pay_period_rows,
       form_500: form_500_section,
       w1: w1_section,
@@ -133,22 +134,46 @@ class QuarterlyCompliancePacketBuilder
     end
   end
 
+  def workflow_section
+    return nil unless persisted_packet
+
+    persisted_packet.workflow_payload
+  end
+
+  def persisted_packet
+    return @persisted_packet if defined?(@persisted_packet)
+
+    @persisted_packet = QuarterlyCompliancePacket.find_by(company: company, year: year, quarter: quarter)
+  end
+
+  def form500_filings_by_pay_period_id
+    @form500_filings_by_pay_period_id ||= Form500Filing.where(company_id: company.id, pay_period_id: pay_periods.select(:id)).index_by(&:pay_period_id)
+  end
+
   def form_500_section
+    deposits = pay_period_rows.map do |period|
+      filing = form500_filings_by_pay_period_id[period[:id]]
+      amount = filing&.payment_amount || period[:guam_withholding]
+      {
+        pay_period_id: period[:id],
+        pay_date: period[:pay_date],
+        quarter_ending: quarter_end.iso8601,
+        amount: money(amount),
+        expected_amount: period[:guam_withholding],
+        status: filing&.status || "needs_payment_confirmation",
+        payment_date: filing&.payment_date&.iso8601,
+        confirmation_number: filing&.confirmation_number,
+        receipt_attached: filing&.receipt_attached || false,
+        notes: filing&.notes
+      }
+    end
+
     {
       policy: "per_pay_period",
       total_guam_withholding: money(payroll_items.sum(&:withholding_tax)),
-      deposits: pay_period_rows.map do |period|
-        {
-          pay_period_id: period[:id],
-          pay_date: period[:pay_date],
-          quarter_ending: quarter_end.iso8601,
-          amount: period[:guam_withholding],
-          status: "needs_payment_confirmation",
-          payment_date: nil,
-          confirmation_number: nil,
-          receipt_attached: false
-        }
-      end
+      total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? }.sum { |row| row[:amount].to_f }),
+      unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? }.sum { |row| row[:amount].to_f }),
+      deposits: deposits
     }
   end
 
@@ -194,8 +219,9 @@ class QuarterlyCompliancePacketBuilder
           total_wages: money(employees.sum { |row| row[:swica_wages].to_f }),
           total_tax_withheld: money(employees.sum { |row| row[:guam_withholding].to_f })
         },
-        upload_export_ready: false,
-        upload_export_note: "The packet prepares the employee detail. ASCII SWICA upload-file generation should follow after field-length validation against the current SWICA booklet.",
+        upload_export_ready: swica_upload_validation[:ready],
+        upload_export_note: swica_upload_validation[:message],
+        upload_validation_errors: swica_upload_validation[:errors],
         filing_steps: [
           "Log in to GuamTax.com.",
           "Choose Quarterly, then SWICA (SW-2).",
@@ -322,6 +348,24 @@ class QuarterlyCompliancePacketBuilder
       href: "/employees"
     )
     checks << review_check(
+      "form_500_payments_reconciled",
+      form_500_section[:unreconciled_balance].to_f.zero?,
+      "Form 500 payment confirmations reconcile to quarterly Guam withholding.",
+      details: {
+        expected_withholding: form_500_section[:total_guam_withholding],
+        confirmed_payments: form_500_section[:total_confirmed_payments],
+        unreconciled_balance: form_500_section[:unreconciled_balance]
+      },
+      href: "/pay-periods"
+    )
+    checks << review_check(
+      "swica_upload_ready",
+      swica_upload_validation[:ready],
+      "SWICA upload export has the required employee identifiers and filing fields.",
+      details: { errors: swica_upload_validation[:errors].first(5).join("; ").presence || "none" },
+      href: "/employees"
+    )
+    checks << review_check(
       "component_taxability_present",
       component_taxability.any?,
       "Pay component taxability map is present for payroll items with earnings detail.",
@@ -354,6 +398,26 @@ class QuarterlyCompliancePacketBuilder
         amount: money(items.sum(&column))
       }
     end.sort_by { |row| row[:pay_date] }
+  end
+
+  def swica_upload_validation
+    @swica_upload_validation ||= begin
+      errors = []
+      employee_rows.each do |row|
+        employee = Employee.find_by(id: row[:employee_id], company_id: company.id)
+        errors << "#{row[:name]} is missing a valid 9-digit SSN" unless employee&.valid_filing_ssn?
+        errors << "#{row[:name]} is missing address line 1" if employee&.address_line1.blank?
+        errors << "#{row[:name]} is missing city" if employee&.city.blank?
+        errors << "#{row[:name]} is missing ZIP" if employee&.zip.blank?
+      end
+      duplicate_ssns = Employee.where(company_id: company.id, id: employee_rows.map { |row| row[:employee_id] }).map(&:ssn_digits).compact.tally.select { |_ssn, count| count > 1 }.keys
+      errors << "Duplicate SSNs detected for this quarter" if duplicate_ssns.any?
+      {
+        ready: errors.empty?,
+        errors: errors,
+        message: errors.empty? ? "SWICA ASCII wage upload can be generated for GuamTax review." : "Fix employee SSN/address issues before generating the SWICA upload file."
+      }
+    end
   end
 
   def monthly_totals(rows, key)
