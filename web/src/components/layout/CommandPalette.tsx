@@ -83,6 +83,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const commandButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const commands = useMemo<CommandItem[]>(() => {
     const items: CommandItem[] = [
@@ -352,6 +353,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       .slice(0, 12);
   }, [commands, query]);
 
+  const safeSelectedIndex = filteredCommands.length === 0
+    ? -1
+    : Math.min(selectedIndex, filteredCommands.length - 1);
+
+  useEffect(() => {
+    if (!open || safeSelectedIndex < 0) return;
+    commandButtonRefs.current[safeSelectedIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [open, safeSelectedIndex, filteredCommands]);
+
   useEffect(() => {
     if (!open) return;
     const focusTimer = window.setTimeout(() => {
@@ -427,7 +437,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   }
                   if (event.key === 'ArrowDown') {
                     event.preventDefault();
-                    setSelectedIndex((index) => Math.min(index + 1, filteredCommands.length - 1));
+                    setSelectedIndex((index) => Math.min(index + 1, Math.max(filteredCommands.length - 1, 0)));
                     return;
                   }
                   if (event.key === 'ArrowUp') {
@@ -435,9 +445,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     setSelectedIndex((index) => Math.max(index - 1, 0));
                     return;
                   }
-                  if (event.key === 'Enter' && filteredCommands[selectedIndex]) {
+                  if (event.key === 'Enter' && safeSelectedIndex >= 0) {
                     event.preventDefault();
-                    runCommand(filteredCommands[selectedIndex]);
+                    runCommand(filteredCommands[safeSelectedIndex]);
                   }
                 }}
                 placeholder="Search pages, reports, actions, or clients..."
@@ -469,16 +479,19 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   <button
                     type="button"
                     key={command.id}
+                    ref={(element) => {
+                      commandButtonRefs.current[index] = element;
+                    }}
                     onClick={() => runCommand(command)}
                     onMouseEnter={() => setSelectedIndex(index)}
                     className={cn(
                       'flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition',
-                      index === selectedIndex ? 'bg-primary-50 text-primary-950 ring-1 ring-primary-100' : 'text-neutral-800 hover:bg-neutral-50'
+                      index === safeSelectedIndex ? 'bg-primary-50 text-primary-950 ring-1 ring-primary-100' : 'text-neutral-800 hover:bg-neutral-50'
                     )}
                   >
                     <span className={cn(
                       'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border',
-                      index === selectedIndex ? 'border-primary-200 bg-white text-primary-700' : 'border-neutral-200 bg-neutral-50 text-neutral-500'
+                      index === safeSelectedIndex ? 'border-primary-200 bg-white text-primary-700' : 'border-neutral-200 bg-neutral-50 text-neutral-500'
                     )}>
                       {command.icon}
                     </span>
