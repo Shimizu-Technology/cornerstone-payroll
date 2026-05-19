@@ -424,8 +424,8 @@ module Api
               create_fit_tax_deposit_check!(committed_items)
             end
 
-            # Prepare tax sync with a fresh idempotency key for this commit event.
-            @pay_period.prepare_tax_sync!
+            # Prepare external tax sync only when the CST ingest integration is configured.
+            tax_sync_enabled = @pay_period.prepare_tax_sync_if_configured!
 
             # CPR-71: if this is a correction run, write committed audit event atomically
             if @pay_period.correction_run?
@@ -435,8 +435,10 @@ module Api
               )
             end
 
-            ActiveRecord.after_all_transactions_commit do
-              PayrollTaxSyncJob.perform_later(@pay_period.id)
+            if tax_sync_enabled
+              ActiveRecord.after_all_transactions_commit do
+                PayrollTaxSyncJob.perform_later(@pay_period.id)
+              end
             end
           end
 
@@ -732,6 +734,11 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
         def retry_tax_sync
+          unless PayrollTaxSyncService.configured?
+            @pay_period.update!(tax_sync_disabled_attributes)
+            return render json: { error: "Tax sync is not configured" }, status: :unprocessable_entity
+          end
+
           unless @pay_period.can_retry_sync?
             return render json: { error: "Tax sync cannot be retried for this pay period" }, status: :unprocessable_entity
           end
@@ -909,10 +916,10 @@ module Api
             committed_by_id: pay_period.committed_by_id,
             processed_at: pay_period.committed_at,
             processed_by_name: lifecycle.dig(:committed, :actor_name),
-            tax_sync_status: pay_period.tax_sync_status,
-            tax_sync_attempts: pay_period.tax_sync_attempts,
-            tax_sync_last_error: pay_period.tax_sync_last_error,
-            tax_synced_at: pay_period.tax_synced_at,
+            tax_sync_status: tax_sync_visible? ? pay_period.tax_sync_status : nil,
+            tax_sync_attempts: tax_sync_visible? ? pay_period.tax_sync_attempts : 0,
+            tax_sync_last_error: tax_sync_visible? ? pay_period.tax_sync_last_error : nil,
+            tax_synced_at: tax_sync_visible? ? pay_period.tax_synced_at : nil,
             lifecycle: lifecycle,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
@@ -1105,7 +1112,7 @@ module Api
             status:            supplemental.status,
             cycle:             supplemental.cycle,
             notes:             supplemental.notes,
-            tax_sync_status:   supplemental.tax_sync_status,
+            tax_sync_status:   tax_sync_visible? ? supplemental.tax_sync_status : nil,
             payroll_items: items.map do |item|
               {
                 id:                              item.id,
@@ -1220,6 +1227,10 @@ module Api
           }
         end
 
+        def tax_sync_visible?
+          PayrollTaxSyncService.configured?
+        end
+
         def pay_period_lifecycle_summary(pay_period)
           logs = pay_period_audit_logs(pay_period)
 
@@ -1256,8 +1267,8 @@ module Api
               timestamp: pay_period.committed_at,
               user_id: pay_period.committed_by_id
             ),
-            tax_synced: lifecycle_event_json(timestamp: pay_period.tax_synced_at)
-          }
+            tax_synced: tax_sync_visible? ? lifecycle_event_json(timestamp: pay_period.tax_synced_at) : nil
+          }.compact
         end
 
         def lifecycle_event_from_log(logs, action, fallback_timestamp: nil)

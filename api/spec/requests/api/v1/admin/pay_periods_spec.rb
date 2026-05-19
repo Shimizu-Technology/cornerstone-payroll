@@ -399,7 +399,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload).to have_attributes(
         pay_date: new_pay_date,
-        tax_sync_status: "pending",
+        tax_sync_status: nil,
         tax_synced_at: nil
       )
       expect(payroll_item.reload).to have_attributes(
@@ -431,7 +431,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         "reason" => "Pay date was entered with the wrong date",
         "corrected_by_name" => admin_user.name
       )
-      expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
+      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
     end
 
     it "does not mask a successful correction when audit logging fails" do
@@ -799,13 +799,28 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(company_ytd.gross_pay).to eq(1200.00)
     end
 
-    it "registers tax sync enqueue on transaction commit" do
+    it "does not enqueue tax sync when the CST ingest integration is not configured" do
+      allow(PayrollTaxSyncJob).to receive(:perform_later)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.tax_sync_status).to be_nil
+      expect(response.parsed_body.dig("pay_period", "tax_sync_status")).to be_nil
+      expect(response.parsed_body.dig("pay_period", "lifecycle")).not_to have_key("tax_synced")
+      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
+    end
+
+    it "registers tax sync enqueue on transaction commit when CST ingest is configured" do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://tax.example.test/ingest")
       allow(PayrollTaxSyncJob).to receive(:perform_later)
       allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 
       expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.tax_sync_status).to eq("pending")
       expect(ActiveRecord).to have_received(:after_all_transactions_commit)
       expect(PayrollTaxSyncJob).to have_received(:perform_later).with(pay_period.id)
     end

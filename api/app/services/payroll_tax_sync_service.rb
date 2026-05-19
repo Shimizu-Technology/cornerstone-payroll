@@ -9,6 +9,10 @@ class PayrollTaxSyncService
 
   TIMEOUT_SECONDS = 30
 
+  def self.configured?
+    ENV["CST_INGEST_URL"].present?
+  end
+
   def initialize(pay_period)
     @pay_period = pay_period
   end
@@ -25,7 +29,10 @@ class PayrollTaxSyncService
     response = post_to_cst(payload)
 
     handle_response(response)
-  rescue SyncError, ConfigurationError => e
+  rescue ConfigurationError
+    @pay_period.update!(@pay_period.tax_sync_disabled_attributes)
+    raise
+  rescue SyncError => e
     @pay_period.mark_sync_failed!(e.message)
     raise
   rescue StandardError => e
@@ -36,7 +43,7 @@ class PayrollTaxSyncService
   private
 
   def validate_configuration!
-    raise ConfigurationError, "CST_INGEST_URL is not configured" if ingest_url.blank?
+    raise ConfigurationError, "CST_INGEST_URL is not configured" unless self.class.configured?
   end
 
   def validate_pay_period!

@@ -51,7 +51,7 @@ class PayPeriodPayDateCorrectionService
 
       locked.update!(
         pay_date: new_pay_date,
-        **locked.tax_sync_reset_attributes
+        **locked.tax_sync_refresh_attributes
       )
 
       payroll_items_updated = locked.payroll_items.where(check_date: old_pay_date).update_all(
@@ -74,8 +74,10 @@ class PayPeriodPayDateCorrectionService
         noop: false
       )
 
-      ActiveRecord.after_all_transactions_commit do
-        PayrollTaxSyncJob.perform_later(locked.id)
+      if PayrollTaxSyncService.configured?
+        ActiveRecord.after_all_transactions_commit do
+          PayrollTaxSyncJob.perform_later(locked.id)
+        end
       end
     end
 
