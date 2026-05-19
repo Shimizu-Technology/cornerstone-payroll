@@ -795,12 +795,12 @@ export function PayPeriodDetail() {
         : lifecycleActor(lifecycle.committed?.actor_name),
       tone: isCommitted ? 'success' as const : 'default' as const,
     },
-    {
+    ...(syncStatus || payPeriod.tax_synced_at ? [{
       label: 'Tax sync',
       timestamp: lifecycle.tax_synced?.timestamp || payPeriod.tax_synced_at,
       actor: syncConfig?.label || 'Not started',
       tone: syncConfig?.variant || 'default' as const,
-    },
+    }] : []),
   ].sort((left, right) => {
     if (left.timestamp && right.timestamp) {
       return new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime();
@@ -965,7 +965,7 @@ export function PayPeriodDetail() {
           <div className="border-b px-4 py-3">
             <h3 className="text-base font-semibold text-gray-900">Processing Timeline</h3>
             <p className="text-sm text-gray-500">
-              Guam timestamps for payroll lifecycle, operator actions, and tax sync.
+              Guam timestamps for payroll lifecycle and operator actions.
             </p>
           </div>
           <div className="grid gap-0 divide-y divide-gray-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]">
@@ -2036,7 +2036,7 @@ export function PayPeriodDetail() {
                   </h3>
                   <p className="text-xs text-amber-800 mt-0.5">
                     Off-cycle supplemental periods that adjust this committed period.
-                    YTDs, W-2s, tax sync, and reports include these corrections.
+                    YTDs, W-2s, reports, and configured downstream syncs include these corrections.
                   </p>
                 </div>
               </div>
@@ -2052,9 +2052,11 @@ export function PayPeriodDetail() {
                       >
                         Supplemental period · pay date {sp.pay_date}
                       </a>
-                      <span className="text-xs text-gray-500">
-                        {sp.tax_sync_status === 'synced' ? 'tax-synced' : `tax-sync ${sp.tax_sync_status ?? 'pending'}`}
-                      </span>
+                      {sp.tax_sync_status && (
+                        <span className="text-xs text-gray-500">
+                          {sp.tax_sync_status === 'synced' ? 'tax-synced' : `tax-sync ${sp.tax_sync_status}`}
+                        </span>
+                      )}
                     </div>
                     {sp.payroll_items.map(it => (
                       <div key={it.id} className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs text-gray-700 sm:grid-cols-2">
@@ -2301,7 +2303,7 @@ export function PayPeriodDetail() {
                   required
                 />
                 <p className="text-xs text-gray-500">
-                  This updates the committed pay period, matching check dates, pay stubs, reports, tax sync payloads, and linked pay-period checks.
+                  This updates the committed pay period, matching check dates, pay stubs, reports, configured downstream sync payloads, and linked pay-period checks.
                 </p>
               </div>
               <div className="space-y-2">

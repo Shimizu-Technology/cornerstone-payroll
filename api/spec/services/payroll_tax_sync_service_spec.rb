@@ -46,10 +46,12 @@ RSpec.describe PayrollTaxSyncService, type: :service do
         expect { service.sync! }.to raise_error(PayrollTaxSyncService::ConfigurationError, /CST_INGEST_URL/)
       end
 
-      it "marks the pay period as failed" do
+      it "clears sync state instead of marking a visible failure" do
         service.sync! rescue nil
         pay_period.reload
-        expect(pay_period.tax_sync_status).to eq("failed")
+        expect(pay_period.tax_sync_status).to be_nil
+        expect(pay_period.tax_sync_last_error).to be_nil
+        expect(pay_period.tax_sync_idempotency_key).to be_nil
       end
     end
 

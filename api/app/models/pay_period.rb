@@ -188,8 +188,27 @@ class PayPeriod < ApplicationRecord
     }
   end
 
+  def tax_sync_disabled_attributes
+    {
+      tax_sync_status: nil,
+      tax_sync_attempts: 0,
+      tax_sync_last_error: nil,
+      tax_synced_at: nil,
+      tax_sync_idempotency_key: nil
+    }
+  end
+
+  def tax_sync_refresh_attributes(reference_time: Time.current)
+    PayrollTaxSyncService.configured? ? tax_sync_reset_attributes(reference_time: reference_time) : tax_sync_disabled_attributes
+  end
+
   def prepare_tax_sync!
     update!(tax_sync_reset_attributes)
+  end
+
+  def prepare_tax_sync_if_configured!
+    update!(tax_sync_refresh_attributes)
+    PayrollTaxSyncService.configured?
   end
 
   def mark_syncing!
