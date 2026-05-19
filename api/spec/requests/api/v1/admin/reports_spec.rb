@@ -256,6 +256,169 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("federal_941", "deposit_schedule", "firm_payment_policy")).to eq("pay_each_pay_period")
     end
 
+    it "creates a persistent workflow packet with default filing tasks" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      workflow = response.parsed_body.dig("report", "workflow")
+      expect(workflow["tasks"].map { |task| task["task_type"] }).to contain_exactly("form_500", "w1", "swica", "federal_941", "schedule_b")
+
+      task = workflow["tasks"].find { |row| row["task_type"] == "w1" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          status: "filed",
+          filing_confirmation_number: "W1-ABC-123",
+          proof_attached: true
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+      expect(response.parsed_body.dig("task", "filing_confirmation_number")).to eq("W1-ABC-123")
+      expect(response.parsed_body.dig("task", "proof_attached")).to eq(true)
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "not_started" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("not_started")
+    end
+
+    it "downgrades filed_and_paid status when one completion date is cleared" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "form_500" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          status: "filed_and_paid",
+          filed_at: "2026-04-30T10:00:00Z",
+          paid_at: "2026-04-30T10:05:00Z"
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed_and_paid")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { paid_at: nil }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: {
+          filed_at: nil,
+          paid_at: "2026-04-30T10:05:00Z",
+          status: "filed_and_paid"
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+    end
+
+    it "downgrades filed and paid terminal statuses when their completion date is cleared" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "w1" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "filed", filed_at: "2026-04-30T10:00:00Z" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { filed_at: nil }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("ready_to_file")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "paid", paid_at: "2026-04-30T10:05:00Z" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { paid_at: nil }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("ready_to_file")
+    end
+
+    it "promotes needs_review tasks when filing or payment dates are recorded" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "schedule_b" }
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "needs_review" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("needs_review")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { filed_at: "2026-04-30T10:00:00Z" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("filed")
+
+      patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
+        task: { status: "needs_review", filed_at: nil, paid_at: "2026-04-30T10:05:00Z" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("task", "status")).to eq("paid")
+    end
+
+    it "recovers from a concurrent packet provisioning uniqueness race" do
+      packet = QuarterlyCompliancePacket.create!(company: company, year: 2026, quarter: 2)
+      allow(QuarterlyCompliancePacket).to receive(:create_with).and_raise(ActiveRecord::RecordNotUnique.new("duplicate packet"))
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "workflow", "id")).to eq(packet.id)
+    end
+
+    it "does not count Form 500 payment-date-only rows as reconciled payments" do
+      pay_period_q1.create_form500_filing!(
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        fields: Form500Generator.default_fields(company: company, pay_period: pay_period_q1),
+        status: "paid",
+        payment_date: Date.new(2026, 4, 3),
+        payment_amount: nil
+      )
+      pay_period_q2.create_form500_filing!(
+        company: company,
+        created_by: admin_user,
+        updated_by: admin_user,
+        fields: Form500Generator.default_fields(company: company, pay_period: pay_period_q2),
+        status: "paid",
+        payment_date: Date.new(2026, 4, 17),
+        payment_amount: nil
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      form500 = response.parsed_body.dig("report", "form_500")
+      check = response.parsed_body.dig("report", "review_checks").find { |row| row["key"] == "form_500_payments_reconciled" }
+      expect(form500["total_confirmed_payments"].to_f).to eq(0.0)
+      expect(form500["unconfirmed_amount_count"]).to eq(2)
+      expect(form500["unreconciled_balance"].to_f).to eq(170.0)
+      expect(check["status"]).to eq("needs_review")
+    end
+
     it "returns 422 for invalid quarter" do
       get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 5 }
 
@@ -305,6 +468,46 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.headers["Content-Disposition"]).to include(filename)
         expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
       end
+    end
+
+    it "exports a validated SWICA ASCII wage file" do
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Dr",
+        city: "Tamuning",
+        state: "GU",
+        zip: "96913"
+      )
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Content-Disposition"]).to include("swica_2026_q2.txt")
+      first_record = response.body.lines.first.chomp
+      expect(first_record.length).to eq(275)
+      expect(first_record[0]).to eq("W")
+      expect(first_record[1, 9]).to eq("123456789")
+      expect(first_record[133]).to eq("2")
+      expect(first_record[274]).to eq("S")
+    end
+
+    it "returns 422 instead of 500 when SWICA export encounters stale employee rows" do
+      employee.update!(
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Dr",
+        city: "Tamuning",
+        state: "GU",
+        zip: "96913"
+      )
+      exporter = instance_double(SwicaAsciiExporter)
+      allow(SwicaAsciiExporter).to receive(:new).and_return(exporter)
+      allow(exporter).to receive(:filename).and_return("swica_2026_q2.txt")
+      allow(exporter).to receive(:generate).and_raise(KeyError, "key not found: 123")
+
+      get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("key not found")
     end
 
     it "returns editable official form defaults with split employer address fields" do

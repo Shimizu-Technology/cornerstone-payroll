@@ -260,6 +260,20 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(log.action).to eq("employees#create")
         expect(log.record_id.to_s).to eq(Employee.last.id.to_s)
       end
+
+      it "creates a W-2 employee when address fields are not available yet" do
+        params_without_address = valid_params.deep_dup
+        params_without_address[:employee].merge!(address_line1: "", city: "", state: "", zip: "")
+
+        post "/api/v1/admin/employees", params: params_without_address
+
+        expect(response).to have_http_status(:created)
+        employee = Employee.last
+        expect(employee.address_line1).to eq("")
+        expect(employee.city).to eq("")
+        expect(employee.state).to eq("")
+        expect(employee.zip).to eq("")
+      end
     end
 
     context "with invalid params" do
@@ -357,6 +371,18 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.default_custom_earnings).to eq([
           { "label" => "Chief Stipend", "amount" => 125.56 }
         ])
+      end
+
+      it "allows updating an employee while address fields remain blank" do
+        employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
+
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { first_name: "No Address Yet" }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload.first_name).to eq("No Address Yet")
+        expect(employee.address_line1).to be_nil
       end
     end
 

@@ -200,6 +200,8 @@ Rails.application.routes.draw do
         get "reports/quarterly_compliance_packet_schedule_b_pdf", to: "reports#quarterly_compliance_packet_schedule_b_pdf"
         get "reports/quarterly_compliance_packet_w1_pdf", to: "reports#quarterly_compliance_packet_w1_pdf"
         get "reports/quarterly_compliance_packet_swica_pdf", to: "reports#quarterly_compliance_packet_swica_pdf"
+        get "reports/quarterly_compliance_packet_swica_ascii", to: "reports#quarterly_compliance_packet_swica_ascii"
+        patch "reports/quarterly_compliance_packet_task/:id", to: "reports#update_quarterly_compliance_packet_task"
         get "reports/quarterly_compliance_packet_official_form_defaults", to: "reports#quarterly_compliance_packet_official_form_defaults"
         post "reports/quarterly_compliance_packet_official_form_preview", to: "reports#quarterly_compliance_packet_official_form_preview"
         post "reports/quarterly_compliance_packet_official_form_download", to: "reports#quarterly_compliance_packet_official_form_download"

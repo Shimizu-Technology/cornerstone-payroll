@@ -26,6 +26,7 @@ class Company < ApplicationRecord
   has_many :client_documents, dependent: :destroy
   has_many :employee_change_requests, dependent: :destroy
   has_many :form500_filings, dependent: :destroy
+  has_many :quarterly_compliance_packets, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy
   # Printer profiles are organization-scoped so every operator in the same
