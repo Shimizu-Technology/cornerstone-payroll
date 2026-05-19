@@ -92,7 +92,14 @@ module Api
         filing = @form500_filing || @pay_period.build_form500_filing(company: current_company)
         filing.created_by ||= current_user
         filing.updated_by = current_user
-        filing.fields = merge_with_defaults(defaults_payload, form500_params.to_h.deep_symbolize_keys.except(:pay_period_id), preserve_blank_strings: true)
+        payload = form500_params.to_h.deep_symbolize_keys
+        filing.fields = merge_with_defaults(defaults_payload, payload.except(:pay_period_id, :status, :payment_date, :payment_amount, :confirmation_number, :receipt_attached, :tracking_notes), preserve_blank_strings: true)
+        filing.status = payload[:status].presence || "prepared" if payload.key?(:status)
+        filing.payment_date = payload[:payment_date].presence if payload.key?(:payment_date)
+        filing.payment_amount = payload[:payment_amount].presence if payload.key?(:payment_amount)
+        filing.confirmation_number = payload[:confirmation_number].presence if payload.key?(:confirmation_number)
+        filing.receipt_attached = ActiveModel::Type::Boolean.new.cast(payload[:receipt_attached]) unless payload[:receipt_attached].nil?
+        filing.notes = payload[:tracking_notes] if payload.key?(:tracking_notes)
         filing.save!
         @form500_filing = filing
       end
@@ -117,7 +124,13 @@ module Api
           :income_tax_withholding_on_wages,
           :tax_withholding_30_percent,
           :corporate_estimated_tax,
-          :income_tax_withholding_1099
+          :income_tax_withholding_1099,
+          :status,
+          :payment_date,
+          :payment_amount,
+          :confirmation_number,
+          :receipt_attached,
+          :tracking_notes
         )
       end
 
