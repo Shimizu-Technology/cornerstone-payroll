@@ -38,6 +38,7 @@ export function Layout() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setMobileNavOpen(false);
+        setCommandPaletteOpen(false);
         return;
       }
 

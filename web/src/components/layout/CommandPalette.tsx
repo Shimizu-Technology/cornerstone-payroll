@@ -354,7 +354,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   useEffect(() => {
     if (!open) return;
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(() => {
+      setQuery('');
+      setSelectedIndex(0);
+      inputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
   }, [open]);
 
   useEffect(() => {
