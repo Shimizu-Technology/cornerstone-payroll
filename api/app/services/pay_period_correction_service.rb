@@ -90,7 +90,7 @@ class PayPeriodCorrectionService
         voided_at:         void_time,
         voided_by_id:      actor&.id,
         void_reason:       reason,
-        **locked.tax_sync_reset_attributes(reference_time: void_time)
+        **locked.tax_sync_refresh_attributes(reference_time: void_time)
       )
 
       # If a committed correction run is being voided, release source linkage so
@@ -101,8 +101,10 @@ class PayPeriodCorrectionService
         end
       end
 
-      ActiveRecord.after_all_transactions_commit do
-        PayrollTaxSyncJob.perform_later(locked.id)
+      if PayrollTaxSyncService.configured?
+        ActiveRecord.after_all_transactions_commit do
+          PayrollTaxSyncJob.perform_later(locked.id)
+        end
       end
 
       event
