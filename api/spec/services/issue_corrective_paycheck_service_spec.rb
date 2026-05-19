@@ -120,7 +120,7 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(supplemental.pay_date).to eq(Date.new(2024, 1, 26))
       expect(supplemental.start_date).to eq(original_period.start_date)
       expect(supplemental.end_date).to eq(original_period.end_date)
-      expect(supplemental.tax_sync_status).to eq("pending")
+      expect(supplemental.tax_sync_status).to be_nil
 
       corrective = supplemental.payroll_items.first
       expect(corrective.correction_for_payroll_item_id).to eq(original_item.id)
@@ -163,7 +163,23 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(PayPeriod.reportable_committed.where(id: supplemental.id)).to exist
     end
 
-    it "enqueues PayrollTaxSyncJob for the supplemental period" do
+    it "does not enqueue PayrollTaxSyncJob for the supplemental period when CST ingest is not configured" do
+      expect {
+        described_class.issue!(
+          original_pay_period: original_period,
+          employee:            employee,
+          corrected_inputs:    { hours_worked: 80 },
+          pay_date:            Date.new(2024, 1, 26),
+          reason:              "+20h",
+          actor:               actor
+        )
+      }.not_to have_enqueued_job(PayrollTaxSyncJob)
+    end
+
+    it "enqueues PayrollTaxSyncJob for the supplemental period when CST ingest is configured" do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with("CST_INGEST_URL").and_return("https://tax.example.test/ingest")
+
       expect {
         described_class.issue!(
           original_pay_period: original_period,

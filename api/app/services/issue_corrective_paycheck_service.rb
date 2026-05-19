@@ -539,10 +539,11 @@ class IssueCorrectivePaycheckService
     create_supplemental_fit_check!(supplemental) if supplemental.company.auto_create_fit_check?
 
     # Tax sync — the supplemental gets its own idempotency key and is
-    # pushed independently to the external tax service.
-    supplemental.prepare_tax_sync!
-    ActiveRecord.after_all_transactions_commit do
-      PayrollTaxSyncJob.perform_later(supplemental.id)
+    # pushed independently only when the external CST ingest integration is configured.
+    if supplemental.prepare_tax_sync_if_configured!
+      ActiveRecord.after_all_transactions_commit do
+        PayrollTaxSyncJob.perform_later(supplemental.id)
+      end
     end
   end
 
