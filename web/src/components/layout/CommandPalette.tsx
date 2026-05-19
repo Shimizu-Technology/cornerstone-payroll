@@ -2,11 +2,13 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  Bell,
   Building2,
   Calculator,
   CalendarDays,
   Check,
   ClipboardCheck,
+  ClipboardList,
   FileBarChart2,
   FileSpreadsheet,
   FolderOpen,
@@ -17,8 +19,8 @@ import {
   ReceiptText,
   ScanLine,
   Search,
-  Settings,
   SlidersHorizontal,
+  UserCog,
   Users,
   WalletCards,
   X,
@@ -27,6 +29,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
+import { platformShortcut } from '@/lib/keyboard-shortcuts';
 import { cn } from '@/lib/utils';
 
 interface CommandPaletteProps {
@@ -46,13 +49,6 @@ interface CommandItem {
   kind: CommandKind;
   href?: string;
   companyId?: number;
-}
-
-function shortcutLabel() {
-  if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)) {
-    return '⌘K';
-  }
-  return 'Ctrl K';
 }
 
 function normalize(value: string) {
@@ -86,186 +82,167 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const commandButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const commands = useMemo<CommandItem[]>(() => {
-    const items: CommandItem[] = [
-      {
-        id: 'go-dashboard',
-        label: 'Dashboard',
-        description: 'Open the main workspace overview.',
-        group: 'Go to',
-        keywords: ['home', 'overview', 'app'],
-        icon: <LayoutDashboard className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/app',
-      },
-      {
-        id: 'go-pay-periods',
-        label: 'Pay Periods',
-        description: 'Review, calculate, approve, and commit payroll runs.',
-        group: 'Payroll',
-        keywords: ['payroll', 'run payroll', 'periods'],
-        icon: <CalendarDays className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/pay-periods',
-      },
-      {
-        id: 'go-employees',
-        label: 'Employees',
-        description: 'Manage employee profiles, rates, and payroll setup.',
-        group: 'People',
-        keywords: ['workers', 'staff', 'employee list'],
-        icon: <Users className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/employees',
-      },
-      {
-        id: 'new-employee',
-        label: 'Add Employee',
-        description: 'Create a new employee or contractor record.',
-        group: 'People',
-        keywords: ['new employee', 'hire', 'contractor'],
-        icon: <Users className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/employees/new',
-      },
-      {
-        id: 'go-departments',
-        label: 'Departments',
-        description: 'Manage department lists for payroll grouping.',
-        group: 'People',
-        keywords: ['teams', 'groups'],
-        icon: <Building2 className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/departments',
-      },
-      {
-        id: 'go-reports',
-        label: 'Reports Center',
-        description: 'Open payroll, tax, and compliance reports.',
-        group: 'Reports',
-        keywords: ['reports', 'exports'],
-        icon: <FileBarChart2 className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/reports',
-      },
-    ];
+    const items: CommandItem[] = [];
+    const add = (command: CommandItem) => items.push(command);
+
+    add({
+      id: 'go-dashboard',
+      label: 'Dashboard',
+      description: 'Open the main workspace overview.',
+      group: 'Sidebar',
+      keywords: ['home', 'overview', 'app'],
+      icon: <LayoutDashboard className="h-4 w-4" />,
+      kind: 'navigation',
+      href: '/app',
+    });
+
+    add({
+      id: 'go-employees',
+      label: 'Employees',
+      description: 'Manage employee profiles, rates, and payroll setup.',
+      group: 'Sidebar',
+      keywords: ['workers', 'staff', 'employee list'],
+      icon: <Users className="h-4 w-4" />,
+      kind: 'navigation',
+      href: '/employees',
+    });
+
+    add({
+      id: 'go-departments',
+      label: 'Departments',
+      description: 'Manage department lists for payroll grouping.',
+      group: 'Sidebar',
+      keywords: ['teams', 'groups'],
+      icon: <Building2 className="h-4 w-4" />,
+      kind: 'navigation',
+      href: '/departments',
+    });
+
+    add({
+      id: 'go-pay-periods',
+      label: 'Pay Periods',
+      description: 'Review, calculate, approve, and commit payroll runs.',
+      group: 'Sidebar',
+      keywords: ['payroll', 'run payroll', 'periods'],
+      icon: <CalendarDays className="h-4 w-4" />,
+      kind: 'navigation',
+      href: '/pay-periods',
+    });
 
     if (!isClient) {
-      items.push(
-        {
-          id: 'go-checks-payments',
-          label: 'Checks & Payments',
-          description: 'Manage standalone checks, tax deposits, and payment records.',
-          group: 'Payroll',
-          keywords: ['checks', 'payments', 'deposits'],
-          icon: <WalletCards className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/checks-payments',
-        },
-        {
-          id: 'quarterly-compliance',
-          label: 'Quarterly Compliance Packet',
-          description: 'Open Form 500, W-1, SWICA, 941, and Schedule B workflow.',
-          group: 'Compliance',
-          keywords: ['quarterly', 'form 500', 'w1', 'swica', '941', 'schedule b'],
-          icon: <ClipboardCheck className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/reports?report=quarterly_compliance_packet',
-        },
-        {
-          id: 'form-941',
-          label: 'Federal Form 941 Report',
-          description: 'Open the Guam-aware Federal Form 941 worksheet.',
-          group: 'Compliance',
-          keywords: ['941', 'federal', 'tax'],
-          icon: <FileSpreadsheet className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/reports?report=form_941_gu',
-        },
-        {
-          id: 'tax-summary',
-          label: 'Tax Summary',
-          description: 'Review quarterly or annual payroll tax totals.',
-          group: 'Compliance',
-          keywords: ['tax', 'withholding', 'fica'],
-          icon: <Calculator className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/reports?report=tax_summary',
-        },
-        {
-          id: 'employee-loans',
-          label: 'Employee Loans',
-          description: 'Manage employee installment loan balances and payments.',
-          group: 'Payroll',
-          keywords: ['loans', 'deductions'],
-          icon: <HandCoins className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/employee-loans',
-        },
-        {
-          id: 'timecard-ocr',
-          label: 'Timecard OCR',
-          description: 'Import and review scanned timecards.',
-          group: 'Tools',
-          keywords: ['timecards', 'ocr', 'scan'],
-          icon: <ScanLine className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/tools/timecard-ocr',
-        },
-        {
-          id: 'transmittals',
-          label: 'General Transmittals',
-          description: 'Prepare and manage transmittal documents.',
-          group: 'Tools',
-          keywords: ['transmittal', 'documents'],
-          icon: <ReceiptText className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/tools/transmittals',
-        },
-        {
-          id: 'invoice-maker',
-          label: 'Invoice Maker',
-          description: 'Create and manage client invoices.',
-          group: 'Tools',
-          keywords: ['invoice', 'billing'],
-          icon: <ReceiptText className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/tools/invoices',
-        },
-        {
-          id: 'client-documents-admin',
-          label: 'Client Documents',
-          description: 'Review documents uploaded through the client portal.',
-          group: 'Client Portal',
-          keywords: ['documents', 'portal', 'uploads'],
-          icon: <FolderOpen className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/settings/client-documents',
-        },
-        {
-          id: 'check-settings',
-          label: 'Check Settings',
-          description: 'Adjust check stock, printer profiles, and check layout.',
-          group: 'Settings',
-          keywords: ['printer', 'checks', 'layout'],
-          icon: <Printer className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/check-settings',
-        },
-        {
-          id: 'time-tracking-sources',
-          label: 'Time Tracking Sources',
-          description: 'Configure external time tracking import sources.',
-          group: 'Settings',
-          keywords: ['time tracking', 'integrations'],
-          icon: <Link2 className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/time-tracking-sources',
-        }
-      );
+      add({
+        id: 'go-checks-payments',
+        label: 'Checks & Payments',
+        description: 'Manage standalone checks, tax deposits, and payment records.',
+        group: 'Sidebar',
+        keywords: ['checks', 'payments', 'deposits'],
+        icon: <WalletCards className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/checks-payments',
+      });
     }
 
-    if (isClient) {
-      items.push({
+    add({
+      id: 'go-reports',
+      label: 'Reports',
+      description: 'Open the reports center.',
+      group: 'Sidebar',
+      keywords: ['reports', 'exports', 'reports center'],
+      icon: <FileBarChart2 className="h-4 w-4" />,
+      kind: 'navigation',
+      href: '/reports',
+    });
+
+    if (!isClient) {
+      add({
+        id: 'employee-loans',
+        label: 'Employee Loans',
+        description: 'Manage employee installment loan balances and payments.',
+        group: 'Sidebar',
+        keywords: ['loans', 'deductions'],
+        icon: <HandCoins className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/employee-loans',
+      });
+
+      add({
+        id: 'timecard-ocr',
+        label: 'Timecard OCR',
+        description: 'Import and review scanned timecards.',
+        group: 'Tools',
+        keywords: ['timecards', 'ocr', 'scan'],
+        icon: <ScanLine className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/tools/timecard-ocr',
+      });
+
+      add({
+        id: 'transmittals',
+        label: 'General Transmittals',
+        description: 'Prepare and manage transmittal documents.',
+        group: 'Tools',
+        keywords: ['transmittal', 'documents'],
+        icon: <ClipboardCheck className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/tools/transmittals',
+      });
+
+      add({
+        id: 'invoice-maker',
+        label: 'Invoice Maker',
+        description: 'Create and manage client invoices.',
+        group: 'Tools',
+        keywords: ['invoice', 'billing'],
+        icon: <ReceiptText className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/tools/invoices',
+      });
+
+      add({
+        id: 'check-settings',
+        label: 'Check Settings',
+        description: 'Adjust check stock, printer profiles, and check layout.',
+        group: 'Settings',
+        keywords: ['printer', 'checks', 'layout'],
+        icon: <Printer className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/check-settings',
+      });
+
+      add({
+        id: 'payroll-reminders',
+        label: 'Payroll Reminders',
+        description: 'Configure payroll reminder recipients and timing.',
+        group: 'Settings',
+        keywords: ['reminders', 'notifications', 'email'],
+        icon: <Bell className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/payroll-reminders',
+      });
+
+      add({
+        id: 'time-tracking-sources',
+        label: 'Time Tracking Sources',
+        description: 'Configure external time tracking import sources.',
+        group: 'Settings',
+        keywords: ['time tracking', 'integrations'],
+        icon: <Link2 className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/time-tracking-sources',
+      });
+
+      add({
+        id: 'client-documents-admin',
+        label: 'Client Documents',
+        description: 'Review documents uploaded through the client portal.',
+        group: 'Client Portal',
+        keywords: ['documents', 'portal', 'uploads'],
+        icon: <FolderOpen className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/client-documents',
+      });
+    } else {
+      add({
         id: 'client-documents',
         label: 'Documents',
         description: 'View and upload payroll documents.',
@@ -277,57 +254,114 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       });
     }
 
-    if (isAdmin) {
-      items.push(
-        {
-          id: 'clients',
-          label: 'Client Management',
-          description: 'Manage company/client records.',
-          group: 'Administration',
-          keywords: ['clients', 'companies'],
-          icon: <Building2 className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/settings/clients',
-        },
-        {
-          id: 'users',
-          label: 'User Management',
-          description: 'Invite and manage staff and client users.',
-          group: 'Administration',
-          keywords: ['users', 'permissions', 'invites'],
-          icon: <Users className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/settings/users',
-        },
-        {
-          id: 'tax-config',
-          label: 'Tax Configuration',
-          description: 'Review tax tables and payroll tax configuration.',
-          group: 'Administration',
-          keywords: ['tax config', 'rates'],
-          icon: <SlidersHorizontal className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/settings/tax-config',
-        }
-      );
-    }
-
     if (isSuperAdmin) {
-      items.push({
+      add({
         id: 'organizations',
         label: 'Organizations',
         description: 'Manage organization-level settings and accounts.',
-        group: 'Platform',
+        group: 'Administration',
         keywords: ['orgs', 'platform'],
-        icon: <Settings className="h-4 w-4" />,
+        icon: <Building2 className="h-4 w-4" />,
         kind: 'navigation',
         href: '/settings/organizations',
       });
     }
 
+    if (isAdmin) {
+      add({
+        id: 'clients',
+        label: 'Client Management',
+        description: 'Manage company/client records.',
+        group: 'Administration',
+        keywords: ['clients', 'companies'],
+        icon: <Building2 className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/clients',
+      });
+
+      add({
+        id: 'tax-config',
+        label: 'Tax Configuration',
+        description: 'Review tax tables and payroll tax configuration.',
+        group: 'Administration',
+        keywords: ['tax config', 'rates'],
+        icon: <SlidersHorizontal className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/tax-config',
+      });
+
+      add({
+        id: 'users',
+        label: 'User Management',
+        description: 'Invite and manage staff and client users.',
+        group: 'Administration',
+        keywords: ['users', 'permissions', 'invites'],
+        icon: <UserCog className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/users',
+      });
+
+      add({
+        id: 'audit-logs',
+        label: 'Audit Logs',
+        description: 'Review administrative activity and security events.',
+        group: 'Administration',
+        keywords: ['audit', 'logs', 'history'],
+        icon: <ClipboardList className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/settings/audit-logs',
+      });
+    }
+
+    if (!isClient) {
+      add({
+        id: 'new-employee',
+        label: 'Add Employee',
+        description: 'Create a new employee or contractor record.',
+        group: 'Quick actions',
+        keywords: ['new employee', 'hire', 'contractor'],
+        icon: <Users className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/employees/new',
+      });
+
+      add({
+        id: 'quarterly-compliance',
+        label: 'Quarterly Compliance Packet',
+        description: 'Open Form 500, W-1, SWICA, 941, and Schedule B workflow.',
+        group: 'Reports',
+        keywords: ['quarterly', 'form 500', 'w1', 'swica', '941', 'schedule b'],
+        icon: <ClipboardCheck className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/reports?report=quarterly_compliance_packet',
+      });
+
+      add({
+        id: 'form-941',
+        label: 'Federal Form 941 Report',
+        description: 'Open the Guam-aware Federal Form 941 worksheet.',
+        group: 'Reports',
+        keywords: ['941', 'federal', 'tax'],
+        icon: <FileSpreadsheet className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/reports?report=form_941_gu',
+      });
+
+      add({
+        id: 'tax-summary',
+        label: 'Tax Summary',
+        description: 'Review quarterly or annual payroll tax totals.',
+        group: 'Reports',
+        keywords: ['tax', 'withholding', 'fica'],
+        icon: <Calculator className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/reports?report=tax_summary',
+      });
+    }
+
     if (canSwitchCompany && companies.length > 1) {
       companies.forEach((company) => {
-        items.push({
+        add({
           id: `company-${company.id}`,
           label: company.name,
           description: `${company.active_employees} active employees · ${company.pay_frequency}`,
@@ -346,9 +380,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const filteredCommands = useMemo(() => {
     const normalizedQuery = normalize(query);
     return commands
-      .map((command) => ({ command, score: scoreCommand(command, normalizedQuery) }))
+      .map((command, index) => ({ command, index, score: scoreCommand(command, normalizedQuery) }))
       .filter((row) => row.score > 0)
-      .sort((left, right) => right.score - left.score || left.command.group.localeCompare(right.command.group) || left.command.label.localeCompare(right.command.label))
+      .sort((left, right) => right.score - left.score || left.index - right.index)
       .map((row) => row.command)
       .slice(0, 12);
   }, [commands, query]);
@@ -450,11 +484,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     runCommand(filteredCommands[safeSelectedIndex]);
                   }
                 }}
-                placeholder="Search pages, reports, actions, or clients..."
+                placeholder="Search sidebar pages, reports, actions, or clients..."
                 className="h-10 flex-1 bg-transparent text-base font-medium text-neutral-950 outline-none placeholder:text-neutral-400"
               />
               <div className="hidden items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 sm:flex">
-                {shortcutLabel()}
+                {platformShortcut('K')}
               </div>
               <button
                 type="button"
