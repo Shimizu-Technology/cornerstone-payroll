@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useOutlet } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -26,13 +26,13 @@ export function Layout() {
   const isFirstCompanyRender = useRef(true);
   const displayedCompanyIdRef = useRef(activeCompanyId);
 
-  const toggleCollapse = () => {
+  const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
       try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* ignore */ }
       return next;
     });
-  };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -63,7 +63,7 @@ export function Layout() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [toggleCollapse]);
 
   useEffect(() => {
     displayedCompanyIdRef.current = displayedCompanyId;
