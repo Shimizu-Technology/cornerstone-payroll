@@ -19,6 +19,7 @@ import {
   Printer,
   Bell,
   Link2,
+  Search,
   Settings,
   Wrench,
   ScanLine,
@@ -34,6 +35,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
+import { platformShortcut } from '@/lib/keyboard-shortcuts';
 
 interface NavItem {
   name: string;
@@ -46,6 +48,7 @@ interface SidebarProps {
   onNavigate?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenCommandPalette?: () => void;
 }
 
 const clientNavigation: NavItem[] = [
@@ -209,7 +212,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
   );
 }
 
-export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const { user, signOut } = useAuth();
   const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
@@ -217,8 +220,10 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const commandButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
+  const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const primaryNavigation = isClient ? portalNavigation : clientNavigation;
 
@@ -325,6 +330,33 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
 
       {/* Collapse toggle + user */}
       <div className="border-t border-neutral-200/70 p-3 space-y-2">
+        {onOpenCommandPalette && (
+          <button
+            ref={commandButtonRef}
+            type="button"
+            onClick={onOpenCommandPalette}
+            onMouseEnter={() => setCommandTooltipVisible(true)}
+            onMouseLeave={() => setCommandTooltipVisible(false)}
+            onFocus={() => setCommandTooltipVisible(true)}
+            onBlur={() => setCommandTooltipVisible(false)}
+            className={cn(
+              'group relative flex w-full items-center rounded-lg px-2 py-2 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-700 transition-colors',
+              collapsed ? 'justify-center' : 'gap-2'
+            )}
+            aria-label="Open command menu"
+          >
+            <Search className="h-4 w-4" />
+            {!collapsed && (
+              <>
+                <span className="text-xs">Command menu</span>
+                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 group-hover:text-neutral-600">
+                  {platformShortcut('K')}
+                </span>
+              </>
+            )}
+          </button>
+        )}
+        {collapsed && onOpenCommandPalette && <FloatingTooltip anchorRef={commandButtonRef} label={`Command menu ${platformShortcut('K')}`} visible={commandTooltipVisible} />}
         {onToggleCollapse && (
           <button
             ref={collapseButtonRef}
@@ -341,11 +373,17 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           >
             {collapsed
               ? <PanelLeftOpen className="h-4 w-4" />
-              : <><PanelLeftClose className="h-4 w-4" /><span className="text-xs">Collapse</span></>
+              : <>
+                  <PanelLeftClose className="h-4 w-4" />
+                  <span className="text-xs">Collapse</span>
+                  <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 group-hover:text-neutral-600">
+                    {platformShortcut('B')}
+                  </span>
+                </>
             }
           </button>
         )}
-        {collapsed && <FloatingTooltip anchorRef={collapseButtonRef} label="Expand sidebar" visible={collapseTooltipVisible} />}
+        {collapsed && <FloatingTooltip anchorRef={collapseButtonRef} label={`Expand sidebar ${platformShortcut('B')}`} visible={collapseTooltipVisible} />}
         <div className="relative" ref={userMenuRef}>
           {userMenuOpen && (
             <div className={cn(

@@ -1,15 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useOutlet } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
+import { CommandPalette } from './CommandPalette';
 import { useCompany } from '@/contexts/CompanyContext';
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
+
+function isEditableShortcutTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false;
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+}
 
 export function Layout() {
   const { activeCompany, activeCompanyId } = useCompany();
   const outlet = useOutlet();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
@@ -18,22 +26,44 @@ export function Layout() {
   const isFirstCompanyRender = useRef(true);
   const displayedCompanyIdRef = useRef(activeCompanyId);
 
-  const toggleCollapse = () => {
+  const toggleCollapse = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
       try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)); } catch { /* ignore */ }
       return next;
     });
-  };
+  }, []);
 
   useEffect(() => {
-    const onEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMobileNavOpen(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+        setCommandPaletteOpen(false);
+        return;
+      }
+
+      const usesCommandModifier = event.metaKey || event.ctrlKey;
+      if (!usesCommandModifier || event.altKey || event.shiftKey || isEditableShortcutTarget(event.target)) return;
+
+      const key = event.key.toLowerCase();
+      if (key === 'b') {
+        event.preventDefault();
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+          toggleCollapse();
+        } else {
+          setMobileNavOpen((current) => !current);
+        }
+      }
+
+      if (key === 'k') {
+        event.preventDefault();
+        setCommandPaletteOpen((current) => !current);
+      }
     };
 
-    window.addEventListener('keydown', onEscape);
-    return () => window.removeEventListener('keydown', onEscape);
-  }, []);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [toggleCollapse]);
 
   useEffect(() => {
     displayedCompanyIdRef.current = displayedCompanyId;
@@ -92,7 +122,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-transparent text-neutral-950">
-      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
@@ -138,6 +168,8 @@ export function Layout() {
         </main>
       </div>
 
+      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
+
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
           <button
@@ -147,7 +179,10 @@ export function Layout() {
             onClick={() => setMobileNavOpen(false)}
           />
           <div className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[320px]">
-            <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} />
+            <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => {
+              setMobileNavOpen(false);
+              setCommandPaletteOpen(true);
+            }} />
             <button
               type="button"
               className="ml-2 mt-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/30 bg-white/10 text-white backdrop-blur-sm"
