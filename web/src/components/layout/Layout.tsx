@@ -122,7 +122,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-transparent text-neutral-950">
-      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
@@ -179,7 +179,10 @@ export function Layout() {
             onClick={() => setMobileNavOpen(false)}
           />
           <div className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[320px]">
-            <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} />
+            <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => {
+              setMobileNavOpen(false);
+              setCommandPaletteOpen(true);
+            }} />
             <button
               type="button"
               className="ml-2 mt-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/30 bg-white/10 text-white backdrop-blur-sm"
