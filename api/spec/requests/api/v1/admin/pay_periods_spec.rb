@@ -834,6 +834,30 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(JSON.parse(response.body)["error"]).to include("no payroll items")
     end
 
+    it "returns not configured instead of failing when retrying disabled tax sync" do
+      pay_period.update!(
+        status: "committed",
+        committed_at: Time.current,
+        tax_sync_status: "failed",
+        tax_sync_attempts: 1,
+        tax_sync_last_error: "CST_INGEST_URL is not configured",
+        tax_sync_idempotency_key: "cpr-stale-sync"
+      )
+      allow(PayrollTaxSyncJob).to receive(:perform_later)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/retry_tax_sync"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Tax sync is not configured")
+      expect(pay_period.reload).to have_attributes(
+        tax_sync_status: nil,
+        tax_sync_attempts: 0,
+        tax_sync_last_error: nil,
+        tax_sync_idempotency_key: nil
+      )
+      expect(PayrollTaxSyncJob).not_to have_received(:perform_later)
+    end
+
     it "returns 422 when correction-commit audit validation fails" do
       source = PayPeriod.create!(
         company: company,

@@ -735,7 +735,7 @@ module Api
         # POST /api/v1/admin/pay_periods/:id/retry_tax_sync
         def retry_tax_sync
           unless PayrollTaxSyncService.configured?
-            @pay_period.update!(tax_sync_disabled_attributes)
+            @pay_period.update!(@pay_period.tax_sync_disabled_attributes)
             return render json: { error: "Tax sync is not configured" }, status: :unprocessable_entity
           end
 
