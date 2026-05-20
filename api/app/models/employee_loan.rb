@@ -85,6 +85,7 @@ class EmployeeLoan < ApplicationRecord
 
   def reactivate!(notes: nil)
     raise ArgumentError, "Paid-off loans cannot be reactivated" if paid_off?
+    raise ArgumentError, "Loan is already active" if active?
 
     update!(status: "active", notes: append_note(notes))
   end

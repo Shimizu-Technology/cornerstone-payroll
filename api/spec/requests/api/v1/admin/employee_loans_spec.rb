@@ -282,5 +282,13 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.reload.status).to eq("paid_off")
       expect(loan.paid_off_date).to eq(Date.new(2026, 4, 1))
     end
+
+    it "does not reactivate an already active loan" do
+      post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Resume" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already active")
+      expect(loan.reload.status).to eq("active")
+    end
   end
 end
