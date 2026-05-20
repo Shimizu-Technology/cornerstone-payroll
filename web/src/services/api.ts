@@ -1133,8 +1133,15 @@ export interface ImportPreviewRow {
   total_pay: number;
   pdf_employee_name: string | null;
   total_tips: number;
+  tips_boh?: number;
+  tips_foh?: number;
   tip_pool: string | null;
   loan_deduction: number;
+  recurring_loan_deduction?: number;
+  installment_beginning_balance?: number;
+  installment_new_amount?: number;
+  installment_payment?: number;
+  installment_estimated_ending_balance?: number;
 }
 
 export interface ImportPreviewResponse {

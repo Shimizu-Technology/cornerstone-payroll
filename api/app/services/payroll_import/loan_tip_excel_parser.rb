@@ -7,15 +7,23 @@ module PayrollImport
   #   TIPS - BOH: Row 4=headers, data from row 5. Col C=Last Name, Col D=First Name, Col F=Tip Amount
   #   TIPS - FOH: Row 4=headers, data from row 5. Col C=Last Name, Col D=First Name, Col F=Tip Amount
   #   LOANS (NO INSTALLMENTS): Same structure, Col F=Loan Amount
-  #   INSTALLMENT LOANS: Col C=Last, Col D=First, Col H=Payment This Period
+  #   INSTALLMENT LOANS: Col C=Last, Col D=First, Col F=Beginning Balance,
+  #     Col G=New Loan Amount, Col H=Payment This Period, Col I=Estimated Ending Balance
   #   SUMMARY: Skip (broken)
   #
   # Returns array of hashes:
   # - last_name (string)
   # - first_name (string)
   # - total_tips (decimal)
-  # - tip_pool (string): "boh" or "foh"
-  # - loan_deduction (decimal)
+  # - tips_boh (decimal)
+  # - tips_foh (decimal)
+  # - tip_pool (string): "boh", "foh", or "mixed"
+  # - loan_deduction (decimal): recurring_loan_deduction + installment_payment
+  # - recurring_loan_deduction (decimal)
+  # - installment_beginning_balance (decimal)
+  # - installment_new_amount (decimal)
+  # - installment_payment (decimal)
+  # - installment_estimated_ending_balance (decimal)
   class LoanTipExcelParser
     TIPS_BOH_SHEET = "TIPS - BOH"
     TIPS_FOH_SHEET = "TIPS - FOH"
@@ -89,8 +97,15 @@ module PayrollImport
         last_name: last_name&.strip,
         first_name: first_name&.strip,
         total_tips: 0.0,
+        tips_boh: 0.0,
+        tips_foh: 0.0,
         tip_pool: nil,
-        loan_deduction: 0.0
+        loan_deduction: 0.0,
+        recurring_loan_deduction: 0.0,
+        installment_beginning_balance: 0.0,
+        installment_new_amount: 0.0,
+        installment_payment: 0.0,
+        installment_estimated_ending_balance: 0.0
       }
     end
 
@@ -113,6 +128,7 @@ module PayrollImport
 
         emp = find_or_init(employees, last_name, first_name)
         emp[:total_tips] += amount
+        emp[pool == "boh" ? :tips_boh : :tips_foh] += amount
 
         # Preserve dual-pool visibility when an employee appears in both BOH and FOH sheets.
         if emp[:tip_pool].nil?
@@ -139,6 +155,7 @@ module PayrollImport
         next if amount.zero?
 
         emp = find_or_init(employees, last_name, first_name)
+        emp[:recurring_loan_deduction] += amount
         emp[:loan_deduction] += amount
       end
     end
@@ -149,17 +166,27 @@ module PayrollImport
       sheet = xlsx.sheet(INSTALLMENT_SHEET)
 
       (5..sheet.last_row).each do |row_num|
-        last_name = sheet.cell(row_num, 3)    # Col C
-        first_name = sheet.cell(row_num, 4)   # Col D
-        payment = sheet.cell(row_num, 8)      # Col H = Payment This Period
+        last_name = sheet.cell(row_num, 3)          # Col C
+        first_name = sheet.cell(row_num, 4)         # Col D
+        beginning_balance = sheet.cell(row_num, 6)  # Col F
+        new_amount = sheet.cell(row_num, 7)         # Col G
+        payment = sheet.cell(row_num, 8)            # Col H = Payment This Period
+        estimated_ending = sheet.cell(row_num, 9)   # Col I
 
         next if last_name.blank?
 
-        amount = to_decimal(payment)
-        next if amount.zero?
+        beginning_balance_amount = to_decimal(beginning_balance)
+        new_amount_value = to_decimal(new_amount)
+        payment_amount = to_decimal(payment)
+        estimated_ending_amount = to_decimal(estimated_ending)
+        next if [ beginning_balance_amount, new_amount_value, payment_amount, estimated_ending_amount ].all?(&:zero?)
 
         emp = find_or_init(employees, last_name, first_name)
-        emp[:loan_deduction] += amount
+        emp[:installment_beginning_balance] += beginning_balance_amount
+        emp[:installment_new_amount] += new_amount_value
+        emp[:installment_payment] += payment_amount
+        emp[:installment_estimated_ending_balance] += estimated_ending_amount
+        emp[:loan_deduction] += payment_amount
       end
     end
 
