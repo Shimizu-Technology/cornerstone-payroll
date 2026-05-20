@@ -22,7 +22,7 @@ export default function EmployeeLoans() {
   const [expandedLoanId, setExpandedLoanId] = useState<number | null>(null);
   const [expandedLoan, setExpandedLoan] = useState<EmployeeLoan | null>(null);
   const [filterEmployee, setFilterEmployee] = useState<string>('');
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('active');
   const [formData, setFormData] = useState({
     employee_id: '',
     name: '',
@@ -70,6 +70,7 @@ export default function EmployeeLoans() {
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
   const handleExpandLoan = async (id: number) => {
+    setLoanActionError(null);
     if (expandedLoanId === id) {
       setExpandedLoanId(null);
       setExpandedLoan(null);
@@ -247,8 +248,8 @@ export default function EmployeeLoans() {
             ))}
           </select>
           <select className="border rounded px-3 py-2 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="">All Statuses</option>
             <option value="active">Active</option>
+            <option value="">All Statuses</option>
             <option value="paid_off">Paid Off</option>
             <option value="suspended">Suspended</option>
           </select>
