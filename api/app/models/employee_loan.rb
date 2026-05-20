@@ -57,6 +57,8 @@ class EmployeeLoan < ApplicationRecord
   end
 
   def mark_paid_off!(date: nil, notes: nil)
+    raise ArgumentError, "Loan is already paid off" if paid_off?
+
     transaction_date = date || Date.current
 
     transaction do
@@ -76,6 +78,8 @@ class EmployeeLoan < ApplicationRecord
   end
 
   def suspend!(notes: nil)
+    raise ArgumentError, "Paid-off loans cannot be suspended" if paid_off?
+
     update!(status: "suspended", notes: append_note(notes))
   end
 
