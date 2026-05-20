@@ -237,7 +237,16 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
                         </TableCell>
                         <TableCell className="text-right">
                           {row.loan_deduction > 0 ? (
-                            formatCurrency(row.loan_deduction)
+                            <div>
+                              <p>{formatCurrency(row.loan_deduction)}</p>
+                              {((row.recurring_loan_deduction || 0) > 0 || (row.installment_payment || 0) > 0) && (
+                                <p className="mt-0.5 text-[11px] text-gray-500">
+                                  {(row.recurring_loan_deduction || 0) > 0 && `Recurring ${formatCurrency(row.recurring_loan_deduction || 0)}`}
+                                  {(row.recurring_loan_deduction || 0) > 0 && (row.installment_payment || 0) > 0 && ' · '}
+                                  {(row.installment_payment || 0) > 0 && `Installment ${formatCurrency(row.installment_payment || 0)}`}
+                                </p>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-gray-400">—</span>
                           )}
