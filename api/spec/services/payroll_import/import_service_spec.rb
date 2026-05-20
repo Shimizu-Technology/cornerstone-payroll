@@ -27,6 +27,12 @@ RSpec.describe PayrollImport::ImportService do
             loan_deduction: 2.5, installment_beginning_balance: 20.0,
             installment_new_amount: 5.0, installment_payment: 2.5,
             installment_estimated_ending_balance: 22.5, tip_pool: "boh"
+          },
+          {
+            first_name: "Jane", last_name: "D.", total_tips: 0.0,
+            loan_deduction: 1.5, installment_beginning_balance: 15.0,
+            installment_new_amount: 2.0, installment_payment: 1.5,
+            installment_estimated_ending_balance: 15.5
           }
         ]
       )
@@ -37,11 +43,11 @@ RSpec.describe PayrollImport::ImportService do
           total_tips: 17.5,
           tips_boh: 7.5,
           tips_foh: 10.0,
-          loan_deduction: 7.5,
+          loan_deduction: 9.0,
           recurring_loan_deduction: 5.0,
           installment_beginning_balance: 20.0,
-          installment_new_amount: 5.0,
-          installment_payment: 2.5,
+          installment_new_amount: 7.0,
+          installment_payment: 4.0,
           installment_estimated_ending_balance: 22.5,
           tip_pool: "mixed"
         )
