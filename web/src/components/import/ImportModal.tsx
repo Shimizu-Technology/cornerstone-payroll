@@ -263,8 +263,13 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               </Table>
             </div>
 
-            <div className="text-sm text-gray-500">
-              {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
+            <div className="space-y-1 text-sm text-gray-500">
+              <p>
+                {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
+              </p>
+              <p>
+                Excel loan deductions are applied to this payroll run only. They do not create or update Employee Loans balances yet.
+              </p>
             </div>
           </div>
         )}
