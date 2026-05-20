@@ -195,4 +195,67 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.reload.deduction_type_id).to eq(deduction_type.id)
     end
   end
+
+  describe "POST /api/v1/admin/employee_loans/:id/mark_paid_off" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Tool Advance",
+        original_amount: 150.00,
+        current_balance: 100.00,
+        payment_amount: 25.00,
+        status: "active"
+      )
+    end
+
+    it "zeros the balance and records a final payment transaction" do
+      expect {
+        post "/api/v1/admin/employee_loans/#{loan.id}/mark_paid_off",
+          params: { date: "2026-05-20", notes: "Confirmed paid outside payroll" },
+          as: :json
+      }.to change(LoanTransaction, :count).by(1)
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("paid_off")
+      expect(loan.current_balance).to eq(0)
+      expect(loan.paid_off_date).to eq(Date.new(2026, 5, 20))
+
+      transaction = loan.loan_transactions.last
+      expect(transaction.transaction_type).to eq("payment")
+      expect(transaction.amount).to eq(100)
+      expect(transaction.notes).to eq("Confirmed paid outside payroll")
+    end
+  end
+
+  describe "POST /api/v1/admin/employee_loans/:id/suspend and reactivate" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Tool Advance",
+        original_amount: 150.00,
+        current_balance: 100.00,
+        payment_amount: 25.00,
+        status: "active"
+      )
+    end
+
+    it "suspends and reactivates a loan without changing the balance" do
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause deductions" }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("suspended")
+      expect(loan.current_balance).to eq(100)
+      expect(loan.notes).to include("Pause deductions")
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Resume" }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("active")
+      expect(loan.current_balance).to eq(100)
+      expect(loan.notes).to include("Pause deductions")
+      expect(loan.notes).to include("Resume")
+    end
+  end
 end

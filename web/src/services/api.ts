@@ -2300,6 +2300,12 @@ export const employeeLoansApi = {
     api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date }),
   recordAddition: (id: number, amount: number, date?: string, notes?: string) =>
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/record_addition`, { amount, date, notes }),
+  markPaidOff: (id: number, date?: string, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/mark_paid_off`, { date, notes }),
+  suspend: (id: number, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/suspend`, { notes }),
+  reactivate: (id: number, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/reactivate`, { notes }),
 };
 
 export const clientDocumentsApi = {
