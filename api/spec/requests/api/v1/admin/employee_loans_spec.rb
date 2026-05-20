@@ -226,6 +226,20 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(transaction.amount).to eq(100)
       expect(transaction.notes).to eq("Confirmed paid outside payroll")
     end
+
+    it "does not overwrite an already paid-off loan or paid_off_date" do
+      loan.update!(status: "paid_off", current_balance: 0, paid_off_date: Date.new(2026, 4, 1))
+
+      expect {
+        post "/api/v1/admin/employee_loans/#{loan.id}/mark_paid_off",
+          params: { date: "2026-05-20" },
+          as: :json
+      }.not_to change(LoanTransaction, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already paid off")
+      expect(loan.reload.paid_off_date).to eq(Date.new(2026, 4, 1))
+    end
   end
 
   describe "POST /api/v1/admin/employee_loans/:id/suspend and reactivate" do
@@ -256,6 +270,17 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.current_balance).to eq(100)
       expect(loan.notes).to include("Pause deductions")
       expect(loan.notes).to include("Resume")
+    end
+
+    it "does not suspend an already paid-off loan" do
+      loan.update!(status: "paid_off", current_balance: 0, paid_off_date: Date.new(2026, 4, 1))
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause deductions" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Paid-off loans cannot be suspended")
+      expect(loan.reload.status).to eq("paid_off")
+      expect(loan.paid_off_date).to eq(Date.new(2026, 4, 1))
     end
   end
 end
