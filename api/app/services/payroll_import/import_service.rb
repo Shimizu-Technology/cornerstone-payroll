@@ -181,10 +181,10 @@ module PayrollImport
         tips_foh: existing[:tips_foh].to_f + incoming[:tips_foh].to_f,
         loan_deduction: existing[:loan_deduction].to_f + incoming[:loan_deduction].to_f,
         recurring_loan_deduction: existing[:recurring_loan_deduction].to_f + incoming[:recurring_loan_deduction].to_f,
-        installment_beginning_balance: existing[:installment_beginning_balance].to_f + incoming[:installment_beginning_balance].to_f,
+        installment_beginning_balance: [ existing[:installment_beginning_balance].to_f, incoming[:installment_beginning_balance].to_f ].max,
         installment_new_amount: existing[:installment_new_amount].to_f + incoming[:installment_new_amount].to_f,
         installment_payment: existing[:installment_payment].to_f + incoming[:installment_payment].to_f,
-        installment_estimated_ending_balance: existing[:installment_estimated_ending_balance].to_f + incoming[:installment_estimated_ending_balance].to_f,
+        installment_estimated_ending_balance: [ existing[:installment_estimated_ending_balance].to_f, incoming[:installment_estimated_ending_balance].to_f ].max,
         tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
       }
     end

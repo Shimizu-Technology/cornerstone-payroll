@@ -30,6 +30,7 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
       add_header_rows(sheet, title: "INSTALLMENT LOANS")
       sheet.add_row([ 1, nil, "Installment", "Employee", "Joint", 300.00, 75.00, 50.00, 325.00 ])
       sheet.add_row([ 2, nil, "Mixed", "Loan", "Kitchen", 100.00, nil, 25.00, 75.00 ])
+      sheet.add_row([ 3, nil, "Mixed", "Loan", "Kitchen", 100.00, 10.00, 15.00, 95.00 ])
     end
 
     package.serialize(tempfile.path)
@@ -90,9 +91,10 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
     expect(mixed).to include(
       recurring_loan_deduction: 20.0,
       installment_beginning_balance: 100.0,
-      installment_payment: 25.0,
-      installment_estimated_ending_balance: 75.0,
-      loan_deduction: 45.0
+      installment_new_amount: 10.0,
+      installment_payment: 40.0,
+      installment_estimated_ending_balance: 95.0,
+      loan_deduction: 60.0
     )
   ensure
     tempfile&.unlink

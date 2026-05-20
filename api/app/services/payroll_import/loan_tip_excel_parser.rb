@@ -182,10 +182,10 @@ module PayrollImport
         next if [ beginning_balance_amount, new_amount_value, payment_amount, estimated_ending_amount ].all?(&:zero?)
 
         emp = find_or_init(employees, last_name, first_name)
-        emp[:installment_beginning_balance] += beginning_balance_amount
+        emp[:installment_beginning_balance] = [ emp[:installment_beginning_balance], beginning_balance_amount ].max
         emp[:installment_new_amount] += new_amount_value
         emp[:installment_payment] += payment_amount
-        emp[:installment_estimated_ending_balance] += estimated_ending_amount
+        emp[:installment_estimated_ending_balance] = [ emp[:installment_estimated_ending_balance], estimated_ending_amount ].max
         emp[:loan_deduction] += payment_amount
       end
     end
