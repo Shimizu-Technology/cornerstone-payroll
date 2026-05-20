@@ -283,6 +283,17 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.paid_off_date).to eq(Date.new(2026, 4, 1))
     end
 
+    it "does not suspend an already suspended loan" do
+      loan.update!(status: "suspended", notes: "Already paused")
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause again" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already suspended")
+      expect(loan.reload.status).to eq("suspended")
+      expect(loan.notes).to eq("Already paused")
+    end
+
     it "does not reactivate an already active loan" do
       post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Resume" }, as: :json
 

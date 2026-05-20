@@ -79,6 +79,7 @@ class EmployeeLoan < ApplicationRecord
 
   def suspend!(notes: nil)
     raise ArgumentError, "Paid-off loans cannot be suspended" if paid_off?
+    raise ArgumentError, "Loan is already suspended" if status == "suspended"
 
     update!(status: "suspended", notes: append_note(notes))
   end
