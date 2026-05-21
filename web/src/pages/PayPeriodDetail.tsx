@@ -1206,9 +1206,9 @@ export function PayPeriodDetail() {
                     <TableHead className={`w-[300px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Regular Hours</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Overtime Hours</TableHead>
-                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[110px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1434,21 +1434,21 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[190px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[160px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={tipsMap[String(emp.id)]?.amount ?? null}
                               onValueChange={(value) => updateTip(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
                             <select
                               value={tipsMap[String(emp.id)]?.pool || ''}
                               onChange={(e) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, e.target.value)}
-                              className="border border-gray-300 rounded-md px-0.5 py-1.5 text-[10px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                              className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                             >
                               <option value="">—</option>
                               <option value="foh">FOH</option>
@@ -1459,14 +1459,14 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[150px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={tipsPaidOutMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
@@ -1474,14 +1474,14 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[150px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={loansMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateLoan(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
@@ -1507,7 +1507,7 @@ export function PayPeriodDetail() {
         {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
           const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
-          const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
+          const hasLoans = payrollItems.some(i => toNumber(i.loan_deduction) > 0);
           const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
           const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
           const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
@@ -1581,7 +1581,7 @@ export function PayPeriodDetail() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <Table stickyHeader containerClassName="max-h-[34rem]">
+              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1640px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead stickyLeft className={`w-[260px] min-w-[260px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Employee</TableHead>
@@ -1590,9 +1590,9 @@ export function PayPeriodDetail() {
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
                     {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Earn.</TableHead>}
                     {hasCustomDeductions && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Ded.</TableHead>}
-                    {hasTips && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {hasTipsPaidOut && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
-                    {hasLoans && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
@@ -1826,8 +1826,8 @@ export function PayPeriodDetail() {
                           )}
                           {hasLoans && (
                           <TableCell className={`text-right ${rowTone}`}>
-                            {toNumber(item.loan_payment) > 0 ? (
-                              formatCurrency(toNumber(item.loan_payment))
+                            {toNumber(item.loan_deduction) > 0 ? (
+                              formatCurrency(toNumber(item.loan_deduction))
                             ) : (
                               <span className="text-gray-300">—</span>
                             )}
@@ -1908,7 +1908,7 @@ export function PayPeriodDetail() {
                   {(() => {
                     const totalTips = reportablePayrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
                     const totalTipsPaidOut = reportablePayrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
-                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
+                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + toNumber(i.loan_deduction), 0);
                     return (
                       <TableRow className="bg-gray-50 font-bold border-t-2">
                         <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({reportablePayrollItems.length} employees)</TableCell>
