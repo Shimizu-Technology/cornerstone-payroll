@@ -420,10 +420,17 @@ export function PayPeriodDetail() {
           : { regular: entry.regular, overtime: entry.overtime };
       });
 
-      // Build salary overrides payload for variable salary employees
+      // Build salary overrides payload for variable salary employees.
+      // Send zeroes too so clearing a variable salary amount removes stale overrides.
+      const includedEmployeeIds = new Set([
+        ...payrollItems.map((pi) => pi.employee_id),
+        ...additionalEmployeeIds,
+      ]);
       const salary_overrides: Record<string, number> = {};
-      Object.entries(salaryOverrideMap).forEach(([empId, amount]) => {
-        if (amount > 0) salary_overrides[empId] = amount;
+      employees.forEach((employee) => {
+        if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
+          salary_overrides[String(employee.id)] = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+        }
       });
 
       // Build tips payload
@@ -1723,6 +1730,7 @@ export function PayPeriodDetail() {
                               if (isSalary) {
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
                                 if (override > 0) return <span className="text-indigo-600" title="Salary Override">{formatCurrency(override)}/period</span>;
+                                if (empRecord?.salary_type === 'variable') return <span className="text-indigo-600 font-medium">Variable</span>;
                                 const payRate = toNumber(item.pay_rate);
                                 const isPerPeriod = empRecord?.salary_type === 'per_period';
                                 if (isPerPeriod) return `${formatCurrency(payRate)}/period`;

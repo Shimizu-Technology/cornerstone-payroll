@@ -45,6 +45,8 @@ class SalaryPayrollCalculator < PayrollCalculator
   def calculate_gross_pay
     if payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
+    elsif employee.salary_type == "variable"
+      @base_pay = 0.0
     elsif employee.salary_type == "per_period"
       @base_pay = payroll_item.pay_rate.to_f
     else
