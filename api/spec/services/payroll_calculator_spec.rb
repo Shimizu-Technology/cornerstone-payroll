@@ -114,6 +114,31 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.withholding_tax).to eq(base_fit - 15.0)
     end
 
+    it "does not use stored pay_rate as base pay for variable salary employees without an override" do
+      variable_employee = create(
+        :employee,
+        company: company,
+        department: department,
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 225_062.76,
+        pay_frequency: "biweekly"
+      )
+      variable_item = create(
+        :payroll_item,
+        employee: variable_employee,
+        pay_period: pay_period,
+        employment_type: "salary",
+        pay_rate: variable_employee.pay_rate,
+        salary_override: nil,
+        reported_tips: 331.93
+      )
+
+      described_class.for(variable_employee, variable_item).calculate
+
+      expect(variable_item.gross_pay).to eq(331.93)
+    end
+
     it "floors adjusted FIT at zero when the adjustment would make it negative" do
       payroll_item.withholding_tax_adjustment = -10_000
 
