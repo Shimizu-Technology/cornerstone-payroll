@@ -46,12 +46,24 @@ module PayrollAdjustable
   end
 
   def active_payroll_adjustments
-    self.class.normalize_payroll_adjustments(payroll_adjustments).select { |adjustment| adjustment["active"] != false }
+    self.class.normalize_payroll_adjustments(payroll_adjustment_entries).select { |adjustment| adjustment["active"] != false }
   end
 
   def payroll_adjustments_total(*treatments)
     active_payroll_adjustments.sum do |adjustment|
       treatments.include?(adjustment["treatment"]) ? adjustment["amount"].to_f : 0.0
+    end
+  end
+
+  private
+
+  def payroll_adjustment_entries
+    if respond_to?(:payroll_adjustments)
+      payroll_adjustments
+    elsif respond_to?(:default_payroll_adjustments)
+      default_payroll_adjustments
+    else
+      []
     end
   end
 end
