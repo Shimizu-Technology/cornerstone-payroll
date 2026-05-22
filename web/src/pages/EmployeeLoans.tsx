@@ -190,6 +190,11 @@ export default function EmployeeLoans() {
   };
 
   const handleReactivate = async (loan: EmployeeLoan) => {
+    const confirmed = window.confirm(
+      `Reactivate ${loan.employee_name}'s ${loan.name}? This loan will count as active again and may be deducted from future paychecks.`
+    );
+    if (!confirmed) return;
+
     setLoanActionId(loan.id);
     setLoanActionError(null);
     try {
