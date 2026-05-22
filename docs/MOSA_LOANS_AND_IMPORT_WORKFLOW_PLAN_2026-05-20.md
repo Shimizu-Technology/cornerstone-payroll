@@ -177,8 +177,9 @@ Recurring adjustment feature implemented in PR #90:
   - post-tax deduction — reduces net pay after taxes.
   - memo only — appears as an inactive/payroll-neutral note category for accounting context.
 - These adjustments are separate from MoSa's tips/loan import.
+- Legacy employee-level recurring custom earnings are migrated into payroll adjustments as `taxable_addition` entries, then cleared from the legacy field to avoid duplicate future payroll runs.
 - New payroll items copy the employee defaults into the pay-period snapshot, so historical payroll does not change when future defaults are edited.
-- The employee UI includes plain-English explanations and caution text to help payroll staff choose the correct treatment.
+- The employee UI includes plain-English explanations and caution text to help payroll staff choose the correct treatment, and no longer shows the deprecated recurring custom earnings editor.
 
 ## Non-goals for PR 1
 
