@@ -134,6 +134,21 @@ RSpec.describe Employee, type: :model do
     end
   end
 
+  describe "recurring payroll adjustments" do
+    it "reads employee default adjustments for active adjustment helpers" do
+      employee = build(
+        :employee,
+        default_payroll_adjustments: [
+          { "label" => "Rent", "amount" => 150.0, "treatment" => "post_tax_deduction", "active" => true },
+          { "label" => "Inactive", "amount" => 25.0, "treatment" => "post_tax_deduction", "active" => false }
+        ]
+      )
+
+      expect(employee.active_payroll_adjustments.map { |adjustment| adjustment["label"] }).to eq([ "Rent" ])
+      expect(employee.payroll_adjustments_total("post_tax_deduction")).to eq(150.0)
+    end
+  end
+
   describe "address validation" do
     it "allows W-2 employees to be saved without mailing address fields" do
       employee = build(:employee, address_line1: "", city: "", state: "", zip: "")
