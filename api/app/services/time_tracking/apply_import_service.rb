@@ -77,6 +77,7 @@ module TimeTracking
             item.employment_type = employee.employment_type
             item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
             item.custom_earnings = employee.default_custom_earnings
+            item.payroll_adjustments = employee.default_payroll_adjustments
           end
           preserved_holiday_hours = item.holiday_hours.to_f
           preserved_pto_hours = item.pto_hours.to_f

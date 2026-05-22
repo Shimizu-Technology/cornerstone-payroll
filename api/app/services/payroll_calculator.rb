@@ -196,11 +196,19 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
-    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total
+    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
+  end
+
+  def pre_tax_payroll_adjustments_total
+    payroll_item.pre_tax_payroll_adjustments_total
+  end
+
+  def non_taxable_additions_total
+    payroll_item.non_taxable_pay.to_f + payroll_item.non_taxable_payroll_adjustments_total
   end
 
   def calculate_totals
@@ -208,7 +216,7 @@ class PayrollCalculator
       payroll_item.reported_tips.to_f +
       payroll_item.bonus.to_f +
       custom_earnings_total +
-      payroll_item.non_taxable_pay.to_f
+      non_taxable_additions_total
     ).round(2)
 
     itemized_pre_tax = 0.0
@@ -255,6 +263,7 @@ class PayrollCalculator
       payroll_item.retirement_payment.to_f +
       payroll_item.roth_retirement_payment.to_f +
       itemized_pre_tax +
+      pre_tax_payroll_adjustments_total +
       post_tax_deductions +
       custom_deductions_total +
       payroll_item.tips_paid_out.to_f
@@ -269,7 +278,7 @@ class PayrollCalculator
     payroll_item.net_pay = (
       payroll_item.gross_pay -
       payroll_item.total_deductions +
-      payroll_item.non_taxable_pay.to_f
+      non_taxable_additions_total
     ).round(2)
     payroll_item.net_pay = 0.0 if payroll_item.net_pay.negative? && !payroll_item.correction_entry?
   end

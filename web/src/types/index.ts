@@ -92,6 +92,21 @@ export interface CustomDeduction {
   amount: number;
 }
 
+export type PayrollAdjustmentTreatment =
+  | 'taxable_addition'
+  | 'non_taxable_addition'
+  | 'pre_tax_deduction'
+  | 'post_tax_deduction'
+  | 'memo';
+
+export interface PayrollAdjustment {
+  label: string;
+  amount: number;
+  treatment: PayrollAdjustmentTreatment;
+  notes?: string;
+  active?: boolean;
+}
+
 export interface Employee {
   id: number;
   company_id: number;
@@ -135,6 +150,7 @@ export interface Employee {
   zip?: string;
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
+  default_payroll_adjustments?: PayrollAdjustment[];
   created_at: string;
   updated_at: string;
 }
@@ -174,6 +190,7 @@ export interface EmployeeFormData {
   zip?: string;
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
+  default_payroll_adjustments?: PayrollAdjustment[];
 }
 
 // ----------------
@@ -333,6 +350,13 @@ export interface PayrollItem {
   total_deductions?: number;
   custom_deductions?: CustomDeduction[];
   custom_deductions_total?: number;
+  payroll_adjustments?: PayrollAdjustment[];
+  payroll_adjustment_totals?: {
+    taxable_additions: number;
+    non_taxable_additions: number;
+    pre_tax_deductions: number;
+    post_tax_deductions: number;
+  };
   // Import fields (MoSa)
   tips?: number;
   loan_deduction?: number;

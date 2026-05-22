@@ -261,6 +261,7 @@ module Api
                 payroll_item.hours_worked = 0
                 payroll_item.additional_withholding = employee.additional_withholding.to_f
                 payroll_item.custom_earnings = employee.default_custom_earnings
+                payroll_item.payroll_adjustments = employee.default_payroll_adjustments
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
@@ -314,6 +315,10 @@ module Api
 
               if params[:custom_deductions] && params[:custom_deductions][employee_id.to_s]
                 payroll_item.custom_deductions = PayrollItem.normalize_custom_deduction_entries(params[:custom_deductions][employee_id.to_s])
+              end
+
+              if params[:payroll_adjustments] && params[:payroll_adjustments][employee_id.to_s]
+                payroll_item.payroll_adjustments = PayrollItem.normalize_payroll_adjustments(params[:payroll_adjustments][employee_id.to_s])
               end
 
               # Calculate payroll
@@ -781,7 +786,8 @@ module Api
           permitted = raw.permit(
             *scalar_fields,
             custom_earnings: [ :label, :amount ],
-            custom_deductions: [ :label, :amount ]
+            custom_deductions: [ :label, :amount ],
+            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
           ).to_h
 
           if raw[:custom_columns_data].present?
@@ -984,6 +990,13 @@ module Api
             loan_payment: item.loan_payment,
             insurance_payment: item.insurance_payment,
             custom_deductions: item.custom_deductions || [],
+            payroll_adjustments: item.payroll_adjustments || [],
+            payroll_adjustment_totals: {
+              taxable_additions: item.taxable_payroll_adjustments_total,
+              non_taxable_additions: item.non_taxable_payroll_adjustments_total,
+              pre_tax_deductions: item.pre_tax_payroll_adjustments_total,
+              post_tax_deductions: item.post_tax_payroll_adjustments_total
+            },
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             employer_social_security_tax: item.employer_social_security_tax,
@@ -1017,7 +1030,7 @@ module Api
         end
 
         def submitted_payroll_employee_ids
-          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings custom_deductions].flat_map do |key|
+          keyed_ids = %i[salary_overrides tips tips_paid_out loan_deductions custom_earnings custom_deductions payroll_adjustments].flat_map do |key|
             params[key].respond_to?(:keys) ? params[key].keys : []
           end
 

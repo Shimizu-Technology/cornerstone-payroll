@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Employee < ApplicationRecord
+  include PayrollAdjustable
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
@@ -44,6 +45,7 @@ class Employee < ApplicationRecord
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_w4_currency_precision
+  before_validation :normalize_default_payroll_adjustments
 
   # Encrypt sensitive fields
   encrypts :ssn_encrypted, deterministic: true
@@ -290,6 +292,10 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def normalize_default_payroll_adjustments
+    self.default_payroll_adjustments = self.class.normalize_payroll_adjustments(default_payroll_adjustments)
+  end
 
   def cached_ytd_matches?(year, as_of_pay_date, before_pay_period_id)
     if as_of_pay_date.nil? && before_pay_period_id.nil?

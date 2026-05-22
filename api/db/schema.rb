@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_18_100100) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_21_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -362,6 +362,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_100100) do
     t.datetime "created_at", null: false
     t.date "date_of_birth"
     t.jsonb "default_custom_earnings", default: [], null: false
+    t.jsonb "default_payroll_adjustments", default: [], null: false
     t.bigint "department_id"
     t.string "email"
     t.decimal "employer_retirement_match_rate", precision: 5, scale: 4, default: "0.0"
@@ -859,6 +860,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_18_100100) do
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
     t.bigint "pay_period_id", null: false
     t.decimal "pay_rate", precision: 12, scale: 6, null: false
+    t.jsonb "payroll_adjustments", default: [], null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
     t.string "replaced_check_number"
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
