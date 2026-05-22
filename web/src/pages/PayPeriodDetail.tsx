@@ -62,6 +62,11 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const effectiveLoanDeduction = (item: PayrollItem): number => {
+  const calculatedLoanPayment = toNumber(item.loan_payment);
+  return calculatedLoanPayment > 0 ? calculatedLoanPayment : toNumber(item.loan_deduction);
+};
+
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
   const configuredRates = employee.wage_rates || [];
@@ -1520,7 +1525,7 @@ export function PayPeriodDetail() {
         {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
           const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
-          const hasLoans = payrollItems.some(i => toNumber(i.loan_deduction) > 0);
+          const hasLoans = payrollItems.some(i => effectiveLoanDeduction(i) > 0);
           const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
           const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
           const hasPayrollAdjustments = payrollItems.some(i => (i.payroll_adjustments || []).some((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0));
@@ -1864,8 +1869,8 @@ export function PayPeriodDetail() {
                           )}
                           {hasLoans && (
                           <TableCell className={`text-right ${rowTone}`}>
-                            {toNumber(item.loan_deduction) > 0 ? (
-                              formatCurrency(toNumber(item.loan_deduction))
+                            {effectiveLoanDeduction(item) > 0 ? (
+                              formatCurrency(effectiveLoanDeduction(item))
                             ) : (
                               <span className="text-gray-300">—</span>
                             )}
@@ -1946,7 +1951,7 @@ export function PayPeriodDetail() {
                   {(() => {
                     const totalTips = reportablePayrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
                     const totalTipsPaidOut = reportablePayrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
-                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + toNumber(i.loan_deduction), 0);
+                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + effectiveLoanDeduction(i), 0);
                     return (
                       <TableRow className="bg-gray-50 font-bold border-t-2">
                         <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({reportablePayrollItems.length} employees)</TableCell>
