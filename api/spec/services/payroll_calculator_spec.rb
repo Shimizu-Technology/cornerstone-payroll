@@ -139,6 +139,24 @@ RSpec.describe PayrollCalculator do
       expect(variable_item.gross_pay).to eq(331.93)
     end
 
+    it "applies recurring payroll adjustments according to their tax treatment" do
+      payroll_item.payroll_adjustments = [
+        { "label" => "Taxable Bonus", "amount" => 100.0, "treatment" => "taxable_addition", "active" => true },
+        { "label" => "Mileage", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Approved Pre-Tax", "amount" => 40.0, "treatment" => "pre_tax_deduction", "active" => true },
+        { "label" => "Rent Repayment", "amount" => 30.0, "treatment" => "post_tax_deduction", "active" => true },
+        { "label" => "Owner Memo", "amount" => 999.0, "treatment" => "memo", "active" => true }
+      ]
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(1_100.0)
+      expect(payroll_item.total_additions).to eq(125.0)
+      expect(payroll_item.total_deductions).to be >= 70.0
+      expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Taxable Bonus", "Mileage")
+      expect(payroll_item.payroll_item_earnings.map(&:label)).not_to include("Owner Memo")
+    end
+
     it "floors adjusted FIT at zero when the adjustment would make it negative" do
       payroll_item.withholding_tax_adjustment = -10_000
 

@@ -151,6 +151,35 @@ Scope:
 - Flag final-payment caps.
 - Capture/display source email notes and expected MoSa pay total.
 
+## PPE 2026-05-16 reconciliation notes
+
+Cornerstone's finalized payroll summary showed an important source-of-truth rule for MoSa imports:
+
+- The Revel PDF is reliable for hours and employee presence/absence review.
+- The Revel PDF gross pay should not be treated as authoritative because it may use stale/wrong rates.
+- Employee master payroll rates are the wage authority for calculating hourly gross pay.
+- The MoSa loan/tip workbook is reliable for tips, but loan deductions still need review against Cornerstone's final handling.
+
+Open questions to confirm with Cornerstone/MoSa:
+
+- Madela Severin: MoSa's workbook showed recurring loan `$454.00` plus installment payment `$75.00`, but Cornerstone's final payroll deducted only `$454.00`. Confirm whether Cornerstone accidentally missed the `$75.00` installment payment and whether a correction is needed.
+- Sara/owner pass-throughs: Cornerstone's final payroll added items that were not in MoSa's loan/tip workbook, including bonus, allotment, rent, loan reimbursements, and auto-loan reimbursement. Confirm where these values came from and whether they are recurring every pay period or one-off for this cycle.
+- Sara/owner adjustment classification: For each pass-through/adjustment, confirm whether it is taxable wages, non-taxable reimbursement/pass-through, pre-tax deduction, post-tax deduction, or memo/owner allocation.
+- Brandon Mariano: Brandon is a 1099 contractor/manual check case, not included in Cornerstone's W-2 payroll check PDF. Confirm whether his imported MoSa loan deduction should still apply to his contractor check and whether contractor checks need a separate report/export from W-2 payroll.
+- Accidental duplicate employees: Addison's duplicate contractor record was accidental and terminated only because there is no delete UI yet. Consider whether the app needs a guarded "delete accidental employee" admin action.
+
+Recurring adjustment feature implemented in PR #90:
+
+- Employee profiles can store recurring payroll adjustments with explicit classification:
+  - taxable addition — adds taxable wages and increases payroll taxes.
+  - non-taxable addition — adds to net pay without increasing taxable wages.
+  - pre-tax deduction — reduces withholding wages before income-tax calculation and reduces net pay.
+  - post-tax deduction — reduces net pay after taxes.
+  - memo only — appears as an inactive/payroll-neutral note category for accounting context.
+- These adjustments are separate from MoSa's tips/loan import.
+- New payroll items copy the employee defaults into the pay-period snapshot, so historical payroll does not change when future defaults are edited.
+- The employee UI includes plain-English explanations and caution text to help payroll staff choose the correct treatment.
+
 ## Non-goals for PR 1
 
 - No changes to tax calculations.

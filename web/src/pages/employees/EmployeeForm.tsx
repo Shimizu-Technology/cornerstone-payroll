@@ -9,7 +9,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate } from '@/types';
+import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -43,6 +43,7 @@ const initialFormData: EmployeeFormData = {
   state: '',
   zip: '',
   default_custom_earnings: [],
+  default_payroll_adjustments: [],
 };
 
 interface FormErrors {
@@ -57,6 +58,15 @@ interface CustomEarningFormRow {
   temp_id: string;
   label: string;
   amount: number;
+}
+
+interface PayrollAdjustmentFormRow {
+  temp_id: string;
+  label: string;
+  amount: number;
+  treatment: PayrollAdjustmentTreatment;
+  notes: string;
+  active: boolean;
 }
 
 type W4MonetaryField =
@@ -88,6 +98,45 @@ const toBoolean = (value: unknown): boolean => value === true || value === 1 || 
 const toCurrencyDraft = (value: number | null | undefined): string =>
   String(roundCurrencyValue(Number(value) || 0));
 
+const adjustmentTreatmentOptions: Array<{
+  value: PayrollAdjustmentTreatment;
+  label: string;
+  helper: string;
+  caution?: string;
+}> = [
+  {
+    value: 'taxable_addition',
+    label: 'Adds taxable pay',
+    helper: 'Use for bonuses, allowances, or extra compensation. Increases gross wages and payroll taxes.',
+  },
+  {
+    value: 'non_taxable_addition',
+    label: 'Adds non-taxable reimbursement',
+    helper: 'Use for true reimbursements or pass-through payments. Increases net pay only.',
+    caution: 'If this is compensation for work, it is usually taxable.',
+  },
+  {
+    value: 'post_tax_deduction',
+    label: 'Deducts after taxes',
+    helper: 'Use for loans, rent repayments, cash tips already paid out, or other after-tax deductions.',
+  },
+  {
+    value: 'pre_tax_deduction',
+    label: 'Deducts before taxes',
+    helper: 'Reduces taxable wages before withholding is calculated.',
+    caution: 'Use only for approved pre-tax deductions confirmed by Cornerstone.',
+  },
+  {
+    value: 'memo',
+    label: 'Memo only',
+    helper: 'For internal/accounting notes that should not change gross pay, taxes, or net pay.',
+  },
+];
+
+const adjustmentTreatmentCopy = (treatment: PayrollAdjustmentTreatment) => (
+  adjustmentTreatmentOptions.find((option) => option.value === treatment) || adjustmentTreatmentOptions[0]
+);
+
 const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormData => ({
   ...form,
   pay_rate: roundCurrencyValue(form.pay_rate),
@@ -110,6 +159,7 @@ export function EmployeeForm() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
   const [defaultCustomEarnings, setDefaultCustomEarnings] = useState<CustomEarningFormRow[]>([]);
+  const [defaultPayrollAdjustments, setDefaultPayrollAdjustments] = useState<PayrollAdjustmentFormRow[]>([]);
   const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
     additional_withholding: toCurrencyDraft(initialFormData.additional_withholding),
     w4_dependent_credit: toCurrencyDraft(initialFormData.w4_dependent_credit),
@@ -171,6 +221,7 @@ export function EmployeeForm() {
         state: employee.state || '',
         zip: employee.zip || '',
         default_custom_earnings: employee.default_custom_earnings || [],
+        default_payroll_adjustments: employee.default_payroll_adjustments || [],
       };
       setForm(normalizeEmployeeMonetaryFields(nextForm));
       setW4CurrencyDrafts({
@@ -199,6 +250,14 @@ export function EmployeeForm() {
         temp_id: crypto.randomUUID(),
         label: earning.label,
         amount: toNumberOrZero(earning.amount),
+      })));
+      setDefaultPayrollAdjustments((employee.default_payroll_adjustments || []).map((adjustment) => ({
+        temp_id: crypto.randomUUID(),
+        label: adjustment.label,
+        amount: toNumberOrZero(adjustment.amount),
+        treatment: adjustment.treatment,
+        notes: adjustment.notes || '',
+        active: adjustment.active !== false,
       })));
       
       setEmployeeStatus(employee.status || 'active');
@@ -332,6 +391,33 @@ export function EmployeeForm() {
     }))
     .filter((earning) => earning.label !== '' && earning.amount > 0);
 
+  const addDefaultPayrollAdjustment = () => {
+    setDefaultPayrollAdjustments((prev) => [
+      ...prev,
+      { temp_id: crypto.randomUUID(), label: '', amount: 0, treatment: 'post_tax_deduction', notes: '', active: true },
+    ]);
+  };
+
+  const updateDefaultPayrollAdjustment = (tempId: string, patch: Partial<PayrollAdjustmentFormRow>) => {
+    setDefaultPayrollAdjustments((prev) => prev.map((adjustment) => (
+      adjustment.temp_id === tempId ? { ...adjustment, ...patch } : adjustment
+    )));
+  };
+
+  const removeDefaultPayrollAdjustment = (tempId: string) => {
+    setDefaultPayrollAdjustments((prev) => prev.filter((adjustment) => adjustment.temp_id !== tempId));
+  };
+
+  const normalizeDefaultPayrollAdjustments = () => defaultPayrollAdjustments
+    .map((adjustment) => ({
+      label: adjustment.label.trim(),
+      amount: roundCurrencyValue(Number(adjustment.amount) || 0),
+      treatment: adjustment.treatment,
+      notes: adjustment.notes.trim(),
+      active: adjustment.active !== false,
+    }))
+    .filter((adjustment) => adjustment.label !== '' && adjustment.amount > 0);
+
   const normalizeWageRates = (): WageRateFormRow[] => {
     const activeRates = wageRates
       .map((rate) => ({
@@ -393,6 +479,11 @@ export function EmployeeForm() {
     if (new Set(defaultEarningLabels).size !== defaultEarningLabels.length) {
       newErrors.default_custom_earnings = ['Recurring earning labels must be unique'];
     }
+    const defaultAdjustments = normalizeDefaultPayrollAdjustments();
+    const adjustmentKeys = defaultAdjustments.map((adjustment) => `${adjustment.treatment}:${adjustment.label.toLowerCase()}`);
+    if (new Set(adjustmentKeys).size !== adjustmentKeys.length) {
+      newErrors.default_payroll_adjustments = ['Recurring adjustment labels must be unique within the same treatment'];
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -429,6 +520,7 @@ export function EmployeeForm() {
             }))
           : undefined,
         default_custom_earnings: normalizeDefaultCustomEarnings(),
+        default_payroll_adjustments: normalizeDefaultPayrollAdjustments(),
       };
 
       let savedEmployeeId: number;
@@ -913,6 +1005,96 @@ export function EmployeeForm() {
             <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addDefaultCustomEarning}>
               <Plus className="mr-1 h-4 w-4" />
               Add Recurring Earning
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-6 border-slate-200 bg-slate-50/60">
+          <CardHeader>
+            <CardTitle>Recurring Payroll Adjustments</CardTitle>
+            <CardDescription>
+              Use these for recurring additions, reimbursements, deductions, or memo items. Each item is copied into new payroll runs and can be reviewed before finalizing.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {adjustmentTreatmentOptions.map((option) => (
+                <div key={option.value} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-900">{option.label}</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
+                  {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
+                </div>
+              ))}
+            </div>
+
+            {getFieldError('default_payroll_adjustments') && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {getFieldError('default_payroll_adjustments')}
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {defaultPayrollAdjustments.map((adjustment) => {
+                const treatment = adjustmentTreatmentCopy(adjustment.treatment);
+                return (
+                  <div key={adjustment.temp_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_17rem_auto]">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
+                        <Input
+                          value={adjustment.label}
+                          onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })}
+                          placeholder="Rent Charlie"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
+                        <NumericInput
+                          value={adjustment.amount}
+                          onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })}
+                          min={0}
+                          fixedDecimalsOnBlur={2}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">What should this do?</label>
+                        <Select
+                          value={adjustment.treatment}
+                          onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}
+                        >
+                          {adjustmentTreatmentOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-xs leading-5 text-slate-600">
+                      {treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}
+                    </p>
+                    <div className="mt-3">
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
+                      <Input
+                        value={adjustment.notes}
+                        onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })}
+                        placeholder="Per Cornerstone recurring setup"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addDefaultPayrollAdjustment}>
+              <Plus className="mr-1 h-4 w-4" />
+              Add Recurring Adjustment
             </Button>
           </CardContent>
         </Card>

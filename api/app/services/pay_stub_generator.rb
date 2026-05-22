@@ -184,8 +184,8 @@ class PayStubGenerator
         ]
       end
     else
-      # Salary — subtract bonus, tips, and custom earnings so they appear as separate lines
-      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+      # Salary — subtract bonus, tips, and taxable adjustment earnings so they appear as separate lines
+      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
       earnings_data << [
         "Salary",
         "—",

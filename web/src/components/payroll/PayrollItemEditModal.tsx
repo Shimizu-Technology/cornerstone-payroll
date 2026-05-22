@@ -10,9 +10,10 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { Select } from '@/components/ui/select';
 import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
-import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours } from '@/types';
+import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment } from '@/types';
 
 interface CustomEarningField {
   label: string;
@@ -23,6 +24,22 @@ interface CustomDeductionField {
   label: string;
   amount: string;
 }
+
+interface PayrollAdjustmentField {
+  label: string;
+  amount: string;
+  treatment: PayrollAdjustmentTreatment;
+  notes: string;
+  active: boolean;
+}
+
+const adjustmentTreatmentOptions: Array<{ value: PayrollAdjustmentTreatment; label: string; helper: string }> = [
+  { value: 'taxable_addition', label: 'Adds taxable pay', helper: 'Increases gross wages and payroll taxes.' },
+  { value: 'non_taxable_addition', label: 'Adds non-taxable reimbursement', helper: 'Increases net pay only.' },
+  { value: 'post_tax_deduction', label: 'Deducts after taxes', helper: 'Taxes first, then this lowers the check.' },
+  { value: 'pre_tax_deduction', label: 'Deducts before taxes', helper: 'Use only for approved pre-tax deductions.' },
+  { value: 'memo', label: 'Memo only', helper: 'No effect on gross, taxes, or net.' },
+];
 
 interface PayrollItemEditModalProps {
   open: boolean;
@@ -53,6 +70,7 @@ interface EditableFields {
   check_memo: string;
   custom_earnings: CustomEarningField[];
   custom_deductions: CustomDeductionField[];
+  payroll_adjustments: PayrollAdjustmentField[];
 }
 
 export function PayrollItemEditModal({
@@ -83,6 +101,7 @@ export function PayrollItemEditModal({
     check_memo: '',
     custom_earnings: [],
     custom_deductions: [],
+    payroll_adjustments: [],
   });
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -126,6 +145,15 @@ export function PayrollItemEditModal({
           : [],
         custom_deductions: (item.custom_deductions && item.custom_deductions.length > 0)
           ? item.custom_deductions.map(deduction => ({ label: deduction.label, amount: String(deduction.amount) }))
+          : [],
+        payroll_adjustments: (item.payroll_adjustments && item.payroll_adjustments.length > 0)
+          ? item.payroll_adjustments.map(adjustment => ({
+              label: adjustment.label,
+              amount: String(adjustment.amount),
+              treatment: adjustment.treatment,
+              notes: adjustment.notes || '',
+              active: adjustment.active !== false,
+            }))
           : [],
       });
       setError(null);
@@ -227,6 +255,28 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const handlePayrollAdjustmentChange = (index: number, patch: Partial<PayrollAdjustmentField>) => {
+    setFields((prev) => {
+      const updated = [...prev.payroll_adjustments];
+      updated[index] = { ...updated[index], ...patch };
+      return { ...prev, payroll_adjustments: updated };
+    });
+  };
+
+  const addPayrollAdjustment = () => {
+    setFields((prev) => ({
+      ...prev,
+      payroll_adjustments: [...prev.payroll_adjustments, { label: '', amount: '0', treatment: 'post_tax_deduction', notes: '', active: true }],
+    }));
+  };
+
+  const removePayrollAdjustment = (index: number) => {
+    setFields((prev) => ({
+      ...prev,
+      payroll_adjustments: prev.payroll_adjustments.filter((_, i) => i !== index),
+    }));
+  };
+
   const handleSaveAndRecalculate = async () => {
     setSaving(true);
     setError(null);
@@ -251,6 +301,15 @@ export function PayrollItemEditModal({
         custom_deductions: fields.custom_deductions
           .filter(deduction => deduction.label.trim() && parseFloat(deduction.amount) > 0)
           .map(deduction => ({ label: deduction.label.trim(), amount: parseFloat(deduction.amount) || 0 })),
+        payroll_adjustments: fields.payroll_adjustments
+          .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
+          .map(adjustment => ({
+            label: adjustment.label.trim(),
+            amount: parseFloat(adjustment.amount) || 0,
+            treatment: adjustment.treatment,
+            notes: adjustment.notes.trim(),
+            active: adjustment.active !== false,
+          })),
       };
 
       if (hasMultiRate) {
@@ -610,6 +669,74 @@ export function PayrollItemEditModal({
                 </button>
               </div>
             ))}
+          </div>
+
+          {/* Payroll Adjustments */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium text-gray-700">Payroll Adjustments</h4>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Use these when the adjustment needs a specific tax treatment. These are copied from employee defaults but can be changed for this check.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={addPayrollAdjustment}
+                className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800"
+              >
+                + Add Adjustment
+              </button>
+            </div>
+            {fields.payroll_adjustments.length === 0 && (
+              <p className="text-xs italic text-gray-400">No payroll adjustments added.</p>
+            )}
+            <div className="space-y-3">
+              {fields.payroll_adjustments.map((adjustment, idx) => {
+                const selected = adjustmentTreatmentOptions.find((option) => option.value === adjustment.treatment) || adjustmentTreatmentOptions[0];
+                return (
+                  <div key={idx} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_8rem_13rem_auto] md:items-end">
+                      <Input
+                        placeholder="Label (e.g. Rent Charlie)"
+                        value={adjustment.label}
+                        onChange={(e) => handlePayrollAdjustmentChange(idx, { label: e.target.value })}
+                      />
+                      <NumericInput
+                        placeholder="Amount"
+                        value={adjustment.amount === '' ? null : Number(adjustment.amount)}
+                        onValueChange={(value) => handlePayrollAdjustmentChange(idx, { amount: value == null ? '' : String(value) })}
+                        min={0}
+                        fixedDecimalsOnBlur={2}
+                      />
+                      <Select
+                        value={adjustment.treatment}
+                        onChange={(e) => handlePayrollAdjustmentChange(idx, { treatment: e.target.value as PayrollAdjustmentTreatment })}
+                      >
+                        {adjustmentTreatmentOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => removePayrollAdjustment(idx)}
+                        className="text-sm font-medium text-red-500 hover:text-red-700 md:px-2"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{selected.helper}</p>
+                    <Input
+                      className="mt-2"
+                      placeholder="Source / notes"
+                      value={adjustment.notes}
+                      onChange={(e) => handlePayrollAdjustmentChange(idx, { notes: e.target.value })}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Tax Adjustments — not applicable to contractors */}
