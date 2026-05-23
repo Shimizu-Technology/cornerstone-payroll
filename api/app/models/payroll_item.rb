@@ -170,6 +170,25 @@ class PayrollItem < ApplicationRecord
     payroll_adjustments_total("post_tax_deduction")
   end
 
+  def payroll_adjustments_overridden?
+    return false unless custom_columns_data.is_a?(Hash)
+
+    ActiveModel::Type::Boolean.new.cast(custom_columns_data["payroll_adjustments_overridden"] || custom_columns_data[:payroll_adjustments_overridden])
+  end
+
+  def mark_payroll_adjustments_overridden!
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data["payroll_adjustments_overridden"] = true
+    self.custom_columns_data = data
+  end
+
+  def apply_default_payroll_adjustments_if_unset!(source_employee = employee)
+    return if payroll_adjustments.present? || payroll_adjustments_overridden?
+
+    defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    self.payroll_adjustments = defaults if defaults.present?
+  end
+
   def self.normalize_custom_deduction_entries(entries)
     Array(entries).filter_map do |entry|
       data = normalize_json_entry(entry)
