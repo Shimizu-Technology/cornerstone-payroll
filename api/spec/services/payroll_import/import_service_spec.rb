@@ -7,6 +7,50 @@ RSpec.describe PayrollImport::ImportService do
   let(:pay_period) { create(:pay_period, company: company) }
   let(:service) { described_class.new(pay_period) }
 
+  describe "#apply!" do
+    it "copies employee recurring payroll adjustments onto MoSa imported payroll items before calculating" do
+      employee = create(
+        :employee,
+        company: company,
+        first_name: "Sara",
+        last_name: "Doctor",
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 225_062.76,
+        default_payroll_adjustments: [
+          { "label" => "Test taxable bonus", "amount" => 100.0, "treatment" => "taxable_addition", "active" => true },
+          { "label" => "Test reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true },
+          { "label" => "Test pre-tax deduction", "amount" => 10.0, "treatment" => "pre_tax_deduction", "active" => true },
+          { "label" => "Test rent payment", "amount" => 15.0, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 0,
+            overtime_hours: 0,
+            total_tips: 0,
+            loan_deduction: 200.0
+          }
+        ]
+      )
+
+      expect(result[:errors]).to be_empty
+      payroll_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(payroll_item.import_source).to eq("mosa_revel")
+      expect(payroll_item.payroll_adjustments).to contain_exactly(
+        include("label" => "Test taxable bonus", "amount" => 100.0, "treatment" => "taxable_addition"),
+        include("label" => "Test reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition"),
+        include("label" => "Test pre-tax deduction", "amount" => 10.0, "treatment" => "pre_tax_deduction"),
+        include("label" => "Test rent payment", "amount" => 15.0, "treatment" => "post_tax_deduction")
+      )
+    end
+  end
+
   describe "#preview" do
     it "merges excel rows that fuzzy-match to the same employee" do
       employee = create(:employee, company: company, first_name: "Jane", last_name: "Doe")
