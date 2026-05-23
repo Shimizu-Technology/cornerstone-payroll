@@ -139,6 +139,23 @@ RSpec.describe PayrollCalculator do
       expect(variable_item.gross_pay).to eq(331.93)
     end
 
+    it "keeps legacy direct insurance deductions when an imported loan deduction is present" do
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+      payroll_item.loan_payment = 200.0
+      payroll_item.insurance_payment = 75.0
+      payroll_item.withholding_tax = 10.0
+      payroll_item.social_security_tax = 20.0
+      payroll_item.medicare_tax = 5.0
+      payroll_item.retirement_payment = 0.0
+      payroll_item.roth_retirement_payment = 0.0
+      payroll_item.payroll_item_deductions.clear
+
+      described_class.new(employee, payroll_item).send(:calculate_totals)
+
+      expect(payroll_item.total_deductions).to eq(310.0)
+    end
+
     it "uses imported loan_deduction as the paycheck loan payment even when itemized loan setup exists" do
       loan_type = DeductionType.create!(
         company: company,

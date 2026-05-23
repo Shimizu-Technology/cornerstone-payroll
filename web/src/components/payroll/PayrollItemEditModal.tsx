@@ -15,16 +15,6 @@ import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment } from '@/types';
 
-interface CustomEarningField {
-  label: string;
-  amount: string;
-}
-
-interface CustomDeductionField {
-  label: string;
-  amount: string;
-}
-
 interface PayrollAdjustmentField {
   label: string;
   amount: string;
@@ -67,8 +57,6 @@ interface EditableFields {
   wage_rate_hours: PayrollItemWageRateHours[];
   check_date: string;
   check_memo: string;
-  custom_earnings: CustomEarningField[];
-  custom_deductions: CustomDeductionField[];
   payroll_adjustments: PayrollAdjustmentField[];
 }
 
@@ -98,8 +86,6 @@ export function PayrollItemEditModal({
     wage_rate_hours: [],
     check_date: '',
     check_memo: '',
-    custom_earnings: [],
-    custom_deductions: [],
     payroll_adjustments: [],
   });
   const [saving, setSaving] = useState(false);
@@ -139,12 +125,6 @@ export function PayrollItemEditModal({
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
         check_memo: item.check_memo || '',
-        custom_earnings: (item.custom_earnings && item.custom_earnings.length > 0)
-          ? item.custom_earnings.map(ce => ({ label: ce.label, amount: String(ce.amount) }))
-          : [],
-        custom_deductions: (item.custom_deductions && item.custom_deductions.length > 0)
-          ? item.custom_deductions.map(deduction => ({ label: deduction.label, amount: String(deduction.amount) }))
-          : [],
         payroll_adjustments: (item.payroll_adjustments && item.payroll_adjustments.length > 0)
           ? item.payroll_adjustments.map(adjustment => ({
               label: adjustment.label,
@@ -210,50 +190,6 @@ export function PayrollItemEditModal({
     });
   };
 
-  const handleCustomEarningChange = (index: number, field: 'label' | 'amount', value: string) => {
-    setFields((prev) => {
-      const updated = [...prev.custom_earnings];
-      updated[index] = { ...updated[index], [field]: value };
-      return { ...prev, custom_earnings: updated };
-    });
-  };
-
-  const addCustomEarning = () => {
-    setFields((prev) => ({
-      ...prev,
-      custom_earnings: [...prev.custom_earnings, { label: '', amount: '0' }],
-    }));
-  };
-
-  const removeCustomEarning = (index: number) => {
-    setFields((prev) => ({
-      ...prev,
-      custom_earnings: prev.custom_earnings.filter((_, i) => i !== index),
-    }));
-  };
-
-  const handleCustomDeductionChange = (index: number, field: 'label' | 'amount', value: string) => {
-    setFields((prev) => {
-      const updated = [...prev.custom_deductions];
-      updated[index] = { ...updated[index], [field]: value };
-      return { ...prev, custom_deductions: updated };
-    });
-  };
-
-  const addCustomDeduction = () => {
-    setFields((prev) => ({
-      ...prev,
-      custom_deductions: [...prev.custom_deductions, { label: '', amount: '0' }],
-    }));
-  };
-
-  const removeCustomDeduction = (index: number) => {
-    setFields((prev) => ({
-      ...prev,
-      custom_deductions: prev.custom_deductions.filter((_, i) => i !== index),
-    }));
-  };
-
   const handlePayrollAdjustmentChange = (index: number, patch: Partial<PayrollAdjustmentField>) => {
     setFields((prev) => {
       const updated = [...prev.payroll_adjustments];
@@ -294,12 +230,6 @@ export function PayrollItemEditModal({
         withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
         check_date: fields.check_date || null,
         check_memo: fields.check_memo || null,
-        custom_earnings: fields.custom_earnings
-          .filter(ce => ce.label.trim() && parseFloat(ce.amount) > 0)
-          .map(ce => ({ label: ce.label.trim(), amount: parseFloat(ce.amount) || 0 })),
-        custom_deductions: fields.custom_deductions
-          .filter(deduction => deduction.label.trim() && parseFloat(deduction.amount) > 0)
-          .map(deduction => ({ label: deduction.label.trim(), amount: parseFloat(deduction.amount) || 0 })),
         payroll_adjustments: fields.payroll_adjustments
           .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
           .map(adjustment => ({
@@ -576,98 +506,6 @@ export function PayrollItemEditModal({
                 </p>
               </div>
             </div>
-          </div>
-
-          {/* Custom Earnings (Stipends, etc.) */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-medium text-gray-700">Custom Earnings</h4>
-              <button
-                type="button"
-                onClick={addCustomEarning}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-              >
-                + Add Custom Earning
-              </button>
-            </div>
-            <p className="text-xs text-gray-400 mb-2">
-              Named taxable earnings (e.g. Chief Stipend, Asst Chief Stipend). Shows on check/stub by name.
-            </p>
-            {fields.custom_earnings.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No custom earnings added.</p>
-            )}
-            {fields.custom_earnings.map((ce, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <Input
-                  placeholder="Label (e.g. Chief Stipend)"
-                  value={ce.label}
-                  onChange={(e) => handleCustomEarningChange(idx, 'label', e.target.value)}
-                  className="flex-1"
-                />
-                <NumericInput
-                  placeholder="Amount"
-                  value={ce.amount === '' ? null : Number(ce.amount)}
-                  onValueChange={(value) => handleCustomEarningChange(idx, 'amount', value == null ? '' : String(value))}
-                  min={0}
-                  fixedDecimalsOnBlur={2}
-                  className="w-28"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeCustomEarning(idx)}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* One-Time Deductions */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-medium text-gray-700">One-Time Deductions</h4>
-              <button
-                type="button"
-                onClick={addCustomDeduction}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-              >
-                + Add Deduction
-              </button>
-            </div>
-            <p className="text-xs text-gray-400 mb-2">
-              Post-tax deductions for this check only, such as a cash advance already paid. Shows on the pay stub by name.
-            </p>
-            {fields.custom_deductions.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No one-time deductions added.</p>
-            )}
-            {fields.custom_deductions.map((deduction, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <Input
-                  placeholder="Label (e.g. Cash Advance)"
-                  value={deduction.label}
-                  onChange={(e) => handleCustomDeductionChange(idx, 'label', e.target.value)}
-                  className="flex-1"
-                />
-                <NumericInput
-                  placeholder="Amount"
-                  value={deduction.amount === '' ? null : Number(deduction.amount)}
-                  onValueChange={(value) => handleCustomDeductionChange(idx, 'amount', value == null ? '' : String(value))}
-                  min={0}
-                  fixedDecimalsOnBlur={2}
-                  className="w-28"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeCustomDeduction(idx)}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
           </div>
 
           {/* Payroll Adjustments */}
