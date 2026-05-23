@@ -249,8 +249,10 @@ class PayrollCalculator
     has_itemized_deductions = payroll_item.payroll_item_deductions.any?
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
+    legacy_insurance_payment = has_itemized_deductions ? 0.0 : payroll_item.insurance_payment.to_f
+
     post_tax_deductions = if imported_loan_payment.positive?
-      (itemized_post_tax - itemized_loan_payment) + imported_loan_payment
+      (itemized_post_tax - itemized_loan_payment) + imported_loan_payment + legacy_insurance_payment
     elsif has_itemized_deductions
       itemized_post_tax
     else
