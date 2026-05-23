@@ -164,7 +164,7 @@ Open questions to confirm with Cornerstone/MoSa:
 
 - Madela Severin: MoSa's workbook showed recurring loan `$454.00` plus installment payment `$75.00`, but Cornerstone's final payroll deducted only `$454.00`. Confirm whether Cornerstone accidentally missed the `$75.00` installment payment and whether a correction is needed.
 - Sara/owner pass-throughs: Cornerstone's final payroll added items that were not in MoSa's loan/tip workbook, including bonus, allotment, rent, loan reimbursements, and auto-loan reimbursement. Confirm where these values came from and whether they are recurring every pay period or one-off for this cycle.
-- Sara/owner adjustment classification: For each pass-through/adjustment, confirm whether it is taxable wages, non-taxable reimbursement/pass-through, pre-tax deduction, post-tax deduction, or memo/owner allocation.
+- Sara/owner adjustment classification: For each pass-through/adjustment, confirm whether it is taxable wages, non-taxable reimbursement/pass-through, pre-tax deduction, or post-tax deduction.
 - Brandon Mariano: Brandon is a 1099 contractor/manual check case, not included in Cornerstone's W-2 payroll check PDF. Confirm whether his imported MoSa loan deduction should still apply to his contractor check and whether contractor checks need a separate report/export from W-2 payroll.
 - Accidental duplicate employees: Addison's duplicate contractor record was accidental and terminated only because there is no delete UI yet. Consider whether the app needs a guarded "delete accidental employee" admin action.
 
@@ -175,7 +175,6 @@ Recurring adjustment feature implemented in PR #90:
   - non-taxable addition — adds to net pay without increasing taxable wages.
   - pre-tax deduction — reduces withholding wages before income-tax calculation and reduces net pay.
   - post-tax deduction — reduces net pay after taxes.
-  - memo only — appears as an inactive/payroll-neutral note category for accounting context.
 - These adjustments are separate from MoSa's tips/loan import.
 - Legacy employee-level recurring custom earnings are migrated into payroll adjustments as `taxable_addition` entries, then cleared from the legacy field to avoid duplicate future payroll runs.
 - New payroll items copy the employee defaults into the pay-period snapshot, so historical payroll does not change when future defaults are edited.

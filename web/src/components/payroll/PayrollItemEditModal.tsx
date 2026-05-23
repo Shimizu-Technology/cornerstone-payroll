@@ -37,8 +37,7 @@ const adjustmentTreatmentOptions: Array<{ value: PayrollAdjustmentTreatment; lab
   { value: 'taxable_addition', label: 'Adds taxable pay', helper: 'Increases gross wages and payroll taxes.' },
   { value: 'non_taxable_addition', label: 'Adds non-taxable reimbursement', helper: 'Increases net pay only.' },
   { value: 'post_tax_deduction', label: 'Deducts after taxes', helper: 'Taxes first, then this lowers the check.' },
-  { value: 'pre_tax_deduction', label: 'Deducts before taxes', helper: 'Use only for approved pre-tax deductions.' },
-  { value: 'memo', label: 'Memo only', helper: 'No effect on gross, taxes, or net.' },
+  { value: 'pre_tax_deduction', label: 'Deducts before taxes', helper: 'Use only for approved pre-tax deductions confirmed by an accountant or payroll administrator.' },
 ];
 
 interface PayrollItemEditModalProps {
@@ -698,7 +697,7 @@ export function PayrollItemEditModal({
                   <div key={idx} className="rounded-lg border border-slate-200 bg-white p-3">
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_8rem_13rem_auto] md:items-end">
                       <Input
-                        placeholder="Label (e.g. Rent Charlie)"
+                        placeholder="Label (e.g. Uniform repayment)"
                         value={adjustment.label}
                         onChange={(e) => handlePayrollAdjustmentChange(idx, { label: e.target.value })}
                       />

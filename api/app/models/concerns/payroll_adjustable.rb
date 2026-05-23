@@ -8,15 +8,13 @@ module PayrollAdjustable
     non_taxable_addition
     pre_tax_deduction
     post_tax_deduction
-    memo
   ].freeze
 
   TREATMENT_LABELS = {
     "taxable_addition" => "Adds taxable pay",
     "non_taxable_addition" => "Adds non-taxable reimbursement",
     "pre_tax_deduction" => "Deducts before taxes",
-    "post_tax_deduction" => "Deducts after taxes",
-    "memo" => "Memo only"
+    "post_tax_deduction" => "Deducts after taxes"
   }.freeze
 
   class_methods do
