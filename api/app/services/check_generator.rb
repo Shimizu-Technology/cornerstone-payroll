@@ -168,7 +168,8 @@ class CheckGenerator
   def cur_deds
     payroll_item.retirement_payment.to_f + payroll_item.roth_retirement_payment.to_f +
       payroll_item.insurance_payment.to_f + payroll_item.loan_payment.to_f +
-      payroll_item.tips_paid_out.to_f + payroll_item.custom_deductions_total.to_f
+      payroll_item.tips_paid_out.to_f + payroll_item.custom_deductions_total.to_f +
+      payroll_item.pre_tax_payroll_adjustments_total.to_f + payroll_item.post_tax_payroll_adjustments_total.to_f
   end
 
   # -----------------------------------------------------------------------
@@ -406,7 +407,7 @@ class CheckGenerator
           end
         end
       else
-        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+        ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
         rows << [label_or("Contract Fee"), "-", "-", fn(payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - ce_total), fn(ytd[:gross])]
       end
     elsif payroll_item.hourly?
@@ -433,7 +434,7 @@ class CheckGenerator
     else
       sal_label = "Salary"
       sal_label = "Salary - #{employee.first_name&.first} #{employee.last_name}" if employee.first_name.present?
-      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+      ce_total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
       sal_cur = payroll_item.gross_pay.to_f - payroll_item.bonus.to_f - payroll_item.reported_tips.to_f - ce_total
       rows << [sal_label, "-", "-", fn(sal_cur), fn(ytd[:gross])]
     end
@@ -444,6 +445,13 @@ class CheckGenerator
     Array(payroll_item.custom_earnings).each do |ce|
       amt = ce["amount"].to_f
       rows << [truncate_label(ce["label"].presence || "Other Earning"), "-", "-", fn(amt), fn(amt)] if amt > 0
+    end
+
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless adjustment["treatment"] == "taxable_addition"
+
+      amt = adjustment["amount"].to_f
+      rows << [truncate_label(adjustment["label"].presence || "Taxable Adjustment"), "-", "-", fn(amt), fn(amt)] if amt > 0
     end
 
     rows << [
@@ -491,6 +499,11 @@ class CheckGenerator
       rows << ["401(k) Pre-Tax", fn(payroll_item.retirement_payment), fn(ytd[:retire])]
     end
     rows << ["Non-Taxable", fn(payroll_item.non_taxable_pay), "-"] if payroll_item.non_taxable_pay.to_f > 0
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless adjustment["treatment"] == "non_taxable_addition"
+
+      rows << [truncate_label(adjustment["label"].presence || "Non-Taxable"), fn(adjustment["amount"]), "-"] if adjustment["amount"].to_f > 0
+    end
     rows
   end
 
@@ -509,6 +522,13 @@ class CheckGenerator
       label = deduction["label"].presence || "Other Deduction"
       rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)]
     end
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
+
+      amount = adjustment["amount"].to_f
+      label = adjustment["label"].presence || "Payroll Adjustment"
+      rows << [truncate_label(label), fn(amount), fn(ytd_custom_deductions_by_label[label.to_s.strip.downcase].to_f)] if amount.positive?
+    end
 
     if rows.any?
       rows << [
@@ -522,9 +542,14 @@ class CheckGenerator
 
   def ytd_custom_deductions_by_label
     @ytd_custom_deductions_by_label ||= begin
-      labels = Array(payroll_item.custom_deductions)
-        .filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence }
-        .uniq
+      labels = (
+        Array(payroll_item.custom_deductions).filter_map { |deduction| deduction["label"].to_s.strip.downcase.presence } +
+        payroll_item.active_payroll_adjustments.filter_map do |adjustment|
+          next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
+
+          adjustment["label"].to_s.strip.downcase.presence
+        end
+      ).uniq
       if labels.empty?
         {}
       else
@@ -535,13 +560,24 @@ class CheckGenerator
 
             totals[label] += deduction["amount"].to_f
           end
+
+          item.active_payroll_adjustments.each do |adjustment|
+            next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
+
+            label = adjustment["label"].to_s.strip.downcase
+            next unless labels.include?(label)
+
+            totals[label] += adjustment["amount"].to_f
+          end
         end
       end
     end
   end
 
   def ytd_custom_deductions_total
-    @ytd_custom_deductions_total ||= custom_deduction_items.sum { |item| item.custom_deductions_total.to_f }
+    @ytd_custom_deductions_total ||= custom_deduction_items.sum do |item|
+      item.custom_deductions_total.to_f + item.pre_tax_payroll_adjustments_total.to_f + item.post_tax_payroll_adjustments_total.to_f
+    end
   end
 
   def custom_deduction_items
@@ -549,7 +585,7 @@ class CheckGenerator
 
     employee.payroll_items
       .joins(:pay_period)
-      .select(:id, :custom_deductions)
+      .select(:id, :custom_deductions, :payroll_adjustments)
       .not_voided
       .where(pay_periods: {
         company_id: company.id,

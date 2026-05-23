@@ -39,7 +39,7 @@ import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel'
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -50,9 +50,20 @@ interface HoursEntry {
 const TABLE_STICKY_TOP_CLASS = 'top-0';
 
 const MAX_HOURS_PER_PERIOD = 200;
+const adjustmentTreatmentLabels: Record<PayrollAdjustmentTreatment, string> = {
+  taxable_addition: 'Taxable add.',
+  non_taxable_addition: 'Non-taxable add.',
+  pre_tax_deduction: 'Pre-tax ded.',
+  post_tax_deduction: 'Post-tax ded.',
+};
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const effectiveLoanDeduction = (item: PayrollItem): number => {
+  const calculatedLoanPayment = toNumber(item.loan_payment);
+  return calculatedLoanPayment > 0 ? calculatedLoanPayment : toNumber(item.loan_deduction);
 };
 
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
@@ -420,11 +431,28 @@ export function PayPeriodDetail() {
           : { regular: entry.regular, overtime: entry.overtime };
       });
 
-      // Build salary overrides payload for variable salary employees
+      // Build salary overrides payload for variable salary employees.
+      // Send zeroes too so clearing a variable salary amount removes stale overrides.
+      const includedEmployeeIds = new Set([
+        ...payrollItems.map((pi) => pi.employee_id),
+        ...additionalEmployeeIds,
+      ]);
       const salary_overrides: Record<string, number> = {};
-      Object.entries(salaryOverrideMap).forEach(([empId, amount]) => {
-        if (amount > 0) salary_overrides[empId] = amount;
+      const missingVariableSalaryEmployees: string[] = [];
+      employees.forEach((employee) => {
+        if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
+          const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          salary_overrides[String(employee.id)] = amount;
+          if (amount <= 0) {
+            missingVariableSalaryEmployees.push(`${employee.first_name} ${employee.last_name}`);
+          }
+        }
       });
+
+      if (missingVariableSalaryEmployees.length > 0) {
+        setError(`Enter period pay before recalculating for variable salary employee(s): ${missingVariableSalaryEmployees.join(', ')}`);
+        return;
+      }
 
       // Build tips payload
       const tips: Record<string, { amount: number; pool: string }> = {};
@@ -675,6 +703,15 @@ export function PayPeriodDetail() {
   );
   const totalCustomDeductions = reportablePayrollItems.reduce(
     (sum, item) => sum + (item.custom_deductions || []).reduce((itemSum, deduction) => itemSum + toNumber(deduction.amount), 0),
+    0
+  );
+  const totalPayrollAdjustments = reportablePayrollItems.reduce(
+    (sum, item) => sum + (item.payroll_adjustments || [])
+      .filter((adjustment) => adjustment.active !== false)
+      .reduce((itemSum, adjustment) => {
+        const amount = toNumber(adjustment.amount);
+        return itemSum + (adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction' ? -amount : amount);
+      }, 0),
     0
   );
 
@@ -1199,9 +1236,9 @@ export function PayPeriodDetail() {
                     <TableHead className={`w-[300px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Regular Hours</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Overtime Hours</TableHead>
-                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[140px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[110px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1427,21 +1464,21 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[190px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[160px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={tipsMap[String(emp.id)]?.amount ?? null}
                               onValueChange={(value) => updateTip(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
                             <select
                               value={tipsMap[String(emp.id)]?.pool || ''}
                               onChange={(e) => updateTip(emp.id, tipsMap[String(emp.id)]?.amount || 0, e.target.value)}
-                              className="border border-gray-300 rounded-md px-0.5 py-1.5 text-[10px] focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                              className="w-20 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
                             >
                               <option value="">—</option>
                               <option value="foh">FOH</option>
@@ -1452,14 +1489,14 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[150px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={tipsPaidOutMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateTipsPaidOut(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
@@ -1467,14 +1504,14 @@ export function PayPeriodDetail() {
                         </TableCell>
                         )}
                         {showTipsLoans && (
-                        <TableCell className={`text-center align-top ${rowTone}`}>
-                          <div className="flex items-center gap-1 justify-center">
+                        <TableCell className={`min-w-[150px] text-center align-top ${rowTone}`}>
+                          <div className="flex min-w-[120px] items-center justify-center gap-2">
                             <span className="text-xs text-gray-400">$</span>
                             <NumericInput
                               value={loansMap[String(emp.id)] ?? null}
                               onValueChange={(value) => updateLoan(emp.id, value ?? 0)}
                               placeholder="0"
-                              className="w-16 text-center border border-gray-300 rounded-md px-1 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                              className="w-24 text-center border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                               min={0}
                               fixedDecimalsOnBlur={2}
                             />
@@ -1500,10 +1537,11 @@ export function PayPeriodDetail() {
         {!isDraft && payrollItems.length > 0 && (() => {
           const hasTips = payrollItems.some(i => toNumber(i.reported_tips) > 0);
           const hasTipsPaidOut = payrollItems.some(i => toNumber(i.tips_paid_out) > 0);
-          const hasLoans = payrollItems.some(i => toNumber(i.loan_payment) > 0);
+          const hasLoans = payrollItems.some(i => effectiveLoanDeduction(i) > 0);
           const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
           const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
-          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
+          const hasPayrollAdjustments = payrollItems.some(i => (i.payroll_adjustments || []).some((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0));
+          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
@@ -1574,7 +1612,7 @@ export function PayPeriodDetail() {
               </div>
             </div>
             <div className="overflow-x-auto">
-              <Table stickyHeader containerClassName="max-h-[34rem]">
+              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1640px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead stickyLeft className={`w-[260px] min-w-[260px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Employee</TableHead>
@@ -1583,9 +1621,10 @@ export function PayPeriodDetail() {
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
                     {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Earn.</TableHead>}
                     {hasCustomDeductions && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Ded.</TableHead>}
-                    {hasTips && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {hasTipsPaidOut && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
-                    {hasLoans && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {hasPayrollAdjustments && <TableHead className={`min-w-[180px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Adjustments</TableHead>}
+                    {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
+                    {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
@@ -1723,6 +1762,7 @@ export function PayPeriodDetail() {
                               if (isSalary) {
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
                                 if (override > 0) return <span className="text-indigo-600" title="Salary Override">{formatCurrency(override)}/period</span>;
+                                if (empRecord?.salary_type === 'variable') return <span className="text-indigo-600 font-medium">Variable</span>;
                                 const payRate = toNumber(item.pay_rate);
                                 const isPerPeriod = empRecord?.salary_type === 'per_period';
                                 if (isPerPeriod) return `${formatCurrency(payRate)}/period`;
@@ -1785,6 +1825,28 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           )}
+                          {hasPayrollAdjustments && (
+                          <TableCell className={`text-right ${rowTone}`}>
+                            {(item.payroll_adjustments || []).some((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0) ? (
+                              <div className="space-y-1">
+                                {(item.payroll_adjustments || []).filter((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0).map((adjustment, index) => {
+                                  const isDeduction = adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction';
+                                  return (
+                                    <div key={`${item.id}-payroll-adjustment-${index}-${adjustment.label}-${adjustment.amount}`} className="text-xs">
+                                      <span className="text-gray-500">{adjustment.label}</span>{' '}
+                                      <span className={isDeduction ? 'font-medium text-red-600' : 'font-medium text-emerald-700'}>
+                                        {isDeduction ? '-' : '+'}{formatCurrency(toNumber(adjustment.amount))}
+                                      </span>
+                                      <div className="text-[10px] uppercase tracking-wide text-slate-400">{adjustmentTreatmentLabels[adjustment.treatment]}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </TableCell>
+                          )}
                           {hasTips && (
                           <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.reported_tips) > 0 ? (
@@ -1818,8 +1880,8 @@ export function PayPeriodDetail() {
                           )}
                           {hasLoans && (
                           <TableCell className={`text-right ${rowTone}`}>
-                            {toNumber(item.loan_payment) > 0 ? (
-                              formatCurrency(toNumber(item.loan_payment))
+                            {effectiveLoanDeduction(item) > 0 ? (
+                              formatCurrency(effectiveLoanDeduction(item))
                             ) : (
                               <span className="text-gray-300">—</span>
                             )}
@@ -1900,13 +1962,18 @@ export function PayPeriodDetail() {
                   {(() => {
                     const totalTips = reportablePayrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
                     const totalTipsPaidOut = reportablePayrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
-                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + toNumber(i.loan_payment), 0);
+                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + effectiveLoanDeduction(i), 0);
                     return (
                       <TableRow className="bg-gray-50 font-bold border-t-2">
                         <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({reportablePayrollItems.length} employees)</TableCell>
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
                         {hasCustomDeductions && <TableCell className="text-right text-red-600">{totalCustomDeductions > 0 ? formatCurrency(totalCustomDeductions) : '—'}</TableCell>}
+                        {hasPayrollAdjustments && (
+                          <TableCell className={totalPayrollAdjustments < 0 ? 'text-right text-red-600' : 'text-right'}>
+                            {totalPayrollAdjustments !== 0 ? `${totalPayrollAdjustments < 0 ? '-' : ''}${formatCurrency(Math.abs(totalPayrollAdjustments))}` : '—'}
+                          </TableCell>
+                        )}
                         {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
                         {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
                         {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}

@@ -10,19 +10,25 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
+import { Select } from '@/components/ui/select';
 import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
-import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours } from '@/types';
+import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment } from '@/types';
 
-interface CustomEarningField {
+interface PayrollAdjustmentField {
   label: string;
   amount: string;
+  treatment: PayrollAdjustmentTreatment;
+  notes: string;
+  active: boolean;
 }
 
-interface CustomDeductionField {
-  label: string;
-  amount: string;
-}
+const adjustmentTreatmentOptions: Array<{ value: PayrollAdjustmentTreatment; label: string; helper: string }> = [
+  { value: 'taxable_addition', label: 'Adds taxable pay', helper: 'Increases gross wages and payroll taxes.' },
+  { value: 'non_taxable_addition', label: 'Adds non-taxable reimbursement', helper: 'Increases net pay only.' },
+  { value: 'post_tax_deduction', label: 'Deducts after taxes', helper: 'Taxes first, then this lowers the check.' },
+  { value: 'pre_tax_deduction', label: 'Deducts before taxes', helper: 'Use only for approved pre-tax deductions confirmed by an accountant or payroll administrator.' },
+];
 
 interface PayrollItemEditModalProps {
   open: boolean;
@@ -51,8 +57,7 @@ interface EditableFields {
   wage_rate_hours: PayrollItemWageRateHours[];
   check_date: string;
   check_memo: string;
-  custom_earnings: CustomEarningField[];
-  custom_deductions: CustomDeductionField[];
+  payroll_adjustments: PayrollAdjustmentField[];
 }
 
 export function PayrollItemEditModal({
@@ -81,8 +86,7 @@ export function PayrollItemEditModal({
     wage_rate_hours: [],
     check_date: '',
     check_memo: '',
-    custom_earnings: [],
-    custom_deductions: [],
+    payroll_adjustments: [],
   });
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -121,11 +125,14 @@ export function PayrollItemEditModal({
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
         check_memo: item.check_memo || '',
-        custom_earnings: (item.custom_earnings && item.custom_earnings.length > 0)
-          ? item.custom_earnings.map(ce => ({ label: ce.label, amount: String(ce.amount) }))
-          : [],
-        custom_deductions: (item.custom_deductions && item.custom_deductions.length > 0)
-          ? item.custom_deductions.map(deduction => ({ label: deduction.label, amount: String(deduction.amount) }))
+        payroll_adjustments: (item.payroll_adjustments && item.payroll_adjustments.length > 0)
+          ? item.payroll_adjustments.map(adjustment => ({
+              label: adjustment.label,
+              amount: String(adjustment.amount),
+              treatment: adjustment.treatment,
+              notes: adjustment.notes || '',
+              active: adjustment.active !== false,
+            }))
           : [],
       });
       setError(null);
@@ -183,47 +190,25 @@ export function PayrollItemEditModal({
     });
   };
 
-  const handleCustomEarningChange = (index: number, field: 'label' | 'amount', value: string) => {
+  const handlePayrollAdjustmentChange = (index: number, patch: Partial<PayrollAdjustmentField>) => {
     setFields((prev) => {
-      const updated = [...prev.custom_earnings];
-      updated[index] = { ...updated[index], [field]: value };
-      return { ...prev, custom_earnings: updated };
+      const updated = [...prev.payroll_adjustments];
+      updated[index] = { ...updated[index], ...patch };
+      return { ...prev, payroll_adjustments: updated };
     });
   };
 
-  const addCustomEarning = () => {
+  const addPayrollAdjustment = () => {
     setFields((prev) => ({
       ...prev,
-      custom_earnings: [...prev.custom_earnings, { label: '', amount: '0' }],
+      payroll_adjustments: [...prev.payroll_adjustments, { label: '', amount: '0', treatment: 'post_tax_deduction', notes: '', active: true }],
     }));
   };
 
-  const removeCustomEarning = (index: number) => {
+  const removePayrollAdjustment = (index: number) => {
     setFields((prev) => ({
       ...prev,
-      custom_earnings: prev.custom_earnings.filter((_, i) => i !== index),
-    }));
-  };
-
-  const handleCustomDeductionChange = (index: number, field: 'label' | 'amount', value: string) => {
-    setFields((prev) => {
-      const updated = [...prev.custom_deductions];
-      updated[index] = { ...updated[index], [field]: value };
-      return { ...prev, custom_deductions: updated };
-    });
-  };
-
-  const addCustomDeduction = () => {
-    setFields((prev) => ({
-      ...prev,
-      custom_deductions: [...prev.custom_deductions, { label: '', amount: '0' }],
-    }));
-  };
-
-  const removeCustomDeduction = (index: number) => {
-    setFields((prev) => ({
-      ...prev,
-      custom_deductions: prev.custom_deductions.filter((_, i) => i !== index),
+      payroll_adjustments: prev.payroll_adjustments.filter((_, i) => i !== index),
     }));
   };
 
@@ -245,12 +230,15 @@ export function PayrollItemEditModal({
         withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
         check_date: fields.check_date || null,
         check_memo: fields.check_memo || null,
-        custom_earnings: fields.custom_earnings
-          .filter(ce => ce.label.trim() && parseFloat(ce.amount) > 0)
-          .map(ce => ({ label: ce.label.trim(), amount: parseFloat(ce.amount) || 0 })),
-        custom_deductions: fields.custom_deductions
-          .filter(deduction => deduction.label.trim() && parseFloat(deduction.amount) > 0)
-          .map(deduction => ({ label: deduction.label.trim(), amount: parseFloat(deduction.amount) || 0 })),
+        payroll_adjustments: fields.payroll_adjustments
+          .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
+          .map(adjustment => ({
+            label: adjustment.label.trim(),
+            amount: parseFloat(adjustment.amount) || 0,
+            treatment: adjustment.treatment,
+            notes: adjustment.notes.trim(),
+            active: adjustment.active !== false,
+          })),
       };
 
       if (hasMultiRate) {
@@ -520,96 +508,72 @@ export function PayrollItemEditModal({
             </div>
           </div>
 
-          {/* Custom Earnings (Stipends, etc.) */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-medium text-gray-700">Custom Earnings</h4>
+          {/* Payroll Adjustments */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium text-gray-700">Payroll Adjustments</h4>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Use these when the adjustment needs a specific tax treatment. These are copied from employee defaults but can be changed for this check.
+                </p>
+              </div>
               <button
                 type="button"
-                onClick={addCustomEarning}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                onClick={addPayrollAdjustment}
+                className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800"
               >
-                + Add Custom Earning
+                + Add Adjustment
               </button>
             </div>
-            <p className="text-xs text-gray-400 mb-2">
-              Named taxable earnings (e.g. Chief Stipend, Asst Chief Stipend). Shows on check/stub by name.
-            </p>
-            {fields.custom_earnings.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No custom earnings added.</p>
+            {fields.payroll_adjustments.length === 0 && (
+              <p className="text-xs italic text-gray-400">No payroll adjustments added.</p>
             )}
-            {fields.custom_earnings.map((ce, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <Input
-                  placeholder="Label (e.g. Chief Stipend)"
-                  value={ce.label}
-                  onChange={(e) => handleCustomEarningChange(idx, 'label', e.target.value)}
-                  className="flex-1"
-                />
-                <NumericInput
-                  placeholder="Amount"
-                  value={ce.amount === '' ? null : Number(ce.amount)}
-                  onValueChange={(value) => handleCustomEarningChange(idx, 'amount', value == null ? '' : String(value))}
-                  min={0}
-                  fixedDecimalsOnBlur={2}
-                  className="w-28"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeCustomEarning(idx)}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-
-          {/* One-Time Deductions */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-medium text-gray-700">One-Time Deductions</h4>
-              <button
-                type="button"
-                onClick={addCustomDeduction}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-              >
-                + Add Deduction
-              </button>
+            <div className="space-y-3">
+              {fields.payroll_adjustments.map((adjustment, idx) => {
+                const selected = adjustmentTreatmentOptions.find((option) => option.value === adjustment.treatment) || adjustmentTreatmentOptions[0];
+                return (
+                  <div key={idx} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_8rem_13rem_auto] md:items-end">
+                      <Input
+                        placeholder="Label (e.g. Uniform repayment)"
+                        value={adjustment.label}
+                        onChange={(e) => handlePayrollAdjustmentChange(idx, { label: e.target.value })}
+                      />
+                      <NumericInput
+                        placeholder="Amount"
+                        value={adjustment.amount === '' ? null : Number(adjustment.amount)}
+                        onValueChange={(value) => handlePayrollAdjustmentChange(idx, { amount: value == null ? '' : String(value) })}
+                        min={0}
+                        fixedDecimalsOnBlur={2}
+                      />
+                      <Select
+                        value={adjustment.treatment}
+                        onChange={(e) => handlePayrollAdjustmentChange(idx, { treatment: e.target.value as PayrollAdjustmentTreatment })}
+                      >
+                        {adjustmentTreatmentOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </Select>
+                      <button
+                        type="button"
+                        onClick={() => removePayrollAdjustment(idx)}
+                        className="text-sm font-medium text-red-500 hover:text-red-700 md:px-2"
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{selected.helper}</p>
+                    <Input
+                      className="mt-2"
+                      placeholder="Source / notes"
+                      value={adjustment.notes}
+                      onChange={(e) => handlePayrollAdjustmentChange(idx, { notes: e.target.value })}
+                    />
+                  </div>
+                );
+              })}
             </div>
-            <p className="text-xs text-gray-400 mb-2">
-              Post-tax deductions for this check only, such as a cash advance already paid. Shows on the pay stub by name.
-            </p>
-            {fields.custom_deductions.length === 0 && (
-              <p className="text-xs text-gray-400 italic">No one-time deductions added.</p>
-            )}
-            {fields.custom_deductions.map((deduction, idx) => (
-              <div key={idx} className="flex items-center gap-2 mb-2">
-                <Input
-                  placeholder="Label (e.g. Cash Advance)"
-                  value={deduction.label}
-                  onChange={(e) => handleCustomDeductionChange(idx, 'label', e.target.value)}
-                  className="flex-1"
-                />
-                <NumericInput
-                  placeholder="Amount"
-                  value={deduction.amount === '' ? null : Number(deduction.amount)}
-                  onValueChange={(value) => handleCustomDeductionChange(idx, 'amount', value == null ? '' : String(value))}
-                  min={0}
-                  fixedDecimalsOnBlur={2}
-                  className="w-28"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeCustomDeduction(idx)}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium px-2"
-                  title="Remove"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
           </div>
 
           {/* Tax Adjustments — not applicable to contractors */}

@@ -263,6 +263,221 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect(item.overtime_hours).to eq(2.0)
     end
 
+    it "rejects variable salary employees without period pay before applying time tracking hours" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(
+        :employee,
+        company: company,
+        department: department,
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 100_000
+      )
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("variable-salary-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(
+          source_user_id: "source-1",
+          employee_id: employee.id,
+          error: "Enter this employee's variable salary amount for the pay period before applying time tracking hours."
+        )
+      )
+      expect(import.reload.status).to eq("previewed")
+      expect(pay_period.payroll_items.find_by(employee: employee)).to be_nil
+      expect(TimeTrackingEmployeeMapping.find_by(source_user_id: "source-1")).to be_nil
+    end
+
+    it "allows variable salary employees with period pay already entered when applying time tracking hours" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(
+        :employee,
+        company: company,
+        department: department,
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 100_000
+      )
+      pay_period = create(:pay_period, company: company)
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee, employment_type: "salary", salary_override: 1_000.0)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("variable-salary-with-pay-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      expect(item.reload.salary_override).to eq(1_000.0)
+      expect(item.hours_worked).to eq(40.0)
+    end
+
+    it "copies recurring payroll adjustments to new payroll items from time tracking imports" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(
+        :employee,
+        company: company,
+        department: department,
+        default_payroll_adjustments: [
+          { "label" => "Recurring reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true }
+        ]
+      )
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("adjustment-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(pay_period.payroll_items.find_by!(employee: employee).payroll_adjustments).to contain_exactly(
+        include("label" => "Recurring reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition")
+      )
+    end
+
+    it "does not overwrite manually overridden payroll adjustments on existing payroll items" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(
+        :employee,
+        company: company,
+        department: department,
+        default_payroll_adjustments: [
+          { "label" => "Default reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true }
+        ]
+      )
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("preserve-manual-adjustment-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "worker@example.com",
+              "source_display_name" => "Worker One",
+              "employee_id" => employee.id,
+              "regular_hours" => 40.0,
+              "overtime_hours" => 0.0,
+              "warnings" => []
+            }
+          ]
+        }
+      )
+      item = create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        payroll_adjustments: [
+          { "label" => "Manual pre-tax deduction", "amount" => 10.0, "treatment" => "pre_tax_deduction", "active" => true }
+        ]
+      )
+      item.mark_payroll_adjustments_overridden!
+      item.save!
+
+      described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(item.reload.payroll_adjustments).to contain_exactly(
+        include("label" => "Manual pre-tax deduction", "amount" => 10.0, "treatment" => "pre_tax_deduction")
+      )
+    end
+
     it "does not apply an import that is already applied" do
       company = create(:company)
       source = TimeTrackingSource.create!(

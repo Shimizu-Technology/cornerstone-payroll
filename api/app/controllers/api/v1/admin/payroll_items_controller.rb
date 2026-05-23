@@ -54,6 +54,7 @@ module Api
           @payroll_item.employee = employee
           @payroll_item.employment_type ||= employee.employment_type
           sync_pay_rate_from_employee(@payroll_item, employee)
+          @payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if save_payroll_item_and_clear_exclusion(@payroll_item, employee)
@@ -76,6 +77,7 @@ module Api
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
+          @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
 
           if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
@@ -114,6 +116,7 @@ module Api
           end
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
+          @payroll_item.apply_default_payroll_adjustments_if_unset!(@payroll_item.employee)
           @payroll_item.calculate!
           render json: { payroll_item: payroll_item_json(@payroll_item) }
         end
@@ -144,13 +147,15 @@ module Api
               :overtime_hours, :holiday_hours, :pto_hours, :is_primary, :active
             ],
             custom_earnings: [ :label, :amount ],
-            custom_deductions: [ :label, :amount ]
+            custom_deductions: [ :label, :amount ],
+            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
           )
 
-          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions).to_h.symbolize_keys
+          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions, :payroll_adjustments).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
+          attrs[:payroll_adjustments] = PayrollItem.normalize_payroll_adjustments(permitted[:payroll_adjustments]) if params.dig(:payroll_item, :payroll_adjustments)
           attrs
         end
 
@@ -206,6 +211,7 @@ module Api
             check_memo: item.check_memo,
             custom_earnings: item.custom_earnings || [],
             custom_deductions: item.custom_deductions || [],
+            payroll_adjustments: item.payroll_adjustments || [],
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours

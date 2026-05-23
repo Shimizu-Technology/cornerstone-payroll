@@ -248,7 +248,7 @@ class ApiClient {
     return { blob: await response.blob(), filename };
   }
 
-  // (postBlob is defined above — unified for all POST-to-Blob calls)
+  // (postBlob is defined above - unified for all POST-to-Blob calls)
 
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
@@ -302,7 +302,7 @@ export const getApiBaseUrl = () => API_BASE_URL;
 // API Endpoints
 // ========================================
 
-import type {
+import type { 
   Department,
   Employee,
   EmployeeFormData,
@@ -332,15 +332,15 @@ import type {
 
 // Employees (Admin API)
 export const employeesApi = {
-  list: (params?: { 
-    company_id?: number; 
-    status?: string; 
+  list: (params?: {
+    company_id?: number;
+    status?: string;
     department_id?: number;
     employment_type?: string;
     search?: string;
     sort_by?: 'name' | 'department' | 'rate' | 'status';
     sort_direction?: 'asc' | 'desc';
-    page?: number; 
+    page?: number;
     per_page?: number;
     group_by?: string;
   }) =>
@@ -818,6 +818,14 @@ export interface RunPayrollCustomEarningEntry {
   amount: number;
 }
 
+export interface RunPayrollAdjustmentEntry {
+  label: string;
+  amount: number;
+  treatment: 'taxable_addition' | 'non_taxable_addition' | 'pre_tax_deduction' | 'post_tax_deduction';
+  notes?: string;
+  active?: boolean;
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }) =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params),
@@ -829,7 +837,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
@@ -881,7 +889,7 @@ export const payPeriodsApi = {
     api.delete<DeleteDraftCorrectionRunResponse>(`/admin/pay_periods/${id}`, { data }),
 
   // Per-employee corrective paycheck (off-cycle supplemental period).
-  // Preview is read-only — used to drive the modal's delta display.
+  // Preview is read-only - used to drive the modal's delta display.
   correctivePaycheckPreview: (
     id: number,
     data: { employee_id: number; corrected_inputs: CorrectivePaycheckInputs }
@@ -1133,8 +1141,15 @@ export interface ImportPreviewRow {
   total_pay: number;
   pdf_employee_name: string | null;
   total_tips: number;
+  tips_boh?: number;
+  tips_foh?: number;
   tip_pool: string | null;
   loan_deduction: number;
+  recurring_loan_deduction?: number;
+  installment_beginning_balance?: number;
+  installment_new_amount?: number;
+  installment_payment?: number;
+  installment_estimated_ending_balance?: number;
 }
 
 export interface ImportPreviewResponse {
@@ -1894,7 +1909,7 @@ export const checksApi = {
   reprint: (payrollItemId: number, reason?: string) =>
     api.post<{ original_check_number: string; reprint: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reprint`, { reason }),
 
-  // Replace check (uncashed) — preview the corrected snapshot + delta.
+  // Replace check (uncashed) - preview the corrected snapshot + delta.
   // Used when the original physical check has not been distributed or has
   // been returned uncashed AND the financial values need to change.
   replaceCheckPreview: (
@@ -1906,7 +1921,7 @@ export const checksApi = {
       data
     ),
 
-  // Replace check (uncashed) — commit the change. For unprinted items the
+  // Replace check (uncashed) - commit the change. For unprinted items the
   // check # is reused (in_place); for printed items the old # is voided
   // and a new one assigned (void_and_reissue).
   replaceCheck: (
@@ -2293,6 +2308,12 @@ export const employeeLoansApi = {
     api.post<{ loan: EmployeeLoan; amount_applied: number }>(`/admin/employee_loans/${id}/record_payment`, { amount, date }),
   recordAddition: (id: number, amount: number, date?: string, notes?: string) =>
     api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/record_addition`, { amount, date, notes }),
+  markPaidOff: (id: number, date?: string, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/mark_paid_off`, { date, notes }),
+  suspend: (id: number, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/suspend`, { notes }),
+  reactivate: (id: number, notes?: string) =>
+    api.post<{ loan: EmployeeLoan }>(`/admin/employee_loans/${id}/reactivate`, { notes }),
 };
 
 export const clientDocumentsApi = {
