@@ -438,11 +438,21 @@ export function PayPeriodDetail() {
         ...additionalEmployeeIds,
       ]);
       const salary_overrides: Record<string, number> = {};
+      const missingVariableSalaryEmployees: string[] = [];
       employees.forEach((employee) => {
         if (employee.employment_type === 'salary' && employee.salary_type === 'variable' && includedEmployeeIds.has(employee.id)) {
-          salary_overrides[String(employee.id)] = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          const amount = Math.max(0, toNumber(salaryOverrideMap[String(employee.id)]));
+          salary_overrides[String(employee.id)] = amount;
+          if (amount <= 0) {
+            missingVariableSalaryEmployees.push(`${employee.first_name} ${employee.last_name}`);
+          }
         }
       });
+
+      if (missingVariableSalaryEmployees.length > 0) {
+        setError(`Enter period pay before recalculating for variable salary employee(s): ${missingVariableSalaryEmployees.join(', ')}`);
+        return;
+      }
 
       // Build tips payload
       const tips: Record<string, { amount: number; pool: string }> = {};

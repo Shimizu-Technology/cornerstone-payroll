@@ -323,6 +323,14 @@ module Api
                 payroll_item.mark_payroll_adjustments_overridden!
               end
 
+              if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
+                results[:errors] << {
+                  employee_id: employee.id,
+                  error: "Enter this employee's variable salary amount for the pay period before recalculating."
+                }
+                next
+              end
+
               # Calculate payroll
               payroll_item.calculate!
               results[:success] << { employee_id: employee.id, name: employee.full_name }

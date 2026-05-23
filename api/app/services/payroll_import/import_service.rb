@@ -126,6 +126,7 @@ module PayrollImport
             payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
             payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
             payroll_item.import_source = "mosa_revel"
+            payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
 
             # Calculate payroll (taxes, deductions, net pay)
             payroll_item.calculate!
