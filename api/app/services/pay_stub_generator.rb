@@ -130,7 +130,9 @@ class PayStubGenerator
 
     earnings_data = [ [ "Description", "Hours", "Rate", "Current", "YTD" ] ]
 
-    item_earnings = payroll_item.payroll_item_earnings.to_a
+    # Non-taxable earnings are printed in their own section because they increase
+    # net pay but are intentionally excluded from gross pay.
+    item_earnings = payroll_item.payroll_item_earnings.reject { |earning| earning.category.to_s == "non_taxable" }
 
     if item_earnings.any?
       item_earnings.each do |earning|

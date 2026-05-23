@@ -63,7 +63,7 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Cash Advance")
   end
 
-  it "prints treatment-aware payroll adjustments by label" do
+  it "prints treatment-aware payroll adjustments by label without duplicating non-taxable earnings" do
     payroll_item.update!(
       payroll_adjustments: [
         { "label" => "Taxable Bonus", "amount" => 100.0, "treatment" => "taxable_addition", "active" => true },
@@ -72,13 +72,14 @@ RSpec.describe PayStubGenerator do
         { "label" => "Post-Tax Deduction", "amount" => 15.0, "treatment" => "post_tax_deduction", "active" => true }
       ]
     )
+    payroll_item.payroll_item_earnings.create!(category: "non_taxable", label: "Reimbursement", amount: 25.0)
 
     pdf = described_class.new(payroll_item).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
 
     expect(text).to include("Taxable Bonus")
     expect(text).to include("NON-TAXABLE ADDITIONS")
-    expect(text).to include("Reimbursement")
+    expect(text.scan("Reimbursement").count).to eq(1)
     expect(text).to include("Pre-Tax Deduction")
     expect(text).to include("Post-Tax Deduction")
   end
