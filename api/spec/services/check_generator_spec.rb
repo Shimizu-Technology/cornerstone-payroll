@@ -110,6 +110,37 @@ RSpec.describe CheckGenerator do
       expect(text).to include("Cash Advance")
       expect(text).to include("40.00")
     end
+
+    it "prints payroll adjustment deduction YTD values on check stubs" do
+      earlier_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 19))
+      create(:payroll_item,
+        pay_period: earlier_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.24,
+        payroll_adjustments: [
+          { "label" => "Uniform repayment", "amount" => 10.0, "treatment" => "post_tax_deduction", "active" => true }
+        ],
+        total_deductions: 10.0)
+      payroll_item.update!(
+        payroll_adjustments: [
+          { "label" => "Uniform repayment", "amount" => 15.0, "treatment" => "post_tax_deduction", "active" => true }
+        ],
+        total_deductions: payroll_item.total_deductions + 15.0,
+        net_pay: payroll_item.net_pay - 15.0
+      )
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Uniform repayment")
+      expect(text).to include("15.00")
+      expect(text).to include("25.00")
+    end
   end
 
   describe "#generate_voided" do
