@@ -117,12 +117,7 @@ const adjustmentTreatmentOptions: Array<{
     value: 'pre_tax_deduction',
     label: 'Deducts before taxes',
     helper: 'Reduces taxable wages before withholding is calculated.',
-    caution: 'Use only for approved pre-tax deductions confirmed by Cornerstone.',
-  },
-  {
-    value: 'memo',
-    label: 'Memo only',
-    helper: 'For internal/accounting notes that should not change gross pay, taxes, or net pay.',
+    caution: 'Use only for approved pre-tax deductions confirmed by an accountant or payroll administrator.',
   },
 ];
 
@@ -912,7 +907,7 @@ export function EmployeeForm() {
           <CardHeader>
             <CardTitle>Recurring Payroll Adjustments</CardTitle>
             <CardDescription>
-              Use these for recurring additions, reimbursements, deductions, or memo items. Each item is copied into new payroll runs and can be reviewed before finalizing.
+              Use these for recurring additions, reimbursements, or deductions. Each item is copied into new payroll runs and can be reviewed before finalizing.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -943,7 +938,7 @@ export function EmployeeForm() {
                         <Input
                           value={adjustment.label}
                           onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })}
-                          placeholder="Rent Charlie"
+                          placeholder="Adjustment label"
                         />
                       </div>
                       <div>
@@ -983,7 +978,7 @@ export function EmployeeForm() {
                       <Input
                         value={adjustment.notes}
                         onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })}
-                        placeholder="Per Cornerstone recurring setup"
+                        placeholder="Per accountant or client recurring setup"
                       />
                     </div>
                   </div>

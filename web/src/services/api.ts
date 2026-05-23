@@ -821,7 +821,7 @@ export interface RunPayrollCustomEarningEntry {
 export interface RunPayrollAdjustmentEntry {
   label: string;
   amount: number;
-  treatment: 'taxable_addition' | 'non_taxable_addition' | 'pre_tax_deduction' | 'post_tax_deduction' | 'memo';
+  treatment: 'taxable_addition' | 'non_taxable_addition' | 'pre_tax_deduction' | 'post_tax_deduction';
   notes?: string;
   active?: boolean;
 }

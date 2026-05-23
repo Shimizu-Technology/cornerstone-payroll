@@ -96,8 +96,7 @@ export type PayrollAdjustmentTreatment =
   | 'taxable_addition'
   | 'non_taxable_addition'
   | 'pre_tax_deduction'
-  | 'post_tax_deduction'
-  | 'memo';
+  | 'post_tax_deduction';
 
 export interface PayrollAdjustment {
   label: string;

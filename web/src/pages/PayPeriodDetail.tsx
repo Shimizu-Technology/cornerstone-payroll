@@ -55,7 +55,6 @@ const adjustmentTreatmentLabels: Record<PayrollAdjustmentTreatment, string> = {
   non_taxable_addition: 'Non-taxable add.',
   pre_tax_deduction: 'Pre-tax ded.',
   post_tax_deduction: 'Post-tax ded.',
-  memo: 'Memo',
 };
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -698,8 +697,11 @@ export function PayPeriodDetail() {
   );
   const totalPayrollAdjustments = reportablePayrollItems.reduce(
     (sum, item) => sum + (item.payroll_adjustments || [])
-      .filter((adjustment) => adjustment.active !== false && adjustment.treatment !== 'memo')
-      .reduce((itemSum, adjustment) => itemSum + toNumber(adjustment.amount), 0),
+      .filter((adjustment) => adjustment.active !== false)
+      .reduce((itemSum, adjustment) => {
+        const amount = toNumber(adjustment.amount);
+        return itemSum + (adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction' ? -amount : amount);
+      }, 0),
     0
   );
 
@@ -1819,12 +1821,11 @@ export function PayPeriodDetail() {
                               <div className="space-y-1">
                                 {(item.payroll_adjustments || []).filter((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0).map((adjustment, index) => {
                                   const isDeduction = adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction';
-                                  const isMemo = adjustment.treatment === 'memo';
                                   return (
                                     <div key={`${item.id}-payroll-adjustment-${index}-${adjustment.label}-${adjustment.amount}`} className="text-xs">
                                       <span className="text-gray-500">{adjustment.label}</span>{' '}
-                                      <span className={isMemo ? 'font-medium text-slate-500' : isDeduction ? 'font-medium text-red-600' : 'font-medium text-emerald-700'}>
-                                        {isMemo ? '' : isDeduction ? '-' : '+'}{formatCurrency(toNumber(adjustment.amount))}
+                                      <span className={isDeduction ? 'font-medium text-red-600' : 'font-medium text-emerald-700'}>
+                                        {isDeduction ? '-' : '+'}{formatCurrency(toNumber(adjustment.amount))}
                                       </span>
                                       <div className="text-[10px] uppercase tracking-wide text-slate-400">{adjustmentTreatmentLabels[adjustment.treatment]}</div>
                                     </div>
@@ -1958,7 +1959,11 @@ export function PayPeriodDetail() {
                         <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
                         {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
                         {hasCustomDeductions && <TableCell className="text-right text-red-600">{totalCustomDeductions > 0 ? formatCurrency(totalCustomDeductions) : '—'}</TableCell>}
-                        {hasPayrollAdjustments && <TableCell className="text-right">{totalPayrollAdjustments > 0 ? formatCurrency(totalPayrollAdjustments) : '—'}</TableCell>}
+                        {hasPayrollAdjustments && (
+                          <TableCell className={totalPayrollAdjustments < 0 ? 'text-right text-red-600' : 'text-right'}>
+                            {totalPayrollAdjustments !== 0 ? `${totalPayrollAdjustments < 0 ? '-' : ''}${formatCurrency(Math.abs(totalPayrollAdjustments))}` : '—'}
+                          </TableCell>
+                        )}
                         {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
                         {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
                         {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
