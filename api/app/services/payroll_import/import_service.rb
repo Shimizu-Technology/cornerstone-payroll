@@ -126,6 +126,7 @@ module PayrollImport
             payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
             payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
             payroll_item.import_source = "mosa_revel"
+            payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
 
             # Calculate payroll (taxes, deductions, net pay)
             payroll_item.calculate!
@@ -177,7 +178,14 @@ module PayrollImport
         last_name: existing[:last_name] || incoming[:last_name],
         first_name: existing[:first_name] || incoming[:first_name],
         total_tips: existing[:total_tips].to_f + incoming[:total_tips].to_f,
+        tips_boh: existing[:tips_boh].to_f + incoming[:tips_boh].to_f,
+        tips_foh: existing[:tips_foh].to_f + incoming[:tips_foh].to_f,
         loan_deduction: existing[:loan_deduction].to_f + incoming[:loan_deduction].to_f,
+        recurring_loan_deduction: existing[:recurring_loan_deduction].to_f + incoming[:recurring_loan_deduction].to_f,
+        installment_beginning_balance: [ existing[:installment_beginning_balance].to_f, incoming[:installment_beginning_balance].to_f ].max,
+        installment_new_amount: existing[:installment_new_amount].to_f + incoming[:installment_new_amount].to_f,
+        installment_payment: existing[:installment_payment].to_f + incoming[:installment_payment].to_f,
+        installment_estimated_ending_balance: [ existing[:installment_estimated_ending_balance].to_f, incoming[:installment_estimated_ending_balance].to_f ].max,
         tip_pool: merge_tip_pool(existing[:tip_pool], incoming[:tip_pool])
       }
     end
@@ -207,8 +215,15 @@ module PayrollImport
         pdf_employee_name: pdf_row&.dig(:employee_name),
         # Excel data
         total_tips: excel_data&.dig(:total_tips) || 0.0,
+        tips_boh: excel_data&.dig(:tips_boh) || 0.0,
+        tips_foh: excel_data&.dig(:tips_foh) || 0.0,
         tip_pool: excel_data&.dig(:tip_pool),
-        loan_deduction: excel_data&.dig(:loan_deduction) || 0.0
+        loan_deduction: excel_data&.dig(:loan_deduction) || 0.0,
+        recurring_loan_deduction: excel_data&.dig(:recurring_loan_deduction) || 0.0,
+        installment_beginning_balance: excel_data&.dig(:installment_beginning_balance) || 0.0,
+        installment_new_amount: excel_data&.dig(:installment_new_amount) || 0.0,
+        installment_payment: excel_data&.dig(:installment_payment) || 0.0,
+        installment_estimated_ending_balance: excel_data&.dig(:installment_estimated_ending_balance) || 0.0
       }
 
       row

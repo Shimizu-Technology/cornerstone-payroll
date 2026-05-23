@@ -26,12 +26,13 @@ class EmployeeLoan < ApplicationRecord
     status == "paid_off"
   end
 
-  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil)
+  def record_payment!(amount:, pay_period: nil, payroll_item: nil, date: nil, notes: nil)
     raise ArgumentError, "Payment amount must be positive" unless amount.positive?
     raise ArgumentError, "Loan is not active" unless active?
 
     actual_payment = [amount, current_balance].min
     balance_before = current_balance
+    transaction_date = date || Date.current
 
     transaction do
       loan_transactions.create!(
@@ -41,17 +42,53 @@ class EmployeeLoan < ApplicationRecord
         amount: actual_payment,
         balance_before: balance_before,
         balance_after: balance_before - actual_payment,
-        transaction_date: date || Date.current
+        transaction_date: transaction_date,
+        notes: notes
       )
 
       new_balance = (balance_before - actual_payment).round(2)
       attrs = { current_balance: new_balance }
       attrs[:status] = "paid_off" if new_balance.zero?
-      attrs[:paid_off_date] = Date.current if new_balance.zero?
+      attrs[:paid_off_date] = transaction_date if new_balance.zero?
       update!(attrs)
     end
 
     actual_payment
+  end
+
+  def mark_paid_off!(date: nil, notes: nil)
+    raise ArgumentError, "Loan is already paid off" if paid_off?
+
+    transaction_date = date || Date.current
+
+    transaction do
+      if current_balance.positive?
+        loan_transactions.create!(
+          transaction_type: "payment",
+          amount: current_balance,
+          balance_before: current_balance,
+          balance_after: 0,
+          transaction_date: transaction_date,
+          notes: notes.presence || "Marked paid off"
+        )
+      end
+
+      update!(current_balance: 0, status: "paid_off", paid_off_date: transaction_date)
+    end
+  end
+
+  def suspend!(notes: nil)
+    raise ArgumentError, "Paid-off loans cannot be suspended" if paid_off?
+    raise ArgumentError, "Loan is already suspended" if status == "suspended"
+
+    update!(status: "suspended", notes: append_note(notes))
+  end
+
+  def reactivate!(notes: nil)
+    raise ArgumentError, "Paid-off loans cannot be reactivated" if paid_off?
+    raise ArgumentError, "Loan is already active" if active?
+
+    update!(status: "active", notes: append_note(notes))
   end
 
   def record_addition!(amount:, date: nil, notes: nil)
@@ -74,5 +111,14 @@ class EmployeeLoan < ApplicationRecord
         status: "active"
       )
     end
+  end
+
+  private
+
+  def append_note(note)
+    return notes if note.blank?
+    return note if notes.blank?
+
+    [ notes, note ].join("\n")
   end
 end

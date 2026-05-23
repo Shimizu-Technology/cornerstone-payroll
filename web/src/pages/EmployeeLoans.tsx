@@ -22,7 +22,7 @@ export default function EmployeeLoans() {
   const [expandedLoanId, setExpandedLoanId] = useState<number | null>(null);
   const [expandedLoan, setExpandedLoan] = useState<EmployeeLoan | null>(null);
   const [filterEmployee, setFilterEmployee] = useState<string>('');
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('active');
   const [formData, setFormData] = useState({
     employee_id: '',
     name: '',
@@ -39,6 +39,8 @@ export default function EmployeeLoans() {
   const [recordingPayment, setRecordingPayment] = useState(false);
   const [recordingAddition, setRecordingAddition] = useState(false);
   const [expandingId, setExpandingId] = useState<number | null>(null);
+  const [loanActionId, setLoanActionId] = useState<number | null>(null);
+  const [loanActionError, setLoanActionError] = useState<string | null>(null);
 
   const loadLoans = useCallback(async () => {
     setLoading(true);
@@ -68,6 +70,7 @@ export default function EmployeeLoans() {
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
   const handleExpandLoan = async (id: number) => {
+    setLoanActionError(null);
     if (expandedLoanId === id) {
       setExpandedLoanId(null);
       setExpandedLoan(null);
@@ -143,6 +146,89 @@ export default function EmployeeLoans() {
     }
   };
 
+  const refreshExpandedLoan = async (loanId: number) => {
+    const res = await employeeLoansApi.get(loanId);
+    setExpandedLoan(res.loan);
+  };
+
+  const handleMarkPaidOff = async (loan: EmployeeLoan) => {
+    const confirmed = window.confirm(
+      `Mark ${loan.employee_name}'s ${loan.name} as paid off? This will set the balance to $0 and keep the loan history for audit.`
+    );
+    if (!confirmed) return;
+
+    setLoanActionId(loan.id);
+    setLoanActionError(null);
+    try {
+      const res = await employeeLoansApi.markPaidOff(loan.id, undefined, 'Marked paid off from Employee Loans page');
+      setExpandedLoan(res.loan);
+      await loadLoans();
+    } catch (err) {
+      setLoanActionError(err instanceof Error ? err.message : 'Failed to mark loan paid off');
+    } finally {
+      setLoanActionId(null);
+    }
+  };
+
+  const handleSuspend = async (loan: EmployeeLoan) => {
+    const confirmed = window.confirm(
+      `Suspend ${loan.employee_name}'s ${loan.name}? The balance will stay unchanged, but the loan will no longer count as active.`
+    );
+    if (!confirmed) return;
+
+    setLoanActionId(loan.id);
+    setLoanActionError(null);
+    try {
+      const res = await employeeLoansApi.suspend(loan.id, 'Suspended from Employee Loans page');
+      setExpandedLoan(res.loan);
+      await loadLoans();
+    } catch (err) {
+      setLoanActionError(err instanceof Error ? err.message : 'Failed to suspend loan');
+    } finally {
+      setLoanActionId(null);
+    }
+  };
+
+  const handleReactivate = async (loan: EmployeeLoan) => {
+    const confirmed = window.confirm(
+      `Reactivate ${loan.employee_name}'s ${loan.name}? This loan will count as active again and may be deducted from future paychecks.`
+    );
+    if (!confirmed) return;
+
+    setLoanActionId(loan.id);
+    setLoanActionError(null);
+    try {
+      const res = await employeeLoansApi.reactivate(loan.id, 'Reactivated from Employee Loans page');
+      setExpandedLoan(res.loan);
+      await loadLoans();
+    } catch (err) {
+      setLoanActionError(err instanceof Error ? err.message : 'Failed to reactivate loan');
+    } finally {
+      setLoanActionId(null);
+    }
+  };
+
+  const handleDeleteLoan = async (loan: EmployeeLoan) => {
+    const confirmed = window.confirm(
+      `Delete ${loan.employee_name}'s ${loan.name}? Only accidental loans without payment history can be deleted.`
+    );
+    if (!confirmed) return;
+
+    setLoanActionId(loan.id);
+    setLoanActionError(null);
+    try {
+      await employeeLoansApi.delete(loan.id);
+      setExpandedLoanId(null);
+      setExpandedLoan(null);
+      await loadLoans();
+    } catch (err) {
+      setLoanActionError(err instanceof Error ? err.message : 'Failed to delete loan');
+      await refreshExpandedLoan(loan.id).catch(() => undefined);
+    } finally {
+      setLoanActionId(null);
+    }
+  };
+
   const fmt = (v: number) => formatCurrency(v);
 
   return (
@@ -167,8 +253,8 @@ export default function EmployeeLoans() {
             ))}
           </select>
           <select className="border rounded px-3 py-2 text-sm" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-            <option value="">All Statuses</option>
             <option value="active">Active</option>
+            <option value="">All Statuses</option>
             <option value="paid_off">Paid Off</option>
             <option value="suspended">Suspended</option>
           </select>
@@ -258,6 +344,38 @@ export default function EmployeeLoans() {
                       <p className="text-sm text-gray-400">Failed to load details</p>
                     ) : (
                     <>
+                    {loanActionError && (
+                      <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        {loanActionError}
+                      </div>
+                    )}
+
+                    {/* Lifecycle Actions */}
+                    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-3">
+                      <div className="mr-auto">
+                        <p className="text-sm font-semibold text-gray-900">Loan status controls</p>
+                        <p className="text-xs text-gray-500">Close, pause, or remove accidental loan records without changing payroll history.</p>
+                      </div>
+                      {loan.status !== 'paid_off' && (
+                        <Button size="sm" variant="outline" onClick={() => handleMarkPaidOff(expandedLoan)} disabled={loanActionId === loan.id}>
+                          Mark Paid Off
+                        </Button>
+                      )}
+                      {loan.status === 'active' && (
+                        <Button size="sm" variant="outline" onClick={() => handleSuspend(expandedLoan)} disabled={loanActionId === loan.id}>
+                          Suspend
+                        </Button>
+                      )}
+                      {loan.status === 'suspended' && (
+                        <Button size="sm" variant="outline" onClick={() => handleReactivate(expandedLoan)} disabled={loanActionId === loan.id}>
+                          Reactivate
+                        </Button>
+                      )}
+                      <Button size="sm" variant="danger" onClick={() => handleDeleteLoan(expandedLoan)} disabled={loanActionId === loan.id}>
+                        Delete Accidental Loan
+                      </Button>
+                    </div>
+
                     {/* Quick Actions */}
                     {loan.status === 'active' && (
                       <div className="flex flex-wrap gap-4 mb-4">

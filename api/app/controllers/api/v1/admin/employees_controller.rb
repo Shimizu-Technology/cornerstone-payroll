@@ -119,10 +119,15 @@ module Api
             :zip,
             :phone,
             :status,
-            default_custom_earnings: [ :label, :amount ]
+            default_custom_earnings: [ :label, :amount ],
+            default_payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
           ).tap do |permitted|
             if permitted.key?(:default_custom_earnings)
               permitted[:default_custom_earnings] = normalize_custom_earnings(permitted[:default_custom_earnings])
+            end
+
+            if permitted.key?(:default_payroll_adjustments)
+              permitted[:default_payroll_adjustments] = Employee.normalize_payroll_adjustments(permitted[:default_payroll_adjustments])
             end
 
             if permitted[:ssn].present?

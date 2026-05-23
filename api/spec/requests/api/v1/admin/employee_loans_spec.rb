@@ -195,4 +195,111 @@ RSpec.describe "Api::V1::Admin::EmployeeLoans", type: :request do
       expect(loan.reload.deduction_type_id).to eq(deduction_type.id)
     end
   end
+
+  describe "POST /api/v1/admin/employee_loans/:id/mark_paid_off" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Tool Advance",
+        original_amount: 150.00,
+        current_balance: 100.00,
+        payment_amount: 25.00,
+        status: "active"
+      )
+    end
+
+    it "zeros the balance and records a final payment transaction" do
+      expect {
+        post "/api/v1/admin/employee_loans/#{loan.id}/mark_paid_off",
+          params: { date: "2026-05-20", notes: "Confirmed paid outside payroll" },
+          as: :json
+      }.to change(LoanTransaction, :count).by(1)
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("paid_off")
+      expect(loan.current_balance).to eq(0)
+      expect(loan.paid_off_date).to eq(Date.new(2026, 5, 20))
+
+      transaction = loan.loan_transactions.last
+      expect(transaction.transaction_type).to eq("payment")
+      expect(transaction.amount).to eq(100)
+      expect(transaction.notes).to eq("Confirmed paid outside payroll")
+    end
+
+    it "does not overwrite an already paid-off loan or paid_off_date" do
+      loan.update!(status: "paid_off", current_balance: 0, paid_off_date: Date.new(2026, 4, 1))
+
+      expect {
+        post "/api/v1/admin/employee_loans/#{loan.id}/mark_paid_off",
+          params: { date: "2026-05-20" },
+          as: :json
+      }.not_to change(LoanTransaction, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already paid off")
+      expect(loan.reload.paid_off_date).to eq(Date.new(2026, 4, 1))
+    end
+  end
+
+  describe "POST /api/v1/admin/employee_loans/:id/suspend and reactivate" do
+    let!(:loan) do
+      EmployeeLoan.create!(
+        employee: employee,
+        company: company,
+        name: "Tool Advance",
+        original_amount: 150.00,
+        current_balance: 100.00,
+        payment_amount: 25.00,
+        status: "active"
+      )
+    end
+
+    it "suspends and reactivates a loan without changing the balance" do
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause deductions" }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("suspended")
+      expect(loan.current_balance).to eq(100)
+      expect(loan.notes).to include("Pause deductions")
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Resume" }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(loan.reload.status).to eq("active")
+      expect(loan.current_balance).to eq(100)
+      expect(loan.notes).to include("Pause deductions")
+      expect(loan.notes).to include("Resume")
+    end
+
+    it "does not suspend an already paid-off loan" do
+      loan.update!(status: "paid_off", current_balance: 0, paid_off_date: Date.new(2026, 4, 1))
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause deductions" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Paid-off loans cannot be suspended")
+      expect(loan.reload.status).to eq("paid_off")
+      expect(loan.paid_off_date).to eq(Date.new(2026, 4, 1))
+    end
+
+    it "does not suspend an already suspended loan" do
+      loan.update!(status: "suspended", notes: "Already paused")
+
+      post "/api/v1/admin/employee_loans/#{loan.id}/suspend", params: { notes: "Pause again" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already suspended")
+      expect(loan.reload.status).to eq("suspended")
+      expect(loan.notes).to eq("Already paused")
+    end
+
+    it "does not reactivate an already active loan" do
+      post "/api/v1/admin/employee_loans/#{loan.id}/reactivate", params: { notes: "Resume" }, as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Loan is already active")
+      expect(loan.reload.status).to eq("active")
+    end
+  end
 end

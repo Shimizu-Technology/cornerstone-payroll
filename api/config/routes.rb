@@ -247,6 +247,9 @@ Rails.application.routes.draw do
           member do
             post :record_payment
             post :record_addition
+            post :mark_paid_off
+            post :suspend
+            post :reactivate
           end
         end
 

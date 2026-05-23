@@ -196,11 +196,19 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
-    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f }
+    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total
+    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
+  end
+
+  def pre_tax_payroll_adjustments_total
+    payroll_item.pre_tax_payroll_adjustments_total
+  end
+
+  def non_taxable_additions_total
+    payroll_item.non_taxable_pay.to_f + payroll_item.non_taxable_payroll_adjustments_total
   end
 
   def calculate_totals
@@ -208,7 +216,7 @@ class PayrollCalculator
       payroll_item.reported_tips.to_f +
       payroll_item.bonus.to_f +
       custom_earnings_total +
-      payroll_item.non_taxable_pay.to_f
+      non_taxable_additions_total
     ).round(2)
 
     itemized_pre_tax = 0.0
@@ -228,21 +236,25 @@ class PayrollCalculator
 
     imported_loan_payment = 0.0
 
-    # Sync loan_deduction from import for imported rows
+    # MoSa imports provide the paycheck loan deduction directly. That imported
+    # amount must remain authoritative for the current payroll run even if the
+    # employee also has itemized EmployeeLoan records configured; those records
+    # are separate loan-tracking setup and should not hide or replace the
+    # workbook's paycheck deduction.
     if payroll_item.import_source.present? && payroll_item.loan_deduction.to_f > 0
-      if itemized_loan_payment.zero?
-        imported_loan_payment = payroll_item.loan_deduction.to_f
-        payroll_item.loan_payment = imported_loan_payment
-      else
-        payroll_item.loan_payment = itemized_loan_payment
-      end
+      imported_loan_payment = payroll_item.loan_deduction.to_f
+      payroll_item.loan_payment = imported_loan_payment
     end
 
     has_itemized_deductions = payroll_item.payroll_item_deductions.any?
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
-    post_tax_deductions = if has_itemized_deductions
-      itemized_post_tax + imported_loan_payment
+    legacy_insurance_payment = has_itemized_deductions ? 0.0 : payroll_item.insurance_payment.to_f
+
+    post_tax_deductions = if imported_loan_payment.positive?
+      (itemized_post_tax - itemized_loan_payment) + imported_loan_payment + legacy_insurance_payment
+    elsif has_itemized_deductions
+      itemized_post_tax
     else
       payroll_item.loan_payment.to_f + payroll_item.insurance_payment.to_f
     end
@@ -255,6 +267,7 @@ class PayrollCalculator
       payroll_item.retirement_payment.to_f +
       payroll_item.roth_retirement_payment.to_f +
       itemized_pre_tax +
+      pre_tax_payroll_adjustments_total +
       post_tax_deductions +
       custom_deductions_total +
       payroll_item.tips_paid_out.to_f
@@ -269,7 +282,7 @@ class PayrollCalculator
     payroll_item.net_pay = (
       payroll_item.gross_pay -
       payroll_item.total_deductions +
-      payroll_item.non_taxable_pay.to_f
+      non_taxable_additions_total
     ).round(2)
     payroll_item.net_pay = 0.0 if payroll_item.net_pay.negative? && !payroll_item.correction_entry?
   end

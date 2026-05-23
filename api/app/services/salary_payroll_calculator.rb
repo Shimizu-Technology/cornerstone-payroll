@@ -28,7 +28,7 @@ class SalaryPayrollCalculator < PayrollCalculator
 
     pre_tax_ded = pre_tax_employee_deductions_total
     taxable_for_withholding = [
-      payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f - pre_tax_ded,
+      payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f - pre_tax_ded - pre_tax_payroll_adjustments_total,
       0.0
     ].max
 
@@ -45,6 +45,8 @@ class SalaryPayrollCalculator < PayrollCalculator
   def calculate_gross_pay
     if payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
+    elsif employee.salary_type == "variable"
+      @base_pay = 0.0
     elsif employee.salary_type == "per_period"
       @base_pay = payroll_item.pay_rate.to_f
     else
@@ -69,6 +71,17 @@ class SalaryPayrollCalculator < PayrollCalculator
     Array(payroll_item.custom_earnings).each do |ce|
       amt = ce["amount"].to_f
       build_earning("other", ce["label"].presence || "Other Earning", nil, nil, amt) if amt > 0
+    end
+
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      amt = adjustment["amount"].to_f
+      label = adjustment["label"].presence || PayrollAdjustable::TREATMENT_LABELS[adjustment["treatment"]] || "Payroll Adjustment"
+      case adjustment["treatment"]
+      when "taxable_addition"
+        build_earning("other", label, nil, nil, amt) if amt > 0
+      when "non_taxable_addition"
+        build_earning("non_taxable", label, nil, nil, amt) if amt > 0
+      end
     end
 
     nontax = payroll_item.non_taxable_pay.to_f

@@ -65,19 +65,29 @@ module TimeTracking
           end
           seen_employee_ids.add(employee.id)
 
-          persist_mapping!(row, employee)
           item = @pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
           if item.persisted? && item.import_source.to_s.start_with?("time_tracking:")
             results[:errors] << { source_user_id: source_user_id, employee_id: employee.id, error: "Employee already has imported time tracking hours in this pay period" }
             next
           end
 
+          if employee.variable_salary? && item.salary_override.to_f <= 0
+            results[:errors] << {
+              source_user_id: source_user_id,
+              employee_id: employee.id,
+              error: "Enter this employee's variable salary amount for the pay period before applying time tracking hours."
+            }
+            next
+          end
+
+          persist_mapping!(row, employee)
+
           if item.new_record?
             item.company_id = @company.id
             item.employment_type = employee.employment_type
             item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
-            item.custom_earnings = employee.default_custom_earnings
           end
+          item.apply_default_payroll_adjustments_if_unset!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
           preserved_pto_hours = item.pto_hours.to_f
 

@@ -85,6 +85,17 @@ class ContractorPayrollCalculator < PayrollCalculator
       build_earning("other", ce["label"].presence || "Other Earning", nil, nil, amt) if amt > 0
     end
 
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      amt = adjustment["amount"].to_f
+      label = adjustment["label"].presence || PayrollAdjustable::TREATMENT_LABELS[adjustment["treatment"]] || "Payroll Adjustment"
+      case adjustment["treatment"]
+      when "taxable_addition"
+        build_earning("other", label, nil, nil, amt) if amt > 0
+      when "non_taxable_addition"
+        build_earning("non_taxable", label, nil, nil, amt) if amt > 0
+      end
+    end
+
     nontax = payroll_item.non_taxable_pay.to_f
     build_earning("non_taxable", "Non-Taxable Pay", nil, nil, nontax) if nontax > 0
   end

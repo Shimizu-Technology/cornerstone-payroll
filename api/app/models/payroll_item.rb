@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class PayrollItem < ApplicationRecord
+  include PayrollAdjustable
   belongs_to :pay_period
   belongs_to :employee
   belongs_to :company
@@ -49,6 +50,7 @@ class PayrollItem < ApplicationRecord
   validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }
   validate :company_matches_pay_period
   validate :custom_deductions_are_valid
+  validate :payroll_adjustments_are_valid
 
   # Validate that each employee only appears once per pay period
   validates :employee_id, uniqueness: { scope: :pay_period_id }
@@ -150,6 +152,41 @@ class PayrollItem < ApplicationRecord
 
   def custom_deductions_total
     Array(custom_deductions).sum { |deduction| deduction["amount"].to_f }
+  end
+
+  def taxable_payroll_adjustments_total
+    payroll_adjustments_total("taxable_addition")
+  end
+
+  def non_taxable_payroll_adjustments_total
+    payroll_adjustments_total("non_taxable_addition")
+  end
+
+  def pre_tax_payroll_adjustments_total
+    payroll_adjustments_total("pre_tax_deduction")
+  end
+
+  def post_tax_payroll_adjustments_total
+    payroll_adjustments_total("post_tax_deduction")
+  end
+
+  def payroll_adjustments_overridden?
+    return false unless custom_columns_data.is_a?(Hash)
+
+    ActiveModel::Type::Boolean.new.cast(custom_columns_data["payroll_adjustments_overridden"] || custom_columns_data[:payroll_adjustments_overridden])
+  end
+
+  def mark_payroll_adjustments_overridden!
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data["payroll_adjustments_overridden"] = true
+    self.custom_columns_data = data
+  end
+
+  def apply_default_payroll_adjustments_if_unset!(source_employee = employee)
+    return if payroll_adjustments.present? || payroll_adjustments_overridden?
+
+    defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    self.payroll_adjustments = defaults if defaults.present?
   end
 
   def self.normalize_custom_deduction_entries(entries)
@@ -262,6 +299,7 @@ class PayrollItem < ApplicationRecord
     self.tips_paid_out = round_currency_value(tips_paid_out)
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
     self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
+    self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments)
 
     return unless custom_columns_data.is_a?(Hash)
 
@@ -306,6 +344,21 @@ class PayrollItem < ApplicationRecord
     custom_deductions.each do |deduction|
       unless deduction.is_a?(Hash) && deduction["label"].present? && deduction["amount"].to_f.positive?
         errors.add(:custom_deductions, "must include a label and positive amount")
+      end
+    end
+  end
+
+  def payroll_adjustments_are_valid
+    return if payroll_adjustments.blank?
+
+    unless payroll_adjustments.is_a?(Array)
+      errors.add(:payroll_adjustments, "must be a list")
+      return
+    end
+
+    payroll_adjustments.each do |adjustment|
+      unless adjustment.is_a?(Hash) && adjustment["label"].present? && adjustment["amount"].to_f.positive? && PayrollAdjustable::ADJUSTMENT_TREATMENTS.include?(adjustment["treatment"].to_s)
+        errors.add(:payroll_adjustments, "must include a label, positive amount, and valid tax treatment")
       end
     end
   end

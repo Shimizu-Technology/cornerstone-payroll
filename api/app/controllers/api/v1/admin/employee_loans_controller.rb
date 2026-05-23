@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class EmployeeLoansController < BaseController
-        before_action :set_loan, only: [:show, :update, :destroy, :record_payment, :record_addition]
+        before_action :set_loan, only: [:show, :update, :destroy, :record_payment, :record_addition, :mark_paid_off, :suspend, :reactivate]
 
         # GET /api/v1/admin/employee_loans
         def index
@@ -101,6 +101,33 @@ module Api
             date: params[:date].present? ? Date.parse(params[:date]) : nil,
             notes: params[:notes]
           )
+          render json: { loan: loan_payload(@loan.reload, include_transactions: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/employee_loans/:id/mark_paid_off
+        def mark_paid_off
+          @loan.mark_paid_off!(
+            date: params[:date].present? ? Date.parse(params[:date]) : nil,
+            notes: params[:notes]
+          )
+          render json: { loan: loan_payload(@loan.reload, include_transactions: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/employee_loans/:id/suspend
+        def suspend
+          @loan.suspend!(notes: params[:notes])
+          render json: { loan: loan_payload(@loan.reload, include_transactions: true) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/employee_loans/:id/reactivate
+        def reactivate
+          @loan.reactivate!(notes: params[:notes])
           render json: { loan: loan_payload(@loan.reload, include_transactions: true) }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
