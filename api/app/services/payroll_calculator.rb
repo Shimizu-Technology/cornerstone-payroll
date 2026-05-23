@@ -236,21 +236,23 @@ class PayrollCalculator
 
     imported_loan_payment = 0.0
 
-    # Sync loan_deduction from import for imported rows
+    # MoSa imports provide the paycheck loan deduction directly. That imported
+    # amount must remain authoritative for the current payroll run even if the
+    # employee also has itemized EmployeeLoan records configured; those records
+    # are separate loan-tracking setup and should not hide or replace the
+    # workbook's paycheck deduction.
     if payroll_item.import_source.present? && payroll_item.loan_deduction.to_f > 0
-      if itemized_loan_payment.zero?
-        imported_loan_payment = payroll_item.loan_deduction.to_f
-        payroll_item.loan_payment = imported_loan_payment
-      else
-        payroll_item.loan_payment = itemized_loan_payment
-      end
+      imported_loan_payment = payroll_item.loan_deduction.to_f
+      payroll_item.loan_payment = imported_loan_payment
     end
 
     has_itemized_deductions = payroll_item.payroll_item_deductions.any?
 
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
-    post_tax_deductions = if has_itemized_deductions
-      itemized_post_tax + imported_loan_payment
+    post_tax_deductions = if imported_loan_payment.positive?
+      (itemized_post_tax - itemized_loan_payment) + imported_loan_payment
+    elsif has_itemized_deductions
+      itemized_post_tax
     else
       payroll_item.loan_payment.to_f + payroll_item.insurance_payment.to_f
     end
