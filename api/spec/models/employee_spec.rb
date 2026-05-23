@@ -147,6 +147,25 @@ RSpec.describe Employee, type: :model do
       expect(employee.active_payroll_adjustments.map { |adjustment| adjustment["label"] }).to eq([ "Rent" ])
       expect(employee.payroll_adjustments_total("post_tax_deduction")).to eq(150.0)
     end
+
+    it "copies employee defaults to a payroll item only until that item is explicitly overridden" do
+      employee = create(
+        :employee,
+        default_payroll_adjustments: [
+          { "label" => "Recurring Bonus", "amount" => 50.0, "treatment" => "taxable_addition", "active" => true }
+        ]
+      )
+      pay_period = create(:pay_period, company: employee.company)
+      item = build(:payroll_item, employee: employee, company: employee.company, pay_period: pay_period, payroll_adjustments: [])
+
+      item.apply_default_payroll_adjustments_if_unset!(employee)
+      expect(item.payroll_adjustments.first["label"]).to eq("Recurring Bonus")
+
+      item.payroll_adjustments = []
+      item.mark_payroll_adjustments_overridden!
+      item.apply_default_payroll_adjustments_if_unset!(employee)
+      expect(item.payroll_adjustments).to eq([])
+    end
   end
 
   describe "address validation" do

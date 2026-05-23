@@ -265,6 +265,7 @@ module Api
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
+              payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
 
               # Use hours from params if provided
               if params[:hours] && params[:hours][employee_id.to_s]
@@ -319,6 +320,7 @@ module Api
 
               if params[:payroll_adjustments] && params[:payroll_adjustments][employee_id.to_s]
                 payroll_item.payroll_adjustments = PayrollItem.normalize_payroll_adjustments(params[:payroll_adjustments][employee_id.to_s])
+                payroll_item.mark_payroll_adjustments_overridden!
               end
 
               # Calculate payroll
