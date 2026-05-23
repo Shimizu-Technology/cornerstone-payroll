@@ -139,6 +139,30 @@ RSpec.describe PayrollCalculator do
       expect(variable_item.gross_pay).to eq(331.93)
     end
 
+    it "uses imported loan_deduction as the paycheck loan payment even when itemized loan setup exists" do
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Loan",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 40.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.loan_payment).to eq(200.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 200.0
+    end
+
     it "applies recurring payroll adjustments according to their tax treatment" do
       payroll_item.payroll_adjustments = [
         { "label" => "Taxable Bonus", "amount" => 100.0, "treatment" => "taxable_addition", "active" => true },
