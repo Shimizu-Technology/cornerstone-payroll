@@ -42,6 +42,9 @@ class PayStubGenerator
     # Deductions Section
     render_deductions(pdf)
 
+    # Non-taxable additions that increase net pay but not gross wages
+    render_non_taxable_additions(pdf)
+
     # Net Pay
     render_net_pay(pdf)
 
@@ -219,6 +222,16 @@ class PayStubGenerator
       end
     end
 
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless adjustment["treatment"] == "taxable_addition"
+
+      label = adjustment["label"].presence || "Taxable Adjustment"
+      amount = adjustment["amount"].to_f
+      if amount > 0 && !existing_other_labels.include?(label.to_s.strip.downcase)
+        earnings_data << [ label, "—", "—", format_currency(amount), "—" ]
+      end
+    end
+
     # Gross total
     earnings_data << [
       { content: "GROSS PAY", font_style: :bold },
@@ -349,6 +362,19 @@ class PayStubGenerator
       ]
     end
 
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless %w[pre_tax_deduction post_tax_deduction].include?(adjustment["treatment"])
+
+      amount = adjustment["amount"].to_f
+      next unless amount.positive?
+
+      deductions_data << [
+        adjustment["label"].presence || "Payroll Adjustment",
+        format_currency(amount),
+        "—"
+      ]
+    end
+
     # Total deductions
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
@@ -363,6 +389,41 @@ class PayStubGenerator
         cells.padding = [ 3, 6 ]
         columns(1..2).align = :right
         row(-1).background_color = "F5F5F5"
+      end
+    end
+
+    pdf.move_down 12
+  end
+
+  def render_non_taxable_additions(pdf)
+    additions = []
+    if payroll_item.non_taxable_pay.to_f > 0
+      additions << [ "Non-Taxable Pay", format_currency(payroll_item.non_taxable_pay), "—" ]
+    end
+
+    payroll_item.active_payroll_adjustments.each do |adjustment|
+      next unless adjustment["treatment"] == "non_taxable_addition"
+
+      amount = adjustment["amount"].to_f
+      next unless amount.positive?
+
+      additions << [ adjustment["label"].presence || "Non-Taxable Addition", format_currency(amount), "—" ]
+    end
+
+    return if additions.empty?
+
+    pdf.font_size(10) do
+      pdf.text "NON-TAXABLE ADDITIONS", style: :bold
+    end
+    pdf.move_down 3
+
+    additions_data = [ [ "Description", "Current", "YTD" ], *additions ]
+    pdf.font_size(8) do
+      pdf.table(additions_data, header: true, width: pdf.bounds.width) do
+        row(0).font_style = :bold
+        row(0).background_color = "EEEEEE"
+        cells.padding = [ 3, 6 ]
+        columns(1..2).align = :right
       end
     end
 
