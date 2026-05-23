@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class MigratePayrollItemCustomEntriesToPayrollAdjustments < ActiveRecord::Migration[7.1]
+class MigratePayrollItemCustomEntriesToPayrollAdjustments < ActiveRecord::Migration[8.1]
   class PayrollItem < ActiveRecord::Base
     self.table_name = "payroll_items"
   end
