@@ -56,6 +56,14 @@ interface InvoiceFormState {
   email_body: string;
   status?: InvoiceStatus;
   generated_at?: string | null;
+  sent_at?: string | null;
+  paid_at?: string | null;
+  voided_at?: string | null;
+  archived_at?: string | null;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
   line_items: DraftLineItem[];
 }
 
@@ -147,9 +155,23 @@ const statusColors: Record<InvoiceStatus, string> = {
   archived: 'bg-neutral-200 text-neutral-700',
 };
 
+const invoiceStatusFilters = [
+  { key: 'active', label: 'Active' },
+  { key: 'draft', label: 'Drafts' },
+  { key: 'generated', label: 'PDF Ready' },
+  { key: 'sent', label: 'Outstanding' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'voided', label: 'Voided' },
+  { key: 'archived', label: 'Archived' },
+  { key: 'all', label: 'All' },
+] as const;
+
+type InvoiceStatusFilter = typeof invoiceStatusFilters[number]['key'];
+
 const statusActions: Partial<Record<InvoiceStatus, InvoiceStatus[]>> = {
-  generated: ['sent', 'voided', 'archived'],
-  sent: ['paid', 'voided', 'archived'],
+  draft: ['generated', 'archived'],
+  generated: ['draft', 'sent', 'voided', 'archived'],
+  sent: ['draft', 'paid', 'voided', 'archived'],
   paid: ['voided', 'archived'],
   voided: ['archived'],
 };
@@ -176,6 +198,41 @@ function localDateFromDateOnly(value?: string | null) {
 function formatDateOnly(value?: string | null) {
   const date = localDateFromDateOnly(value);
   return date ? date.toLocaleDateString() : '';
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function invoiceStatusLabel(status: InvoiceStatus) {
+  switch (status) {
+  case 'draft': return 'Draft';
+  case 'generated': return 'PDF Ready';
+  case 'sent': return 'Outstanding';
+  case 'paid': return 'Paid';
+  case 'voided': return 'Voided';
+  case 'archived': return 'Archived';
+  default: return status;
+  }
+}
+
+function statusActionLabel(status: InvoiceStatus) {
+  switch (status) {
+  case 'draft': return 'Return to Draft';
+  case 'generated': return 'Mark PDF Ready';
+  case 'sent': return 'Mark Sent / Outstanding';
+  case 'paid': return 'Mark Paid';
+  case 'voided': return 'Void';
+  case 'archived': return 'Archive';
+  default: return `Mark ${invoiceStatusLabel(status)}`;
+  }
 }
 
 function downloadBlob(blobData: BlobDownload, fallbackName: string) {
@@ -226,6 +283,7 @@ export function InvoiceMaker() {
   const [chatBusy, setChatBusy] = useState(false);
   const [invoiceMode, setInvoiceMode] = useState<'manual' | 'ai'>('manual');
   const [showArchivedChatSessions, setShowArchivedChatSessions] = useState(false);
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<InvoiceStatusFilter>('active');
   const [createdChatInvoice, setCreatedChatInvoice] = useState<Invoice | null>(null);
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
@@ -310,6 +368,21 @@ export function InvoiceMaker() {
   );
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
   const activeBillingProfiles = useMemo(() => billingProfiles.filter((profile) => profile.active), [billingProfiles]);
+  const filteredInvoices = useMemo(() => {
+    if (invoiceStatusFilter === 'all') return invoices;
+    if (invoiceStatusFilter === 'active') return invoices.filter((invoice) => invoice.status !== 'archived');
+    return invoices.filter((invoice) => invoice.status === invoiceStatusFilter);
+  }, [invoiceStatusFilter, invoices]);
+  const invoiceStatusCounts = useMemo(() => ({
+    active: invoices.filter((invoice) => invoice.status !== 'archived').length,
+    all: invoices.length,
+    draft: invoices.filter((invoice) => invoice.status === 'draft').length,
+    generated: invoices.filter((invoice) => invoice.status === 'generated').length,
+    sent: invoices.filter((invoice) => invoice.status === 'sent').length,
+    paid: invoices.filter((invoice) => invoice.status === 'paid').length,
+    voided: invoices.filter((invoice) => invoice.status === 'voided').length,
+    archived: invoices.filter((invoice) => invoice.status === 'archived').length,
+  }), [invoices]);
   const activePreview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
   const previewLineItems = activePreview?.line_items || [];
 
@@ -387,6 +460,14 @@ export function InvoiceMaker() {
       email_body: invoice.email_body || '',
       status: invoice.status,
       generated_at: invoice.generated_at,
+      sent_at: invoice.sent_at,
+      paid_at: invoice.paid_at,
+      voided_at: invoice.voided_at,
+      archived_at: invoice.archived_at,
+      created_by_name: invoice.created_by_name,
+      updated_by_name: invoice.updated_by_name,
+      created_at: invoice.created_at,
+      updated_at: invoice.updated_at,
       line_items: (invoice.line_items || []).map((item) => ({
         ...item,
         local_id: `existing-${item.id}`,
@@ -449,6 +530,10 @@ export function InvoiceMaker() {
       email_body: preview.email_body || '',
       status: 'draft',
       generated_at: null,
+      sent_at: null,
+      paid_at: null,
+      voided_at: null,
+      archived_at: null,
       line_items: (preview.line_items || []).map((item, index) => ({
         local_id: `ai-${Date.now()}-${index}`,
         description: item.description,
@@ -590,8 +675,16 @@ export function InvoiceMaker() {
     return false;
   };
 
+  const canReturnInvoiceToDraft = (status?: InvoiceStatus) => Boolean(status && statusActions[status]?.includes('draft'));
+
   const confirmDraftResetForFinalizedEdits = (action: string) => {
     if (!invoiceForm.status || invoiceForm.status === 'draft' || !hasUnsavedInvoiceChanges()) return true;
+
+    if (!canReturnInvoiceToDraft(invoiceForm.status)) {
+      setError(`Cannot ${action} with unsaved changes because ${invoiceStatusLabel(invoiceForm.status)} invoices cannot be returned to draft.`);
+      setSuccess(null);
+      return false;
+    }
 
     return window.confirm(
       `This invoice has already moved beyond draft. To ${action}, the current edits must be saved as a draft and generated/sent/paid timestamps will be cleared. Continue?`
@@ -668,13 +761,37 @@ export function InvoiceMaker() {
 
   const handleStatusChange = async (status: InvoiceStatus) => {
     if (!invoiceForm.id) return;
+
+    let targetInvoiceId = invoiceForm.id;
+    if (hasUnsavedInvoiceChanges()) {
+      if (invoiceForm.status === 'draft') {
+        const shouldSaveFirst = window.confirm(
+          'Save the current draft edits before changing the invoice workflow?'
+        );
+        if (!shouldSaveFirst) return;
+
+        const savedId = await saveInvoice({
+          markDraft: false,
+          reloadAfterSave: false,
+          successMessage: 'Invoice saved before workflow update.',
+        });
+        if (!savedId) return;
+        targetInvoiceId = savedId;
+      } else {
+        const shouldDiscardEdits = window.confirm(
+          'This invoice has unsaved edits. Changing the invoice workflow now will reload the saved invoice and discard those edits. Continue?'
+        );
+        if (!shouldDiscardEdits) return;
+      }
+    }
+
     setStatusBusy(true);
     setError(null);
     try {
-      const response = await invoicesApi.updateStatus(invoiceForm.id, status);
+      const response = await invoicesApi.updateStatus(targetInvoiceId, status);
       await loadData();
       hydrateInvoiceForm(response.invoice);
-      setSuccess(`Invoice marked ${status}.`);
+      setSuccess(`Invoice marked ${invoiceStatusLabel(status)}.`);
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update invoice status');
@@ -1127,15 +1244,36 @@ export function InvoiceMaker() {
           </Button>
         </div>
 
+        <div className="flex flex-wrap gap-1.5">
+          {invoiceStatusFilters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => setInvoiceStatusFilter(filter.key)}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                invoiceStatusFilter === filter.key
+                  ? 'border-primary-300 bg-primary-50 text-primary-700'
+                  : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50'
+              }`}
+            >
+              {filter.label} {invoiceStatusCounts[filter.key]}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <p className="text-sm text-neutral-500">Loading...</p>
         ) : invoices.length === 0 ? (
           <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
             No invoices yet.
           </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+            No invoices in this status.
+          </div>
         ) : (
           <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
-            {invoices.map((invoice) => (
+            {filteredInvoices.map((invoice) => (
               <button
                 key={invoice.id}
                 type="button"
@@ -1151,11 +1289,15 @@ export function InvoiceMaker() {
                       {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
                     </p>
                   </div>
-                  <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
+                  <Badge className={statusColors[invoice.status]}>{invoiceStatusLabel(invoice.status)}</Badge>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
                   <span>{formatDateOnly(invoice.invoice_date)}</span>
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
+                </div>
+                <div className="mt-1 text-[11px] text-neutral-400">
+                  {invoice.generated_at ? `Generated ${formatDateOnly(invoice.generated_at)}` : 'Draft not generated'}
+                  {invoice.archived_at ? ` · Archived ${formatDateOnly(invoice.archived_at)}` : ''}
                 </div>
               </button>
             ))}
@@ -1334,6 +1476,21 @@ export function InvoiceMaker() {
     Boolean(message.role === 'assistant' && message.has_preview && message.preview_version && message.preview_version !== activePreviewVersion && chatCanAcceptMessages)
   );
 
+  const invoiceLifecycle = [
+    { label: 'Created', value: invoiceForm.created_at, actor: invoiceForm.created_by_name },
+    { label: 'PDF Ready', value: invoiceForm.generated_at },
+    { label: 'Sent / Outstanding', value: invoiceForm.sent_at },
+    { label: 'Paid', value: invoiceForm.paid_at },
+    { label: 'Voided', value: invoiceForm.voided_at },
+    { label: 'Archived', value: invoiceForm.archived_at },
+  ].filter((event) => Boolean(event.value));
+  const selectedInvoiceArchived = invoiceForm.status === 'archived';
+  const selectedInvoiceReadOnly = Boolean(invoiceForm.status && ['paid', 'voided', 'archived'].includes(invoiceForm.status));
+  const selectedInvoiceCannotSaveDraft = Boolean(
+    invoiceForm.status && invoiceForm.status !== 'draft' && !canReturnInvoiceToDraft(invoiceForm.status)
+  );
+  const selectedInvoiceHasBlockedUnsavedChanges = selectedInvoiceCannotSaveDraft && hasUnsavedInvoiceChanges();
+
   return (
     <div>
       <Header
@@ -1391,7 +1548,7 @@ export function InvoiceMaker() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {invoiceForm.status && <Badge className={statusColors[invoiceForm.status]}>{invoiceForm.status}</Badge>}
+                  {invoiceForm.status && <Badge className={statusColors[invoiceForm.status]}>{invoiceStatusLabel(invoiceForm.status)}</Badge>}
                   {invoiceForm.id && invoiceForm.status === 'draft' && (
                     <Button
                       variant="outline"
@@ -1407,12 +1564,50 @@ export function InvoiceMaker() {
                 </div>
               </div>
 
+              {selectedInvoiceArchived && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                  This invoice is archived. It remains available for records, but cannot be edited or moved to another status.
+                </div>
+              )}
+
+              {selectedInvoiceReadOnly && !selectedInvoiceArchived && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                  This invoice is {invoiceStatusLabel(invoiceForm.status || 'draft').toLowerCase()} and is read-only. Void/archive actions remain available where allowed, but invoice details cannot be edited.
+                </div>
+              )}
+
+              {invoiceForm.id && (
+                <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
+                      <p className="text-xs text-neutral-500">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
+                    </div>
+                    <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceStatusLabel(invoiceForm.status || 'draft')}</Badge>
+                  </div>
+                  {invoiceLifecycle.length === 0 ? (
+                    <p className="text-sm text-neutral-500">No lifecycle events recorded yet.</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {invoiceLifecycle.map((event) => (
+                        <div key={`${event.label}-${event.value}`} className="rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{event.label}</p>
+                          <p className="mt-1 text-sm font-medium text-neutral-800">{formatDateTime(event.value)}</p>
+                          {event.actor && <p className="text-xs text-neutral-500">by {event.actor}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">From</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
                     value={invoiceForm.invoice_billing_profile_id}
+                    disabled={selectedInvoiceReadOnly}
                     onChange={(event) => {
                       const nextProfile = billingProfiles.find((profile) => String(profile.id) === event.target.value);
                       setInvoiceForm((current) => ({
@@ -1433,8 +1628,9 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Bill To</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
                     value={invoiceForm.invoice_recipient_id}
+                    disabled={selectedInvoiceReadOnly}
                     onChange={(event) => applyRecipientDefaults(event.target.value)}
                   >
                     <option value="">Select recipient...</option>
@@ -1447,20 +1643,20 @@ export function InvoiceMaker() {
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice #</span>
-                  <Input value={invoiceForm.invoice_number} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_number: event.target.value }))} placeholder="Auto-generated if blank" />
+                  <Input value={invoiceForm.invoice_number} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_number: event.target.value }))} placeholder="Auto-generated if blank" disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
-                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} />
+                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period Start</span>
-                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} />
+                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period End</span>
-                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value }))} />
+                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                 </div>
               </div>
@@ -1470,7 +1666,7 @@ export function InvoiceMaker() {
                   <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-neutral-700">{currency(invoiceTotal)}</span>
-                    <Button type="button" size="sm" variant="outline" onClick={addLineItem}>
+                    <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
                       <Plus className="mr-1.5 h-4 w-4" />
                       Line
                     </Button>
@@ -1490,7 +1686,8 @@ export function InvoiceMaker() {
                           <button
                             type="button"
                             onClick={() => removeLineItem(item.local_id)}
-                            className="rounded-lg p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
+                            disabled={selectedInvoiceReadOnly}
+                            className="rounded-lg p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label="Remove line item"
                           >
                             <X className="h-4 w-4" />
@@ -1499,19 +1696,19 @@ export function InvoiceMaker() {
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_120px_120px]">
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Description</span>
-                            <Input value={item.description} onChange={(event) => updateLineItem(item.local_id, { description: event.target.value })} placeholder="Service description" />
+                            <Input value={item.description} onChange={(event) => updateLineItem(item.local_id, { description: event.target.value })} placeholder="Service description" disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Qty</span>
-                            <Input type="number" step="0.01" min="0" value={item.quantity} onChange={(event) => updateLineItem(item.local_id, { quantity: Number(event.target.value || 0) })} />
+                            <Input type="number" step="0.01" min="0" value={item.quantity} onChange={(event) => updateLineItem(item.local_id, { quantity: Number(event.target.value || 0) })} disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Rate</span>
-                            <Input type="number" step="0.01" min="0" value={item.rate} onChange={(event) => updateLineItem(item.local_id, { rate: Number(event.target.value || 0) })} />
+                            <Input type="number" step="0.01" min="0" value={item.rate} onChange={(event) => updateLineItem(item.local_id, { rate: Number(event.target.value || 0) })} disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Date</span>
-                            <Input type="date" value={item.service_date || ''} onChange={(event) => updateLineItem(item.local_id, { service_date: event.target.value })} />
+                            <Input type="date" value={item.service_date || ''} onChange={(event) => updateLineItem(item.local_id, { service_date: event.target.value })} disabled={selectedInvoiceReadOnly} />
                           </label>
                         </div>
                         <p className="mt-2 text-right text-sm font-medium text-neutral-700">
@@ -1526,11 +1723,11 @@ export function InvoiceMaker() {
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Payment Terms</span>
-                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => ({ ...current, payment_terms: event.target.value }))} rows={3} />
+                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => ({ ...current, payment_terms: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Notes</span>
-                  <Textarea value={invoiceForm.notes} onChange={(event) => setInvoiceForm((current) => ({ ...current, notes: event.target.value }))} rows={3} />
+                  <Textarea value={invoiceForm.notes} onChange={(event) => setInvoiceForm((current) => ({ ...current, notes: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
                 </label>
               </div>
 
@@ -1549,32 +1746,39 @@ export function InvoiceMaker() {
                   </Button>
                 </div>
                 <div className="space-y-3">
-                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" />
-                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} />
+                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" disabled={selectedInvoiceReadOnly} />
+                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} disabled={selectedInvoiceReadOnly} />
                 </div>
               </div>
 
-              {invoiceForm.id && invoiceForm.status && invoiceForm.status !== 'draft' && (
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white p-3">
-                  <span className="mr-2 text-sm font-medium text-neutral-700">Status:</span>
-                  {(statusActions[invoiceForm.status] || []).map((status) => (
-                    <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
-                      Mark {status}
-                    </Button>
-                  ))}
+              {invoiceForm.id && invoiceForm.status && (statusActions[invoiceForm.status] || []).length > 0 && (
+                <div className="rounded-xl border border-neutral-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-neutral-700">Invoice workflow</span>
+                    {invoiceForm.status === 'draft' && (
+                      <span className="text-xs text-neutral-500">Generate PDF is the normal path to make this invoice PDF Ready.</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(statusActions[invoiceForm.status] || []).map((status) => (
+                      <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
+                        {statusActionLabel(status)}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy}>
+                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>
-                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy}>
+                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Eye className="mr-1.5 h-4 w-4" />
                   Preview PDF
                 </Button>
-                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy}>
+                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Download className="mr-1.5 h-4 w-4" />
                   Generate PDF
                 </Button>

@@ -18,7 +18,7 @@ Status values:
 2. `needs_product_decision` - Finalize the real permission model for `admin`, `manager`, and `accountant`, then make backend and frontend match it.
 3. `confirmed` - Reduce production slowness, starting with expensive company-list loading and repeated aggregate work.
 4. `confirmed` - Improve employee page behavior: show employee totals, verify/fix search behavior, and remove permission-confusing UI states.
-5. `planned` - Add recurring additional earnings support for monthly stipends / monthly bonuses on top of hourly and multi-rate pay.
+5. `done` - Recurring payroll adjustments now support taxable additions, non-taxable additions, pre-tax deductions, and post-tax deductions on top of hourly, salary, variable salary, and imported payroll items.
 6. `planned` - Add realtime updates and collaboration improvements after permissions, correctness, and performance are stable.
 
 ## Confirmed Findings
@@ -82,7 +82,7 @@ Status values:
 
 - `planned` - the payroll engine already supports one-off `bonus` entries on payroll items
 - Current limitation:
-  - there is no recurring monthly stipend / monthly bonus setup at the employee level
+  - recurring stipends, bonuses, reimbursements, and deduction adjustments are handled by employee-level recurring payroll adjustments
 - Real-world need:
   - some employees receive multi-rate hourly pay plus a fixed monthly amount like `$1,500/month`
 - Desired behavior:
@@ -117,7 +117,7 @@ Status values:
 
 ### Recurring Additional Earnings Rules
 
-- `needs_product_decision` - define how recurring earnings should work:
+- `done` - recurring adjustments are implemented as a unified adjustment model:
   - earning type label, such as `Monthly Stipend` or `Monthly Bonus`
   - amount
   - frequency
@@ -150,7 +150,7 @@ Status values:
 
 ### Phase 3 - Recurring Additional Earnings
 
-- `planned` - add employee-level recurring additional earnings configuration
+- `done` - employee-level recurring payroll adjustment configuration is available
 - `planned` - support common use cases:
   - monthly stipend
   - recurring bonus
