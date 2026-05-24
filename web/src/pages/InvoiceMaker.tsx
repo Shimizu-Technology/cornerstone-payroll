@@ -761,10 +761,34 @@ export function InvoiceMaker() {
 
   const handleStatusChange = async (status: InvoiceStatus) => {
     if (!invoiceForm.id) return;
+
+    let targetInvoiceId = invoiceForm.id;
+    if (hasUnsavedInvoiceChanges()) {
+      if (invoiceForm.status === 'draft') {
+        const shouldSaveFirst = window.confirm(
+          'Save the current draft edits before changing the invoice workflow?'
+        );
+        if (!shouldSaveFirst) return;
+
+        const savedId = await saveInvoice({
+          markDraft: false,
+          reloadAfterSave: false,
+          successMessage: 'Invoice saved before workflow update.',
+        });
+        if (!savedId) return;
+        targetInvoiceId = savedId;
+      } else {
+        const shouldDiscardEdits = window.confirm(
+          'This invoice has unsaved edits. Changing the invoice workflow now will reload the saved invoice and discard those edits. Continue?'
+        );
+        if (!shouldDiscardEdits) return;
+      }
+    }
+
     setStatusBusy(true);
     setError(null);
     try {
-      const response = await invoicesApi.updateStatus(invoiceForm.id, status);
+      const response = await invoicesApi.updateStatus(targetInvoiceId, status);
       await loadData();
       hydrateInvoiceForm(response.invoice);
       setSuccess(`Invoice marked ${invoiceStatusLabel(status)}.`);
