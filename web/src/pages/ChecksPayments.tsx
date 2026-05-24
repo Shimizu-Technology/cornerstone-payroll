@@ -16,6 +16,7 @@ import { NonEmployeeCheckEditModal } from '@/components/checks/NonEmployeeCheckE
 import { NonEmployeeCheckHistory } from '@/components/checks/NonEmployeeCheckHistory';
 import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
 import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
+import { DRT } from '@/lib/constants';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -517,7 +518,14 @@ export function ChecksPayments() {
             </FormField>
             {form.check_type === 'grt' && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
+                  <div className="flex flex-wrap gap-2 text-xs font-medium">
+                    <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                    <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT filing help</a>
+                    <a href={DRT.BPT_EFILE_GUIDANCE_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">BPT e-file guidance</a>
+                  </div>
+                </div>
                 <ul className="mt-1 list-inside list-disc space-y-1">
                   <li>Total the client’s gross receipts/payments received for the filing month from the accounting records.</li>
                   <li>File the monthly GRT/BPT return through GuamTax.com; GuamTax calculates the tax due from the entered values.</li>
@@ -627,9 +635,18 @@ export function ChecksPayments() {
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
                       )}
                       {check.check_type === 'grt' && (
-                        <p className="mt-1 text-xs text-amber-700">
-                          GRT: confirm the filing period, DRT confirmation number, and source calculation before marking paid/printed.
-                        </p>
+                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-semibold">GRT workflow reminder</span>
+                            <div className="flex flex-wrap gap-2 font-medium">
+                              <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                              <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT help</a>
+                            </div>
+                          </div>
+                          <p className="mt-1">
+                            Confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.
+                          </p>
+                        </div>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
