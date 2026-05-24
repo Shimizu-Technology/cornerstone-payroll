@@ -1434,11 +1434,11 @@ export function InvoiceMaker() {
 
   const invoiceLifecycle = [
     { label: 'Created', value: invoiceForm.created_at, actor: invoiceForm.created_by_name },
-    { label: 'Generated', value: invoiceForm.generated_at, actor: invoiceForm.updated_by_name },
-    { label: 'Sent', value: invoiceForm.sent_at, actor: invoiceForm.updated_by_name },
-    { label: 'Paid', value: invoiceForm.paid_at, actor: invoiceForm.updated_by_name },
-    { label: 'Voided', value: invoiceForm.voided_at, actor: invoiceForm.updated_by_name },
-    { label: 'Archived', value: invoiceForm.archived_at, actor: invoiceForm.updated_by_name },
+    { label: 'Generated', value: invoiceForm.generated_at },
+    { label: 'Sent', value: invoiceForm.sent_at },
+    { label: 'Paid', value: invoiceForm.paid_at },
+    { label: 'Voided', value: invoiceForm.voided_at },
+    { label: 'Archived', value: invoiceForm.archived_at },
   ].filter((event) => Boolean(event.value));
   const selectedInvoiceArchived = invoiceForm.status === 'archived';
 
@@ -1526,7 +1526,7 @@ export function InvoiceMaker() {
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
-                      <p className="text-xs text-neutral-500">Who touched this invoice and when.</p>
+                      <p className="text-xs text-neutral-500">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
                     </div>
                     <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceForm.status || 'draft'}</Badge>
                   </div>
