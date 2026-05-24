@@ -8,10 +8,12 @@ No major payroll software (Gusto, ADP, Check.com) supports Guam. QuickBooks requ
 
 ## Status
 
-**Phase 1: Internal Payroll MVP** (Active build)
-- Payroll engine and tax calculations in place
-- Role-based access control and audit logging added
-- Admin UI for user management, tax config, and audit logs
+**Production-capable internal payroll and firm operations app**
+- Live Guam payroll workflows: calculation, approval/commit, check printing, pay stubs, tax summaries, W-2GU/941-GU/1099 support, and MoSa import automation
+- Unified recurring/pay-period payroll adjustments with taxable, non-taxable, pre-tax, and post-tax treatment
+- Check reissue, void, print, standalone FIT/GRT/child-support payments, and audit history workflows
+- Invoice Maker and General Transmittals for Cornerstone firm operations
+- Role-based access control, company switching, and audit logging
 
 See [PRD.md](PRD.md) for full product requirements.
 

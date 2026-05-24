@@ -451,8 +451,9 @@ Possible deliverables:
 - Invoice numbers are unique per company.
 - Staff can preview/download a PDF.
 - Staff can copy an email subject/body.
-- Staff can track status from draft to sent/paid.
-- Records are scoped to the active company.
+- Staff can track status from draft to generated to sent/paid, plus void/archive completed records.
+- Staff can filter invoice history by status, hide/show archived records, and review the lifecycle timeline for created/generated/sent/paid/voided/archived timestamps.
+- Records are scoped to the active organization/company context.
 - Client portal users cannot access the tool.
 
 ### AI Invoice Assistant
@@ -500,4 +501,4 @@ Build both tools natively in Cornerstone Payroll.
 
 Do not embed FastAPI. Rails can handle the invoice maker, including AI chat, image extraction, PDFs, and history. The separate invoice-maker app should be treated as a prototype/spec, not as a runtime dependency.
 
-Build general transmittals first, then the manual invoice maker, then AI invoice assistance. This sequence supports the firm's immediate QuickBooks replacement work while keeping the app stable and cohesive.
+Build general transmittals first, then the manual invoice maker, then AI invoice assistance. As of 2026-05-24, the native invoice tool includes manual invoices, AI-assisted previews, generated PDF snapshots, email draft copy, status filters/actions, archive visibility, and lifecycle timeline. Remaining invoice work should focus on richer PDF design, optional persistent PDF storage, and smarter recipient research guardrails.

@@ -56,6 +56,14 @@ interface InvoiceFormState {
   email_body: string;
   status?: InvoiceStatus;
   generated_at?: string | null;
+  sent_at?: string | null;
+  paid_at?: string | null;
+  voided_at?: string | null;
+  archived_at?: string | null;
+  created_by_name?: string | null;
+  updated_by_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
   line_items: DraftLineItem[];
 }
 
@@ -147,9 +155,23 @@ const statusColors: Record<InvoiceStatus, string> = {
   archived: 'bg-neutral-200 text-neutral-700',
 };
 
+const invoiceStatusFilters = [
+  { key: 'active', label: 'Active' },
+  { key: 'draft', label: 'Draft' },
+  { key: 'generated', label: 'Generated' },
+  { key: 'sent', label: 'Sent' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'voided', label: 'Voided' },
+  { key: 'archived', label: 'Archived' },
+  { key: 'all', label: 'All' },
+] as const;
+
+type InvoiceStatusFilter = typeof invoiceStatusFilters[number]['key'];
+
 const statusActions: Partial<Record<InvoiceStatus, InvoiceStatus[]>> = {
-  generated: ['sent', 'voided', 'archived'],
-  sent: ['paid', 'voided', 'archived'],
+  draft: ['generated', 'archived'],
+  generated: ['draft', 'sent', 'voided', 'archived'],
+  sent: ['draft', 'paid', 'voided', 'archived'],
   paid: ['voided', 'archived'],
   voided: ['archived'],
 };
@@ -176,6 +198,29 @@ function localDateFromDateOnly(value?: string | null) {
 function formatDateOnly(value?: string | null) {
   const date = localDateFromDateOnly(value);
   return date ? date.toLocaleDateString() : '';
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function statusActionLabel(status: InvoiceStatus) {
+  switch (status) {
+  case 'draft': return 'Return to Draft';
+  case 'generated': return 'Mark Generated';
+  case 'sent': return 'Mark Sent';
+  case 'paid': return 'Mark Paid';
+  case 'voided': return 'Void';
+  case 'archived': return 'Archive';
+  default: return `Mark ${status}`;
+  }
 }
 
 function downloadBlob(blobData: BlobDownload, fallbackName: string) {
@@ -226,6 +271,7 @@ export function InvoiceMaker() {
   const [chatBusy, setChatBusy] = useState(false);
   const [invoiceMode, setInvoiceMode] = useState<'manual' | 'ai'>('manual');
   const [showArchivedChatSessions, setShowArchivedChatSessions] = useState(false);
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<InvoiceStatusFilter>('active');
   const [createdChatInvoice, setCreatedChatInvoice] = useState<Invoice | null>(null);
   const [chatEmailCopied, setChatEmailCopied] = useState(false);
   const savedInvoiceSignatureRef = useRef<string | null>(null);
@@ -310,6 +356,21 @@ export function InvoiceMaker() {
   );
   const activeRecipients = useMemo(() => recipients.filter((recipient) => recipient.active), [recipients]);
   const activeBillingProfiles = useMemo(() => billingProfiles.filter((profile) => profile.active), [billingProfiles]);
+  const filteredInvoices = useMemo(() => {
+    if (invoiceStatusFilter === 'all') return invoices;
+    if (invoiceStatusFilter === 'active') return invoices.filter((invoice) => invoice.status !== 'archived');
+    return invoices.filter((invoice) => invoice.status === invoiceStatusFilter);
+  }, [invoiceStatusFilter, invoices]);
+  const invoiceStatusCounts = useMemo(() => ({
+    active: invoices.filter((invoice) => invoice.status !== 'archived').length,
+    all: invoices.length,
+    draft: invoices.filter((invoice) => invoice.status === 'draft').length,
+    generated: invoices.filter((invoice) => invoice.status === 'generated').length,
+    sent: invoices.filter((invoice) => invoice.status === 'sent').length,
+    paid: invoices.filter((invoice) => invoice.status === 'paid').length,
+    voided: invoices.filter((invoice) => invoice.status === 'voided').length,
+    archived: invoices.filter((invoice) => invoice.status === 'archived').length,
+  }), [invoices]);
   const activePreview = activeChatSession?.current_preview as InvoiceAiPreview | undefined;
   const previewLineItems = activePreview?.line_items || [];
 
@@ -387,6 +448,14 @@ export function InvoiceMaker() {
       email_body: invoice.email_body || '',
       status: invoice.status,
       generated_at: invoice.generated_at,
+      sent_at: invoice.sent_at,
+      paid_at: invoice.paid_at,
+      voided_at: invoice.voided_at,
+      archived_at: invoice.archived_at,
+      created_by_name: invoice.created_by_name,
+      updated_by_name: invoice.updated_by_name,
+      created_at: invoice.created_at,
+      updated_at: invoice.updated_at,
       line_items: (invoice.line_items || []).map((item) => ({
         ...item,
         local_id: `existing-${item.id}`,
@@ -449,6 +518,10 @@ export function InvoiceMaker() {
       email_body: preview.email_body || '',
       status: 'draft',
       generated_at: null,
+      sent_at: null,
+      paid_at: null,
+      voided_at: null,
+      archived_at: null,
       line_items: (preview.line_items || []).map((item, index) => ({
         local_id: `ai-${Date.now()}-${index}`,
         description: item.description,
@@ -1127,15 +1200,36 @@ export function InvoiceMaker() {
           </Button>
         </div>
 
+        <div className="flex flex-wrap gap-1.5">
+          {invoiceStatusFilters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => setInvoiceStatusFilter(filter.key)}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                invoiceStatusFilter === filter.key
+                  ? 'border-primary-300 bg-primary-50 text-primary-700'
+                  : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-300 hover:bg-neutral-50'
+              }`}
+            >
+              {filter.label} {invoiceStatusCounts[filter.key]}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
           <p className="text-sm text-neutral-500">Loading...</p>
         ) : invoices.length === 0 ? (
           <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
             No invoices yet.
           </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
+            No invoices in this status.
+          </div>
         ) : (
           <div className="max-h-[460px] space-y-2 overflow-y-auto pr-1">
-            {invoices.map((invoice) => (
+            {filteredInvoices.map((invoice) => (
               <button
                 key={invoice.id}
                 type="button"
@@ -1156,6 +1250,10 @@ export function InvoiceMaker() {
                 <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
                   <span>{formatDateOnly(invoice.invoice_date)}</span>
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
+                </div>
+                <div className="mt-1 text-[11px] text-neutral-400">
+                  {invoice.generated_at ? `Generated ${formatDateOnly(invoice.generated_at)}` : 'Draft not generated'}
+                  {invoice.archived_at ? ` · Archived ${formatDateOnly(invoice.archived_at)}` : ''}
                 </div>
               </button>
             ))}
@@ -1334,6 +1432,16 @@ export function InvoiceMaker() {
     Boolean(message.role === 'assistant' && message.has_preview && message.preview_version && message.preview_version !== activePreviewVersion && chatCanAcceptMessages)
   );
 
+  const invoiceLifecycle = [
+    { label: 'Created', value: invoiceForm.created_at, actor: invoiceForm.created_by_name },
+    { label: 'Generated', value: invoiceForm.generated_at, actor: invoiceForm.updated_by_name },
+    { label: 'Sent', value: invoiceForm.sent_at, actor: invoiceForm.updated_by_name },
+    { label: 'Paid', value: invoiceForm.paid_at, actor: invoiceForm.updated_by_name },
+    { label: 'Voided', value: invoiceForm.voided_at, actor: invoiceForm.updated_by_name },
+    { label: 'Archived', value: invoiceForm.archived_at, actor: invoiceForm.updated_by_name },
+  ].filter((event) => Boolean(event.value));
+  const selectedInvoiceArchived = invoiceForm.status === 'archived';
+
   return (
     <div>
       <Header
@@ -1406,6 +1514,37 @@ export function InvoiceMaker() {
                   )}
                 </div>
               </div>
+
+              {selectedInvoiceArchived && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                  This invoice is archived. It remains available for records, but cannot be edited or moved to another status.
+                </div>
+              )}
+
+              {invoiceForm.id && (
+                <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
+                      <p className="text-xs text-neutral-500">Who touched this invoice and when.</p>
+                    </div>
+                    <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceForm.status || 'draft'}</Badge>
+                  </div>
+                  {invoiceLifecycle.length === 0 ? (
+                    <p className="text-sm text-neutral-500">No lifecycle events recorded yet.</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {invoiceLifecycle.map((event) => (
+                        <div key={`${event.label}-${event.value}`} className="rounded-lg border border-neutral-100 bg-neutral-50 px-3 py-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-neutral-400">{event.label}</p>
+                          <p className="mt-1 text-sm font-medium text-neutral-800">{formatDateTime(event.value)}</p>
+                          {event.actor && <p className="text-xs text-neutral-500">by {event.actor}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5">
@@ -1554,27 +1693,34 @@ export function InvoiceMaker() {
                 </div>
               </div>
 
-              {invoiceForm.id && invoiceForm.status && invoiceForm.status !== 'draft' && (
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-neutral-200 bg-white p-3">
-                  <span className="mr-2 text-sm font-medium text-neutral-700">Status:</span>
-                  {(statusActions[invoiceForm.status] || []).map((status) => (
-                    <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
-                      Mark {status}
-                    </Button>
-                  ))}
+              {invoiceForm.id && invoiceForm.status && (statusActions[invoiceForm.status] || []).length > 0 && (
+                <div className="rounded-xl border border-neutral-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-neutral-700">Status actions</span>
+                    {invoiceForm.status === 'draft' && (
+                      <span className="text-xs text-neutral-500">Generate PDF is the normal path to move a draft to generated.</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {(statusActions[invoiceForm.status] || []).map((status) => (
+                      <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
+                        {statusActionLabel(status)}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy}>
+                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy || selectedInvoiceArchived}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>
-                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy}>
+                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy || selectedInvoiceArchived}>
                   <Eye className="mr-1.5 h-4 w-4" />
                   Preview PDF
                 </Button>
-                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy}>
+                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy || selectedInvoiceArchived}>
                   <Download className="mr-1.5 h-4 w-4" />
                   Generate PDF
                 </Button>
