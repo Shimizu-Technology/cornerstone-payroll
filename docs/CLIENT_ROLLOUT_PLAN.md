@@ -1,6 +1,6 @@
 # Cornerstone Payroll — Client-by-Client Rollout Plan (Week 1–4)
 
-**Last updated:** 2026-03-11  
+**Last updated:** 2026-05-24
 **Execution start (Week 1):** TBD — set before kickoff meeting  
 **Owner:** Leon + Cornerstone Ops + Dev Team  
 **Objective:** Safely transition payroll operations from QuickBooks to Cornerstone Payroll using a phased, low-risk rollout.
@@ -46,19 +46,28 @@
 - Check printing workflow (CPR-66):
   - check number assignment sequence
   - single/batch check PDF generation
-  - mark printed / void / reprint actions
+  - mark printed / void / reissue actions with explicit replacement check numbers and reasons
   - alignment test PDF + check settings calibration
-  - check event audit trail
+  - check event audit trail with actor names
+- Standalone Checks & Payments:
+  - FIT / Tax Deposit, GRT, child support, garnishment, vendor, reimbursement, and contractor checks
+  - GRT workflow guidance with GuamTax links and two-copy in-person payment reminder
+- Invoice Maker:
+  - manual and AI-assisted invoice creation
+  - invoice status workflow: draft → generated → sent → paid / voided / archived
+  - status filters, archive visibility, PDF generation, email draft copy, and invoice lifecycle timeline
 
 ### In progress / partial
 - Rollout execution + per-client PASS/FAIL evidence capture
+- Pay period comparison review against prior period
+- MoSa installment loan ledger integration beyond paycheck deductions
+- QuickBooks historical import lane
 
 ### Not complete for full QB parity
-- W-2GU generation/export
-- 941-GU credits/deposit integration
+- Off-cycle / bonus payroll runs
 - ACH/NACHA export
-- Payroll-level void/adjust/re-run workflow
-- Final payroll register PDF/export package
+- Pay stub email delivery
+- W-2GU EFW2 electronic filing
 
 ---
 

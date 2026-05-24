@@ -8,7 +8,7 @@
 - 🟡 **Partial** — Core exists but gaps remain (see "Next Actions")
 - ❌ **Missing** — Not yet implemented
 
-**Last updated:** 2026-04-15
+**Last updated:** 2026-05-24
 
 ---
 
@@ -72,7 +72,7 @@
 | General ledger export | ✅ | ❌ **Missing** | Not planned yet | Scope after core reports; needs GL account mapping config |
 | QuickBooks IIF/CSV export | ✅ | ❌ **Missing** | Not planned | Low priority once fully replacing QB |
 | Bank reconciliation report | ✅ | ❌ **Missing** | Not planned | Add after check printing is live |
-| Garnishment / special deduction reporting | ✅ | ❌ **Missing** | No garnishment type or report | Add `GarnishmentDeduction` type to `DeductionType` |
+| Garnishment / special deduction reporting | ✅ | 🟡 **Partial** | Standalone garnishment/child-support checks are supported; employee-level garnishment deduction reporting still pending | Add `GarnishmentDeduction` type/reporting to payroll deductions |
 
 ---
 
@@ -91,9 +91,9 @@
 | W-2GU annual generation | ✅ | ✅ **Done** | `W2GuAggregator` + `W2GuPdfGenerator`; JSON, CSV, PDF export; preflight validation + filing readiness workflow | — |
 | W-2GU XML/EFW2 file (electronic filing) | ✅ | ❌ **Missing** | Not implemented | Follow after W-2GU PDF; Guam DRT accepts EFW2 format |
 | 1099-NEC (contractor payments) | ✅ | ✅ **Done** | `Form1099NecAggregator` + PDF export; contractor employment type supported | — |
-| Form 500 DRT links | N/A | ✅ **Done** | Links to DRT Form 500 in NonEmployeeChecks, Transmittal, and PayPeriodDetail | — |
+| Form 500 / GuamTax resource links | N/A | ✅ **Done** | Links to DRT Form 500 plus GuamTax GRT/BPT filing help in standalone check workflows | — |
 | ACH / direct deposit file generation (NACHA) | ✅ | ❌ **Missing** | Not implemented | Phase 2; requires bank routing/account on employee |
-| Check printing (MICR / pre-printed stock) | ✅ | ✅ **Done** | Full check lifecycle: numbering, single/batch PDF, print/void/reprint, alignment test, non-employee checks | — |
+| Check printing (MICR / pre-printed stock) | ✅ | ✅ **Done** | Full check lifecycle: numbering, single/batch PDF, print/void/reissue, replacement check numbers, alignment test, standalone FIT/GRT/child-support/garnishment checks | — |
 
 ---
 
@@ -135,14 +135,17 @@
 ### 🔴 High — Remaining for full QB replacement
 
 1. **Off-cycle / bonus payroll run** — Some clients need off-cycle bonus runs
-2. **Pay stub email delivery** — Replaces printing + mailing for most employees
-3. **W-2GU EFW2 electronic filing** — Guam DRT accepts EFW2 format
+2. **Pay period comparison review** — QuickBooks-style current-vs-previous period deltas before approval
+3. **Pay stub email delivery** — Replaces printing + mailing for most employees
+4. **W-2GU EFW2 electronic filing** — Guam DRT accepts EFW2 format
 
 ### 🟠 Medium — Needed for Cornerstone scale-up
 
-4. **General ledger export** — Some clients need GL data for accounting software
-5. **Audit log CSV export + retention** — Compliance completeness
-6. **ACH / NACHA direct deposit file** — Phase 2; currently check-only
+5. **MoSa loan ledger integration** — Optional balance-tracked loans, commit-time transactions, payoff caps
+6. **QuickBooks historical import** — Snapshot import lane for full QB exit
+7. **General ledger export** — Some clients need GL data for accounting software
+8. **Audit log CSV export + retention** — Compliance completeness
+9. **ACH / NACHA direct deposit file** — Phase 2; currently check-only
 
 ### 🟡 Lower — QoL / compliance completeness
 
@@ -158,4 +161,4 @@
 
 *Document owner: Leon Shimizu / Shimizu Technology*  
 *Based on: PRD.md, BUILD_PLAN.md, FUTURE_IMPROVEMENTS.md, and actual code review of `api/app/`*  
-*Last updated: 2026-04-15*
+*Last updated: 2026-05-24*
