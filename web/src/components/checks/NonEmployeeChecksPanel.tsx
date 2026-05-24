@@ -70,7 +70,7 @@ function getTaxQuarter(dateStr?: string): { year: number; quarter: number } | nu
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
-  tax_deposit: 'Tax Deposit',
+  tax_deposit: 'FIT / Tax Deposit',
   grt: 'GRT',
   estimated_tax: 'Estimated Tax',
   w1_balance: 'W-1 Balance',
@@ -448,6 +448,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
             <Input className="px-3 py-2 text-sm" placeholder="Reference #" value={formData.reference_number} onChange={e => setFormData(p => ({ ...p, reference_number: e.target.value }))} />
           </div>
           <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
+          {formData.check_type === 'grt' && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <p className="font-medium">GRT payment notes</p>
+              <p className="mt-0.5">Confirm the GRT filing period, keep the source calculation with the voucher details, and record the DRT confirmation number after payment. This is separate from payroll FIT/Form 500 deposits.</p>
+            </div>
+          )}
           <div className="mt-3 flex gap-2">
             <Button size="sm" onClick={handleCreate} disabled={creating}>
               {creating ? 'Creating...' : 'Create Check'}
@@ -637,6 +643,10 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         )}
                         {check.memo && <span>{check.memo}</span>}
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
+                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{new Date(check.created_at).toLocaleDateString()}</span>
+                        {check.check_type === 'grt' && (
+                          <span className="text-amber-700">GRT: verify period, confirmation, and source calculation.</span>
+                        )}
                         {check.check_type === 'tax_deposit' && (
                           <button
                             type="button"

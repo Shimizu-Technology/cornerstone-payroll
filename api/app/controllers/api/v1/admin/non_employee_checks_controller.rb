@@ -247,7 +247,7 @@ module Api
           # Preload :edits so check_payload's `edit_count: check.edits.size`
           # uses the loaded association instead of issuing a per-request COUNT.
           @check = NonEmployeeCheck
-            .includes(:edits, :line_items, :pay_period)
+            .includes(:edits, :line_items, :pay_period, :created_by)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @check
 
@@ -341,6 +341,7 @@ module Api
             check_status: check.check_status,
             edit_count: edit_count_for(check, override: edit_count),
             created_by_id: check.created_by_id,
+            created_by_name: check.created_by&.name,
             created_at: check.created_at,
             updated_at: check.updated_at
           }

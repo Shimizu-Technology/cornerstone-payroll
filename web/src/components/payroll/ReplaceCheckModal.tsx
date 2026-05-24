@@ -503,7 +503,7 @@ export function ReplaceCheckModal({
             {preview?.meta.is_zero_change && (
               <p className="text-sm text-gray-600">
                 The corrected inputs match the original — nothing to replace.
-                If the check is just lost or damaged, use the standard reprint
+                If the check is just lost or damaged, use the standard reissue
                 action instead.
               </p>
             )}

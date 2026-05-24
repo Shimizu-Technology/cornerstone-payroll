@@ -19,7 +19,7 @@ import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/component
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
-  tax_deposit: 'Tax Deposit',
+  tax_deposit: 'FIT / Tax Deposit',
   grt: 'GRT',
   estimated_tax: 'Estimated Tax',
   w1_balance: 'W-1 Balance',
@@ -32,10 +32,13 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
 };
 
 const STANDALONE_TYPES: NonEmployeeCheckType[] = [
+  'tax_deposit',
   'grt',
   'estimated_tax',
   'w1_balance',
   'swica',
+  'child_support',
+  'garnishment',
   'vendor',
   'reimbursement',
   'contractor',
@@ -342,6 +345,7 @@ export function ChecksPayments() {
       'Reference Number',
       'Memo',
       'Description',
+      'Created By',
       'Created At',
     ];
     const rows = visibleChecks.map(check => [
@@ -360,6 +364,7 @@ export function ChecksPayments() {
       check.reference_number || '',
       check.memo || '',
       check.description || '',
+      check.created_by_name || '',
       check.created_at,
     ]);
     const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
@@ -510,6 +515,16 @@ export function ChecksPayments() {
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               />
             </FormField>
+            {form.check_type === 'grt' && (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-semibold">GRT payment notes</p>
+                <ul className="mt-1 list-inside list-disc space-y-1">
+                  <li>Use the gross receipts tax period this payment covers, usually a monthly period.</li>
+                  <li>Record the DRT confirmation number after payment so the register ties back to the filing.</li>
+                  <li>Keep this separate from payroll FIT/Form 500 tax deposits.</li>
+                </ul>
+              </div>
+            )}
             <VoucherLineItemsEditor
               items={form.line_items}
               amount={form.amount}
@@ -604,9 +619,15 @@ export function ChecksPayments() {
                         {check.payment_date && <span>Payment {formatDate(check.payment_date)}</span>}
                         {check.due_date && <span>Due {formatDate(check.due_date)}</span>}
                         {check.confirmation_number && <span>Confirmation {check.confirmation_number}</span>}
+                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatDate(check.created_at)}</span>
                       </div>
                       {(check.memo || check.description) && (
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
+                      )}
+                      {check.check_type === 'grt' && (
+                        <p className="mt-1 text-xs text-amber-700">
+                          GRT: confirm the filing period, DRT confirmation number, and source calculation before marking paid/printed.
+                        </p>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -689,7 +710,8 @@ function formatCurrency(value: number) {
 }
 
 function formatDate(value: string) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString();
+  const date = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString();
 }
 
 function periodLabel(check: NonEmployeeCheck) {

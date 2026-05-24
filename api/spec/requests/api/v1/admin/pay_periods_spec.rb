@@ -797,6 +797,12 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       company_ytd = CompanyYtdTotal.find_by(company: company, year: pay_period.pay_date.year)
       expect(company_ytd).to be_present
       expect(company_ytd.gross_pay).to eq(1200.00)
+
+      item = pay_period.payroll_items.first
+      assigned_event = item.check_events.find_by(event_type: "assigned")
+      expect(assigned_event).to be_present
+      expect(assigned_event.check_number).to eq(item.reload.check_number)
+      expect(assigned_event.reason).to eq("Assigned when pay period was committed")
     end
 
     it "does not enqueue tax sync when the CST ingest integration is not configured" do

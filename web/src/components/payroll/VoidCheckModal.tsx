@@ -53,7 +53,7 @@ export function VoidCheckModal({ item, onClose, onComplete }: VoidCheckModalProp
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-800">
           <strong>This action cannot be undone.</strong> The check will be permanently voided.
           The payroll obligation remains in the system — only the physical check is voided.
-          Use <em>Reprint</em> to issue a replacement.
+          Use <em>Reissue</em> to issue a replacement.
         </div>
 
         <div className="space-y-1">

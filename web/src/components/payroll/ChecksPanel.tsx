@@ -1,6 +1,6 @@
 /**
  * CPR-66: ChecksPanel
- * Shows all checks for a committed pay period with print/void/reprint controls.
+ * Shows all checks for a committed pay period with print/void/reissue controls.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -32,6 +32,29 @@ function checkStatusBadge(item: CheckItem) {
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+}
+
+function formatEventTime(value?: string | null) {
+  if (!value) return null;
+  return new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function eventLabel(eventType: string) {
+  switch (eventType) {
+    case 'assigned': return 'Assigned';
+    case 'printed': return 'Printed';
+    case 'voided': return 'Voided';
+    case 'reprinted': return 'Reissued';
+    case 'batch_downloaded': return 'Batch downloaded';
+    case 'replaced': return 'Replaced';
+    case 'renumbered': return 'Renumbered';
+    default: return eventType;
+  }
 }
 
 export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
@@ -599,8 +622,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                       <div className="flex items-center gap-2">
                         <span className="font-mono">{item.check_number || '—'}</span>
                         {item.reprint_of_check_number && (
-                          <span className="text-xs text-orange-600" title={`Reprint of #${item.reprint_of_check_number}`}>
-                            (reprint)
+                          <span className="text-xs text-orange-700" title={`Reissued replacement for #${item.reprint_of_check_number}`}>
+                            replaces #{item.reprint_of_check_number}
                           </span>
                         )}
                         {!item.voided && item.check_number && (
@@ -621,6 +644,16 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                       {item.department_name && (
                         <div className="text-xs text-gray-500">{item.department_name}</div>
                       )}
+                      {item.events && item.events.length > 0 && (() => {
+                        const latest = item.events[item.events.length - 1];
+                        return (
+                          <div className="text-xs text-gray-500">
+                            Last event: {eventLabel(latest.event_type)} #{latest.check_number || '—'}
+                            {latest.user_name ? ` by ${latest.user_name}` : ''}
+                            {formatEventTime(latest.created_at) ? ` · ${formatEventTime(latest.created_at)}` : ''}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">
@@ -669,7 +702,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                         </Button>
                       )}
 
-                      {/* Reprint */}
+                      {/* Reissue physical check */}
                       {!item.voided && item.check_number && (
                         <Button
                           size="sm"
@@ -678,7 +711,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                           disabled={actionLoading?.id === item.id}
                           className="text-xs px-2 py-1 text-orange-700 border-orange-300 hover:bg-orange-50"
                         >
-                          Reprint
+                          Reissue
                         </Button>
                       )}
 
