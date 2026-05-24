@@ -157,9 +157,9 @@ const statusColors: Record<InvoiceStatus, string> = {
 
 const invoiceStatusFilters = [
   { key: 'active', label: 'Active' },
-  { key: 'draft', label: 'Draft' },
-  { key: 'generated', label: 'Generated' },
-  { key: 'sent', label: 'Sent' },
+  { key: 'draft', label: 'Drafts' },
+  { key: 'generated', label: 'PDF Ready' },
+  { key: 'sent', label: 'Outstanding' },
   { key: 'paid', label: 'Paid' },
   { key: 'voided', label: 'Voided' },
   { key: 'archived', label: 'Archived' },
@@ -211,15 +211,27 @@ function formatDateTime(value?: string | null) {
   });
 }
 
+function invoiceStatusLabel(status: InvoiceStatus) {
+  switch (status) {
+  case 'draft': return 'Draft';
+  case 'generated': return 'PDF Ready';
+  case 'sent': return 'Outstanding';
+  case 'paid': return 'Paid';
+  case 'voided': return 'Voided';
+  case 'archived': return 'Archived';
+  default: return status;
+  }
+}
+
 function statusActionLabel(status: InvoiceStatus) {
   switch (status) {
   case 'draft': return 'Return to Draft';
-  case 'generated': return 'Mark Generated';
-  case 'sent': return 'Mark Sent';
+  case 'generated': return 'Mark PDF Ready';
+  case 'sent': return 'Mark Sent / Outstanding';
   case 'paid': return 'Mark Paid';
   case 'voided': return 'Void';
   case 'archived': return 'Archive';
-  default: return `Mark ${status}`;
+  default: return `Mark ${invoiceStatusLabel(status)}`;
   }
 }
 
@@ -669,7 +681,7 @@ export function InvoiceMaker() {
     if (!invoiceForm.status || invoiceForm.status === 'draft' || !hasUnsavedInvoiceChanges()) return true;
 
     if (!canReturnInvoiceToDraft(invoiceForm.status)) {
-      setError(`Cannot ${action} with unsaved changes because ${invoiceForm.status} invoices cannot be returned to draft.`);
+      setError(`Cannot ${action} with unsaved changes because ${invoiceStatusLabel(invoiceForm.status)} invoices cannot be returned to draft.`);
       setSuccess(null);
       return false;
     }
@@ -755,7 +767,7 @@ export function InvoiceMaker() {
       const response = await invoicesApi.updateStatus(invoiceForm.id, status);
       await loadData();
       hydrateInvoiceForm(response.invoice);
-      setSuccess(`Invoice marked ${status}.`);
+      setSuccess(`Invoice marked ${invoiceStatusLabel(status)}.`);
       window.setTimeout(() => setSuccess(null), 3500);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update invoice status');
@@ -1253,7 +1265,7 @@ export function InvoiceMaker() {
                       {invoice.billing_profile_name || 'Unknown sender'} to {invoice.recipient_name || 'No recipient'}
                     </p>
                   </div>
-                  <Badge className={statusColors[invoice.status]}>{invoice.status}</Badge>
+                  <Badge className={statusColors[invoice.status]}>{invoiceStatusLabel(invoice.status)}</Badge>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-neutral-500">
                   <span>{formatDateOnly(invoice.invoice_date)}</span>
@@ -1442,8 +1454,8 @@ export function InvoiceMaker() {
 
   const invoiceLifecycle = [
     { label: 'Created', value: invoiceForm.created_at, actor: invoiceForm.created_by_name },
-    { label: 'Generated', value: invoiceForm.generated_at },
-    { label: 'Sent', value: invoiceForm.sent_at },
+    { label: 'PDF Ready', value: invoiceForm.generated_at },
+    { label: 'Sent / Outstanding', value: invoiceForm.sent_at },
     { label: 'Paid', value: invoiceForm.paid_at },
     { label: 'Voided', value: invoiceForm.voided_at },
     { label: 'Archived', value: invoiceForm.archived_at },
@@ -1511,7 +1523,7 @@ export function InvoiceMaker() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {invoiceForm.status && <Badge className={statusColors[invoiceForm.status]}>{invoiceForm.status}</Badge>}
+                  {invoiceForm.status && <Badge className={statusColors[invoiceForm.status]}>{invoiceStatusLabel(invoiceForm.status)}</Badge>}
                   {invoiceForm.id && invoiceForm.status === 'draft' && (
                     <Button
                       variant="outline"
@@ -1540,7 +1552,7 @@ export function InvoiceMaker() {
                       <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
                       <p className="text-xs text-neutral-500">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
                     </div>
-                    <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceForm.status || 'draft'}</Badge>
+                    <Badge className={statusColors[invoiceForm.status || 'draft']}>{invoiceStatusLabel(invoiceForm.status || 'draft')}</Badge>
                   </div>
                   {invoiceLifecycle.length === 0 ? (
                     <p className="text-sm text-neutral-500">No lifecycle events recorded yet.</p>
@@ -1708,9 +1720,9 @@ export function InvoiceMaker() {
               {invoiceForm.id && invoiceForm.status && (statusActions[invoiceForm.status] || []).length > 0 && (
                 <div className="rounded-xl border border-neutral-200 bg-white p-3">
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-neutral-700">Status actions</span>
+                    <span className="text-sm font-medium text-neutral-700">Invoice workflow</span>
                     {invoiceForm.status === 'draft' && (
-                      <span className="text-xs text-neutral-500">Generate PDF is the normal path to move a draft to generated.</span>
+                      <span className="text-xs text-neutral-500">Generate PDF is the normal path to make this invoice PDF Ready.</span>
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
