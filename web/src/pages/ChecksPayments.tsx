@@ -16,10 +16,11 @@ import { NonEmployeeCheckEditModal } from '@/components/checks/NonEmployeeCheckE
 import { NonEmployeeCheckHistory } from '@/components/checks/NonEmployeeCheckHistory';
 import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
 import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
+import { DRT } from '@/lib/constants';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
-  tax_deposit: 'Tax Deposit',
+  tax_deposit: 'FIT / Tax Deposit',
   grt: 'GRT',
   estimated_tax: 'Estimated Tax',
   w1_balance: 'W-1 Balance',
@@ -32,10 +33,13 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
 };
 
 const STANDALONE_TYPES: NonEmployeeCheckType[] = [
+  'tax_deposit',
   'grt',
   'estimated_tax',
   'w1_balance',
   'swica',
+  'child_support',
+  'garnishment',
   'vendor',
   'reimbursement',
   'contractor',
@@ -342,6 +346,7 @@ export function ChecksPayments() {
       'Reference Number',
       'Memo',
       'Description',
+      'Created By',
       'Created At',
     ];
     const rows = visibleChecks.map(check => [
@@ -360,6 +365,7 @@ export function ChecksPayments() {
       check.reference_number || '',
       check.memo || '',
       check.description || '',
+      check.created_by_name || '',
       check.created_at,
     ]);
     const csv = [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
@@ -510,6 +516,25 @@ export function ChecksPayments() {
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
               />
             </FormField>
+            {form.check_type === 'grt' && (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
+                  <div className="flex flex-wrap gap-2 text-xs font-medium">
+                    <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                    <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT filing help</a>
+                    <a href={DRT.BPT_EFILE_GUIDANCE_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">BPT e-file guidance</a>
+                  </div>
+                </div>
+                <ul className="mt-1 list-inside list-disc space-y-1">
+                  <li>Total the client’s gross receipts/payments received for the filing month from the accounting records.</li>
+                  <li>File the monthly GRT/BPT return through GuamTax.com; GuamTax calculates the tax due from the entered values.</li>
+                  <li>Create this check for the GuamTax balance due, payable to Treasurer of Guam when paying in person.</li>
+                  <li>If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file.</li>
+                  <li>Record the GuamTax confirmation number and keep this separate from payroll FIT/Form 500 tax deposits.</li>
+                </ul>
+              </div>
+            )}
             <VoucherLineItemsEditor
               items={form.line_items}
               amount={form.amount}
@@ -604,9 +629,24 @@ export function ChecksPayments() {
                         {check.payment_date && <span>Payment {formatDate(check.payment_date)}</span>}
                         {check.due_date && <span>Due {formatDate(check.due_date)}</span>}
                         {check.confirmation_number && <span>Confirmation {check.confirmation_number}</span>}
+                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatDate(check.created_at)}</span>
                       </div>
                       {(check.memo || check.description) && (
                         <p className="mt-1 max-w-3xl truncate text-sm text-neutral-600">{check.memo || check.description}</p>
+                      )}
+                      {check.check_type === 'grt' && (
+                        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-semibold">GRT workflow reminder</span>
+                            <div className="flex flex-wrap gap-2 font-medium">
+                              <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                              <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT help</a>
+                            </div>
+                          </div>
+                          <p className="mt-1">
+                            Confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.
+                          </p>
+                        </div>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -689,7 +729,8 @@ function formatCurrency(value: number) {
 }
 
 function formatDate(value: string) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString();
+  const date = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString();
 }
 
 function periodLabel(check: NonEmployeeCheck) {

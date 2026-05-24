@@ -263,7 +263,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     before { company.update!(next_check_number: 3002) }
 
     it "returns 201 with original_check_number and reprint data" do
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
       expect(response).to have_http_status(:created)
       json = response.parsed_body
       expect(json["original_check_number"]).to eq("3000")
@@ -271,46 +271,72 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
 
     it "does NOT void the payroll item (payroll obligation stays active)" do
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(item_a.reload.voided).to be false
     end
 
     it "assigns a new check number from the sequence" do
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(item_a.reload.check_number).to eq("3002")
     end
 
+    it "allows the operator to specify the replacement check number" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint",
+        params: { reason: "Lost check — stop payment requested", replacement_check_number: "3105" }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body["replacement_check_number"]).to eq("3105")
+      expect(item_a.reload.check_number).to eq("3105")
+      expect(company.reload.next_check_number).to eq(3106)
+    end
+
+    it "rejects a replacement check number that is already used" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint",
+        params: { reason: "Lost check", replacement_check_number: item_b.check_number }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("already in use")
+      expect(item_a.reload.check_number).to eq("3000")
+    end
+
     it "stores reprint_of_check_number on the item" do
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(item_a.reload.reprint_of_check_number).to eq("3000")
     end
 
     it "clears check_printed_at so item is ready for printing again" do
       item_a.mark_printed!(user: admin_user)
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Damaged check stock" }
       expect(item_a.reload.check_printed_at).to be_nil
     end
 
     it "advances the company next_check_number" do
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(company.reload.next_check_number).to eq(3003)
     end
 
     it "creates a reprinted check_event" do
       expect {
-        post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+        post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       }.to change { CheckEvent.where(event_type: "reprinted").count }.by(1)
     end
 
     it "creates a voided check_event for the old check number" do
       expect {
-        post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+        post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check — stop payment requested" }
       }.to change { CheckEvent.where(event_type: "voided", check_number: "3000").count }.by(1)
+      expect(CheckEvent.where(event_type: "voided", check_number: "3000").last.reason).to eq("Lost check — stop payment requested")
+    end
+
+    it "returns 422 when the reissue reason is blank" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("A reason is required to reissue a check")
     end
 
     it "returns 422 when reprinting an already-voided check" do
       item_a.update!(voided: true, voided_at: Time.current, void_reason: "Was already voided before test")
-      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint"
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(response).to have_http_status(:unprocessable_entity)
     end
   end
