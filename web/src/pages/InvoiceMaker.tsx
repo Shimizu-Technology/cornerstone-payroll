@@ -1485,6 +1485,7 @@ export function InvoiceMaker() {
     { label: 'Archived', value: invoiceForm.archived_at },
   ].filter((event) => Boolean(event.value));
   const selectedInvoiceArchived = invoiceForm.status === 'archived';
+  const selectedInvoiceReadOnly = Boolean(invoiceForm.status && ['paid', 'voided', 'archived'].includes(invoiceForm.status));
   const selectedInvoiceCannotSaveDraft = Boolean(
     invoiceForm.status && invoiceForm.status !== 'draft' && !canReturnInvoiceToDraft(invoiceForm.status)
   );
@@ -1569,6 +1570,12 @@ export function InvoiceMaker() {
                 </div>
               )}
 
+              {selectedInvoiceReadOnly && !selectedInvoiceArchived && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600">
+                  This invoice is {invoiceStatusLabel(invoiceForm.status || 'draft').toLowerCase()} and is read-only. Void/archive actions remain available where allowed, but invoice details cannot be edited.
+                </div>
+              )}
+
               {invoiceForm.id && (
                 <div className="rounded-xl border border-neutral-200 bg-white p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
@@ -1598,8 +1605,9 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">From</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
                     value={invoiceForm.invoice_billing_profile_id}
+                    disabled={selectedInvoiceReadOnly}
                     onChange={(event) => {
                       const nextProfile = billingProfiles.find((profile) => String(profile.id) === event.target.value);
                       setInvoiceForm((current) => ({
@@ -1620,8 +1628,9 @@ export function InvoiceMaker() {
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Bill To</span>
                   <select
-                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    className="h-10 w-full rounded-xl border border-neutral-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-300 disabled:cursor-not-allowed disabled:bg-neutral-100 disabled:text-neutral-500"
                     value={invoiceForm.invoice_recipient_id}
+                    disabled={selectedInvoiceReadOnly}
                     onChange={(event) => applyRecipientDefaults(event.target.value)}
                   >
                     <option value="">Select recipient...</option>
@@ -1634,20 +1643,20 @@ export function InvoiceMaker() {
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice #</span>
-                  <Input value={invoiceForm.invoice_number} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_number: event.target.value }))} placeholder="Auto-generated if blank" />
+                  <Input value={invoiceForm.invoice_number} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_number: event.target.value }))} placeholder="Auto-generated if blank" disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
-                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} />
+                  <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period Start</span>
-                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} />
+                    <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period End</span>
-                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value }))} />
+                    <Input type="date" value={invoiceForm.service_period_end} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_end: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                   </label>
                 </div>
               </div>
@@ -1657,7 +1666,7 @@ export function InvoiceMaker() {
                   <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-neutral-700">{currency(invoiceTotal)}</span>
-                    <Button type="button" size="sm" variant="outline" onClick={addLineItem}>
+                    <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
                       <Plus className="mr-1.5 h-4 w-4" />
                       Line
                     </Button>
@@ -1677,7 +1686,8 @@ export function InvoiceMaker() {
                           <button
                             type="button"
                             onClick={() => removeLineItem(item.local_id)}
-                            className="rounded-lg p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
+                            disabled={selectedInvoiceReadOnly}
+                            className="rounded-lg p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label="Remove line item"
                           >
                             <X className="h-4 w-4" />
@@ -1686,19 +1696,19 @@ export function InvoiceMaker() {
                         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_120px_120px]">
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Description</span>
-                            <Input value={item.description} onChange={(event) => updateLineItem(item.local_id, { description: event.target.value })} placeholder="Service description" />
+                            <Input value={item.description} onChange={(event) => updateLineItem(item.local_id, { description: event.target.value })} placeholder="Service description" disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Qty</span>
-                            <Input type="number" step="0.01" min="0" value={item.quantity} onChange={(event) => updateLineItem(item.local_id, { quantity: Number(event.target.value || 0) })} />
+                            <Input type="number" step="0.01" min="0" value={item.quantity} onChange={(event) => updateLineItem(item.local_id, { quantity: Number(event.target.value || 0) })} disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Rate</span>
-                            <Input type="number" step="0.01" min="0" value={item.rate} onChange={(event) => updateLineItem(item.local_id, { rate: Number(event.target.value || 0) })} />
+                            <Input type="number" step="0.01" min="0" value={item.rate} onChange={(event) => updateLineItem(item.local_id, { rate: Number(event.target.value || 0) })} disabled={selectedInvoiceReadOnly} />
                           </label>
                           <label className="space-y-1.5">
                             <span className="text-sm font-medium text-neutral-700">Date</span>
-                            <Input type="date" value={item.service_date || ''} onChange={(event) => updateLineItem(item.local_id, { service_date: event.target.value })} />
+                            <Input type="date" value={item.service_date || ''} onChange={(event) => updateLineItem(item.local_id, { service_date: event.target.value })} disabled={selectedInvoiceReadOnly} />
                           </label>
                         </div>
                         <p className="mt-2 text-right text-sm font-medium text-neutral-700">
@@ -1713,11 +1723,11 @@ export function InvoiceMaker() {
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Payment Terms</span>
-                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => ({ ...current, payment_terms: event.target.value }))} rows={3} />
+                  <Textarea value={invoiceForm.payment_terms} onChange={(event) => setInvoiceForm((current) => ({ ...current, payment_terms: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
                 </label>
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-neutral-700">Notes</span>
-                  <Textarea value={invoiceForm.notes} onChange={(event) => setInvoiceForm((current) => ({ ...current, notes: event.target.value }))} rows={3} />
+                  <Textarea value={invoiceForm.notes} onChange={(event) => setInvoiceForm((current) => ({ ...current, notes: event.target.value }))} rows={3} disabled={selectedInvoiceReadOnly} />
                 </label>
               </div>
 
@@ -1736,8 +1746,8 @@ export function InvoiceMaker() {
                   </Button>
                 </div>
                 <div className="space-y-3">
-                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" />
-                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} />
+                  <Input value={invoiceForm.email_subject} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_subject: event.target.value }))} placeholder="Subject line to paste into Gmail" disabled={selectedInvoiceReadOnly} />
+                  <Textarea value={invoiceForm.email_body} onChange={(event) => setInvoiceForm((current) => ({ ...current, email_body: event.target.value }))} placeholder="Message body to paste into Gmail" rows={4} disabled={selectedInvoiceReadOnly} />
                 </div>
               </div>
 
