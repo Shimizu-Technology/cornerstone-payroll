@@ -1905,8 +1905,8 @@ export const checksApi = {
   void: (payrollItemId: number, reason: string) =>
     api.post<{ payroll_item: CheckItem }>(`/admin/payroll_items/${payrollItemId}/void`, { reason }),
 
-  // Reprint a check (in-place reassignment)
-  reprint: (payrollItemId: number, reason?: string) =>
+  // Reissue a physical check (in-place check-number reassignment)
+  reprint: (payrollItemId: number, reason: string) =>
     api.post<{ original_check_number: string; reprint: CheckItem }>(`/admin/payroll_items/${payrollItemId}/reprint`, { reason }),
 
   // Replace check (uncashed) - preview the corrected snapshot + delta.

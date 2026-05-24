@@ -36,7 +36,7 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:check_events, employee: :department)
+                             .includes({ check_events: :user }, employee: :department)
                              .left_outer_joins(:employee)
                              .with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
@@ -257,6 +257,11 @@ module Api
             return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
           end
 
+          reason = params[:reason].to_s.strip
+          if reason.blank?
+            return render json: { error: "A reason is required to reissue a check" }, status: :unprocessable_entity
+          end
+
           user    = User.find(current_user_id)
           company = @payroll_item.pay_period.company
 
@@ -264,18 +269,17 @@ module Api
 
           ActiveRecord::Base.transaction do
             @payroll_item.lock!
-            raise ArgumentError, "Cannot reprint: check is already voided" if @payroll_item.voided?
-            raise ArgumentError, "Cannot reprint: no check number assigned" if @payroll_item.check_number.blank?
+            raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reissue: no check number assigned" if @payroll_item.check_number.blank?
 
             original_check_number = @payroll_item.check_number
 
             # Step 1: Void the old physical check (audit trail only — item itself stays active)
-            void_reason = params[:reason].presence || "Reprint requested — physical check damaged/lost"
             @payroll_item.check_events.create!(
               user: user,
               event_type: "voided",
               check_number: original_check_number,
-              reason: void_reason,
+              reason: reason,
               ip_address: request.remote_ip
             )
 
@@ -295,7 +299,7 @@ module Api
               user: user,
               event_type: "reprinted",
               check_number: new_check_number,
-              reason: "Replacement for voided check ##{original_check_number}",
+              reason: "Reissued replacement for voided check ##{original_check_number}: #{reason}",
               ip_address: request.remote_ip
             )
           end
@@ -634,7 +638,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:employee, :check_events, pay_period: :company).find(params[:payroll_item_id])
+          @payroll_item = PayrollItem.includes(:employee, { check_events: :user }, pay_period: :company).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found and return
           end
@@ -679,6 +683,7 @@ module Api
             check_number: event.check_number,
             reason: event.reason,
             user_id: event.user_id,
+            user_name: event.user&.name,
             ip_address: event.ip_address,
             created_at: event.created_at
           }

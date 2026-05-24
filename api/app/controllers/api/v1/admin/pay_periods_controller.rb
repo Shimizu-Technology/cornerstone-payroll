@@ -432,7 +432,10 @@ module Api
             # Auto-assign check numbers to payroll items with positive net pay.
             # $0 net pay items don't get checks. Uses company-level row lock to prevent collisions.
             unassigned = committed_items.select { |i| i.check_number.nil? && i.net_pay.to_d > 0 }
-            @pay_period.company.assign_check_numbers!(unassigned) if unassigned.any?
+            if unassigned.any?
+              @pay_period.company.assign_check_numbers!(unassigned)
+              record_check_assignment_events!(unassigned.map(&:id))
+            end
 
             # Auto-create FIT tax deposit check if company setting is enabled
             if @pay_period.company.auto_create_fit_check?
@@ -807,6 +810,28 @@ module Api
           end
 
           permitted
+        end
+
+        def record_check_assignment_events!(payroll_item_ids)
+          assigned_items = PayrollItem.where(id: payroll_item_ids).where.not(check_number: nil).pluck(:id, :check_number)
+          return if assigned_items.empty?
+
+          now = Time.current
+          actor_id = User.exists?(id: current_user_id) ? current_user_id : nil
+          CheckEvent.insert_all!(
+            assigned_items.map do |item_id, check_number|
+              {
+                payroll_item_id: item_id,
+                user_id: actor_id,
+                event_type: "assigned",
+                check_number: check_number,
+                reason: "Assigned when pay period was committed",
+                ip_address: request.remote_ip,
+                created_at: now,
+                updated_at: now
+              }
+            end
+          )
         end
 
         def create_fit_tax_deposit_check!(items)

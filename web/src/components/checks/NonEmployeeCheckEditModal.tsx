@@ -16,7 +16,7 @@ interface NonEmployeeCheckEditModalProps {
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
-  tax_deposit: 'Tax Deposit',
+  tax_deposit: 'FIT / Tax Deposit',
   grt: 'GRT',
   estimated_tax: 'Estimated Tax',
   w1_balance: 'W-1 Balance',
@@ -504,6 +504,17 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 onChange={e => setForm(p => p && { ...p, description: e.target.value })}
               />
             </Field>
+
+            {form.check_type === 'grt' && (
+              <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-semibold">GRT payment notes</p>
+                <ul className="mt-1 list-inside list-disc space-y-1">
+                  <li>Confirm the GRT filing period this payment covers.</li>
+                  <li>Record the DRT confirmation number after payment.</li>
+                  <li>Keep source calculation details in the voucher lines or description.</li>
+                </ul>
+              </div>
+            )}
 
             <VoucherLineItemsEditor
               items={form.line_items}
