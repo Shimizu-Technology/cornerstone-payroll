@@ -262,10 +262,13 @@ module Api
             return render json: { error: "A reason is required to reissue a check" }, status: :unprocessable_entity
           end
 
+          requested_check_number = params[:replacement_check_number].to_s.strip.presence
+
           user    = User.find(current_user_id)
           company = @payroll_item.pay_period.company
 
           original_check_number = nil
+          new_check_number = nil
 
           ActiveRecord::Base.transaction do
             @payroll_item.lock!
@@ -283,8 +286,8 @@ module Api
               ip_address: request.remote_ip
             )
 
-            # Step 2: Reserve a new check number
-            new_check_number = company.next_check_number!
+            # Step 2: Reserve or validate the replacement check number
+            new_check_number = requested_check_number.present? ? reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number) : company.next_check_number!
 
             # Step 3 & 4 & 5: Reassign in-place
             @payroll_item.update!(
@@ -306,6 +309,7 @@ module Api
 
           render json: {
             original_check_number: original_check_number,
+            replacement_check_number: new_check_number,
             reprint: check_item_json(@payroll_item.reload)
           }, status: :created
         rescue ActiveRecord::RecordNotFound
@@ -574,6 +578,24 @@ module Api
         end
 
         private
+
+        def reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number)
+          normalized = requested_check_number.to_s.strip
+          raise ArgumentError, "Replacement check number must be numeric" unless normalized.match?(/\A\d+\z/)
+          raise ArgumentError, "Replacement check number must be greater than 0" if normalized.to_i < 1
+          raise ArgumentError, "Replacement check number cannot exceed 9,999,999" if normalized.to_i > 9_999_999
+          raise ArgumentError, "Replacement check number must be different from the original check number" if normalized == original_check_number.to_s
+
+          company.lock!
+          if PayrollItem.where(company_id: company.id, check_number: normalized).where.not(id: @payroll_item.id).exists? ||
+             NonEmployeeCheck.where(company_id: company.id, check_number: normalized).exists?
+            raise ArgumentError, "Check number #{normalized} is already in use for this company"
+          end
+
+          next_number = normalized.to_i + 1
+          company.update!(next_check_number: next_number) if next_number > company.next_check_number.to_i
+          normalized
+        end
 
         def issued_check_numbers_for_company(company)
           payroll_max = PayrollItem

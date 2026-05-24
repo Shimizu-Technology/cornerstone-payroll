@@ -517,11 +517,13 @@ export function ChecksPayments() {
             </FormField>
             {form.check_type === 'grt' && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <p className="font-semibold">GRT payment notes</p>
+                <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
                 <ul className="mt-1 list-inside list-disc space-y-1">
-                  <li>Use the gross receipts tax period this payment covers, usually a monthly period.</li>
-                  <li>Record the DRT confirmation number after payment so the register ties back to the filing.</li>
-                  <li>Keep this separate from payroll FIT/Form 500 tax deposits.</li>
+                  <li>Total the client’s gross receipts/payments received for the filing month from the accounting records.</li>
+                  <li>File the monthly GRT/BPT return through GuamTax.com; GuamTax calculates the tax due from the entered values.</li>
+                  <li>Create this check for the GuamTax balance due, payable to Treasurer of Guam when paying in person.</li>
+                  <li>If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file.</li>
+                  <li>Record the GuamTax confirmation number and keep this separate from payroll FIT/Form 500 tax deposits.</li>
                 </ul>
               </div>
             )}
