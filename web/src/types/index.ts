@@ -657,10 +657,11 @@ export interface ApiError {
 
 export interface CheckEvent {
   id: number;
-  event_type: 'printed' | 'voided' | 'reprinted' | 'batch_downloaded';
+  event_type: 'assigned' | 'printed' | 'voided' | 'reprinted' | 'batch_downloaded' | 'replaced' | 'renumbered';
   check_number: string | null;
   reason: string | null;
   user_id: number | null;
+  user_name?: string | null;
   ip_address: string | null;
   created_at: string;
 }
@@ -932,6 +933,7 @@ export interface NonEmployeeCheck {
   check_status: string;
   edit_count?: number;
   created_by_id?: number;
+  created_by_name?: string | null;
   created_at: string;
   updated_at: string;
 }

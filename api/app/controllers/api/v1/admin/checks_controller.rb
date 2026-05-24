@@ -36,7 +36,7 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:check_events, employee: :department)
+                             .includes({ check_events: :user }, employee: :department)
                              .left_outer_joins(:employee)
                              .with_check_number
                              .order("employees.last_name ASC, employees.first_name ASC, payroll_items.id ASC")
@@ -257,30 +257,37 @@ module Api
             return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
           end
 
+          reason = params[:reason].to_s.strip
+          if reason.blank?
+            return render json: { error: "A reason is required to reissue a check" }, status: :unprocessable_entity
+          end
+
+          requested_check_number = params[:replacement_check_number].to_s.strip.presence
+
           user    = User.find(current_user_id)
           company = @payroll_item.pay_period.company
 
           original_check_number = nil
+          new_check_number = nil
 
           ActiveRecord::Base.transaction do
             @payroll_item.lock!
-            raise ArgumentError, "Cannot reprint: check is already voided" if @payroll_item.voided?
-            raise ArgumentError, "Cannot reprint: no check number assigned" if @payroll_item.check_number.blank?
+            raise ArgumentError, "Cannot reissue: check is already voided" if @payroll_item.voided?
+            raise ArgumentError, "Cannot reissue: no check number assigned" if @payroll_item.check_number.blank?
 
             original_check_number = @payroll_item.check_number
 
             # Step 1: Void the old physical check (audit trail only — item itself stays active)
-            void_reason = params[:reason].presence || "Reprint requested — physical check damaged/lost"
             @payroll_item.check_events.create!(
               user: user,
               event_type: "voided",
               check_number: original_check_number,
-              reason: void_reason,
+              reason: reason,
               ip_address: request.remote_ip
             )
 
-            # Step 2: Reserve a new check number
-            new_check_number = company.next_check_number!
+            # Step 2: Reserve or validate the replacement check number
+            new_check_number = requested_check_number.present? ? reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number) : company.next_check_number!
 
             # Step 3 & 4 & 5: Reassign in-place
             @payroll_item.update!(
@@ -295,13 +302,14 @@ module Api
               user: user,
               event_type: "reprinted",
               check_number: new_check_number,
-              reason: "Replacement for voided check ##{original_check_number}",
+              reason: "Reissued replacement for voided check ##{original_check_number}: #{reason}",
               ip_address: request.remote_ip
             )
           end
 
           render json: {
             original_check_number: original_check_number,
+            replacement_check_number: new_check_number,
             reprint: check_item_json(@payroll_item.reload)
           }, status: :created
         rescue ActiveRecord::RecordNotFound
@@ -571,6 +579,24 @@ module Api
 
         private
 
+        def reserve_requested_reissue_check_number!(company, requested_check_number, original_check_number)
+          normalized = requested_check_number.to_s.strip
+          raise ArgumentError, "Replacement check number must be numeric" unless normalized.match?(/\A\d+\z/)
+          raise ArgumentError, "Replacement check number must be greater than 0" if normalized.to_i < 1
+          raise ArgumentError, "Replacement check number cannot exceed 9,999,999" if normalized.to_i > 9_999_999
+          raise ArgumentError, "Replacement check number must be different from the original check number" if normalized == original_check_number.to_s
+
+          company.lock!
+          if PayrollItem.where(company_id: company.id, check_number: normalized).where.not(id: @payroll_item.id).exists? ||
+             NonEmployeeCheck.where(company_id: company.id, check_number: normalized).exists?
+            raise ArgumentError, "Check number #{normalized} is already in use for this company"
+          end
+
+          next_number = normalized.to_i + 1
+          company.update!(next_check_number: next_number) if next_number > company.next_check_number.to_i
+          normalized
+        end
+
         def issued_check_numbers_for_company(company)
           payroll_max = PayrollItem
             .joins(:pay_period)
@@ -634,7 +660,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:employee, :check_events, pay_period: :company).find(params[:payroll_item_id])
+          @payroll_item = PayrollItem.includes(:employee, { check_events: :user }, pay_period: :company).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found and return
           end
@@ -679,6 +705,7 @@ module Api
             check_number: event.check_number,
             reason: event.reason,
             user_id: event.user_id,
+            user_name: event.user&.name,
             ip_address: event.ip_address,
             created_at: event.created_at
           }

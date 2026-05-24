@@ -7,6 +7,7 @@ import { nonEmployeeChecksApi } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType, PaymentPeriodType } from '@/types';
 import { VoucherLineItemsEditor } from '@/components/checks/VoucherLineItemsEditor';
 import { normalizeVoucherLineItems, type VoucherLineItemForm } from '@/components/checks/voucherLineItems';
+import { DRT } from '@/lib/constants';
 
 interface NonEmployeeCheckEditModalProps {
   check: NonEmployeeCheck | null;
@@ -16,7 +17,7 @@ interface NonEmployeeCheckEditModalProps {
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
-  tax_deposit: 'Tax Deposit',
+  tax_deposit: 'FIT / Tax Deposit',
   grt: 'GRT',
   estimated_tax: 'Estimated Tax',
   w1_balance: 'W-1 Balance',
@@ -504,6 +505,26 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
                 onChange={e => setForm(p => p && { ...p, description: e.target.value })}
               />
             </Field>
+
+            {form.check_type === 'grt' && (
+              <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
+                  <div className="flex flex-wrap gap-2 text-xs font-medium">
+                    <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                    <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT filing help</a>
+                    <a href={DRT.BPT_EFILE_GUIDANCE_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">BPT e-file guidance</a>
+                  </div>
+                </div>
+                <ul className="mt-1 list-inside list-disc space-y-1">
+                  <li>Total the client’s gross receipts/payments received for the filing month from accounting records.</li>
+                  <li>File the monthly return through GuamTax.com; GuamTax calculates the tax due from the entered values.</li>
+                  <li>Create this check for the GuamTax balance due, payable to Treasurer of Guam when paying in person.</li>
+                  <li>If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file.</li>
+                  <li>Record the GuamTax confirmation number and keep source calculation details in the voucher lines or description.</li>
+                </ul>
+              </div>
+            )}
 
             <VoucherLineItemsEditor
               items={form.line_items}
