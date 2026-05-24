@@ -450,8 +450,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
           {formData.check_type === 'grt' && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <p className="font-medium">GRT payment notes</p>
-              <p className="mt-0.5">Confirm the GRT filing period, keep the source calculation with the voucher details, and record the DRT confirmation number after payment. This is separate from payroll FIT/Form 500 deposits.</p>
+              <p className="font-medium">GRT / Business Privilege Tax workflow</p>
+              <p className="mt-0.5">Total the client’s gross receipts/payments received for the month, file the monthly return through GuamTax.com, then create this check for the GuamTax balance due. If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file. Record the GuamTax confirmation number and keep this separate from payroll FIT/Form 500 deposits.</p>
             </div>
           )}
           <div className="mt-3 flex gap-2">
@@ -645,7 +645,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
                         <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{new Date(check.created_at).toLocaleDateString()}</span>
                         {check.check_type === 'grt' && (
-                          <span className="text-amber-700">GRT: verify period, confirmation, and source calculation.</span>
+                          <span className="text-amber-700">GRT: confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.</span>
                         )}
                         {check.check_type === 'tax_deposit' && (
                           <button

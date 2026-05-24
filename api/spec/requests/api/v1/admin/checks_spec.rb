@@ -280,6 +280,25 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(item_a.reload.check_number).to eq("3002")
     end
 
+    it "allows the operator to specify the replacement check number" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint",
+        params: { reason: "Lost check — stop payment requested", replacement_check_number: "3105" }
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body["replacement_check_number"]).to eq("3105")
+      expect(item_a.reload.check_number).to eq("3105")
+      expect(company.reload.next_check_number).to eq(3106)
+    end
+
+    it "rejects a replacement check number that is already used" do
+      post "/api/v1/admin/payroll_items/#{item_a.id}/reprint",
+        params: { reason: "Lost check", replacement_check_number: item_b.check_number }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("already in use")
+      expect(item_a.reload.check_number).to eq("3000")
+    end
+
     it "stores reprint_of_check_number on the item" do
       post "/api/v1/admin/payroll_items/#{item_a.id}/reprint", params: { reason: "Lost check" }
       expect(item_a.reload.reprint_of_check_number).to eq("3000")

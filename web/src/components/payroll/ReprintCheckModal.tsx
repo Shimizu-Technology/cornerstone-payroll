@@ -25,11 +25,14 @@ const reasonExamples = [
 
 export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckModalProps) {
   const [reason, setReason] = useState('');
+  const [replacementCheckNumber, setReplacementCheckNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const trimmedReason = reason.trim();
-  const canSubmit = trimmedReason.length > 0 && !loading;
+  const trimmedReplacementCheckNumber = replacementCheckNumber.trim();
+  const replacementCheckNumberInvalid = trimmedReplacementCheckNumber.length > 0 && !/^\d+$/.test(trimmedReplacementCheckNumber);
+  const canSubmit = trimmedReason.length > 0 && !replacementCheckNumberInvalid && !loading;
   const previousReissue = useMemo(() => {
     const reissues = item.events?.filter((event) => event.event_type === 'reprinted') || [];
     return reissues[reissues.length - 1];
@@ -41,10 +44,15 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
       return;
     }
 
+    if (replacementCheckNumberInvalid) {
+      setError('Replacement check number must be numeric.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      await checksApi.reprint(item.id, trimmedReason);
+      await checksApi.reprint(item.id, trimmedReason, trimmedReplacementCheckNumber || undefined);
       await onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reissue check');
@@ -75,7 +83,7 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
           <strong>Physical check replacement only:</strong>
           <ul className="mt-1 list-inside list-disc space-y-1">
             <li>Check #{item.check_number} is recorded as voided in the check audit trail.</li>
-            <li>A new check number is assigned from the company sequence.</li>
+            <li>Enter the replacement check number below, or leave it blank to use the next available company check number.</li>
             <li>Payroll wages, taxes, deductions, and net pay stay exactly the same.</li>
             <li>The replacement check appears as unprinted and ready for check stock.</li>
           </ul>
@@ -87,6 +95,25 @@ export function ReprintCheckModal({ item, onClose, onComplete }: ReprintCheckMod
             {new Date(previousReissue.created_at).toLocaleString()}.
           </div>
         )}
+
+        <div className="space-y-2">
+          <Label htmlFor="replacement-check-number">Replacement check number</Label>
+          <input
+            id="replacement-check-number"
+            type="text"
+            inputMode="numeric"
+            placeholder="Leave blank to use next available"
+            value={replacementCheckNumber}
+            onChange={(e) => setReplacementCheckNumber(e.target.value)}
+            className={`w-full rounded-xl border px-3.5 py-2.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 ${replacementCheckNumberInvalid ? 'border-red-400 focus-visible:ring-red-100' : 'border-neutral-300 focus-visible:border-primary-400 focus-visible:ring-primary-200'}`}
+          />
+          <p className="text-xs text-gray-500">
+            Use this when you already know the physical check stock number being issued as the replacement.
+          </p>
+          {replacementCheckNumberInvalid && (
+            <p className="text-xs text-red-600">Replacement check number must be numeric.</p>
+          )}
+        </div>
 
         <div className="space-y-2">
           <Label htmlFor="reissue-reason">Reason <span className="text-red-600">*</span></Label>

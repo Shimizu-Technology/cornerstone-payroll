@@ -507,11 +507,13 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
 
             {form.check_type === 'grt' && (
               <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                <p className="font-semibold">GRT payment notes</p>
+                <p className="font-semibold">GRT / Business Privilege Tax workflow</p>
                 <ul className="mt-1 list-inside list-disc space-y-1">
-                  <li>Confirm the GRT filing period this payment covers.</li>
-                  <li>Record the DRT confirmation number after payment.</li>
-                  <li>Keep source calculation details in the voucher lines or description.</li>
+                  <li>Total the client’s gross receipts/payments received for the filing month from accounting records.</li>
+                  <li>File the monthly return through GuamTax.com; GuamTax calculates the tax due from the entered values.</li>
+                  <li>Create this check for the GuamTax balance due, payable to Treasurer of Guam when paying in person.</li>
+                  <li>If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file.</li>
+                  <li>Record the GuamTax confirmation number and keep source calculation details in the voucher lines or description.</li>
                 </ul>
               </div>
             )}

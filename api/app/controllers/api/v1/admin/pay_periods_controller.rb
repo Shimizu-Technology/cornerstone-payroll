@@ -832,6 +832,9 @@ module Api
               }
             end
           )
+        rescue ActiveRecord::StatementInvalid => e
+          Rails.logger.error("record_check_assignment_events! failed: #{e.message}")
+          raise ArgumentError, "Check numbers were assigned, but their audit events could not be recorded. Please retry committing this pay period."
         end
 
         def create_fit_tax_deposit_check!(items)
