@@ -646,11 +646,21 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                       )}
                       {item.events && item.events.length > 0 && (() => {
                         const latest = item.events[item.events.length - 1];
+                        const shouldShowReason = Boolean(
+                          latest.reason && ['voided', 'reprinted', 'replaced', 'renumbered'].includes(latest.event_type)
+                        );
                         return (
-                          <div className="text-xs text-gray-500">
-                            Last event: {eventLabel(latest.event_type)} #{latest.check_number || '—'}
-                            {latest.user_name ? ` by ${latest.user_name}` : ''}
-                            {formatEventTime(latest.created_at) ? ` · ${formatEventTime(latest.created_at)}` : ''}
+                          <div className="space-y-0.5 text-xs text-gray-500">
+                            <div>
+                              Last event: {eventLabel(latest.event_type)} #{latest.check_number || '—'}
+                              {latest.user_name ? ` by ${latest.user_name}` : ''}
+                              {formatEventTime(latest.created_at) ? ` · ${formatEventTime(latest.created_at)}` : ''}
+                            </div>
+                            {shouldShowReason && (
+                              <div className="max-w-md text-orange-700">
+                                Reason: {latest.reason}
+                              </div>
+                            )}
                           </div>
                         );
                       })()}

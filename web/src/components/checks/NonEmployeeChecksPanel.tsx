@@ -450,7 +450,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           <textarea className="mt-2 w-full border rounded px-3 py-2 text-sm" placeholder="Description" rows={2} value={formData.description} onChange={e => setFormData(p => ({ ...p, description: e.target.value }))} />
           {formData.check_type === 'grt' && (
             <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              <p className="font-medium">GRT / Business Privilege Tax workflow</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-medium">GRT / Business Privilege Tax workflow</p>
+                <div className="flex flex-wrap gap-2 text-xs font-medium">
+                  <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                  <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">GRT filing help</a>
+                  <a href={DRT.BPT_EFILE_GUIDANCE_PDF} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline underline-offset-2">BPT e-file guidance</a>
+                </div>
+              </div>
               <p className="mt-0.5">Total the client’s gross receipts/payments received for the month, file the monthly return through GuamTax.com, then create this check for the GuamTax balance due. If paying in person, bring two printed copies of the e-filed return: one for DRT/Treasurer and one stamped copy for the firm/client file. Record the GuamTax confirmation number and keep this separate from payroll FIT/Form 500 deposits.</p>
             </div>
           )}
@@ -645,7 +652,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
                         <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{new Date(check.created_at).toLocaleDateString()}</span>
                         {check.check_type === 'grt' && (
-                          <span className="text-amber-700">GRT: confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.</span>
+                          <span className="text-amber-700">
+                            GRT: confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.{' '}
+                            <a href={DRT.GUAMTAX_HOME} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-700 underline underline-offset-2">Open GuamTax</a>
+                            {' · '}
+                            <a href={DRT.GUAMTAX_GRT_HELP} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-700 underline underline-offset-2">GRT help</a>
+                          </span>
                         )}
                         {check.check_type === 'tax_deposit' && (
                           <button
