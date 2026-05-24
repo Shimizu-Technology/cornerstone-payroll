@@ -663,8 +663,16 @@ export function InvoiceMaker() {
     return false;
   };
 
+  const canReturnInvoiceToDraft = (status?: InvoiceStatus) => Boolean(status && statusActions[status]?.includes('draft'));
+
   const confirmDraftResetForFinalizedEdits = (action: string) => {
     if (!invoiceForm.status || invoiceForm.status === 'draft' || !hasUnsavedInvoiceChanges()) return true;
+
+    if (!canReturnInvoiceToDraft(invoiceForm.status)) {
+      setError(`Cannot ${action} with unsaved changes because ${invoiceForm.status} invoices cannot be returned to draft.`);
+      setSuccess(null);
+      return false;
+    }
 
     return window.confirm(
       `This invoice has already moved beyond draft. To ${action}, the current edits must be saved as a draft and generated/sent/paid timestamps will be cleared. Continue?`
@@ -1441,6 +1449,10 @@ export function InvoiceMaker() {
     { label: 'Archived', value: invoiceForm.archived_at },
   ].filter((event) => Boolean(event.value));
   const selectedInvoiceArchived = invoiceForm.status === 'archived';
+  const selectedInvoiceCannotSaveDraft = Boolean(
+    invoiceForm.status && invoiceForm.status !== 'draft' && !canReturnInvoiceToDraft(invoiceForm.status)
+  );
+  const selectedInvoiceHasBlockedUnsavedChanges = selectedInvoiceCannotSaveDraft && hasUnsavedInvoiceChanges();
 
   return (
     <div>
@@ -1712,15 +1724,15 @@ export function InvoiceMaker() {
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-neutral-200 pt-5 sm:flex-row sm:justify-end">
-                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy || selectedInvoiceArchived}>
+                <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceCannotSaveDraft}>
                   <Save className="mr-1.5 h-4 w-4" />
                   {saving ? 'Saving...' : 'Save Draft'}
                 </Button>
-                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy || selectedInvoiceArchived}>
+                <Button type="button" variant="secondary" onClick={handlePreview} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Eye className="mr-1.5 h-4 w-4" />
                   Preview PDF
                 </Button>
-                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy || selectedInvoiceArchived}>
+                <Button type="button" onClick={handleGenerate} disabled={saving || pdfBusy || selectedInvoiceArchived || selectedInvoiceHasBlockedUnsavedChanges}>
                   <Download className="mr-1.5 h-4 w-4" />
                   Generate PDF
                 </Button>
