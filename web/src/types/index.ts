@@ -302,6 +302,69 @@ export interface PayPeriodLifecycleEvent {
   actor_name?: string | null;
 }
 
+export interface PayPeriodComparisonMetric {
+  current: number;
+  previous: number;
+  delta: number;
+  percent_delta: number | null;
+}
+
+export interface PayPeriodComparisonPeriodSummary {
+  id: number;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  status: PayPeriodStatus;
+  period_description?: string | null;
+}
+
+export interface PayPeriodComparisonEmployeeSnapshot {
+  gross_pay: number;
+  net_pay: number;
+  fit: number;
+  social_security: number;
+  medicare: number;
+  total_deductions: number;
+  reported_tips: number;
+  tips_paid_out: number;
+  loan_deduction: number;
+  loan_payment: number;
+  hours_worked: number;
+  salary_override: number;
+}
+
+export interface PayPeriodComparisonFlag {
+  key: string;
+  message: string;
+  severity: 'ok' | 'review' | 'warning';
+}
+
+export interface PayPeriodComparisonEmployeeChange {
+  employee_id: number;
+  employee_name: string;
+  department_name?: string | null;
+  employment_type?: EmploymentType | string | null;
+  salary_type?: 'annual' | 'per_period' | 'variable' | null;
+  change_type: 'new' | 'missing' | 'changed';
+  flags: PayPeriodComparisonFlag[];
+  current: PayPeriodComparisonEmployeeSnapshot | null;
+  previous: PayPeriodComparisonEmployeeSnapshot | null;
+  deltas: Record<string, PayPeriodComparisonMetric>;
+}
+
+export interface PayPeriodComparisonResponse {
+  current_pay_period: PayPeriodComparisonPeriodSummary;
+  previous_pay_period: PayPeriodComparisonPeriodSummary | null;
+  summary: Record<string, PayPeriodComparisonMetric>;
+  employee_changes: PayPeriodComparisonEmployeeChange[];
+  review_flags: {
+    status: 'ok' | 'review' | 'warning';
+    warning_count: number;
+    review_count: number;
+    message: string;
+  };
+}
+
 // ----------------
 // Payroll Item (one per employee per pay period)
 // ----------------
