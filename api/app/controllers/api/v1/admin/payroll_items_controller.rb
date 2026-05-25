@@ -186,7 +186,7 @@ module Api
               tax_treatment: data["tax_treatment"].presence || field&.tax_treatment,
               category: data["category"].presence || field&.category || "other",
               amount: amount.round(2),
-              source: data["source"].presence || "manual",
+              source: normalized_payroll_field_entry_source(data["source"]),
               employee_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employee_paid") ? data["employee_paid"] : field&.employee_paid?),
               employer_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employer_paid") ? data["employer_paid"] : field&.employer_paid?),
               active: data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true,
@@ -196,6 +196,11 @@ module Api
           rescue ArgumentError, FloatDomainError, NoMethodError
             nil
           end
+        end
+
+        def normalized_payroll_field_entry_source(value)
+          source = value.to_s
+          PayrollItemFieldEntry::SOURCES.include?(source) ? source : "manual"
         end
 
         def save_payroll_item_and_clear_exclusion(payroll_item, employee)
