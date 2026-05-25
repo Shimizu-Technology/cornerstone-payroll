@@ -25,13 +25,14 @@ class PayPeriodComparisonBuilder
   def call
     current_items = comparison_items(@pay_period)
     previous_items = @previous_period ? comparison_items(@previous_period) : []
+    employee_changes = employee_changes_payload(current_items, previous_items)
 
     {
       current_pay_period: period_payload(@pay_period),
       previous_pay_period: @previous_period ? period_payload(@previous_period) : nil,
       summary: summary_payload(current_items, previous_items),
-      employee_changes: employee_changes_payload(current_items, previous_items),
-      review_flags: review_flags_payload(current_items, previous_items)
+      employee_changes: employee_changes,
+      review_flags: review_flags_payload(employee_changes)
     }
   end
 
@@ -179,8 +180,7 @@ class PayPeriodComparisonBuilder
     flags.uniq { |entry| entry[:key] }
   end
 
-  def review_flags_payload(current_items, previous_items)
-    employee_changes = employee_changes_payload(current_items, previous_items)
+  def review_flags_payload(employee_changes)
     warnings = employee_changes.sum { |row| row[:flags].count { |flag| flag[:severity] == "warning" } }
     reviews = employee_changes.sum { |row| row[:flags].count { |flag| flag[:severity] == "review" } }
 
