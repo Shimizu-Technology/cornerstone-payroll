@@ -1158,8 +1158,9 @@ export function PayPeriodDetail() {
                 <p className="text-sm text-gray-500">Loading comparison…</p>
               ) : comparison?.previous_pay_period ? (
                 <>
-                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
-                    {comparisonHighlights.map((metric) => {
+                  <div className="overflow-x-auto pb-1">
+                    <div className="grid min-w-[58rem] grid-cols-6 gap-3">
+                      {comparisonHighlights.map((metric) => {
                       const isCount = metric.key === 'employee_count';
                       const deltaClass = metric.delta > 0 ? 'text-emerald-700' : metric.delta < 0 ? 'text-red-700' : 'text-gray-500';
                       return (
@@ -1174,7 +1175,8 @@ export function PayPeriodDetail() {
                           </p>
                         </div>
                       );
-                    })}
+                      })}
+                    </div>
                   </div>
 
                   {comparisonRows.length > 0 ? (
@@ -1190,15 +1192,15 @@ export function PayPeriodDetail() {
                         )}
                       </div>
                       <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
-                        <table className="w-full text-sm">
+                        <table className="min-w-[64rem] w-full text-sm">
                         <thead className="bg-blue-50 text-xs uppercase tracking-wide text-blue-900">
                           <tr>
-                            <th className="px-3 py-2 text-left font-semibold">Review item</th>
-                            <th className="px-3 py-2 text-right font-semibold">Gross Δ</th>
-                            <th className="px-3 py-2 text-right font-semibold">Net Δ</th>
-                            <th className="px-3 py-2 text-right font-semibold">Tips Δ</th>
-                            <th className="px-3 py-2 text-right font-semibold">Loan Ded. Δ</th>
-                            <th className="px-3 py-2 text-right font-semibold">Loan Pmt. Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-left font-semibold">Review item</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Gross Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Net Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Tips Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Loan Ded. Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Loan Pmt. Δ</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-blue-50">
