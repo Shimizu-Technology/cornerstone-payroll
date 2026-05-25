@@ -604,6 +604,61 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/pay_periods/:id/comparison" do
+    it "compares the period against the previous committed period and returns employee review flags" do
+      previous_period = PayPeriod.create!(
+        company: company,
+        start_date: pay_period.start_date - 14.days,
+        end_date: pay_period.end_date - 14.days,
+        pay_date: pay_period.pay_date - 14.days,
+        status: "committed",
+        committed_at: 1.week.ago
+      )
+      PayrollItem.create!(
+        company: company,
+        pay_period: previous_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 80,
+        gross_pay: 1200.00,
+        net_pay: 950.00,
+        withholding_tax: 100.00,
+        social_security_tax: 74.40,
+        medicare_tax: 17.40,
+        total_deductions: 250.00,
+        reported_tips: 0,
+        loan_deduction: 0
+      )
+      PayrollItem.create!(
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 80,
+        gross_pay: 1500.00,
+        net_pay: 1100.00,
+        withholding_tax: 125.00,
+        social_security_tax: 93.00,
+        medicare_tax: 21.75,
+        total_deductions: 400.00,
+        reported_tips: 250.00,
+        loan_deduction: 50.00
+      )
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/comparison"
+
+      expect(response).to have_http_status(:ok)
+      json = response.parsed_body
+      expect(json.dig("previous_pay_period", "id")).to eq(previous_period.id)
+      expect(json.dig("summary", "gross_pay", "delta")).to eq(300.0)
+      expect(json.dig("summary", "reported_tips", "delta")).to eq(250.0)
+      expect(json["employee_changes"].first["employee_name"]).to eq(employee.full_name)
+      expect(json["employee_changes"].first["flags"].map { |flag| flag["key"] }).to include("gross_pay", "reported_tips")
+    end
+  end
+
   describe "POST /api/v1/admin/pay_periods/:id/run_payroll" do
     before do
       # Create tax tables for calculations (use find_or_create to avoid uniqueness conflicts)

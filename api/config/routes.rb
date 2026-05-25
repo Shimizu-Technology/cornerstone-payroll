@@ -131,6 +131,7 @@ Rails.application.routes.draw do
         resources :pay_periods do
           member do
             post :run_payroll
+            get :comparison
             post :approve
             post :unapprove
             post :commit
