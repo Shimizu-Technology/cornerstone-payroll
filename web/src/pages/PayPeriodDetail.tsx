@@ -776,7 +776,10 @@ export function PayPeriodDetail() {
     : comparison?.review_flags.status === 'review'
       ? 'border-amber-200 bg-amber-50 text-amber-800'
       : 'border-emerald-200 bg-emerald-50 text-emerald-800';
-  const comparisonRows = comparison?.employee_changes.slice(0, 10) || [];
+  const comparisonRowLimit = 10;
+  const comparisonTotalRows = comparison?.employee_changes.length || 0;
+  const comparisonRows = comparison?.employee_changes.slice(0, comparisonRowLimit) || [];
+  const comparisonHiddenRows = Math.max(0, comparisonTotalRows - comparisonRows.length);
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
@@ -1175,15 +1178,27 @@ export function PayPeriodDetail() {
                   </div>
 
                   {comparisonRows.length > 0 ? (
-                    <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
-                      <table className="w-full text-sm">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
+                        <span>
+                          Showing {comparisonRows.length} of {comparisonTotalRows} flagged employee{comparisonTotalRows === 1 ? '' : 's'}.
+                        </span>
+                        {comparisonHiddenRows > 0 && (
+                          <span className="font-medium text-amber-700">
+                            {comparisonHiddenRows} more flagged employee{comparisonHiddenRows === 1 ? '' : 's'} not shown in this summary.
+                          </span>
+                        )}
+                      </div>
+                      <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
+                        <table className="w-full text-sm">
                         <thead className="bg-blue-50 text-xs uppercase tracking-wide text-blue-900">
                           <tr>
                             <th className="px-3 py-2 text-left font-semibold">Review item</th>
                             <th className="px-3 py-2 text-right font-semibold">Gross Δ</th>
                             <th className="px-3 py-2 text-right font-semibold">Net Δ</th>
                             <th className="px-3 py-2 text-right font-semibold">Tips Δ</th>
-                            <th className="px-3 py-2 text-right font-semibold">Loan Δ</th>
+                            <th className="px-3 py-2 text-right font-semibold">Loan Ded. Δ</th>
+                            <th className="px-3 py-2 text-right font-semibold">Loan Pmt. Δ</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-blue-50">
@@ -1203,10 +1218,12 @@ export function PayPeriodDetail() {
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.net_pay?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.reported_tips?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.loan_deduction?.delta || 0)}</td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.loan_payment?.delta || 0)}</td>
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                        </table>
+                      </div>
                     </div>
                   ) : (
                     <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
