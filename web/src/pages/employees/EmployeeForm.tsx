@@ -7,9 +7,9 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, ApiError } from '@/services/api';
+import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment } from '@/types';
+import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -60,6 +60,16 @@ interface PayrollAdjustmentFormRow {
   treatment: PayrollAdjustmentTreatment;
   notes: string;
   active: boolean;
+}
+
+interface EmployeePayrollFieldFormRow {
+  temp_id: string;
+  id?: number;
+  payroll_field_definition_id: number | '';
+  amount: number;
+  percentage: number;
+  active: boolean;
+  notes: string;
 }
 
 type W4MonetaryField =
@@ -145,6 +155,8 @@ export function EmployeeForm() {
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
+  const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
   const [defaultPayrollAdjustments, setDefaultPayrollAdjustments] = useState<PayrollAdjustmentFormRow[]>([]);
   const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
@@ -250,6 +262,34 @@ export function EmployeeForm() {
     }
   }, [id, isClient]);
 
+  const fetchPayrollFields = useCallback(async () => {
+    if (isClient) return;
+    try {
+      const response = await payrollFieldsApi.list({ active: true });
+      setPayrollFields(response.payroll_fields);
+    } catch (err) {
+      console.error('Failed to load payroll fields:', err);
+    }
+  }, [isClient]);
+
+  const fetchEmployeePayrollFields = useCallback(async () => {
+    if (!id || isClient) return;
+    try {
+      const response = await employeePayrollFieldsApi.list(parseInt(id, 10));
+      setEmployeePayrollFields(response.employee_payroll_fields.map((assignment: EmployeePayrollField) => ({
+        temp_id: crypto.randomUUID(),
+        id: assignment.id,
+        payroll_field_definition_id: assignment.payroll_field_definition_id,
+        amount: toNumberOrZero(assignment.amount),
+        percentage: toNumberOrZero(assignment.percentage),
+        active: assignment.active !== false,
+        notes: assignment.notes || '',
+      })));
+    } catch (err) {
+      console.error('Failed to load employee payroll fields:', err);
+    }
+  }, [id, isClient]);
+
   const fetchDepartments = useCallback(async () => {
     try {
       const response = isClient
@@ -263,10 +303,12 @@ export function EmployeeForm() {
 
   useEffect(() => {
     fetchDepartments();
+    fetchPayrollFields();
     if (isEditing) {
       fetchEmployee();
+      fetchEmployeePayrollFields();
     }
-  }, [fetchDepartments, fetchEmployee, isEditing]);
+  }, [fetchDepartments, fetchEmployee, fetchEmployeePayrollFields, fetchPayrollFields, isEditing]);
 
   useEffect(() => {
     if (supportsMultipleHourlyRates && wageRates.length === 0) {
@@ -363,6 +405,29 @@ export function EmployeeForm() {
 
   const removeDefaultPayrollAdjustment = (tempId: string) => {
     setDefaultPayrollAdjustments((prev) => prev.filter((adjustment) => adjustment.temp_id !== tempId));
+  };
+
+  const addEmployeePayrollField = () => {
+    const availableField = payrollFields.find((field) => !employeePayrollFields.some((row) => row.payroll_field_definition_id === field.id));
+    setEmployeePayrollFields((prev) => [
+      ...prev,
+      {
+        temp_id: crypto.randomUUID(),
+        payroll_field_definition_id: availableField?.id || '',
+        amount: 0,
+        percentage: 0,
+        active: true,
+        notes: '',
+      },
+    ]);
+  };
+
+  const updateEmployeePayrollField = (tempId: string, patch: Partial<EmployeePayrollFieldFormRow>) => {
+    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, ...patch } : row));
+  };
+
+  const removeEmployeePayrollField = (tempId: string) => {
+    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false } : row));
   };
 
   const normalizeDefaultPayrollAdjustments = () => defaultPayrollAdjustments
@@ -498,6 +563,26 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+        }
+      }
+
+      if (!isClient && savedEmployeeId) {
+        for (const row of employeePayrollFields) {
+          if (!row.payroll_field_definition_id) continue;
+          const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
+          const payload = {
+            payroll_field_definition_id: row.payroll_field_definition_id,
+            amount: field?.amount_type === 'fixed' ? roundCurrencyValue(Number(row.amount) || 0) : null,
+            percentage: field?.amount_type === 'percentage' ? Number(row.percentage) || 0 : null,
+            active: row.active !== false,
+            notes: row.notes.trim(),
+          };
+
+          if (row.id) {
+            await employeePayrollFieldsApi.update(savedEmployeeId, row.id, payload);
+          } else if (row.active !== false) {
+            await employeePayrollFieldsApi.create(savedEmployeeId, payload);
+          }
         }
       }
 
@@ -903,9 +988,96 @@ export function EmployeeForm() {
           </CardContent>
         </Card>
 
+        {!isClient && isEditing && (
+          <Card className="mb-6 border-blue-200 bg-blue-50/40">
+            <CardHeader>
+              <CardTitle>Assigned Payroll Fields</CardTitle>
+              <CardDescription>
+                Use reusable client-wide fields for loans, 401(k), insurance, rent, reimbursements, and employer contributions.
+                These defaults snapshot into payroll runs and can be reviewed before finalizing.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {payrollFields.length === 0 ? (
+                <div className="rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800">
+                  No company payroll fields exist yet. Create them from Payroll Fields, then assign them here.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {employeePayrollFields.filter((row) => row.active !== false).map((row) => {
+                    const selectedField = payrollFields.find((field) => field.id === row.payroll_field_definition_id);
+                    return (
+                      <div key={row.temp_id} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1.5fr)_10rem_10rem_auto]">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Payroll field</label>
+                            <Select
+                              value={row.payroll_field_definition_id || ''}
+                              onChange={(event) => updateEmployeePayrollField(row.temp_id, { payroll_field_definition_id: Number(event.target.value) })}
+                            >
+                              <option value="">Select field</option>
+                              {payrollFields.map((field) => (
+                                <option key={field.id} value={field.id}>{field.name} · {field.tax_treatment.replace(/_/g, ' ')}</option>
+                              ))}
+                            </Select>
+                          </div>
+                          {selectedField?.amount_type === 'percentage' ? (
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-gray-600">Employee %</label>
+                              <NumericInput
+                                value={row.percentage}
+                                onValueChange={(value) => updateEmployeePayrollField(row.temp_id, { percentage: value ?? 0 })}
+                                min={0}
+                              />
+                            </div>
+                          ) : selectedField?.amount_type === 'manual' ? (
+                            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                              Manual each payroll
+                            </div>
+                          ) : (
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-gray-600">Employee amount</label>
+                              <NumericInput
+                                value={row.amount}
+                                onValueChange={(value) => updateEmployeePayrollField(row.temp_id, { amount: value ?? 0 })}
+                                min={0}
+                                fixedDecimalsOnBlur={2}
+                              />
+                            </div>
+                          )}
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Notes</label>
+                            <Input
+                              value={row.notes}
+                              onChange={(event) => updateEmployeePayrollField(row.temp_id, { notes: event.target.value })}
+                              placeholder="Optional source or setup note"
+                            />
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeEmployeePayrollField(row.temp_id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {selectedField && (
+                          <p className="mt-2 text-xs text-blue-800">
+                            {selectedField.kind.replace(/_/g, ' ')} · {selectedField.tax_treatment.replace(/_/g, ' ')} · {selectedField.category.replace(/_/g, ' ')}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addEmployeePayrollField} disabled={payrollFields.length === 0}>
+                <Plus className="mr-1 h-4 w-4" />
+                Assign Payroll Field
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         <Card className="mb-6 border-slate-200 bg-slate-50/60">
           <CardHeader>
-            <CardTitle>Recurring Payroll Adjustments</CardTitle>
+            <CardTitle>Employee-Specific Recurring Adjustments</CardTitle>
             <CardDescription>
               Use these for recurring additions, reimbursements, or deductions. Each item is copied into new payroll runs and can be reviewed before finalizing.
             </CardDescription>

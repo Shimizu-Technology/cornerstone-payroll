@@ -127,6 +127,10 @@ class PayrollCalculator
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
+  def sync_payroll_field_entries_after_base_gross
+    payroll_item.apply_default_payroll_field_entries_if_unset!(employee)
+  end
+
   def pre_tax_employee_deductions_total
     employee.employee_deductions.active.includes(:deduction_type)
       .reject { |ed| skip_employee_deduction?(ed.deduction_type) }
@@ -174,6 +178,12 @@ class PayrollCalculator
       record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match)
     end
 
+    payroll_item.payroll_item_field_entries.each do |entry|
+      next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
+
+      record_employer_contribution(entry.label, entry.amount)
+    end
+
     # Update aggregate fields for backward compatibility with existing code
     payroll_item.loan_payment = aggregate_loan
     payroll_item.insurance_payment = aggregate_insurance
@@ -196,19 +206,25 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
-    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
+    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
+      payroll_item.taxable_payroll_adjustments_total +
+      payroll_item.taxable_payroll_field_entries_total
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
+    payroll_item.custom_deductions_total +
+      payroll_item.post_tax_payroll_adjustments_total +
+      payroll_item.post_tax_payroll_field_entries_total
   end
 
   def pre_tax_payroll_adjustments_total
-    payroll_item.pre_tax_payroll_adjustments_total
+    payroll_item.pre_tax_payroll_adjustments_total + payroll_item.pre_tax_payroll_field_entries_total
   end
 
   def non_taxable_additions_total
-    payroll_item.non_taxable_pay.to_f + payroll_item.non_taxable_payroll_adjustments_total
+    payroll_item.non_taxable_pay.to_f +
+      payroll_item.non_taxable_payroll_adjustments_total +
+      payroll_item.non_taxable_payroll_field_entries_total
   end
 
   def calculate_totals
@@ -372,7 +388,7 @@ class PayrollCalculator
     return if payroll_item.correction_entry?
     return unless payroll_item.additional_withholding.to_f.positive?
 
-    available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
+    available_pay = payroll_item.gross_pay.to_f + non_taxable_additions_total
     excess = payroll_item.total_deductions.to_f - available_pay
     return unless excess.positive?
 
@@ -384,13 +400,14 @@ class PayrollCalculator
   def cap_deductions_to_available_pay!
     return if payroll_item.correction_entry?
 
-    available_pay = (payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f).round(2)
+    available_pay = (payroll_item.gross_pay.to_f + non_taxable_additions_total).round(2)
     excess = (payroll_item.total_deductions.to_f - available_pay).round(2)
     return unless excess.positive?
 
     had_itemized_deductions = payroll_item.payroll_item_deductions.any?
 
     remaining = reduce_custom_deductions_by!(excess)
+    remaining = reduce_payroll_field_deductions_by!(remaining)
     remaining = reduce_payroll_item_deductions_by!(remaining)
     sync_aggregate_deductions_from_itemized! if had_itemized_deductions
 
@@ -434,6 +451,29 @@ class PayrollCalculator
     end
 
     payroll_item.custom_deductions = deductions.select { |deduction| deduction["amount"].to_f.positive? }
+    amount
+  end
+
+  def reduce_payroll_field_deductions_by!(amount)
+    return amount unless amount.positive?
+
+    deductions = payroll_item.payroll_item_field_entries.select do |entry|
+      entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
+    end
+
+    deductions.reverse_each do |entry|
+      current = entry.amount.to_f
+      reduction = [ current, amount ].min
+      entry.amount = (current - reduction).round(2)
+      amount = (amount - reduction).round(2)
+      break unless amount.positive?
+    end
+
+    deductions.select { |entry| entry.amount.to_f.zero? }.each do |entry|
+      entry.destroy! if entry.persisted?
+      payroll_item.payroll_item_field_entries.target.delete(entry)
+    end
+
     amount
   end
 

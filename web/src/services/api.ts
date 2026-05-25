@@ -329,6 +329,8 @@ import type {
   ReplaceCheckPreview,
   ReplaceCheckResult,
   PayPeriodComparisonResponse,
+  PayrollFieldDefinition,
+  EmployeePayrollField,
 } from '@/types';
 
 // Employees (Admin API)
@@ -441,6 +443,28 @@ export const employeeBulkImportApi = {
   },
   applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
     api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
+};
+
+export const payrollFieldsApi = {
+  list: (params?: { active?: boolean }) =>
+    api.get<{ payroll_fields: PayrollFieldDefinition[] }>('/admin/payroll_fields', params),
+  create: (data: Partial<PayrollFieldDefinition>) =>
+    api.post<{ payroll_field: PayrollFieldDefinition }>('/admin/payroll_fields', { payroll_field: data }),
+  update: (id: number, data: Partial<PayrollFieldDefinition>) =>
+    api.patch<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`, { payroll_field: data }),
+  archive: (id: number) =>
+    api.delete<{ payroll_field: PayrollFieldDefinition }>(`/admin/payroll_fields/${id}`),
+};
+
+export const employeePayrollFieldsApi = {
+  list: (employeeId: number) =>
+    api.get<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields`),
+  create: (employeeId: number, data: Partial<EmployeePayrollField>) =>
+    api.post<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields`, { employee_payroll_field: data }),
+  update: (employeeId: number, id: number, data: Partial<EmployeePayrollField>) =>
+    api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
+  archive: (employeeId: number, id: number) =>
+    api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`),
 };
 
 export const employeeWageRatesApi = {

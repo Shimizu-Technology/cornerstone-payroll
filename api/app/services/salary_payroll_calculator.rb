@@ -22,6 +22,8 @@ class SalaryPayrollCalculator < PayrollCalculator
 
   def calculate
     calculate_gross_pay
+    sync_payroll_field_entries_after_base_gross
+    calculate_gross_pay
     record_earnings_breakdown
     calculate_retirement
     calculate_roth_retirement
@@ -81,6 +83,18 @@ class SalaryPayrollCalculator < PayrollCalculator
         build_earning("other", label, nil, nil, amt) if amt > 0
       when "non_taxable_addition"
         build_earning("non_taxable", label, nil, nil, amt) if amt > 0
+      end
+    end
+
+    payroll_item.payroll_item_field_entries.each do |entry|
+      amt = entry.amount.to_f
+      next unless entry.active? && amt.positive?
+
+      case entry.tax_treatment
+      when "taxable_addition"
+        build_earning("other", entry.label, nil, nil, amt)
+      when "non_taxable_addition"
+        build_earning("non_taxable", entry.label, nil, nil, amt)
       end
     end
 

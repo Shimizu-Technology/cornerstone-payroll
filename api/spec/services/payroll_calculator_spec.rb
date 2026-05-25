@@ -196,6 +196,97 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Taxable Bonus", "Mileage")
     end
 
+    it "snapshots assigned payroll fields into the payroll item and applies their tax treatment" do
+      taxable_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Client Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      deduction_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Auto Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 75.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: taxable_field, amount: 125.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: deduction_field, amount: 80.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      entries = payroll_item.payroll_item_field_entries.map { |entry| [ entry.label, entry.amount.to_f ] }.to_h
+      expect(entries).to include("Client Bonus" => 125.0, "Auto Loan" => 80.0)
+      expect(payroll_item.gross_pay).to eq(1_125.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 80.0
+      expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Client Bonus")
+    end
+
+    it "recomputes default percentage payroll fields when pay changes before manual override" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 5.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, percentage: 5.0)
+
+      described_class.for(employee, payroll_item).calculate
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(50.0)
+
+      payroll_item.hours_worked = 80
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(40.0)
+    end
+
+    it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "MoSa Auto Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 75.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: 75.0)
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.map(&:label)).not_to include("MoSa Auto Loan")
+      expect(payroll_item.loan_payment).to eq(200.0)
+    end
+
+    it "records employer contribution payroll fields separately from employee deductions" do
+      contribution_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employer Health",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "insurance",
+        amount_type: "fixed",
+        default_amount: 50.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: contribution_field, amount: 60.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      contribution = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Employer Health" }
+      expect(contribution).to be_employer_contribution
+      expect(payroll_item.payroll_item_deductions.select(&:employer_contribution?).map(&:label)).to include("Employer Health")
+    end
+
     it "floors adjusted FIT at zero when the adjustment would make it negative" do
       payroll_item.withholding_tax_adjustment = -10_000
 

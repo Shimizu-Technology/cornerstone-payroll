@@ -39,6 +39,8 @@ class Employee < ApplicationRecord
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :employee_deductions, dependent: :destroy
   has_many :deduction_types, through: :employee_deductions
+  has_many :employee_payroll_fields, dependent: :destroy
+  has_many :payroll_field_definitions, through: :employee_payroll_fields
   has_many :employee_ytd_totals, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
   has_many :employee_wage_rates, dependent: :destroy
