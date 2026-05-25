@@ -261,6 +261,7 @@ export function PayPeriodDetail() {
   const [supplementalsLoading, setSupplementalsLoading] = useState(false);
   const [comparison, setComparison] = useState<PayPeriodComparisonResponse | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState<'all' | 'salary' | 'hourly' | 'contractor'>('all');
@@ -337,6 +338,7 @@ export function PayPeriodDetail() {
       setNonEmployeeChecks([]);
       setSupplementals([]);
       setComparison(null);
+      setComparisonError(null);
       tipsLoansVisibilityModeRef.current = 'auto';
       loadPayPeriod(parseInt(id));
     }
@@ -344,11 +346,13 @@ export function PayPeriodDetail() {
 
   const loadComparison = useCallback(async (payPeriodId: number) => {
     setComparisonLoading(true);
+    setComparisonError(null);
     try {
       const res = await payPeriodsApi.comparison(payPeriodId);
       setComparison(res);
-    } catch {
+    } catch (err) {
       setComparison(null);
+      setComparisonError(err instanceof Error ? err.message : 'Failed to load pay period comparison');
     } finally {
       setComparisonLoading(false);
     }
@@ -373,6 +377,7 @@ export function PayPeriodDetail() {
     if (!payPeriod) return;
     if (payPeriod.cycle === 'supplemental' || !['calculated', 'approved', 'committed'].includes(payPeriod.status)) {
       setComparison(null);
+      setComparisonError(null);
       return;
     }
     loadComparison(payPeriod.id);
@@ -1141,10 +1146,12 @@ export function PayPeriodDetail() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">Previous Pay Period Comparison</h3>
-                  <p className="mt-1 text-sm text-gray-600">
-                    {comparison?.previous_pay_period
-                      ? `Compared with ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
-                      : comparisonLoading ? 'Loading previous period comparison…' : 'No previous committed pay period found for this company.'}
+                  <p className={`mt-1 text-sm ${comparisonError ? 'text-red-700' : 'text-gray-600'}`}>
+                    {comparisonError
+                      ? 'Comparison failed to load. Retry before approving this payroll.'
+                      : comparison?.previous_pay_period
+                        ? `Compared with ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
+                        : comparisonLoading ? 'Loading previous period comparison…' : 'No previous committed pay period found for this company.'}
                   </p>
                 </div>
                 {comparison && (
@@ -1154,7 +1161,14 @@ export function PayPeriodDetail() {
                 )}
               </div>
 
-              {comparisonLoading ? (
+              {comparisonError ? (
+                <div className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Unable to load comparison data: {comparisonError}</span>
+                  <Button variant="outline" size="sm" onClick={() => loadComparison(payPeriod.id)} disabled={comparisonLoading}>
+                    Retry comparison
+                  </Button>
+                </div>
+              ) : comparisonLoading ? (
                 <p className="text-sm text-gray-500">Loading comparison…</p>
               ) : comparison?.previous_pay_period ? (
                 <>
