@@ -177,7 +177,9 @@ class PayPeriodComparisonBuilder
       end
     end
 
-    flags.uniq { |entry| entry[:key] }
+    flags
+      .uniq { |entry| entry[:key] }
+      .sort_by { |entry| severity_rank([ entry ]) }
   end
 
   def review_flags_payload(employee_changes)
