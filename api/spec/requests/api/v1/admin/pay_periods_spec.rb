@@ -626,6 +626,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:ok)
       json = response.parsed_body
       expect(json["previous_pay_period"]).to be_nil
+      expect(json["employee_changes"]).to eq([])
       expect(json.dig("review_flags", "status")).to eq("ok")
       expect(json.dig("review_flags", "review_count")).to eq(0)
       expect(json.dig("review_flags", "message")).to eq("No previous committed pay period found for comparison.")

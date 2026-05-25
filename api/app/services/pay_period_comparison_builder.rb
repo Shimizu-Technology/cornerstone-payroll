@@ -25,7 +25,7 @@ class PayPeriodComparisonBuilder
   def call
     current_items = comparison_items(@pay_period)
     previous_items = @previous_period ? comparison_items(@previous_period) : []
-    employee_changes = employee_changes_payload(current_items, previous_items)
+    employee_changes = @previous_period ? employee_changes_payload(current_items, previous_items) : []
 
     {
       current_pay_period: period_payload(@pay_period),
