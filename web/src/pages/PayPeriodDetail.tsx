@@ -39,7 +39,7 @@ import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel'
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -65,6 +65,33 @@ const effectiveLoanDeduction = (item: PayrollItem): number => {
   const calculatedLoanPayment = toNumber(item.loan_payment);
   return calculatedLoanPayment > 0 ? calculatedLoanPayment : toNumber(item.loan_deduction);
 };
+
+const comparisonMetricLabels: Record<string, string> = {
+  employee_count: 'Employees',
+  gross_pay: 'Gross Pay',
+  net_pay: 'Net Pay',
+  fit: 'FIT',
+  social_security: 'Social Security',
+  medicare: 'Medicare',
+  total_deductions: 'Total Deductions',
+  reported_tips: 'Reported Tips',
+  tips_paid_out: 'Tips Paid Out',
+  loan_deduction: 'Loan Deduction',
+  loan_payment: 'Loan Payment',
+};
+
+function formatSignedCurrency(value: number) {
+  const formatted = formatCurrency(Math.abs(value));
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
+}
+
+function formatSignedNumber(value: number) {
+  if (value > 0) return `+${value}`;
+  if (value < 0) return String(value);
+  return '0';
+}
 
 function templateWageRates(employee: Employee, payrollItem?: PayrollItem): PayrollItemWageRateHours[] {
   const existing = payrollItem?.wage_rate_hours;
@@ -232,6 +259,8 @@ export function PayPeriodDetail() {
   const [replacingItem, setReplacingItem] = useState<PayrollItem | null>(null);
   const [supplementals, setSupplementals] = useState<SupplementalPayPeriodSummary[]>([]);
   const [supplementalsLoading, setSupplementalsLoading] = useState(false);
+  const [comparison, setComparison] = useState<PayPeriodComparisonResponse | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState<'all' | 'salary' | 'hourly' | 'contractor'>('all');
@@ -307,10 +336,23 @@ export function PayPeriodDetail() {
       // new panel loads.
       setNonEmployeeChecks([]);
       setSupplementals([]);
+      setComparison(null);
       tipsLoansVisibilityModeRef.current = 'auto';
       loadPayPeriod(parseInt(id));
     }
   }, [id, loadPayPeriod]);
+
+  const loadComparison = useCallback(async (payPeriodId: number) => {
+    setComparisonLoading(true);
+    try {
+      const res = await payPeriodsApi.comparison(payPeriodId);
+      setComparison(res);
+    } catch {
+      setComparison(null);
+    } finally {
+      setComparisonLoading(false);
+    }
+  }, []);
 
   // Load any linked corrective supplemental periods for a regular,
   // committed period. Refetches whenever a new corrective is issued.
@@ -326,6 +368,15 @@ export function PayPeriodDetail() {
       setSupplementalsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!payPeriod) return;
+    if (!['calculated', 'approved', 'committed'].includes(payPeriod.status)) {
+      setComparison(null);
+      return;
+    }
+    loadComparison(payPeriod.id);
+  }, [payPeriod, loadComparison]);
 
   useEffect(() => {
     if (!payPeriod) return;
@@ -715,6 +766,18 @@ export function PayPeriodDetail() {
     0
   );
 
+  const comparisonHighlights = comparison
+    ? ['employee_count', 'gross_pay', 'net_pay', 'fit', 'reported_tips', 'loan_deduction']
+      .filter((key) => comparison.summary[key])
+      .map((key) => ({ key, ...comparison.summary[key] }))
+    : [];
+  const comparisonFlagTone = comparison?.review_flags.status === 'warning'
+    ? 'border-red-200 bg-red-50 text-red-800'
+    : comparison?.review_flags.status === 'review'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  const comparisonRows = comparison?.employee_changes.slice(0, 10) || [];
+
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
@@ -1066,6 +1129,94 @@ export function PayPeriodDetail() {
               </Card>
             )}
           </div>
+        )}
+
+        {/* Previous Period Comparison */}
+        {payrollItems.length > 0 && (isCalculated || isApproved || isCommitted) && (
+          <Card className="border-blue-100 bg-blue-50/40">
+            <CardContent className="space-y-4 py-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900">Previous Pay Period Comparison</h3>
+                  <p className="mt-1 text-sm text-gray-600">
+                    {comparison?.previous_pay_period
+                      ? `Compared with ${formatDateRange(comparison.previous_pay_period.start_date, comparison.previous_pay_period.end_date)} · Pay date ${formatDate(comparison.previous_pay_period.pay_date)}`
+                      : comparisonLoading ? 'Loading previous period comparison…' : 'No previous committed pay period found for this company.'}
+                  </p>
+                </div>
+                {comparison && (
+                  <Badge className={comparisonFlagTone}>
+                    {comparison.review_flags.message}
+                  </Badge>
+                )}
+              </div>
+
+              {comparisonLoading ? (
+                <p className="text-sm text-gray-500">Loading comparison…</p>
+              ) : comparison?.previous_pay_period ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+                    {comparisonHighlights.map((metric) => {
+                      const isCount = metric.key === 'employee_count';
+                      const deltaClass = metric.delta > 0 ? 'text-emerald-700' : metric.delta < 0 ? 'text-red-700' : 'text-gray-500';
+                      return (
+                        <div key={metric.key} className="rounded-xl border border-white/70 bg-white px-3 py-3 shadow-sm">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500">{comparisonMetricLabels[metric.key]}</p>
+                          <p className="mt-1 text-lg font-semibold text-gray-900">
+                            {isCount ? metric.current : formatCurrency(metric.current)}
+                          </p>
+                          <p className={`mt-0.5 text-xs font-medium ${deltaClass}`}>
+                            {isCount ? formatSignedNumber(metric.delta) : formatSignedCurrency(metric.delta)}
+                            {metric.percent_delta !== null && ` · ${metric.percent_delta > 0 ? '+' : ''}${metric.percent_delta}%`}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {comparisonRows.length > 0 ? (
+                    <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
+                      <table className="w-full text-sm">
+                        <thead className="bg-blue-50 text-xs uppercase tracking-wide text-blue-900">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-semibold">Review item</th>
+                            <th className="px-3 py-2 text-right font-semibold">Gross Δ</th>
+                            <th className="px-3 py-2 text-right font-semibold">Net Δ</th>
+                            <th className="px-3 py-2 text-right font-semibold">Tips Δ</th>
+                            <th className="px-3 py-2 text-right font-semibold">Loan Δ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-blue-50">
+                          {comparisonRows.map((row) => (
+                            <tr key={`${row.employee_id}-${row.change_type}`}>
+                              <td className="px-3 py-2">
+                                <div className="font-medium text-gray-900">{row.employee_name}</div>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {row.flags.slice(0, 3).map((flag) => (
+                                    <span key={flag.key} className={`rounded-full px-2 py-0.5 text-xs font-medium ${flag.severity === 'warning' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                                      {flag.message}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.gross_pay?.delta || 0)}</td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.net_pay?.delta || 0)}</td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.reported_tips?.delta || 0)}</td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.loan_deduction?.delta || 0)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                      No material employee-level changes detected against the previous committed period.
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </CardContent>
+          </Card>
         )}
 
         {/* Missing Employees Warning */}

@@ -17,7 +17,8 @@ module Api
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
           :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
-          :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods
+          :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
+          :comparison
         ]
 
         # GET /api/v1/admin/pay_periods
@@ -356,6 +357,11 @@ module Api
             pay_period: pay_period_json(@pay_period, include_items: true),
             results: results
           }
+        end
+
+        # GET /api/v1/admin/pay_periods/:id/comparison
+        def comparison
+          render json: PayPeriodComparisonBuilder.new(@pay_period).call
         end
 
         # POST /api/v1/admin/pay_periods/:id/approve
