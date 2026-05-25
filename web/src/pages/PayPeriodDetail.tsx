@@ -1223,7 +1223,7 @@ export function PayPeriodDetail() {
                               <td className="px-3 py-2">
                                 <div className="font-medium text-gray-900">{row.employee_name}</div>
                                 <div className="mt-1 flex flex-wrap gap-1">
-                                  {row.flags.slice(0, 3).map((flag) => (
+                                  {row.flags.map((flag) => (
                                     <span key={flag.key} className={`rounded-full px-2 py-0.5 text-xs font-medium ${flag.severity === 'warning' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
                                       {flag.message}
                                     </span>
