@@ -248,6 +248,40 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(40.0)
     end
 
+    it "restores manually overridden payroll field deductions after an insufficient-pay cap" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "manual"
+      )
+      payroll_item.payroll_item_field_entries.build(
+        payroll_field_definition: field,
+        label: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 2_000.0,
+        source: "manual",
+        employee_paid: true,
+        active: true
+      )
+      payroll_item.mark_payroll_field_entries_overridden!
+
+      described_class.for(employee, payroll_item).calculate
+      capped_amount = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Loan" }.amount.to_f
+      expect(capped_amount).to be < 2_000.0
+
+      payroll_item.hours_worked = 300
+      described_class.for(employee, payroll_item).calculate
+
+      restored = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Loan" }
+      expect(restored.amount.to_f).to eq(2_000.0)
+      expect(restored.metadata).not_to have_key("uncapped_amount")
+    end
+
     it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,

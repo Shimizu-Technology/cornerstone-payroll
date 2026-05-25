@@ -255,7 +255,7 @@ class PayrollItem < ApplicationRecord
       if existing
         next if existing.source.in?(%w[manual import])
 
-        existing.assign_attributes(attributes.merge(source: "employee_default"))
+        existing.assign_attributes(attributes.merge(source: "employee_default", metadata: existing.metadata.except("uncapped_amount")))
       else
         payroll_item_field_entries.build(attributes.merge(source: "employee_default"))
       end
