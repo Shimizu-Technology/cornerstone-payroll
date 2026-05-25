@@ -13,7 +13,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
-import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment } from '@/types';
+import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment, PayrollItemFieldEntry } from '@/types';
 
 interface PayrollAdjustmentField {
   label: string;
@@ -58,6 +58,7 @@ interface EditableFields {
   check_date: string;
   check_memo: string;
   payroll_adjustments: PayrollAdjustmentField[];
+  payroll_field_entries: PayrollItemFieldEntry[];
 }
 
 export function PayrollItemEditModal({
@@ -87,6 +88,7 @@ export function PayrollItemEditModal({
     check_date: '',
     check_memo: '',
     payroll_adjustments: [],
+    payroll_field_entries: [],
   });
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -134,6 +136,11 @@ export function PayrollItemEditModal({
               active: adjustment.active !== false,
             }))
           : [],
+        payroll_field_entries: (item.payroll_field_entries || []).map(entry => ({
+          ...entry,
+          amount: Number(entry.amount) || 0,
+          active: entry.active !== false,
+        })),
       });
       setError(null);
       setConfirmRemove(false);
@@ -212,6 +219,14 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const handlePayrollFieldEntryAmountChange = (index: number, amount: number | null) => {
+    setFields((prev) => {
+      const updated = [...prev.payroll_field_entries];
+      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual' };
+      return { ...prev, payroll_field_entries: updated };
+    });
+  };
+
   const handleSaveAndRecalculate = async () => {
     setSaving(true);
     setError(null);
@@ -239,6 +254,12 @@ export function PayrollItemEditModal({
             notes: adjustment.notes.trim(),
             active: adjustment.active !== false,
           })),
+        payroll_field_entries: fields.payroll_field_entries.map(entry => ({
+          ...entry,
+          amount: Number(entry.amount) || 0,
+          source: entry.source || 'manual',
+          active: entry.active !== false,
+        })),
       };
 
       if (hasMultiRate) {
@@ -507,6 +528,34 @@ export function PayrollItemEditModal({
               </div>
             </div>
           </div>
+
+          {/* Company Payroll Fields */}
+          {fields.payroll_field_entries.length > 0 && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div className="mb-2">
+                <h4 className="text-sm font-medium text-gray-700">Company Payroll Fields</h4>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Client-wide fields assigned to this employee. Amounts can be overridden for this check without changing employee defaults.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {fields.payroll_field_entries.map((entry, idx) => (
+                  <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{entry.label}</p>
+                      <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}</p>
+                    </div>
+                    <NumericInput
+                      value={Number(entry.amount) || 0}
+                      onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
+                      min={0}
+                      fixedDecimalsOnBlur={2}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Payroll Adjustments */}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">

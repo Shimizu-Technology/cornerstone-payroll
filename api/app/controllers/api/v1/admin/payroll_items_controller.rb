@@ -78,6 +78,7 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
+          @payroll_item.mark_payroll_field_entries_overridden! if params.dig(:payroll_item, :payroll_field_entries)
 
           if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
@@ -148,15 +149,53 @@ module Api
             ],
             custom_earnings: [ :label, :amount ],
             custom_deductions: [ :label, :amount ],
-            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
+            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ],
+            payroll_field_entries: [
+              :id, :payroll_field_definition_id, :label, :kind, :tax_treatment,
+              :category, :amount, :source, :employee_paid, :employer_paid,
+              :active, :notes
+            ]
           )
 
-          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions, :payroll_adjustments).to_h.symbolize_keys
+          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions, :payroll_adjustments, :payroll_field_entries).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs[:payroll_adjustments] = PayrollItem.normalize_payroll_adjustments(permitted[:payroll_adjustments]) if params.dig(:payroll_item, :payroll_adjustments)
+          attrs[:payroll_field_entries_attributes] = normalize_payroll_field_entries(permitted[:payroll_field_entries]) if params.dig(:payroll_item, :payroll_field_entries)
           attrs
+        end
+
+        def normalize_payroll_field_entries(entries)
+          Array(entries).filter_map do |entry|
+            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+            amount = BigDecimal(data["amount"].to_s)
+            label = data["label"].to_s.strip
+            next if label.blank? || amount.negative? || !amount.finite?
+
+            field = nil
+            if data["payroll_field_definition_id"].present?
+              field = PayrollFieldDefinition.find_by(id: data["payroll_field_definition_id"], company_id: current_company_id)
+            end
+
+            payload = {
+              id: data["id"],
+              payroll_field_definition_id: field&.id,
+              label: label,
+              kind: data["kind"].presence || field&.kind,
+              tax_treatment: data["tax_treatment"].presence || field&.tax_treatment,
+              category: data["category"].presence || field&.category || "other",
+              amount: amount.round(2),
+              source: data["source"].presence || "manual",
+              employee_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employee_paid") ? data["employee_paid"] : field&.employee_paid?),
+              employer_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employer_paid") ? data["employer_paid"] : field&.employer_paid?),
+              active: data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true,
+              notes: data["notes"].to_s.strip.presence
+            }
+            payload.compact
+          rescue ArgumentError, FloatDomainError, NoMethodError
+            nil
+          end
         end
 
         def save_payroll_item_and_clear_exclusion(payroll_item, employee)
@@ -168,6 +207,24 @@ module Api
           end
 
           true
+        end
+
+        def payroll_field_entry_json(entry)
+          {
+            id: entry.id,
+            payroll_item_id: entry.payroll_item_id,
+            payroll_field_definition_id: entry.payroll_field_definition_id,
+            label: entry.label,
+            kind: entry.kind,
+            tax_treatment: entry.tax_treatment,
+            category: entry.category,
+            amount: entry.amount.to_f,
+            source: entry.source,
+            employee_paid: entry.employee_paid,
+            employer_paid: entry.employer_paid,
+            active: entry.active,
+            notes: entry.notes
+          }
         end
 
         def payroll_item_json(item, detailed: false)
@@ -212,6 +269,7 @@ module Api
             custom_earnings: item.custom_earnings || [],
             custom_deductions: item.custom_deductions || [],
             payroll_adjustments: item.payroll_adjustments || [],
+            payroll_field_entries: item.payroll_item_field_entries.map { |entry| payroll_field_entry_json(entry) },
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
