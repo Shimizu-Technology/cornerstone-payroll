@@ -993,7 +993,7 @@ module Api
           }
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.includes(employee: :department).map do |item|
+            json[:payroll_items] = pay_period.payroll_items.includes(:payroll_item_field_entries, employee: :department).map do |item|
               payroll_item_json(item)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)

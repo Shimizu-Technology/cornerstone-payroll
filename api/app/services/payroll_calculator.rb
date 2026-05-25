@@ -128,7 +128,20 @@ class PayrollCalculator
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
   def sync_payroll_field_entries_after_base_gross
+    restore_capped_payroll_field_entries!
     payroll_item.apply_default_payroll_field_entries_if_unset!(employee)
+  end
+
+  def restore_capped_payroll_field_entries!
+    payroll_item.payroll_item_field_entries.each do |entry|
+      uncapped_amount = entry.metadata.is_a?(Hash) ? entry.metadata["uncapped_amount"] : nil
+      next if uncapped_amount.blank?
+
+      entry.amount = BigDecimal(uncapped_amount.to_s).round(2)
+      entry.metadata = entry.metadata.except("uncapped_amount")
+    rescue ArgumentError
+      next
+    end
   end
 
   def pre_tax_employee_deductions_total
@@ -464,14 +477,10 @@ class PayrollCalculator
     deductions.reverse_each do |entry|
       current = entry.amount.to_f
       reduction = [ current, amount ].min
+      entry.metadata = (entry.metadata || {}).merge("uncapped_amount" => current.round(2)) if reduction.positive? && !entry.metadata.key?("uncapped_amount")
       entry.amount = (current - reduction).round(2)
       amount = (amount - reduction).round(2)
       break unless amount.positive?
-    end
-
-    deductions.select { |entry| entry.amount.to_f.zero? }.each do |entry|
-      entry.destroy! if entry.persisted?
-      payroll_item.payroll_item_field_entries.target.delete(entry)
     end
 
     amount
