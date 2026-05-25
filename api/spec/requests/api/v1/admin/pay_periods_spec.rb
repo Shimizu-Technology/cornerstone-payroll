@@ -680,6 +680,10 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json.dig("previous_pay_period", "id")).to eq(previous_period.id)
       expect(json.dig("summary", "gross_pay", "delta")).to eq(300.0)
       expect(json.dig("summary", "reported_tips", "delta")).to eq(250.0)
+      expect(json.dig("review_flags", "status")).to eq("review")
+      expect(json.dig("review_flags", "warning_count")).to eq(0)
+      expect(json.dig("review_flags", "review_count")).to be >= 1
+      expect(json.dig("review_flags", "message")).to eq("Review recommended before approval.")
       expect(json["employee_changes"].first["employee_name"]).to eq(employee.full_name)
       expect(json["employee_changes"].first["flags"].map { |flag| flag["key"] }).to include("gross_pay", "reported_tips")
     end
