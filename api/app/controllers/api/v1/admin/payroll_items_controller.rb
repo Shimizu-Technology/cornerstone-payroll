@@ -9,7 +9,7 @@ module Api
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
-          @payroll_items = @pay_period.payroll_items.includes(:employee)
+          @payroll_items = @pay_period.payroll_items.includes(:payroll_item_field_entries, :employee)
           reportable_items = @payroll_items.not_voided
 
           render json: {
