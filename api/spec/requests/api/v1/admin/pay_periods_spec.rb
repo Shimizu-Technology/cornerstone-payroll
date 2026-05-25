@@ -605,6 +605,32 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "GET /api/v1/admin/pay_periods/:id/comparison" do
+    it "returns an ok no-comparison status when no previous committed period exists" do
+      PayrollItem.create!(
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 80,
+        gross_pay: 1200.00,
+        net_pay: 950.00,
+        withholding_tax: 100.00,
+        social_security_tax: 74.40,
+        medicare_tax: 17.40,
+        total_deductions: 250.00
+      )
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/comparison"
+
+      expect(response).to have_http_status(:ok)
+      json = response.parsed_body
+      expect(json["previous_pay_period"]).to be_nil
+      expect(json.dig("review_flags", "status")).to eq("ok")
+      expect(json.dig("review_flags", "review_count")).to eq(0)
+      expect(json.dig("review_flags", "message")).to eq("No previous committed pay period found for comparison.")
+    end
+
     it "compares the period against the previous committed period and returns employee review flags" do
       previous_period = PayPeriod.create!(
         company: company,

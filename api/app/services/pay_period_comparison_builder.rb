@@ -181,6 +181,15 @@ class PayPeriodComparisonBuilder
   end
 
   def review_flags_payload(employee_changes)
+    if @previous_period.nil?
+      return {
+        status: "ok",
+        warning_count: 0,
+        review_count: 0,
+        message: "No previous committed pay period found for comparison."
+      }
+    end
+
     warnings = employee_changes.sum { |row| row[:flags].count { |flag| flag[:severity] == "warning" } }
     reviews = employee_changes.sum { |row| row[:flags].count { |flag| flag[:severity] == "review" } }
 
@@ -188,9 +197,7 @@ class PayPeriodComparisonBuilder
       status: warnings.positive? ? "warning" : reviews.positive? ? "review" : "ok",
       warning_count: warnings,
       review_count: reviews,
-      message: if @previous_period.nil?
-        "No previous committed pay period found for comparison."
-      elsif warnings.positive?
+      message: if warnings.positive?
         "Review required before approval."
       elsif reviews.positive?
         "Review recommended before approval."
