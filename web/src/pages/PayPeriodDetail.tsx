@@ -371,7 +371,7 @@ export function PayPeriodDetail() {
 
   useEffect(() => {
     if (!payPeriod) return;
-    if (!['calculated', 'approved', 'committed'].includes(payPeriod.status)) {
+    if (payPeriod.cycle === 'supplemental' || !['calculated', 'approved', 'committed'].includes(payPeriod.status)) {
       setComparison(null);
       return;
     }
@@ -1135,7 +1135,7 @@ export function PayPeriodDetail() {
         )}
 
         {/* Previous Period Comparison */}
-        {payrollItems.length > 0 && (isCalculated || isApproved || isCommitted) && (
+        {payrollItems.length > 0 && payPeriod.cycle !== 'supplemental' && (isCalculated || isApproved || isCommitted) && (
           <Card className="border-blue-100 bg-blue-50/40">
             <CardContent className="space-y-4 py-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
