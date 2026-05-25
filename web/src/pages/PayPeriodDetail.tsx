@@ -1206,13 +1206,14 @@ export function PayPeriodDetail() {
                         )}
                       </div>
                       <div className="overflow-x-auto rounded-xl border border-blue-100 bg-white">
-                        <table className="min-w-[64rem] w-full text-sm">
+                        <table className="min-w-[72rem] w-full text-sm">
                         <thead className="bg-blue-50 text-xs uppercase tracking-wide text-blue-900">
                           <tr>
                             <th className="whitespace-nowrap px-3 py-2 text-left font-semibold">Review item</th>
                             <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Gross Δ</th>
                             <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Net Δ</th>
                             <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Tips Δ</th>
+                            <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Deduct. Δ</th>
                             <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Loan Ded. Δ</th>
                             <th className="whitespace-nowrap px-3 py-2 text-right font-semibold">Loan Pmt. Δ</th>
                           </tr>
@@ -1233,6 +1234,7 @@ export function PayPeriodDetail() {
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.gross_pay?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.net_pay?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.reported_tips?.delta || 0)}</td>
+                              <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.total_deductions?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.loan_deduction?.delta || 0)}</td>
                               <td className="px-3 py-2 text-right font-mono">{formatSignedCurrency(row.deltas.loan_payment?.delta || 0)}</td>
                             </tr>
