@@ -136,11 +136,13 @@ export function PayrollItemEditModal({
               active: adjustment.active !== false,
             }))
           : [],
-        payroll_field_entries: (item.payroll_field_entries || []).map(entry => ({
-          ...entry,
-          amount: Number(entry.amount) || 0,
-          active: entry.active !== false,
-        })),
+        payroll_field_entries: (item.payroll_field_entries || [])
+          .filter(entry => entry.active !== false)
+          .map(entry => ({
+            ...entry,
+            amount: Number(entry.amount) || 0,
+            active: true,
+          })),
       });
       setError(null);
       setConfirmRemove(false);
@@ -257,7 +259,7 @@ export function PayrollItemEditModal({
         payroll_field_entries: fields.payroll_field_entries.map(entry => ({
           ...entry,
           amount: Number(entry.amount) || 0,
-          source: entry.source || 'manual',
+          source: 'manual' as const,
           active: entry.active !== false,
         })),
       };
