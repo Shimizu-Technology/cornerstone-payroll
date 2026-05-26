@@ -130,7 +130,7 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
         }
       }
 
-      expect(response).to have_http_status(:created)
+      expect(response).to have_http_status(:ok)
       expect(employee.employee_payroll_fields.where(payroll_field_definition: field).count).to eq(1)
       assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
       expect(assignment).to be_active
@@ -202,6 +202,28 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(response).to have_http_status(:created)
       assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
       expect(assignment.employee_loan_id).to be_nil
+    end
+
+    it "returns a validation response when assignment creation hits a uniqueness race" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Race Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "other"
+      )
+      allow_any_instance_of(EmployeePayrollField).to receive(:save!).and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value"))
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields", params: {
+        employee_payroll_field: {
+          payroll_field_definition_id: field.id,
+          amount: 50,
+          active: true
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to be_present
     end
 
     it "does not assign another company's payroll field" do
