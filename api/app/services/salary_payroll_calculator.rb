@@ -24,6 +24,7 @@ class SalaryPayrollCalculator < PayrollCalculator
     calculate_base_gross_for_payroll_fields
     sync_payroll_field_entries_after_base_gross
     calculate_gross_pay
+    sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
     calculate_retirement
     calculate_roth_retirement

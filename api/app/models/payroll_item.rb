@@ -269,6 +269,26 @@ class PayrollItem < ApplicationRecord
     end
   end
 
+  def refresh_percentage_payroll_field_entries_after_final_gross!(source_employee = employee)
+    return if payroll_field_entries_overridden?
+
+    assignments = source_employee&.employee_payroll_fields&.active&.effective_on(pay_period.pay_date)&.includes(:payroll_field_definition) || []
+    assignments.each do |assignment|
+      field = assignment.payroll_field_definition
+      next unless field&.active?
+      next unless field.amount_type == "percentage"
+      next if field.tax_treatment.in?(%w[taxable_addition non_taxable_addition])
+      next if imported_mosa_loan_field_should_be_skipped?(field)
+
+      entry = payroll_item_field_entries.detect { |candidate| candidate.payroll_field_definition_id == field.id }
+      next unless entry&.active?
+      next if entry.source.in?(%w[manual import])
+
+      entry.amount = assignment.effective_amount_for(gross_pay.to_d)
+      entry.metadata = (entry.metadata || {}).except("uncapped_amount")
+    end
+  end
+
   def active_payroll_field_entries_total(treatment)
     payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
   end

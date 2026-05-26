@@ -139,6 +139,10 @@ class PayrollCalculator
     payroll_item.apply_default_payroll_field_entries_if_unset!(employee)
   end
 
+  def sync_percentage_payroll_field_entries_after_final_gross
+    payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee)
+  end
+
   def restore_capped_payroll_field_entries!
     payroll_item.payroll_item_field_entries.each do |entry|
       uncapped_amount = entry.metadata.is_a?(Hash) ? entry.metadata["uncapped_amount"] : nil

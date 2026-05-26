@@ -19,6 +19,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     calculate_base_gross_for_payroll_fields
     sync_payroll_field_entries_after_base_gross
     calculate_gross_pay
+    sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
     clear_deduction_state
     zero_out_taxes

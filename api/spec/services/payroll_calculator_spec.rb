@@ -246,6 +246,36 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
     end
 
+    it "calculates percentage deductions against gross after taxable field additions" do
+      bonus_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Commission Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      deduction_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: bonus_field, percentage: 10.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: deduction_field, percentage: 10.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      entries = payroll_item.payroll_item_field_entries.index_by(&:label)
+      expect(entries["Commission Bonus"].amount.to_f).to eq(100.0)
+      expect(entries["401(k)"].amount.to_f).to eq(110.0)
+      expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
+    end
+
     it "recomputes default percentage payroll fields when pay changes before manual override" do
       field = PayrollFieldDefinition.create!(
         company: company,
