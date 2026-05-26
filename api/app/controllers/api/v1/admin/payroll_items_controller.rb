@@ -185,6 +185,8 @@ module Api
 
             existing_entry = nil
             if data["id"].present?
+              raise ActiveRecord::RecordNotFound, "Payroll field entry IDs cannot be submitted when creating a payroll item" unless @payroll_item
+
               existing_entry = @payroll_item.payroll_item_field_entries.find_by(id: data["id"])
               raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item" unless existing_entry
             end

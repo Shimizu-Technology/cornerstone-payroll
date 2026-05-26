@@ -14,13 +14,11 @@ module Api
 
         def create
           attrs = assignment_params
-          assignment = @employee.employee_payroll_fields.find_or_initialize_by(payroll_field_definition_id: attrs[:payroll_field_definition_id])
-          assignment.assign_attributes(attrs.merge(active: attrs.key?(:active) ? attrs[:active] : true))
-          if assignment.save
-            render json: { employee_payroll_field: assignment_json(assignment) }, status: :created
-          else
-            render json: { errors: assignment.errors.full_messages }, status: :unprocessable_entity
-          end
+          assignment = upsert_assignment(attrs)
+          status = assignment.previously_new_record? ? :created : :ok
+          render json: { employee_payroll_field: assignment_json(assignment) }, status: status
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         def update
@@ -47,6 +45,18 @@ module Api
 
         def set_assignment
           @assignment = @employee.employee_payroll_fields.find(params[:id])
+        end
+
+        def upsert_assignment(attrs)
+          assignment = @employee.employee_payroll_fields.find_or_initialize_by(payroll_field_definition_id: attrs[:payroll_field_definition_id])
+          assignment.assign_attributes(attrs.merge(active: attrs.key?(:active) ? attrs[:active] : true))
+          assignment.save!
+          assignment
+        rescue ActiveRecord::RecordNotUnique
+          assignment = @employee.employee_payroll_fields.find_by!(payroll_field_definition_id: attrs[:payroll_field_definition_id])
+          assignment.assign_attributes(attrs.merge(active: attrs.key?(:active) ? attrs[:active] : true))
+          assignment.save!
+          assignment
         end
 
         def assignment_params
