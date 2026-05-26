@@ -91,7 +91,7 @@ module Api
             end_date: assignment.end_date,
             notes: assignment.notes,
             employee_loan_id: assignment.employee_loan_id,
-            payroll_field: {
+            payroll_field: field && {
               id: field.id,
               name: field.name,
               kind: field.kind,
