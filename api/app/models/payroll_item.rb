@@ -283,7 +283,18 @@ class PayrollItem < ApplicationRecord
   end
 
   def active_payroll_field_assignments_for(source_employee)
-    source_employee&.employee_payroll_fields&.active&.effective_on(pay_period.pay_date)&.includes(:payroll_field_definition) || []
+    return [] unless source_employee
+
+    if source_employee.association(:employee_payroll_fields).loaded?
+      pay_date = pay_period.pay_date
+      source_employee.employee_payroll_fields.select do |assignment|
+        assignment.active? &&
+          (assignment.start_date.blank? || assignment.start_date <= pay_date) &&
+          (assignment.end_date.blank? || assignment.end_date >= pay_date)
+      end
+    else
+      source_employee.employee_payroll_fields.active.effective_on(pay_period.pay_date).includes(:payroll_field_definition)
+    end
   end
 
   def active_payroll_field_definition_ids(assignments)
