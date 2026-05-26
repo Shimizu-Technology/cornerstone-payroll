@@ -22,6 +22,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     record_earnings_breakdown
     clear_deduction_state
     zero_out_taxes
+    record_payroll_field_employer_contributions
     calculate_totals
     calculate_net_pay
     update_ytd_on_item

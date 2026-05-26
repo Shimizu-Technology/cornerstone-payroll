@@ -191,11 +191,7 @@ class PayrollCalculator
       record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match)
     end
 
-    payroll_item.payroll_item_field_entries.each do |entry|
-      next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
-
-      record_employer_contribution(entry.label, entry.amount)
-    end
+    record_payroll_field_employer_contributions
 
     # Update aggregate fields for backward compatibility with existing code
     payroll_item.loan_payment = aggregate_loan
@@ -238,6 +234,14 @@ class PayrollCalculator
     payroll_item.non_taxable_pay.to_f +
       payroll_item.non_taxable_payroll_adjustments_total +
       payroll_item.non_taxable_payroll_field_entries_total
+  end
+
+  def record_payroll_field_employer_contributions
+    payroll_item.payroll_item_field_entries.each do |entry|
+      next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
+
+      record_employer_contribution(entry.label, entry.amount)
+    end
   end
 
   def calculate_totals

@@ -29,6 +29,32 @@ RSpec.describe ContractorPayrollCalculator do
     )
   end
 
+  it "records employer contribution payroll field entries without reducing contractor net pay" do
+    contribution_field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Contractor Admin Fee",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "other",
+      amount_type: "fixed",
+      default_amount: 25.00
+    )
+    EmployeePayrollField.create!(
+      employee: employee,
+      payroll_field_definition: contribution_field,
+      amount: 25.00
+    )
+
+    described_class.new(employee, payroll_item).calculate
+
+    contribution = payroll_item.payroll_item_deductions.find { |deduction| deduction.label == "Contractor Admin Fee" }
+    expect(contribution).to be_present
+    expect(contribution.category).to eq("employer_contribution")
+    expect(contribution.amount.to_f).to eq(25.0)
+    expect(payroll_item.total_deductions).to eq(0)
+    expect(payroll_item.net_pay).to eq(payroll_item.gross_pay)
+  end
+
   it "clears stale deductions from a prior non-contractor calculation" do
     deduction_type = DeductionType.create!(
       company: company,

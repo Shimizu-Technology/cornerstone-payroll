@@ -314,11 +314,15 @@ export function PayPeriodDetail() {
       if (!silent) setLoading(true);
       setError(null);
 
-      const [ppResponse, empResponse, fieldsResponse] = await Promise.all([
+      const [ppResponse, empResponse] = await Promise.all([
         payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
-        payrollFieldsApi.list(),
       ]);
+
+      const fieldsResponse = await payrollFieldsApi.list().catch((err) => {
+        console.warn('Failed to load payroll fields for pay period grid', err);
+        return { payroll_fields: [] };
+      });
 
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
