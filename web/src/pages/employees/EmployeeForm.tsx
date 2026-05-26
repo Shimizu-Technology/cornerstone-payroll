@@ -409,8 +409,12 @@ export function EmployeeForm() {
     setDefaultPayrollAdjustments((prev) => prev.filter((adjustment) => adjustment.temp_id !== tempId));
   };
 
+  const availablePayrollFields = payrollFields.filter((field) => !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
+
   const addEmployeePayrollField = () => {
-    const availableField = payrollFields.find((field) => !employeePayrollFields.some((row) => row.payroll_field_definition_id === field.id));
+    const availableField = availablePayrollFields[0];
+    if (!availableField) return;
+
     setEmployeePayrollFields((prev) => [
       ...prev,
       {
@@ -1070,7 +1074,7 @@ export function EmployeeForm() {
                   })}
                 </div>
               )}
-              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addEmployeePayrollField} disabled={payrollFields.length === 0}>
+              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addEmployeePayrollField} disabled={availablePayrollFields.length === 0}>
                 <Plus className="mr-1 h-4 w-4" />
                 Assign Payroll Field
               </Button>
