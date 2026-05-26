@@ -86,6 +86,8 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordNotFound => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id
@@ -178,6 +180,10 @@ module Api
             field = nil
             if data["payroll_field_definition_id"].present?
               field = PayrollFieldDefinition.find_by(id: data["payroll_field_definition_id"], company_id: current_company_id)
+            end
+
+            if data["id"].present? && !@payroll_item.payroll_item_field_entries.exists?(id: data["id"])
+              raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item"
             end
 
             payload = {
