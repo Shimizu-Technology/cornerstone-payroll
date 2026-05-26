@@ -83,6 +83,47 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "clears payroll field entry notes when blank notes are submitted" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 10,
+        source: "manual",
+        notes: "Clear me"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              notes: "",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.notes).to be_nil
+    end
+
     it "returns a validation response for stale payroll field entry ids" do
       field = PayrollFieldDefinition.create!(
         company: company,

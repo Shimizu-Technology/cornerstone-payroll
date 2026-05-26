@@ -165,7 +165,7 @@ module Api
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs[:payroll_adjustments] = PayrollItem.normalize_payroll_adjustments(permitted[:payroll_adjustments]) if params.dig(:payroll_item, :payroll_adjustments)
           if params.dig(:payroll_item, :payroll_field_entries).present?
-            attrs[:payroll_field_entries_attributes] = normalize_payroll_field_entries(permitted[:payroll_field_entries])
+            attrs[:payroll_item_field_entries_attributes] = normalize_payroll_field_entries(permitted[:payroll_field_entries])
           end
           attrs
         end
@@ -200,7 +200,7 @@ module Api
               active: data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true,
               notes: data["notes"].to_s.strip.presence
             }
-            payload.compact
+            payload.compact.merge(notes: payload[:notes])
           rescue ArgumentError, FloatDomainError, NoMethodError
             nil
           end
