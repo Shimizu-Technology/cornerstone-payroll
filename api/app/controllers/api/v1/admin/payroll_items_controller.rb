@@ -78,7 +78,7 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
-          @payroll_item.mark_payroll_field_entries_overridden! if params.dig(:payroll_item, :payroll_field_entries)
+          @payroll_item.mark_payroll_field_entries_overridden! if params.dig(:payroll_item, :payroll_field_entries).present?
 
           if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
@@ -162,7 +162,9 @@ module Api
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs[:payroll_adjustments] = PayrollItem.normalize_payroll_adjustments(permitted[:payroll_adjustments]) if params.dig(:payroll_item, :payroll_adjustments)
-          attrs[:payroll_field_entries_attributes] = normalize_payroll_field_entries(permitted[:payroll_field_entries]) if params.dig(:payroll_item, :payroll_field_entries)
+          if params.dig(:payroll_item, :payroll_field_entries).present?
+            attrs[:payroll_field_entries_attributes] = normalize_payroll_field_entries(permitted[:payroll_field_entries])
+          end
           attrs
         end
 
