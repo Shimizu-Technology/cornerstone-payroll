@@ -489,7 +489,8 @@ class PayrollCalculator
     deductions.reverse_each do |entry|
       current = entry.amount.to_f
       reduction = [ current, amount ].min
-      entry.metadata = (entry.metadata || {}).merge("uncapped_amount" => current.round(2)) if reduction.positive? && !entry.metadata.key?("uncapped_amount")
+      metadata = entry.metadata || {}
+      entry.metadata = metadata.merge("uncapped_amount" => current.round(2)) if reduction.positive? && !metadata.key?("uncapped_amount")
       entry.amount = (current - reduction).round(2)
       amount = (amount - reduction).round(2)
       break unless amount.positive?

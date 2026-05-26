@@ -82,6 +82,38 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "returns a validation response for stale payroll field entry ids" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: 999_999,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field entry no longer exists")
+    end
+  end
+
   describe "DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
     it "records the employee as excluded from the pay period" do
       expect {
