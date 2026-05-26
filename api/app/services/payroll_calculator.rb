@@ -127,6 +127,13 @@ class PayrollCalculator
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
+  def calculate_base_gross_for_payroll_fields
+    @exclude_payroll_field_entry_totals = true
+    calculate_gross_pay
+  ensure
+    @exclude_payroll_field_entry_totals = false
+  end
+
   def sync_payroll_field_entries_after_base_gross
     restore_capped_payroll_field_entries!
     payroll_item.apply_default_payroll_field_entries_if_unset!(employee)
@@ -215,9 +222,10 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
-    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
-      payroll_item.taxable_payroll_adjustments_total +
-      payroll_item.taxable_payroll_field_entries_total
+    total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
+      payroll_item.taxable_payroll_adjustments_total
+    total += payroll_item.taxable_payroll_field_entries_total unless @exclude_payroll_field_entry_totals
+    total
   end
 
   def custom_deductions_total

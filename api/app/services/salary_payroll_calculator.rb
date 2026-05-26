@@ -21,7 +21,7 @@ class SalaryPayrollCalculator < PayrollCalculator
   }.freeze
 
   def calculate
-    calculate_gross_pay
+    calculate_base_gross_for_payroll_fields
     sync_payroll_field_entries_after_base_gross
     calculate_gross_pay
     record_earnings_breakdown

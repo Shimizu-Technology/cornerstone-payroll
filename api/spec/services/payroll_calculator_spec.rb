@@ -227,6 +227,25 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Client Bonus")
     end
 
+    it "does not compound percentage-based taxable additions across recalculations" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Commission Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, percentage: 10.0)
+
+      3.times { described_class.for(employee, payroll_item).calculate }
+
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Commission Bonus" }
+      expect(entry.amount.to_f).to eq(100.0)
+      expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
+    end
+
     it "recomputes default percentage payroll fields when pay changes before manual override" do
       field = PayrollFieldDefinition.create!(
         company: company,
