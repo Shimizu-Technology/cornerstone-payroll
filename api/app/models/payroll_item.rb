@@ -225,17 +225,16 @@ class PayrollItem < ApplicationRecord
   end
 
   def apply_default_payroll_field_entries_if_unset!(source_employee = employee)
-    return if payroll_field_entries_overridden?
+    assignments = active_payroll_field_assignments_for(source_employee)
+    assigned_definition_ids = active_payroll_field_definition_ids(assignments)
+    deactivate_stale_payroll_field_entries!(assigned_definition_ids)
 
-    assignments = source_employee&.employee_payroll_fields&.active&.effective_on(pay_period.pay_date)&.includes(:payroll_field_definition) || []
-    assigned_definition_ids = []
+    return if payroll_field_entries_overridden?
 
     assignments.each do |assignment|
       field = assignment.payroll_field_definition
-      next unless field&.active?
-      next if imported_mosa_loan_field_should_be_skipped?(field)
+      next unless assigned_definition_ids.include?(field&.id)
 
-      assigned_definition_ids << field.id
       amount = assignment.effective_amount_for(gross_pay.to_d)
       existing = payroll_item_field_entries.detect { |entry| entry.payroll_field_definition_id == field.id }
 
@@ -261,18 +260,12 @@ class PayrollItem < ApplicationRecord
       end
     end
 
-    payroll_item_field_entries.each do |entry|
-      next unless entry.source == "employee_default"
-      next if entry.payroll_field_definition_id.in?(assigned_definition_ids)
-
-      entry.active = false
-    end
   end
 
   def refresh_percentage_payroll_field_entries_after_final_gross!(source_employee = employee)
     return if payroll_field_entries_overridden?
 
-    assignments = source_employee&.employee_payroll_fields&.active&.effective_on(pay_period.pay_date)&.includes(:payroll_field_definition) || []
+    assignments = active_payroll_field_assignments_for(source_employee)
     assignments.each do |assignment|
       field = assignment.payroll_field_definition
       next unless field&.active?
@@ -286,6 +279,30 @@ class PayrollItem < ApplicationRecord
 
       entry.amount = assignment.effective_amount_for(gross_pay.to_d)
       entry.metadata = (entry.metadata || {}).except("uncapped_amount")
+    end
+  end
+
+  def active_payroll_field_assignments_for(source_employee)
+    source_employee&.employee_payroll_fields&.active&.effective_on(pay_period.pay_date)&.includes(:payroll_field_definition) || []
+  end
+
+  def active_payroll_field_definition_ids(assignments)
+    assignments.filter_map do |assignment|
+      field = assignment.payroll_field_definition
+      next unless field&.active?
+      next if imported_mosa_loan_field_should_be_skipped?(field)
+
+      field.id
+    end
+  end
+
+  def deactivate_stale_payroll_field_entries!(active_definition_ids)
+    payroll_item_field_entries.each do |entry|
+      next if entry.payroll_field_definition_id.blank?
+      next if entry.source == "import"
+      next if entry.payroll_field_definition_id.in?(active_definition_ids)
+
+      entry.active = false
     end
   end
 
