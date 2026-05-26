@@ -310,7 +310,7 @@ class PayrollItem < ApplicationRecord
   def deactivate_stale_payroll_field_entries!(active_definition_ids)
     payroll_item_field_entries.each do |entry|
       next if entry.payroll_field_definition_id.blank?
-      next if entry.source == "import"
+      next if entry.source.in?(%w[import manual])
       next if entry.payroll_field_definition_id.in?(active_definition_ids)
 
       entry.active = false

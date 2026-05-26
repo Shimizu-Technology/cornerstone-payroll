@@ -327,7 +327,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(40.0)
     end
 
-    it "deactivates stale overridden field entries when an assignment is removed" do
+    it "deactivates stale default field entries when an assignment is removed" do
       field = PayrollFieldDefinition.create!(
         company: company,
         name: "Stale Bonus",
@@ -341,14 +341,37 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
       entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Stale Bonus" }
-      entry.update!(source: "manual", amount: 150.0)
-      payroll_item.mark_payroll_field_entries_overridden!
       assignment.update!(active: false)
 
       described_class.for(employee, payroll_item).calculate
 
       expect(entry).not_to be_active
       expect(payroll_item.gross_pay.to_f).to eq(1_000.0)
+    end
+
+    it "preserves manually overridden field entries when an assignment is removed" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+
+      described_class.for(employee, payroll_item).calculate
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Rent" }
+      entry.assign_attributes(source: "manual", amount: 150.0)
+      payroll_item.mark_payroll_field_entries_overridden!
+      assignment.update!(active: false)
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(entry).to be_active
+      expect(entry.amount.to_f).to eq(150.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
     it "restores manually overridden payroll field deductions after an insufficient-pay cap" do
