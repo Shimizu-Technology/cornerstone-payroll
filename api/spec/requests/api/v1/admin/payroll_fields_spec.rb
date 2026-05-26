@@ -137,6 +137,73 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(assignment.amount.to_f).to eq(50.0)
     end
 
+    it "does not assign another company's employee loan" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan Payroll Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      other_department = create(:department, company: other_company)
+      other_employee = create(:employee, company: other_company, department: other_department)
+      other_loan = EmployeeLoan.create!(
+        company: other_company,
+        employee: other_employee,
+        name: "Other Company Loan",
+        original_amount: 500,
+        current_balance: 500,
+        payment_amount: 50,
+        status: "active"
+      )
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields", params: {
+        employee_payroll_field: {
+          payroll_field_definition_id: field.id,
+          amount: 50,
+          employee_loan_id: other_loan.id,
+          active: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
+      expect(assignment.employee_loan_id).to be_nil
+    end
+
+    it "does not assign another employee's loan from the same company" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employee Loan Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      coworker = create(:employee, company: company, department: department)
+      coworker_loan = EmployeeLoan.create!(
+        company: company,
+        employee: coworker,
+        name: "Coworker Loan",
+        original_amount: 500,
+        current_balance: 500,
+        payment_amount: 50,
+        status: "active"
+      )
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields", params: {
+        employee_payroll_field: {
+          payroll_field_definition_id: field.id,
+          amount: 50,
+          employee_loan_id: coworker_loan.id,
+          active: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
+      expect(assignment.employee_loan_id).to be_nil
+    end
+
     it "does not assign another company's payroll field" do
       field = PayrollFieldDefinition.create!(
         company: other_company,

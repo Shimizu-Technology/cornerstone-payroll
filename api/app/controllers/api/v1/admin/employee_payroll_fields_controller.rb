@@ -60,6 +60,11 @@ module Api
             permitted[:payroll_field_definition_id] = field&.id
           end
 
+          if permitted[:employee_loan_id].present?
+            loan = EmployeeLoan.find_by(id: permitted[:employee_loan_id], company_id: current_company_id, employee_id: @employee.id)
+            permitted[:employee_loan_id] = loan&.id
+          end
+
           permitted
         end
 
