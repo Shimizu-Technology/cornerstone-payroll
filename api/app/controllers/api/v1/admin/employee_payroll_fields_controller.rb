@@ -8,12 +8,14 @@ module Api
         before_action :set_assignment, only: [ :update, :destroy ]
 
         def index
-          assignments = @employee.employee_payroll_fields.includes(:payroll_field_definition).order("payroll_field_definitions.sort_order ASC", "payroll_field_definitions.name ASC")
+          assignments = @employee.employee_payroll_fields.active.includes(:payroll_field_definition).order("payroll_field_definitions.sort_order ASC", "payroll_field_definitions.name ASC")
           render json: { employee_payroll_fields: assignments.map { |assignment| assignment_json(assignment) } }
         end
 
         def create
-          assignment = @employee.employee_payroll_fields.new(assignment_params)
+          attrs = assignment_params
+          assignment = @employee.employee_payroll_fields.find_or_initialize_by(payroll_field_definition_id: attrs[:payroll_field_definition_id])
+          assignment.assign_attributes(attrs.merge(active: attrs.key?(:active) ? attrs[:active] : true))
           if assignment.save
             render json: { employee_payroll_field: assignment_json(assignment) }, status: :created
           else
