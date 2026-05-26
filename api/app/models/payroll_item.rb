@@ -270,7 +270,7 @@ class PayrollItem < ApplicationRecord
       field = assignment.payroll_field_definition
       next unless field&.active?
       next unless field.amount_type == "percentage"
-      next if field.tax_treatment.in?(%w[taxable_addition non_taxable_addition])
+      next if field.tax_treatment == "taxable_addition"
       next if imported_mosa_loan_field_should_be_skipped?(field)
 
       entry = payroll_item_field_entries.detect { |candidate| candidate.payroll_field_definition_id == field.id }
