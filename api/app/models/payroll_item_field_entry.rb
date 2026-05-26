@@ -13,6 +13,7 @@ class PayrollItemFieldEntry < ApplicationRecord
   validates :source, inclusion: { in: SOURCES }
   validates :amount, numericality: { greater_than_or_equal_to: 0 }
   validates :payroll_field_definition_id, uniqueness: { scope: :payroll_item_id }, allow_nil: true
+  validate :kind_matches_tax_treatment
 
   scope :active, -> { where(active: true) }
   scope :employee_paid, -> { where(employee_paid: true) }
@@ -37,5 +38,22 @@ class PayrollItemFieldEntry < ApplicationRecord
 
   def employer_contribution?
     tax_treatment == "employer_contribution"
+  end
+
+  private
+
+  def kind_matches_tax_treatment
+    valid = case kind
+    when "addition"
+      tax_treatment.in?(%w[taxable_addition non_taxable_addition])
+    when "deduction"
+      tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
+    when "employer_contribution"
+      tax_treatment == "employer_contribution"
+    else
+      false
+    end
+
+    errors.add(:tax_treatment, "does not match field type") unless valid
   end
 end
