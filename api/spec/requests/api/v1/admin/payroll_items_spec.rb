@@ -69,6 +69,29 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
     end
 
+    it "returns a validation response for stale payroll field definitions" do
+      payroll_item.destroy!
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.deep_merge(
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: 999_999,
+              label: "Stale Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      )
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field definition no longer exists")
+    end
+
     it "returns a validation response if a concurrent add creates the same payroll item" do
       allow_any_instance_of(PayrollItem).to receive(:save!)
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
