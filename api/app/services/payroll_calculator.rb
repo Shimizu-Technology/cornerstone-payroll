@@ -136,11 +136,15 @@ class PayrollCalculator
 
   def sync_payroll_field_entries_after_base_gross
     restore_capped_payroll_field_entries!
-    payroll_item.apply_default_payroll_field_entries_if_unset!(employee)
+    payroll_item.apply_default_payroll_field_entries_if_unset!(employee, assignments: payroll_field_assignments_for_calculation)
   end
 
   def sync_percentage_payroll_field_entries_after_final_gross
-    payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee)
+    payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee, assignments: payroll_field_assignments_for_calculation)
+  end
+
+  def payroll_field_assignments_for_calculation
+    @payroll_field_assignments_for_calculation ||= payroll_item.active_payroll_field_assignments_for(employee).to_a
   end
 
   def restore_capped_payroll_field_entries!
