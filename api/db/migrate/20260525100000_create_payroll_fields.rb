@@ -33,7 +33,7 @@ class CreatePayrollFields < ActiveRecord::Migration[8.1]
       t.date :start_date
       t.date :end_date
       t.text :notes
-      t.references :employee_loan, foreign_key: true
+      t.references :employee_loan, foreign_key: { on_delete: :nullify }
 
       t.timestamps
     end

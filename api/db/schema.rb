@@ -1329,7 +1329,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_25_100000) do
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
-  add_foreign_key "employee_payroll_fields", "employee_loans"
+  add_foreign_key "employee_payroll_fields", "employee_loans", on_delete: :nullify
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
   add_foreign_key "employee_wage_rates", "employees"
