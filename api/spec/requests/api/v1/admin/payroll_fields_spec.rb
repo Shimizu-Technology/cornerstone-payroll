@@ -74,6 +74,18 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
   end
 
   describe "POST /api/v1/admin/employees/:employee_id/payroll_fields" do
+    it "only lists active employee payroll field assignments" do
+      active_field = PayrollFieldDefinition.create!(company: company, name: "Active Field", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")
+      inactive_field = PayrollFieldDefinition.create!(company: company, name: "Inactive Field", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: active_field, amount: 10, active: true)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: inactive_field, amount: 10, active: false)
+
+      get "/api/v1/admin/employees/#{employee.id}/payroll_fields"
+
+      names = response.parsed_body.fetch("employee_payroll_fields").map { |assignment| assignment.dig("payroll_field", "name") }
+      expect(names).to contain_exactly("Active Field")
+    end
+
     it "assigns an existing company payroll field to an employee" do
       field = PayrollFieldDefinition.create!(
         company: company,
@@ -98,6 +110,31 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(json["payroll_field_definition_id"]).to eq(field.id)
       expect(json["percentage"]).to eq(5.0)
       expect(json.dig("payroll_field", "name")).to eq("401(k)")
+    end
+
+    it "reactivates an inactive assignment instead of failing uniqueness validation" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Insurance",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "insurance"
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 25, active: false)
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields", params: {
+        employee_payroll_field: {
+          payroll_field_definition_id: field.id,
+          amount: 50,
+          active: true
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(employee.employee_payroll_fields.where(payroll_field_definition: field).count).to eq(1)
+      assignment = employee.employee_payroll_fields.find_by!(payroll_field_definition: field)
+      expect(assignment).to be_active
+      expect(assignment.amount.to_f).to eq(50.0)
     end
 
     it "does not assign another company's payroll field" do

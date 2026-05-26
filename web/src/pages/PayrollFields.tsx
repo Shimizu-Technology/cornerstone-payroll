@@ -117,8 +117,13 @@ export function PayrollFields() {
 
   const archiveField = async (field: PayrollFieldDefinition) => {
     if (!window.confirm(`Archive ${field.name}? Existing payroll history stays unchanged.`)) return;
-    await payrollFieldsApi.archive(field.id);
-    await loadFields();
+    try {
+      await payrollFieldsApi.archive(field.id);
+      await loadFields();
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive payroll field');
+    }
   };
 
   return (
