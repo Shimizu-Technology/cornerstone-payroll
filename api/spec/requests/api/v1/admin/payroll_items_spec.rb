@@ -166,6 +166,27 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(entry.metadata).not_to have_key("uncapped_amount")
     end
 
+    it "returns a validation response for stale payroll field definition ids" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: 999_999,
+              label: "Stale Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field definition no longer exists")
+    end
+
     it "returns a validation response for stale payroll field entry ids" do
       field = PayrollFieldDefinition.create!(
         company: company,

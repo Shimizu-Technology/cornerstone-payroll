@@ -376,6 +376,24 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.loan_payment).to eq(200.0)
     end
 
+    it "preserves benefit sub-category for employer contribution payroll fields" do
+      contribution_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employer Wellness",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "benefit",
+        amount_type: "fixed",
+        default_amount: 45.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: contribution_field, amount: 45.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      deduction = payroll_item.payroll_item_deductions.find { |item_deduction| item_deduction.label == "Employer Wellness" }
+      expect(deduction.deduction_type.sub_category).to eq("benefit")
+    end
+
     it "records employer contribution payroll fields separately from employee deductions" do
       contribution_field = PayrollFieldDefinition.create!(
         company: company,
