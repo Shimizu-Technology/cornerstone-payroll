@@ -180,6 +180,7 @@ module Api
             field = nil
             if data["payroll_field_definition_id"].present?
               field = PayrollFieldDefinition.find_by(id: data["payroll_field_definition_id"], company_id: current_company_id)
+              raise ActiveRecord::RecordNotFound, "Payroll field definition no longer exists for this company" unless field
             end
 
             existing_entry = nil
