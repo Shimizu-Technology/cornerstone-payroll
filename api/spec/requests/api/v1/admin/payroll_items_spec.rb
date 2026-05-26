@@ -124,6 +124,48 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(entry.reload.notes).to be_nil
     end
 
+    it "clears capped-entry metadata when an admin manually overrides the amount" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 0,
+        source: "employee_default",
+        metadata: { "uncapped_amount" => 500.0 }
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 25,
+              source: "manual",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.amount.to_f).to eq(25.0)
+      expect(entry.metadata).not_to have_key("uncapped_amount")
+    end
+
     it "returns a validation response for stale payroll field entry ids" do
       field = PayrollFieldDefinition.create!(
         company: company,
