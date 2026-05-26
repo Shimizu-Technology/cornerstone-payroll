@@ -91,6 +91,7 @@ export function PayrollItemEditModal({
     payroll_field_entries: [],
   });
   const [saving, setSaving] = useState(false);
+  const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,6 +146,7 @@ export function PayrollItemEditModal({
           })),
       });
       setError(null);
+      setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
   }, [item, wageRates]);
@@ -222,6 +224,7 @@ export function PayrollItemEditModal({
   };
 
   const handlePayrollFieldEntryAmountChange = (index: number, amount: number | null) => {
+    setPayrollFieldEntriesDirty(true);
     setFields((prev) => {
       const updated = [...prev.payroll_field_entries];
       updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual' };
@@ -256,13 +259,16 @@ export function PayrollItemEditModal({
             notes: adjustment.notes.trim(),
             active: adjustment.active !== false,
           })),
-        payroll_field_entries: fields.payroll_field_entries.map(entry => ({
+      };
+
+      if (payrollFieldEntriesDirty) {
+        payload.payroll_field_entries = fields.payroll_field_entries.map(entry => ({
           ...entry,
           amount: Number(entry.amount) || 0,
           source: 'manual' as const,
           active: entry.active !== false,
-        })),
-      };
+        }));
+      }
 
       if (hasMultiRate) {
         payload.wage_rate_hours = fields.wage_rate_hours;
