@@ -70,6 +70,7 @@ interface EmployeePayrollFieldFormRow {
   percentage: number;
   active: boolean;
   notes: string;
+  dirty?: boolean;
 }
 
 type W4MonetaryField =
@@ -284,6 +285,7 @@ export function EmployeeForm() {
         percentage: toNumberOrZero(assignment.percentage),
         active: assignment.active !== false,
         notes: assignment.notes || '',
+        dirty: false,
       })));
     } catch (err) {
       console.error('Failed to load employee payroll fields:', err);
@@ -418,16 +420,17 @@ export function EmployeeForm() {
         percentage: 0,
         active: true,
         notes: '',
+        dirty: true,
       },
     ]);
   };
 
   const updateEmployeePayrollField = (tempId: string, patch: Partial<EmployeePayrollFieldFormRow>) => {
-    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, ...patch } : row));
+    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, ...patch, dirty: true } : row));
   };
 
   const removeEmployeePayrollField = (tempId: string) => {
-    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false } : row));
+    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false, dirty: true } : row));
   };
 
   const normalizeDefaultPayrollAdjustments = () => defaultPayrollAdjustments
@@ -568,7 +571,7 @@ export function EmployeeForm() {
 
       if (!isClient && savedEmployeeId) {
         for (const row of employeePayrollFields) {
-          if (!row.payroll_field_definition_id) continue;
+          if (!row.payroll_field_definition_id || (row.id && !row.dirty)) continue;
           const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
           const payload = {
             payroll_field_definition_id: row.payroll_field_definition_id,

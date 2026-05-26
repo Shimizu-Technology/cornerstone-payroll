@@ -135,7 +135,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = @pay_period.payroll_items.find(params[:id])
+          @payroll_item = @pay_period.payroll_items.includes(:payroll_item_field_entries).find(params[:id])
         end
 
         def payroll_item_params
@@ -211,7 +211,7 @@ module Api
               payload[:metadata] = existing_entry.metadata.except("uncapped_amount")
             end
             payload
-          rescue ArgumentError, FloatDomainError, NoMethodError
+          rescue ArgumentError, FloatDomainError
             nil
           end
         end
