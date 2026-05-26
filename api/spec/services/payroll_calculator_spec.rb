@@ -31,7 +31,7 @@ RSpec.describe PayrollCalculator do
         .with(name: label, category: "employer_contribution", sub_category: "retirement")
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value"))
 
-      result = calculator.send(:find_or_create_employer_deduction_type, label)
+      result = calculator.send(:find_or_create_employer_deduction_type, label, sub_category: "retirement")
 
       expect(result).to eq(existing)
     end
@@ -46,7 +46,7 @@ RSpec.describe PayrollCalculator do
         active: true
       )
 
-      result = calculator.send(:find_or_create_employer_deduction_type, legacy.name)
+      result = calculator.send(:find_or_create_employer_deduction_type, legacy.name, sub_category: "retirement")
 
       expect(result.reload.category).to eq("employer_contribution")
     end
@@ -69,7 +69,7 @@ RSpec.describe PayrollCalculator do
       )
 
       expect {
-        calculator.send(:find_or_create_employer_deduction_type, conflicting.name)
+        calculator.send(:find_or_create_employer_deduction_type, conflicting.name, sub_category: "retirement")
       }.to raise_error(ActiveRecord::RecordInvalid)
 
       expect(conflicting.reload.category).to eq("pre_tax")
@@ -392,6 +392,8 @@ RSpec.describe PayrollCalculator do
 
       contribution = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Employer Health" }
       expect(contribution).to be_employer_contribution
+      deduction = payroll_item.payroll_item_deductions.find { |item_deduction| item_deduction.label == "Employer Health" }
+      expect(deduction.deduction_type.sub_category).to eq("insurance")
       expect(payroll_item.payroll_item_deductions.select(&:employer_contribution?).map(&:label)).to include("Employer Health")
     end
 

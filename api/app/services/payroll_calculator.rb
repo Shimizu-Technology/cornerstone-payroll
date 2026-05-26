@@ -200,10 +200,10 @@ class PayrollCalculator
 
     # Record employer retirement match as employer_contribution deductions
     if payroll_item.employer_retirement_match.to_f > 0
-      record_employer_contribution("401(k) Employer Match", payroll_item.employer_retirement_match)
+      record_employer_contribution("401(k) Employer Match", payroll_item.employer_retirement_match, sub_category: "retirement")
     end
     if payroll_item.employer_roth_retirement_match.to_f > 0
-      record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match)
+      record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match, sub_category: "retirement")
     end
 
     record_payroll_field_employer_contributions
@@ -256,7 +256,7 @@ class PayrollCalculator
     payroll_item.payroll_item_field_entries.each do |entry|
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
-      record_employer_contribution(entry.label, entry.amount)
+      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category)
     end
   end
 
@@ -358,30 +358,35 @@ class PayrollCalculator
     )
   end
 
-  def record_employer_contribution(label, amount)
+  def record_employer_contribution(label, amount, sub_category: "retirement")
     return if amount.to_f.zero?
+
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
 
     # Employer contributions don't need a DeductionType row — use a virtual record
     payroll_item.payroll_item_deductions.build(
-      deduction_type_id: find_or_create_employer_deduction_type(label).id,
+      deduction_type_id: find_or_create_employer_deduction_type(label, sub_category: sub_category).id,
       amount: amount,
       category: "employer_contribution",
       label: label
     )
   end
 
-  def find_or_create_employer_deduction_type(label)
+  def find_or_create_employer_deduction_type(label, sub_category: "retirement")
     company = payroll_item.company || pay_period.company
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
     return existing if existing
 
-    legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
-    return ensure_employer_contribution_type!(legacy) if legacy
+    if sub_category == "retirement"
+      legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
+      return ensure_employer_contribution_type!(legacy) if legacy
+    end
 
     company.deduction_types.create!(
       name: label,
       category: "employer_contribution",
-      sub_category: "retirement"
+      sub_category: sub_category
     )
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
