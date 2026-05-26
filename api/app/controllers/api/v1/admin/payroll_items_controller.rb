@@ -182,10 +182,13 @@ module Api
               field = PayrollFieldDefinition.find_by(id: data["payroll_field_definition_id"], company_id: current_company_id)
             end
 
-            if data["id"].present? && !@payroll_item.payroll_item_field_entries.exists?(id: data["id"])
-              raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item"
+            existing_entry = nil
+            if data["id"].present?
+              existing_entry = @payroll_item.payroll_item_field_entries.find_by(id: data["id"])
+              raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item" unless existing_entry
             end
 
+            source = normalized_payroll_field_entry_source(data["source"])
             payload = {
               id: data["id"],
               payroll_field_definition_id: field&.id,
@@ -194,13 +197,17 @@ module Api
               tax_treatment: data["tax_treatment"].presence || field&.tax_treatment,
               category: data["category"].presence || field&.category || "other",
               amount: amount.round(2),
-              source: normalized_payroll_field_entry_source(data["source"]),
+              source: source,
               employee_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employee_paid") ? data["employee_paid"] : field&.employee_paid?),
               employer_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employer_paid") ? data["employer_paid"] : field&.employer_paid?),
               active: data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true,
               notes: data["notes"].to_s.strip.presence
             }
-            payload.compact.merge(notes: payload[:notes])
+            payload = payload.compact.merge(notes: payload[:notes])
+            if source == "manual" && existing_entry&.metadata.is_a?(Hash)
+              payload[:metadata] = existing_entry.metadata.except("uncapped_amount")
+            end
+            payload
           rescue ArgumentError, FloatDomainError, NoMethodError
             nil
           end
