@@ -45,6 +45,24 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(json["tax_treatment"]).to eq("post_tax_deduction")
     end
 
+    it "returns validation errors when a duplicate create hits the database unique index" do
+      allow_any_instance_of(PayrollFieldDefinition).to receive(:save)
+        .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
+
+      post "/api/v1/admin/payroll_fields", params: {
+        payroll_field: {
+          name: "Duplicate Field",
+          kind: "deduction",
+          tax_treatment: "post_tax_deduction",
+          category: "other",
+          amount_type: "fixed"
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("duplicate key value")
+    end
+
     it "rejects a mismatched type and tax treatment" do
       post "/api/v1/admin/payroll_fields", params: {
         payroll_field: {

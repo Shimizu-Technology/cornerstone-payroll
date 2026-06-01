@@ -23,6 +23,8 @@ module Api
           else
             render json: { errors: field.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         def update
@@ -31,6 +33,8 @@ module Api
           else
             render json: { errors: @payroll_field.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         def destroy
