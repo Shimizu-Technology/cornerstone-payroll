@@ -137,6 +137,45 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "does not mark field entries overridden when normalization filters every submitted entry" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other"
+      )
+      payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount: 10,
+        source: "employee_default"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: field.id,
+              label: "",
+              kind: "addition",
+              tax_treatment: "taxable_addition",
+              category: "other",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.payroll_field_entries_overridden?).to be_falsey
+      expect(payroll_item.payroll_item_field_entries.active.count).to eq(1)
+    end
+
     it "clears payroll field entry notes when blank notes are submitted" do
       field = PayrollFieldDefinition.create!(
         company: company,

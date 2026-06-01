@@ -9,7 +9,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition } from '@/types';
+import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -73,6 +73,16 @@ interface EmployeePayrollFieldFormRow {
   dirty?: boolean;
 }
 
+interface QuickPayrollFieldDraft {
+  name: string;
+  kind: PayrollFieldKind;
+  tax_treatment: PayrollFieldTaxTreatment;
+  category: PayrollFieldCategory;
+  amount_type: PayrollFieldAmountType;
+  default_amount: number;
+  default_percentage: number;
+}
+
 type W4MonetaryField =
   | 'additional_withholding'
   | 'w4_dependent_credit'
@@ -98,6 +108,16 @@ const toNumberOrZero = (value: unknown): number => {
 };
 
 const toBoolean = (value: unknown): boolean => value === true || value === 1 || value === '1';
+
+const initialQuickPayrollFieldDraft = (): QuickPayrollFieldDraft => ({
+  name: '',
+  kind: 'deduction',
+  tax_treatment: 'post_tax_deduction',
+  category: 'other',
+  amount_type: 'fixed',
+  default_amount: 0,
+  default_percentage: 0,
+});
 
 const toCurrencyDraft = (value: number | null | undefined): string =>
   String(roundCurrencyValue(Number(value) || 0));
@@ -161,6 +181,9 @@ export function EmployeeForm() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
+  const [showQuickPayrollField, setShowQuickPayrollField] = useState(false);
+  const [quickPayrollField, setQuickPayrollField] = useState<QuickPayrollFieldDraft>(initialQuickPayrollFieldDraft());
+  const [quickPayrollFieldSaving, setQuickPayrollFieldSaving] = useState(false);
   const [wageRates, setWageRates] = useState<WageRateFormRow[]>([defaultHourlyWageRate()]);
   const [defaultPayrollAdjustments, setDefaultPayrollAdjustments] = useState<PayrollAdjustmentFormRow[]>([]);
   const [w4CurrencyDrafts, setW4CurrencyDrafts] = useState<Record<W4MonetaryField, string>>({
@@ -414,17 +437,21 @@ export function EmployeeForm() {
 
   const availablePayrollFields = payrollFields.filter((field) => !employeePayrollFields.some((row) => row.active !== false && row.payroll_field_definition_id === field.id));
 
-  const addEmployeePayrollField = () => {
-    const availableField = availablePayrollFields[0];
+  const defaultAssignmentValuesForField = (field?: PayrollFieldDefinition) => ({
+    amount: field?.amount_type === 'fixed' ? toNumberOrZero(field.default_amount) : 0,
+    percentage: field?.amount_type === 'percentage' ? toNumberOrZero(field.default_percentage) : 0,
+  });
+
+  const addEmployeePayrollField = (fieldOverride?: PayrollFieldDefinition) => {
+    const availableField = fieldOverride || availablePayrollFields[0];
     if (!availableField) return;
 
     setEmployeePayrollFields((prev) => [
       ...prev,
       {
         temp_id: crypto.randomUUID(),
-        payroll_field_definition_id: availableField?.id || '',
-        amount: 0,
-        percentage: 0,
+        payroll_field_definition_id: availableField.id,
+        ...defaultAssignmentValuesForField(availableField),
         active: true,
         notes: '',
         dirty: true,
@@ -433,11 +460,50 @@ export function EmployeeForm() {
   };
 
   const updateEmployeePayrollField = (tempId: string, patch: Partial<EmployeePayrollFieldFormRow>) => {
-    setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, ...patch, dirty: true } : row));
+    setEmployeePayrollFields((prev) => prev.map((row) => {
+      if (row.temp_id !== tempId) return row;
+      const selectedField = typeof patch.payroll_field_definition_id === 'number'
+        ? payrollFields.find((field) => field.id === patch.payroll_field_definition_id)
+        : undefined;
+      return { ...row, ...(selectedField ? defaultAssignmentValuesForField(selectedField) : {}), ...patch, dirty: true };
+    }));
   };
 
   const removeEmployeePayrollField = (tempId: string) => {
     setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false, dirty: true } : row));
+  };
+
+  const updateQuickPayrollFieldKind = (kind: PayrollFieldKind) => {
+    const tax_treatment: PayrollFieldTaxTreatment = kind === 'addition'
+      ? 'taxable_addition'
+      : kind === 'employer_contribution'
+        ? 'employer_contribution'
+        : 'post_tax_deduction';
+    setQuickPayrollField((prev) => ({ ...prev, kind, tax_treatment }));
+  };
+
+  const createQuickPayrollField = async () => {
+    if (!quickPayrollField.name.trim()) return;
+
+    setQuickPayrollFieldSaving(true);
+    try {
+      const payload = {
+        ...quickPayrollField,
+        name: quickPayrollField.name.trim(),
+        default_amount: quickPayrollField.amount_type === 'fixed' ? roundCurrencyValue(quickPayrollField.default_amount) : null,
+        default_percentage: quickPayrollField.amount_type === 'percentage' ? Number(quickPayrollField.default_percentage) || 0 : null,
+        show_in_payroll_grid: true,
+      };
+      const response = await payrollFieldsApi.create(payload);
+      setPayrollFields((prev) => [...prev, response.payroll_field]);
+      addEmployeePayrollField(response.payroll_field);
+      setQuickPayrollField(initialQuickPayrollFieldDraft());
+      setShowQuickPayrollField(false);
+    } catch (err) {
+      setGeneralError(err instanceof Error ? err.message : 'Failed to create payroll field');
+    } finally {
+      setQuickPayrollFieldSaving(false);
+    }
   };
 
   const normalizeDefaultPayrollAdjustments = () => defaultPayrollAdjustments
@@ -1087,10 +1153,99 @@ export function EmployeeForm() {
                   })}
                 </div>
               )}
-              <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addEmployeePayrollField} disabled={availablePayrollFields.length === 0}>
-                <Plus className="mr-1 h-4 w-4" />
-                Assign Payroll Field
-              </Button>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => addEmployeePayrollField()} disabled={availablePayrollFields.length === 0}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  Assign Payroll Field
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowQuickPayrollField(true)}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  Create client-wide field
+                </Button>
+              </div>
+
+              {showQuickPayrollField && (
+                <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-950">Create reusable client-wide payroll field</h3>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        This creates a field for the whole client and immediately assigns it to this employee.
+                      </p>
+                    </div>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setShowQuickPayrollField(false)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="md:col-span-2 xl:col-span-1">
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Field name</label>
+                      <Input value={quickPayrollField.name} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, name: event.target.value }))} placeholder="Auto loan, 401(k), phone allowance" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Type</label>
+                      <Select value={quickPayrollField.kind} onChange={(event) => updateQuickPayrollFieldKind(event.target.value as PayrollFieldKind)}>
+                        <option value="addition">Addition</option>
+                        <option value="deduction">Deduction</option>
+                        <option value="employer_contribution">Employer contribution</option>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Treatment</label>
+                      <Select value={quickPayrollField.tax_treatment} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, tax_treatment: event.target.value as PayrollFieldTaxTreatment }))}>
+                        {quickPayrollField.kind === 'addition' && <>
+                          <option value="taxable_addition">Taxable addition</option>
+                          <option value="non_taxable_addition">Non-taxable addition</option>
+                        </>}
+                        {quickPayrollField.kind === 'deduction' && <>
+                          <option value="post_tax_deduction">Post-tax deduction</option>
+                          <option value="pre_tax_deduction">Pre-tax deduction</option>
+                        </>}
+                        {quickPayrollField.kind === 'employer_contribution' && <option value="employer_contribution">Employer contribution</option>}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Category</label>
+                      <Select value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory }))}>
+                        {['loan', 'retirement', 'insurance', 'rent', 'allotment', 'reimbursement', 'garnishment', 'child_support', 'phone', 'benefit', 'other'].map((category) => (
+                          <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Default</label>
+                      <Select value={quickPayrollField.amount_type} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, amount_type: event.target.value as PayrollFieldAmountType }))}>
+                        <option value="fixed">Fixed amount</option>
+                        <option value="percentage">Percentage</option>
+                        <option value="manual">Set during payroll</option>
+                      </Select>
+                    </div>
+                    {quickPayrollField.amount_type === 'percentage' ? (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">Default %</label>
+                        <NumericInput value={quickPayrollField.default_percentage} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_percentage: value ?? 0 }))} min={0} />
+                      </div>
+                    ) : quickPayrollField.amount_type === 'fixed' ? (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">Default amount</label>
+                        <NumericInput value={quickPayrollField.default_amount} onValueChange={(value) => setQuickPayrollField((prev) => ({ ...prev, default_amount: value ?? 0 }))} min={0} fixedDecimalsOnBlur={2} />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        Amount starts blank/zero and is filled during payroll review.
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim()}>
+                      Create and assign
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickPayrollField(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
