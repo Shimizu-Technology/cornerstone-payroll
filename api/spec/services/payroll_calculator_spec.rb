@@ -374,6 +374,43 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
+    it "adds newly assigned default payroll fields after another field was manually overridden" do
+      rent_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: rent_field, amount: 25.0)
+
+      described_class.for(employee, payroll_item).calculate
+      rent_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
+      rent_entry.assign_attributes(source: "manual", amount: 30.0)
+      payroll_item.mark_payroll_field_entries_overridden!
+
+      phone_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Phone Allowance",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "phone",
+        amount_type: "fixed",
+        default_amount: 20.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: phone_field, amount: 20.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      phone_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Phone Allowance" }
+      expect(rent_entry.amount.to_f).to eq(30.0)
+      expect(phone_entry).to be_present
+      expect(phone_entry.amount.to_f).to eq(20.0)
+      expect(phone_entry.source).to eq("employee_default")
+    end
+
     it "refreshes untouched percentage fields after a different field is manually overridden" do
       fixed_field = PayrollFieldDefinition.create!(
         company: company,

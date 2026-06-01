@@ -229,8 +229,6 @@ class PayrollItem < ApplicationRecord
     assigned_definition_ids = active_payroll_field_definition_ids(assignments)
     deactivate_stale_payroll_field_entries!(assigned_definition_ids)
 
-    return if payroll_field_entries_overridden?
-
     assignments.each do |assignment|
       field = assignment.payroll_field_definition
       next unless assigned_definition_ids.include?(field&.id)
