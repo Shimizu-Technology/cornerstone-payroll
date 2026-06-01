@@ -374,6 +374,41 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
+    it "refreshes untouched percentage fields after a different field is manually overridden" do
+      fixed_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      percent_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: fixed_field, amount: 25.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: percent_field, percentage: 10.0)
+
+      described_class.for(employee, payroll_item).calculate
+      fixed_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
+      fixed_entry.assign_attributes(source: "manual", amount: 30.0)
+      payroll_item.mark_payroll_field_entries_overridden!
+
+      payroll_item.hours_worked = 80
+      described_class.for(employee, payroll_item).calculate
+
+      percent_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }
+      expect(fixed_entry.amount.to_f).to eq(30.0)
+      expect(percent_entry.amount.to_f).to eq(80.0)
+    end
+
     it "restores manually overridden payroll field deductions after an insufficient-pay cap" do
       field = PayrollFieldDefinition.create!(
         company: company,

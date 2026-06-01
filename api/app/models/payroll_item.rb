@@ -263,8 +263,6 @@ class PayrollItem < ApplicationRecord
   end
 
   def refresh_percentage_payroll_field_entries_after_final_gross!(source_employee = employee, assignments: nil)
-    return if payroll_field_entries_overridden?
-
     assignments ||= active_payroll_field_assignments_for(source_employee)
     assignments.each do |assignment|
       field = assignment.payroll_field_definition
