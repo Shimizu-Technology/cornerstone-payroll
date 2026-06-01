@@ -1109,7 +1109,7 @@ export function EmployeeForm() {
               </div>
             )}
 
-            <div className="grid gap-5 xl:grid-cols-2">
+            <div className="grid gap-5 2xl:grid-cols-2">
               <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
                 <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -1143,7 +1143,7 @@ export function EmployeeForm() {
                     const treatment = adjustmentTreatmentCopy(adjustment.treatment);
                     return (
                       <div key={adjustment.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_9rem_14rem_auto]">
+                        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
                             <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Bonus, stipend, reimbursement" />
@@ -1152,13 +1152,13 @@ export function EmployeeForm() {
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
                             <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Addition type</label>
                             <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
                               {additionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start md:justify-self-end md:self-end" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
@@ -1209,7 +1209,7 @@ export function EmployeeForm() {
                     const treatment = adjustmentTreatmentCopy(adjustment.treatment);
                     return (
                       <div key={adjustment.temp_id} className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
-                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_9rem_14rem_auto]">
+                        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-2">
                           <div>
                             <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
                             <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Loan, rent, cash tips, garnishment" />
@@ -1218,13 +1218,13 @@ export function EmployeeForm() {
                             <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
                             <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <label className="mb-1 block text-xs font-medium text-gray-600">Deduction type</label>
                             <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
                               {deductionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </Select>
                           </div>
-                          <Button type="button" variant="outline" size="sm" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                          <Button type="button" variant="outline" size="sm" className="justify-self-start md:justify-self-end md:self-end" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
