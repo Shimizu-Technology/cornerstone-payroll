@@ -349,7 +349,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.gross_pay.to_f).to eq(1_000.0)
     end
 
-    it "preserves manually overridden field entries when an assignment is removed" do
+    it "deactivates manually overridden field entries when the backing assignment is removed" do
       field = PayrollFieldDefinition.create!(
         company: company,
         name: "Manual Rent",
@@ -369,9 +369,9 @@ RSpec.describe PayrollCalculator do
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(entry).to be_active
+      expect(entry).not_to be_active
       expect(entry.amount.to_f).to eq(150.0)
-      expect(payroll_item.total_deductions.to_f).to be >= 150.0
+      expect(payroll_item.total_deductions.to_f).to be < 150.0
     end
 
     it "adds newly assigned default payroll fields after another field was manually overridden" do
