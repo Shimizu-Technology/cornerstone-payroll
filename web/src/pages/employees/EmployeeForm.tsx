@@ -132,6 +132,9 @@ const adjustmentTreatmentOptions: Array<{
   },
 ];
 
+const additionAdjustmentOptions = adjustmentTreatmentOptions.filter((option) => option.value.endsWith('_addition'));
+const deductionAdjustmentOptions = adjustmentTreatmentOptions.filter((option) => option.value.endsWith('_deduction'));
+
 const adjustmentTreatmentCopy = (treatment: PayrollAdjustmentTreatment) => (
   adjustmentTreatmentOptions.find((option) => option.value === treatment) || adjustmentTreatmentOptions[0]
 );
@@ -392,10 +395,10 @@ export function EmployeeForm() {
     replaceWageRates(wageRates.filter((rate) => rate.temp_id !== tempId));
   };
 
-  const addDefaultPayrollAdjustment = () => {
+  const addDefaultPayrollAdjustment = (treatment: PayrollAdjustmentTreatment) => {
     setDefaultPayrollAdjustments((prev) => [
       ...prev,
-      { temp_id: crypto.randomUUID(), label: '', amount: 0, treatment: 'post_tax_deduction', notes: '', active: true },
+      { temp_id: crypto.randomUUID(), label: '', amount: 0, treatment, notes: '', active: true },
     ]);
   };
 
@@ -998,16 +1001,26 @@ export function EmployeeForm() {
         {!isClient && isEditing && (
           <Card className="mb-6 border-blue-200 bg-blue-50/40">
             <CardHeader>
-              <CardTitle>Assigned Payroll Fields</CardTitle>
-              <CardDescription>
-                Use reusable client-wide fields for loans, 401(k), insurance, rent, reimbursements, and employer contributions.
-                These defaults snapshot into payroll runs and can be reviewed before finalizing.
-              </CardDescription>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle>Assigned Payroll Fields</CardTitle>
+                  <CardDescription>
+                    Assign reusable client-wide fields for loans, 401(k), insurance, rent, reimbursements, and employer contributions.
+                    Field definitions are managed once for the whole client, then assigned to employees here.
+                  </CardDescription>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
+                  Manage client-wide fields
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {payrollFields.length === 0 ? (
-                <div className="rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800">
-                  No company payroll fields exist yet. Create them from Payroll Fields, then assign them here.
+                <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800 sm:flex-row sm:items-center sm:justify-between">
+                  <span>No client-wide payroll fields exist yet. Create reusable fields first, then assign them here.</span>
+                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
+                    Create payroll fields
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -1090,85 +1103,145 @@ export function EmployeeForm() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {adjustmentTreatmentOptions.map((option) => (
-                <div key={option.value} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                  <div className="text-sm font-semibold text-slate-900">{option.label}</div>
-                  <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
-                  {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
-                </div>
-              ))}
-            </div>
-
             {getFieldError('default_payroll_adjustments') && (
-              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {getFieldError('default_payroll_adjustments')}
               </div>
             )}
 
-            <div className="space-y-3">
-              {defaultPayrollAdjustments.map((adjustment) => {
-                const treatment = adjustmentTreatmentCopy(adjustment.treatment);
-                return (
-                  <div key={adjustment.temp_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_11rem_17rem_auto]">
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
-                        <Input
-                          value={adjustment.label}
-                          onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })}
-                          placeholder="Adjustment label"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
-                        <NumericInput
-                          value={adjustment.amount}
-                          onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })}
-                          min={0}
-                          fixedDecimalsOnBlur={2}
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-gray-600">What should this do?</label>
-                        <Select
-                          value={adjustment.treatment}
-                          onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}
-                        >
-                          {adjustmentTreatmentOptions.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </Select>
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <p className="mt-2 text-xs leading-5 text-slate-600">
-                      {treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}
+            <div className="grid gap-5 xl:grid-cols-2">
+              <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-emerald-950">Recurring additions</h3>
+                    <p className="mt-1 text-sm leading-6 text-emerald-800">
+                      Use this side when money should be added to the employee's check.
                     </p>
-                    <div className="mt-3">
-                      <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
-                      <Input
-                        value={adjustment.notes}
-                        onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })}
-                        placeholder="Per accountant or client recurring setup"
-                      />
-                    </div>
                   </div>
-                );
-              })}
-            </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('taxable_addition')}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      Taxable
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('non_taxable_addition')}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      Non-taxable
+                    </Button>
+                  </div>
+                </div>
+                <div className="mb-4 grid gap-3 md:grid-cols-2">
+                  {additionAdjustmentOptions.map((option) => (
+                    <div key={option.value} className="rounded-xl border border-emerald-100 bg-white p-3 shadow-sm">
+                      <div className="text-sm font-semibold text-slate-900">{option.label}</div>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
+                      {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {defaultPayrollAdjustments.filter((adjustment) => adjustment.treatment.endsWith('_addition')).map((adjustment) => {
+                    const treatment = adjustmentTreatmentCopy(adjustment.treatment);
+                    return (
+                      <div key={adjustment.temp_id} className="rounded-xl border border-emerald-100 bg-white p-4 shadow-sm">
+                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_9rem_14rem_auto]">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
+                            <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Bonus, stipend, reimbursement" />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
+                            <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Addition type</label>
+                            <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
+                              {additionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </Select>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
+                        <div className="mt-3">
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
+                          <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_addition')) && (
+                    <div className="rounded-xl border border-dashed border-emerald-200 bg-white/70 px-4 py-6 text-sm text-emerald-800">No recurring additions set.</div>
+                  )}
+                </div>
+              </section>
 
-            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addDefaultPayrollAdjustment}>
-              <Plus className="mr-1 h-4 w-4" />
-              Add Recurring Adjustment
-            </Button>
+              <section className="rounded-2xl border border-rose-100 bg-rose-50/50 p-4">
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-base font-semibold text-rose-950">Recurring deductions</h3>
+                    <p className="mt-1 text-sm leading-6 text-rose-800">
+                      Use this side only when money should be subtracted from the employee's check.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('post_tax_deduction')}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      After tax
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => addDefaultPayrollAdjustment('pre_tax_deduction')}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      Before tax
+                    </Button>
+                  </div>
+                </div>
+                <div className="mb-4 grid gap-3 md:grid-cols-2">
+                  {deductionAdjustmentOptions.map((option) => (
+                    <div key={option.value} className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm">
+                      <div className="text-sm font-semibold text-slate-900">{option.label}</div>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">{option.helper}</p>
+                      {option.caution && <p className="mt-2 text-xs font-medium text-amber-700">{option.caution}</p>}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3">
+                  {defaultPayrollAdjustments.filter((adjustment) => adjustment.treatment.endsWith('_deduction')).map((adjustment) => {
+                    const treatment = adjustmentTreatmentCopy(adjustment.treatment);
+                    return (
+                      <div key={adjustment.temp_id} className="rounded-xl border border-rose-100 bg-white p-4 shadow-sm">
+                        <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1fr)_9rem_14rem_auto]">
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Label</label>
+                            <Input value={adjustment.label} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { label: event.target.value })} placeholder="Loan, rent, cash tips, garnishment" />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Amount</label>
+                            <NumericInput value={adjustment.amount} onValueChange={(value) => updateDefaultPayrollAdjustment(adjustment.temp_id, { amount: value ?? 0 })} min={0} fixedDecimalsOnBlur={2} />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-gray-600">Deduction type</label>
+                            <Select value={adjustment.treatment} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { treatment: event.target.value as PayrollAdjustmentTreatment })}>
+                              {deductionAdjustmentOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </Select>
+                          </div>
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeDefaultPayrollAdjustment(adjustment.temp_id)}>
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        <p className="mt-2 text-xs leading-5 text-slate-600">{treatment.helper} {treatment.caution && <span className="font-medium text-amber-700">{treatment.caution}</span>}</p>
+                        <div className="mt-3">
+                          <label className="mb-1 block text-xs font-medium text-gray-600">Source / notes</label>
+                          <Input value={adjustment.notes} onChange={(event) => updateDefaultPayrollAdjustment(adjustment.temp_id, { notes: event.target.value })} placeholder="Per accountant or client recurring setup" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {defaultPayrollAdjustments.every((adjustment) => !adjustment.treatment.endsWith('_deduction')) && (
+                    <div className="rounded-xl border border-dashed border-rose-200 bg-white/70 px-4 py-6 text-sm text-rose-800">No recurring deductions set.</div>
+                  )}
+                </div>
+              </section>
+            </div>
           </CardContent>
         </Card>
 
