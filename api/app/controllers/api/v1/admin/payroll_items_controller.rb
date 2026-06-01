@@ -209,7 +209,7 @@ module Api
             }
             payload = payload.compact.merge(notes: payload[:notes])
             if source == "manual" && existing_entry&.metadata.is_a?(Hash)
-              payload[:metadata] = existing_entry.metadata.except("uncapped_amount")
+              payload[:metadata] = amount == existing_entry.amount ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount")
             end
             payload
           rescue ArgumentError, FloatDomainError
