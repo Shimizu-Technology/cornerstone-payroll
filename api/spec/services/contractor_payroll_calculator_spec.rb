@@ -55,6 +55,19 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.net_pay).to eq(payroll_item.gross_pay)
   end
 
+  it "preserves contractor custom deductions and payroll adjustment deductions" do
+    payroll_item.custom_deductions = [{ "label" => "Rent", "amount" => 15.00 }]
+    payroll_item.payroll_adjustments = [
+      { "label" => "Supplies", "amount" => 10.00, "treatment" => "post_tax_deduction", "active" => true },
+      { "label" => "Pre-tax Plan", "amount" => 5.00, "treatment" => "pre_tax_deduction", "active" => true }
+    ]
+
+    described_class.new(employee, payroll_item).calculate
+
+    expect(payroll_item.total_deductions.to_f).to eq(30.0)
+    expect(payroll_item.net_pay.to_f).to eq(payroll_item.gross_pay.to_f - 30.0)
+  end
+
   it "does not reduce contractor net pay for employee-paid payroll field deductions" do
     deduction_field = PayrollFieldDefinition.create!(
       company: company,

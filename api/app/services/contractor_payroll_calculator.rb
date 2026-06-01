@@ -136,11 +136,11 @@ class ContractorPayrollCalculator < PayrollCalculator
   end
 
   def custom_deductions_total
-    0.0
+    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
   end
 
   def pre_tax_payroll_adjustments_total
-    0.0
+    payroll_item.pre_tax_payroll_adjustments_total
   end
 
   def build_earning(category, label, hours, rate, amount)
