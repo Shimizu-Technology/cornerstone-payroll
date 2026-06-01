@@ -41,6 +41,8 @@ interface PayrollItemEditModalProps {
   wageRates?: EmployeeWageRate[];
 }
 
+type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean };
+
 interface EditableFields {
   hours_worked: number;
   overtime_hours: number;
@@ -58,7 +60,7 @@ interface EditableFields {
   check_date: string;
   check_memo: string;
   payroll_adjustments: PayrollAdjustmentField[];
-  payroll_field_entries: PayrollItemFieldEntry[];
+  payroll_field_entries: EditablePayrollItemFieldEntry[];
 }
 
 export function PayrollItemEditModal({
@@ -227,7 +229,7 @@ export function PayrollItemEditModal({
     setPayrollFieldEntriesDirty(true);
     setFields((prev) => {
       const updated = [...prev.payroll_field_entries];
-      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual' };
+      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual', dirty: true };
       return { ...prev, payroll_field_entries: updated };
     });
   };
@@ -262,12 +264,17 @@ export function PayrollItemEditModal({
       };
 
       if (payrollFieldEntriesDirty) {
-        payload.payroll_field_entries = fields.payroll_field_entries.map(entry => ({
-          ...entry,
-          amount: Number(entry.amount) || 0,
-          source: 'manual' as const,
-          active: entry.active !== false,
-        }));
+        payload.payroll_field_entries = fields.payroll_field_entries
+          .filter(entry => entry.dirty)
+          .map(({ dirty: _dirty, ...entry }) => {
+            void _dirty;
+            return {
+            ...entry,
+            amount: Number(entry.amount) || 0,
+            source: 'manual' as const,
+            active: entry.active !== false,
+          };
+          });
       }
 
       if (hasMultiRate) {
