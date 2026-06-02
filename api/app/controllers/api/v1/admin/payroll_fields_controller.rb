@@ -40,6 +40,8 @@ module Api
         def destroy
           @payroll_field.update!(active: false)
           render json: { payroll_field: payroll_field_json(@payroll_field) }
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         private

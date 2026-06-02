@@ -287,6 +287,46 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(entry.reload.metadata).to include("uncapped_amount" => 500.0)
     end
 
+    it "normalizes privileged payroll field entry sources from API clients to manual" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 10,
+        source: "employee_default"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              source: "import",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.source).to eq("manual")
+    end
+
     it "clears capped-entry metadata when an admin manually overrides the amount" do
       field = PayrollFieldDefinition.create!(
         company: company,

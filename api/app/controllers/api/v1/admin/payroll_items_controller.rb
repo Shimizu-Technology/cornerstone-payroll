@@ -221,7 +221,7 @@ module Api
 
         def normalized_payroll_field_entry_source(value)
           source = value.to_s
-          PayrollItemFieldEntry::SOURCES.include?(source) ? source : "manual"
+          %w[manual employee_default].include?(source) ? source : "manual"
         end
 
         def save_payroll_item_and_clear_exclusion(payroll_item, employee)
