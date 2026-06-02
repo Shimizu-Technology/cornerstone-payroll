@@ -706,7 +706,7 @@ class CheckGenerator
     data_rows = [
       ["Total Pay", fd(payroll_item.gross_pay), fd(ytd[:gross])],
       ["Taxes", fd(cur_taxes), fd(ytd[:taxes])],
-      ["Deductions", fd(cur_deds), fd(ytd[:deds])]
+      ["Deductions", fd(cur_deds), fd(ytd_visible_deds)]
     ]
 
     data = [header] + data_rows
