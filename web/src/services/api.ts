@@ -465,6 +465,8 @@ export const employeePayrollFieldsApi = {
     api.patch<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`, { employee_payroll_field: data }),
   archive: (employeeId: number, id: number) =>
     api.delete<{ employee_payroll_field: EmployeePayrollField }>(`/admin/employees/${employeeId}/payroll_fields/${id}`),
+  bulkUpdate: (employeeId: number, data: Partial<EmployeePayrollField>[]) =>
+    api.post<{ employee_payroll_fields: EmployeePayrollField[] }>(`/admin/employees/${employeeId}/payroll_fields/bulk_update`, { employee_payroll_fields: data }),
 };
 
 export const employeeWageRatesApi = {

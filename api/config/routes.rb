@@ -116,7 +116,11 @@ Rails.application.routes.draw do
           member do
             post :reactivate
           end
-          resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields
+          resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
+            collection do
+              post :bulk_update
+            end
+          end
         end
 
         # Employee Bulk Import

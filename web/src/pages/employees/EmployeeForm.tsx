@@ -577,6 +577,12 @@ export function EmployeeForm() {
     if (new Set(adjustmentKeys).size !== adjustmentKeys.length) {
       newErrors.default_payroll_adjustments = ['Recurring adjustment labels must be unique within the same treatment'];
     }
+    const activePayrollFieldIds = employeePayrollFields
+      .filter((row) => row.active !== false && row.payroll_field_definition_id)
+      .map((row) => row.payroll_field_definition_id);
+    if (new Set(activePayrollFieldIds).size !== activePayrollFieldIds.length) {
+      newErrors.employee_payroll_fields = ['Each assigned payroll field can only appear once per employee'];
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -643,22 +649,22 @@ export function EmployeeForm() {
       }
 
       if (!isClient && savedEmployeeId) {
-        for (const row of employeePayrollFields) {
-          if (!row.payroll_field_definition_id || (row.id && !row.dirty)) continue;
-          const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
-          const payload = {
-            payroll_field_definition_id: row.payroll_field_definition_id,
-            amount: field?.amount_type === 'fixed' ? roundCurrencyValue(Number(row.amount) || 0) : null,
-            percentage: field?.amount_type === 'percentage' ? Number(row.percentage) || 0 : null,
-            active: row.active !== false,
-            notes: row.notes.trim(),
-          };
+        const payrollFieldPayload = employeePayrollFields
+          .filter((row) => row.payroll_field_definition_id && (!row.id || row.dirty))
+          .map((row) => {
+            const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
+            return {
+              id: row.id,
+              payroll_field_definition_id: row.payroll_field_definition_id,
+              amount: field?.amount_type === 'fixed' ? roundCurrencyValue(Number(row.amount) || 0) : null,
+              percentage: field?.amount_type === 'percentage' ? Number(row.percentage) || 0 : null,
+              active: row.active !== false,
+              notes: row.notes.trim(),
+            };
+          });
 
-          if (row.id) {
-            await employeePayrollFieldsApi.update(savedEmployeeId, row.id, payload);
-          } else if (row.active !== false) {
-            await employeePayrollFieldsApi.create(savedEmployeeId, payload);
-          }
+        if (payrollFieldPayload.length > 0) {
+          await employeePayrollFieldsApi.bulkUpdate(savedEmployeeId, payrollFieldPayload);
         }
       }
 
@@ -1081,6 +1087,11 @@ export function EmployeeForm() {
               </div>
             </CardHeader>
             <CardContent>
+              {getFieldError('employee_payroll_fields') && (
+                <div className="mb-3 rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+                  {getFieldError('employee_payroll_fields')}
+                </div>
+              )}
               {payrollFields.length === 0 ? (
                 <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800 sm:flex-row sm:items-center sm:justify-between">
                   <span>No client-wide payroll fields exist yet. Create reusable fields first, then assign them here.</span>
@@ -1092,6 +1103,10 @@ export function EmployeeForm() {
                 <div className="space-y-3">
                   {employeePayrollFields.filter((row) => row.active !== false).map((row) => {
                     const selectedField = payrollFields.find((field) => field.id === row.payroll_field_definition_id);
+                    const rowAvailablePayrollFields = payrollFields.filter((field) =>
+                      field.id === row.payroll_field_definition_id ||
+                      !employeePayrollFields.some((candidate) => candidate.temp_id !== row.temp_id && candidate.active !== false && candidate.payroll_field_definition_id === field.id)
+                    );
                     return (
                       <div key={row.temp_id} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
                         <div className="grid grid-cols-1 items-end gap-3 lg:grid-cols-[minmax(0,1.5fr)_10rem_10rem_auto]">
@@ -1102,7 +1117,7 @@ export function EmployeeForm() {
                               onChange={(event) => updateEmployeePayrollField(row.temp_id, { payroll_field_definition_id: Number(event.target.value) })}
                             >
                               <option value="">Select field</option>
-                              {payrollFields.map((field) => (
+                              {rowAvailablePayrollFields.map((field) => (
                                 <option key={field.id} value={field.id}>{field.name} · {field.tax_treatment.replace(/_/g, ' ')}</option>
                               ))}
                             </Select>
