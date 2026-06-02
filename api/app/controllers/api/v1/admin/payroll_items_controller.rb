@@ -78,7 +78,6 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
-          @payroll_item.mark_payroll_field_entries_overridden! if attrs[:payroll_item_field_entries_attributes].present?
 
           if @payroll_item.update(attrs)
             @payroll_item.calculate! if params[:auto_calculate]
