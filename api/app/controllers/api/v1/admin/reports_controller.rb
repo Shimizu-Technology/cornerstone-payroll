@@ -1783,8 +1783,14 @@ module Api
         end
 
         def employer_contributions_breakdown(item)
-          item.payroll_item_deductions.select(&:employer_contribution?).map { |deduction| deduction_row(deduction) } +
-            active_payroll_field_entries(item).select(&:employer_contribution?).map do |entry|
+          field_contribution_entries = active_payroll_field_entries(item).select(&:employer_contribution?)
+          field_contribution_totals = field_contribution_entries.group_by { |entry| entry.label.to_s }.transform_values { |entries| entries.sum { |entry| entry.amount.to_f } }
+
+          item.payroll_item_deductions
+            .select(&:employer_contribution?)
+            .reject { |deduction| field_contribution_totals.fetch(deduction.label.to_s, nil)&.round(2) == deduction.amount.to_f.round(2) }
+            .map { |deduction| deduction_row(deduction) } +
+            field_contribution_entries.map do |entry|
               {
                 category: "employer_contribution",
                 label: entry.label,
@@ -2293,7 +2299,9 @@ module Api
             [
               emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name], emp[:gross_pay],
               emp[:retirement_payment], emp[:roth_retirement_payment], field_employee_retirement, emp[:employer_retirement_match],
-              emp[:employer_roth_retirement_match], field_employer_retirement, emp[:total_retirement_payment], emp[:total_employer_retirement_match]
+              emp[:employer_roth_retirement_match], field_employer_retirement,
+              emp[:total_retirement_payment].to_f + field_employee_retirement,
+              emp[:total_employer_retirement_match].to_f + field_employer_retirement
             ]
           end
           [
