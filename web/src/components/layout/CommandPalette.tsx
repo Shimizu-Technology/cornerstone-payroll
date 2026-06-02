@@ -221,6 +221,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       });
 
       add({
+        id: 'payroll-fields',
+        label: 'Payroll Fields',
+        description: 'Manage reusable client-wide additions, deductions, and employer contributions.',
+        group: 'Settings',
+        keywords: ['payroll fields', 'deductions', 'additions', 'employer contributions', '401k', 'rent', 'benefits'],
+        icon: <SlidersHorizontal className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/payroll-fields',
+      });
+
+      add({
         id: 'time-tracking-sources',
         label: 'Time Tracking Sources',
         description: 'Configure external time tracking import sources.',

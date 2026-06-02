@@ -264,5 +264,52 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "bulk-updates employee payroll field assignments atomically" do
+      rent = PayrollFieldDefinition.create!(company: company, name: "Rent", kind: "deduction", tax_treatment: "post_tax_deduction", category: "rent")
+      retirement = PayrollFieldDefinition.create!(company: company, name: "401(k)", kind: "deduction", tax_treatment: "pre_tax_deduction", category: "retirement", amount_type: "percentage")
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/bulk_update", params: {
+        employee_payroll_fields: [
+          { payroll_field_definition_id: rent.id, amount: 25, active: true },
+          { payroll_field_definition_id: retirement.id, percentage: 5, active: true }
+        ]
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.employee_payroll_fields.count).to eq(2)
+      expect(employee.employee_payroll_fields.find_by!(payroll_field_definition: rent).amount.to_f).to eq(25.0)
+      expect(employee.employee_payroll_fields.find_by!(payroll_field_definition: retirement).percentage.to_f).to eq(5.0)
+    end
+
+    it "rejects duplicate active payroll fields in bulk payloads" do
+      rent = PayrollFieldDefinition.create!(company: company, name: "Rent", kind: "deduction", tax_treatment: "post_tax_deduction", category: "rent")
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/bulk_update", params: {
+        employee_payroll_fields: [
+          { payroll_field_definition_id: rent.id, amount: 25, active: true },
+          { payroll_field_definition_id: rent.id, amount: 30, active: true }
+        ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_payroll_fields.count).to eq(0)
+      expect(response.parsed_body.fetch("errors").join).to include("duplicate")
+    end
+
+    it "rolls back bulk assignment updates when one entry fails" do
+      rent = PayrollFieldDefinition.create!(company: company, name: "Rent", kind: "deduction", tax_treatment: "post_tax_deduction", category: "rent")
+      invalid_foreign_field = PayrollFieldDefinition.create!(company: other_company, name: "Foreign", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")
+
+      post "/api/v1/admin/employees/#{employee.id}/payroll_fields/bulk_update", params: {
+        employee_payroll_fields: [
+          { payroll_field_definition_id: rent.id, amount: 25, active: true },
+          { payroll_field_definition_id: invalid_foreign_field.id, amount: 30, active: true }
+        ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_payroll_fields.count).to eq(0)
+    end
   end
 end
