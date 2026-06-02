@@ -125,7 +125,7 @@ RSpec.describe ContractorPayrollCalculator do
     deduction = payroll_item.payroll_item_deductions.reject(&:employer_contribution?).find { |item_deduction| item_deduction.label == "Health Insurance" }
     expect(deduction).to be_present
     expect(deduction.category).to eq("post_tax")
-    expect(deduction.deduction_type.name).to eq("Health Insurance (Post Tax)")
+    expect(deduction.deduction_type.name).to eq("Payroll Field: Health Insurance (Post Tax)")
     expect(payroll_item.total_deductions.to_f).to eq(25.0)
   end
 

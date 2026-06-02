@@ -651,7 +651,7 @@ export function EmployeeForm() {
       if (!isClient && savedEmployeeId) {
         const payrollFieldPayload: Partial<EmployeePayrollField>[] = employeePayrollFields
           .filter((row): row is EmployeePayrollFieldFormRow & { payroll_field_definition_id: number } =>
-            typeof row.payroll_field_definition_id === 'number' && (!row.id || row.dirty === true)
+            typeof row.payroll_field_definition_id === 'number' && row.payroll_field_definition_id > 0 && (!row.id || row.dirty === true)
           )
           .map((row) => {
             const field = payrollFields.find((candidate) => candidate.id === row.payroll_field_definition_id);
