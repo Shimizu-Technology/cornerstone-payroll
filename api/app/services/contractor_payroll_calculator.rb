@@ -132,7 +132,8 @@ class ContractorPayrollCalculator < PayrollCalculator
   end
 
   def clear_deduction_state
-    payroll_item.payroll_item_deductions.clear
+    payroll_item.payroll_item_deductions.destroy_all
+    payroll_item.payroll_item_deductions.reset
     payroll_item.loan_payment = 0
     payroll_item.insurance_payment = 0
   end
