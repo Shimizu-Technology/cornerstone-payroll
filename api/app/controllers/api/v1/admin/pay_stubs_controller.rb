@@ -83,7 +83,9 @@ module Api
 
           results = { success: [], errors: [] }
 
-          pay_period.payroll_items.includes(:employee).each do |item|
+          pay_period.payroll_items
+                    .includes(:payroll_item_earnings, :payroll_item_field_entries, employee: :department, pay_period: :company)
+                    .each do |item|
             begin
               generator = PayStubGenerator.new(item)
               pdf_data = generator.generate
@@ -131,7 +133,7 @@ module Api
 
           requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
           base_items = pay_period.payroll_items
-                                 .includes(:employee, :pay_period)
+                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, employee: :department, pay_period: :company)
 
           if requested_ids.any?
             selected_items = base_items.where(id: requested_ids).to_a
@@ -216,7 +218,7 @@ module Api
         private
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:employee, :pay_period).find(params[:payroll_item_id] || params[:id])
+          @payroll_item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, employee: :department, pay_period: :company).find(params[:payroll_item_id] || params[:id])
 
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found
