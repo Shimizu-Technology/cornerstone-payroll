@@ -456,7 +456,7 @@ class CheckGenerator
     end
 
     payroll_field_entries_for("taxable_addition").each do |entry|
-      rows << [truncate_label(entry.label), "-", "-", fn(entry.amount), fn(entry.amount)] if entry.amount.to_f.positive?
+      rows << [truncate_label(entry.label), "-", "-", fn(entry.amount), fn(ytd_payroll_field_amount(entry))] if entry.amount.to_f.positive?
     end
 
     rows << [
