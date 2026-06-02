@@ -27,6 +27,8 @@ module Api
           else
             render json: { errors: @assignment.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         def bulk_update
@@ -65,6 +67,8 @@ module Api
         def destroy
           @assignment.update!(active: false)
           render json: { employee_payroll_field: assignment_json(@assignment) }
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         private
