@@ -535,10 +535,9 @@ class PayStubGenerator
   end
 
   def ytd_total_deductions
-    ytd = employee_ytd_totals
-    ytd[:withholding_tax].to_f + ytd[:social_security_tax].to_f + ytd[:medicare_tax].to_f +
-      ytd[:additional_withholding].to_f + ytd[:retirement].to_f + ytd[:roth_retirement].to_f +
-      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + ytd[:tips_paid_out].to_f +
+    payroll_item.ytd_withholding_tax.to_f + payroll_item.ytd_social_security_tax.to_f + payroll_item.ytd_medicare_tax.to_f +
+      employee_ytd_additional_withholding + payroll_item.ytd_retirement.to_f + payroll_item.ytd_roth_retirement.to_f +
+      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + employee_ytd_tips_paid_out +
       employee_ytd_custom_deductions_total + ytd_payroll_field_deductions_total
   end
 

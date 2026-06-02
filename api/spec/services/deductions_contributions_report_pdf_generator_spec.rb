@@ -82,6 +82,39 @@ RSpec.describe DeductionsContributionsReportPdfGenerator do
       expect(generator.send(:employee_deductions_total, payroll_item)).to eq(75.00)
     end
 
+    it "does not drop non-field deductions that coincidentally match a field label and amount" do
+      company = create(:company)
+      employee = create(:employee, company: company)
+      pay_period = create(:pay_period, :committed, company: company)
+      deduction_type = DeductionType.create!(company: company, name: "Manual Rent", category: "post_tax", sub_category: "rent")
+      payroll_item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 75.00,
+        source: "manual"
+      )
+      PayrollItemDeduction.create!(
+        payroll_item: payroll_item,
+        deduction_type: deduction_type,
+        label: "Rent Deduction",
+        category: "post_tax",
+        amount: 75.00
+      )
+
+      expect(described_class.new(pay_period).send(:employee_deductions_total, payroll_item)).to eq(150.00)
+    end
+
     it "dedupes capped mirrored payroll field deductions by payroll-field deduction type" do
       company = create(:company)
       employee = create(:employee, company: company)

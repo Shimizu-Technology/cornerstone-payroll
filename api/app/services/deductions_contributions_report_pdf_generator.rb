@@ -205,10 +205,9 @@ class DeductionsContributionsReportPdfGenerator
 
   def deduction_amount_for_label(item, label, category)
     field_entries = employee_payroll_field_deduction_entries(item, category).select { |entry| entry.label == label }
-    field_amounts = field_entries.map { |entry| entry.amount.to_f.round(2) }
     amount = item.payroll_item_deductions
       .select { |deduction| deduction.label == label && deduction.category == category }
-      .reject { |deduction| payroll_field_mirrored_deduction?(deduction, field_entries) || consume_matching_amount?(field_amounts, deduction.amount.to_f) }
+      .reject { |deduction| payroll_field_mirrored_deduction?(deduction, field_entries) }
       .sum(&:amount)
       .to_f
     amount += field_entries.sum { |entry| entry.amount.to_f }
@@ -244,13 +243,6 @@ class DeductionsContributionsReportPdfGenerator
     field_entries.any? && deduction.deduction_type&.name.to_s.start_with?("Payroll Field")
   end
 
-  def consume_matching_amount?(amounts, amount)
-    index = amounts.index(amount.round(2))
-    return false unless index
-
-    amounts.delete_at(index)
-    true
-  end
 
   def render_table(pdf, data)
     pdf.table(data,
