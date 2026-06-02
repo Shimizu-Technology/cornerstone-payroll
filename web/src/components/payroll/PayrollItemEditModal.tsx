@@ -140,7 +140,7 @@ export function PayrollItemEditModal({
             }))
           : [],
         payroll_field_entries: (item.payroll_field_entries || [])
-          .filter(entry => entry.active !== false)
+          .filter(entry => entry.active === true)
           .map(entry => ({
             ...entry,
             amount: Number(entry.amount) || 0,
@@ -265,7 +265,7 @@ export function PayrollItemEditModal({
 
       if (payrollFieldEntriesDirty) {
         payload.payroll_field_entries = fields.payroll_field_entries
-          .filter(entry => entry.dirty)
+          .filter(entry => entry.dirty && entry.active === true)
           .map(({ dirty: _dirty, ...entry }) => {
             void _dirty;
             return {

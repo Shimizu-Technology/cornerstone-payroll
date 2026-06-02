@@ -191,6 +191,7 @@ module Api
 
               existing_entry = @payroll_item.payroll_item_field_entries.find_by(id: data["id"])
               raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item" unless existing_entry
+              raise ActiveRecord::RecordNotFound, "Payroll field entry is inactive and cannot be edited" unless existing_entry.active?
             end
 
             source = normalized_payroll_field_entry_source(data["source"])

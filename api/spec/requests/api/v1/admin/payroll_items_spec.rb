@@ -350,6 +350,48 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field definition no longer exists")
     end
 
+    it "returns a validation response for inactive payroll field entry edits" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Inactive Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Inactive Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 10,
+        source: "employee_default",
+        active: false
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Inactive Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "rent",
+              amount: 20,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("inactive")
+      expect(entry.reload.amount.to_f).to eq(10.0)
+      expect(entry).not_to be_active
+    end
+
     it "returns a validation response for stale payroll field entry ids" do
       field = PayrollFieldDefinition.create!(
         company: company,
