@@ -457,7 +457,11 @@ class PayStubGenerator
     pdf.move_down 3
 
     rows = [ [ "Description", "Current", "YTD" ] ] + entries.map { |entry| [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] }
-    rows << [ { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold }, { content: format_currency(entries.sum { |entry| entry.amount.to_f }), font_style: :bold }, "—" ]
+    rows << [
+      { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold },
+      { content: format_currency(entries.sum { |entry| entry.amount.to_f }), font_style: :bold },
+      { content: format_currency(entries.sum { |entry| ytd_payroll_field_amount(entry) }), font_style: :bold }
+    ]
 
     pdf.font_size(8) do
       pdf.table(rows, header: true, width: pdf.bounds.width) do
