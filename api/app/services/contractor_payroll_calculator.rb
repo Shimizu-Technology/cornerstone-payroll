@@ -24,6 +24,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     record_earnings_breakdown
     clear_deduction_state
     zero_out_taxes
+    record_payroll_field_employee_deductions
     record_payroll_field_employer_contributions
     calculate_totals
     calculate_net_pay
@@ -137,13 +138,11 @@ class ContractorPayrollCalculator < PayrollCalculator
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total +
-      payroll_item.post_tax_payroll_adjustments_total +
-      payroll_item.post_tax_payroll_field_entries_total
+    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
   end
 
   def pre_tax_payroll_adjustments_total
-    payroll_item.pre_tax_payroll_adjustments_total + payroll_item.pre_tax_payroll_field_entries_total
+    payroll_item.pre_tax_payroll_adjustments_total
   end
 
   def build_earning(category, label, hours, rate, amount)
