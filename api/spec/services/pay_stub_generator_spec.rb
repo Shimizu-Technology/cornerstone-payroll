@@ -56,6 +56,32 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Chief Stipend")
   end
 
+  it "prints legacy insurance and loan YTD values when those rows are visible" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    create(
+      :payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8,
+      insurance_payment: 30,
+      loan_payment: 15,
+      gross_pay: 160,
+      net_pay: 115,
+      total_deductions: 45
+    )
+    payroll_item.update!(insurance_payment: 10, loan_payment: 5, total_deductions: payroll_item.total_deductions.to_f + 15)
+
+    pdf = described_class.new(payroll_item).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Health Insurance")
+    expect(text).to include("Loan Repayment")
+    expect(text).to include("$40.00")
+    expect(text).to include("$20.00")
+  end
+
   it "prints custom deductions by label" do
     pdf = described_class.new(payroll_item).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")

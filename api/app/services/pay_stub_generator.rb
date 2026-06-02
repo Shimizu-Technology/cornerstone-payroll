@@ -338,7 +338,7 @@ class PayStubGenerator
       deductions_data << [
         "Health Insurance",
         format_currency(payroll_item.insurance_payment),
-        "—"
+        format_currency(visible_legacy_insurance_ytd)
       ]
     end
 
@@ -347,7 +347,7 @@ class PayStubGenerator
       deductions_data << [
         "Loan Repayment",
         format_currency(payroll_item.loan_payment),
-        "—"
+        format_currency(visible_legacy_loan_ytd)
       ]
     end
 
