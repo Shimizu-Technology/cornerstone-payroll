@@ -224,6 +224,13 @@ class DeductionsContributionsReportPdfGenerator
     %w[pre_tax post_tax].sum do |category|
       labels = item.payroll_item_deductions.select { |deduction| deduction.category == category }.map(&:label) +
         employee_payroll_field_deduction_entries(item, category).map(&:label)
+      if category == "post_tax"
+        labels += Array(item.custom_deductions).filter_map do |deduction|
+          next unless deduction["amount"].to_f.positive?
+
+          deduction["label"].presence || "Other Deduction"
+        end
+      end
       labels.uniq.sum { |label| deduction_amount_for_label(item, label, category) }
     end
   end

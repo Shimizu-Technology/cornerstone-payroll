@@ -39,6 +39,21 @@ RSpec.describe DeductionsContributionsReportPdfGenerator do
       expect(amount).to eq(30.00)
     end
 
+    it "includes custom-only deductions in employee deduction totals" do
+      company = create(:company)
+      employee = create(:employee, company: company)
+      pay_period = create(:pay_period, :committed, company: company)
+      payroll_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        custom_deductions: [ { "label" => "Cash Advance", "amount" => 20.00 } ]
+      )
+
+      expect(described_class.new(pay_period).send(:employee_deductions_total, payroll_item)).to eq(20.00)
+    end
+
     it "includes field-only employee deductions in totals" do
       company = create(:company)
       employee = create(:employee, company: company)
