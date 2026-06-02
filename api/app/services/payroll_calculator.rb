@@ -260,6 +260,22 @@ class PayrollCalculator
     end
   end
 
+  def record_payroll_field_employee_deductions
+    payroll_item.payroll_item_field_entries.each do |entry|
+      next unless entry.active? && entry.kind == "deduction" && entry.amount.to_f.positive?
+      next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
+
+      category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
+      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category)
+      payroll_item.payroll_item_deductions.build(
+        deduction_type: deduction_type,
+        amount: entry.amount,
+        category: category,
+        label: entry.label
+      )
+    end
+  end
+
   def calculate_totals
     payroll_item.total_additions = (
       payroll_item.reported_tips.to_f +
@@ -356,6 +372,20 @@ class PayrollCalculator
       pay_date: pay_period.pay_date,
       pay_period_id: pay_period.id
     )
+  end
+
+  def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other")
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
+    existing = payroll_item.company.deduction_types.find_by(name: label)
+    return existing if existing&.category == category && existing.sub_category == sub_category
+
+    payroll_item.company.deduction_types.create!(
+      name: label,
+      category: category,
+      sub_category: sub_category
+    )
+  rescue ActiveRecord::RecordNotUnique
+    payroll_item.company.deduction_types.find_by!(name: label, category: category, sub_category: sub_category)
   end
 
   def record_employer_contribution(label, amount, sub_category: "retirement")

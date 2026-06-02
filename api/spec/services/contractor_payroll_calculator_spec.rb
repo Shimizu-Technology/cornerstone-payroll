@@ -94,7 +94,9 @@ RSpec.describe ContractorPayrollCalculator do
 
     expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Contractor Rent Deduction" }.amount.to_f).to eq(25.0)
     expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Contractor Plan Deduction" }.amount.to_f).to eq(10.0)
-    expect(payroll_item.payroll_item_deductions.reject(&:employer_contribution?)).to be_empty
+    employee_paid_deductions = payroll_item.payroll_item_deductions.reject(&:employer_contribution?)
+    expect(employee_paid_deductions.map(&:label)).to contain_exactly("Contractor Rent Deduction", "Contractor Plan Deduction")
+    expect(employee_paid_deductions.map { |deduction| deduction.amount.to_f }.sum).to eq(35.0)
     expect(payroll_item.total_deductions.to_f).to eq(35.0)
     expect(payroll_item.net_pay.to_f).to eq(payroll_item.gross_pay.to_f - 35.0)
   end
