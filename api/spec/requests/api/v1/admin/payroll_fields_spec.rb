@@ -311,5 +311,29 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(employee.employee_payroll_fields.count).to eq(0)
     end
+
+    it "returns a validation response when assignment update hits a uniqueness race" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Update Race", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 10)
+      allow_any_instance_of(EmployeePayrollField).to receive(:update).and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value"))
+
+      patch "/api/v1/admin/employees/#{employee.id}/payroll_fields/#{assignment.id}", params: {
+        employee_payroll_field: { amount: 20 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("duplicate key value")
+    end
+
+    it "returns a validation response when assignment archive fails validation" do
+      field = PayrollFieldDefinition.create!(company: company, name: "Archive Failure", kind: "deduction", tax_treatment: "post_tax_deduction", category: "other")
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 10)
+      allow_any_instance_of(EmployeePayrollField).to receive(:update!).and_raise(ActiveRecord::RecordInvalid.new(assignment))
+
+      delete "/api/v1/admin/employees/#{employee.id}/payroll_fields/#{assignment.id}"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to be_present
+    end
   end
 end
