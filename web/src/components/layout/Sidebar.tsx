@@ -15,6 +15,7 @@ import {
   WalletCards,
   FolderOpen,
   HandCoins,
+  ListPlus,
   SlidersHorizontal,
   Printer,
   Bell,
@@ -78,6 +79,7 @@ const toolsNavigation: NavItem[] = [
 
 const clientSettingsNavigation: NavItem[] = [
   { name: 'Check Settings', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time Tracking Sources', href: '/time-tracking-sources', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
 ];

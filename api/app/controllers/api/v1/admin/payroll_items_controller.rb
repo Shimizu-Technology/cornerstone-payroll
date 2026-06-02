@@ -9,7 +9,7 @@ module Api
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
-          @payroll_items = @pay_period.payroll_items.includes(:employee)
+          @payroll_items = @pay_period.payroll_items.includes(:payroll_item_field_entries, :employee)
           reportable_items = @payroll_items.not_voided
 
           render json: {
@@ -63,7 +63,7 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
@@ -85,6 +85,8 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id
@@ -119,6 +121,8 @@ module Api
           @payroll_item.apply_default_payroll_adjustments_if_unset!(@payroll_item.employee)
           @payroll_item.calculate!
           render json: { payroll_item: payroll_item_json(@payroll_item) }
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique => e
+          render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         private
@@ -132,7 +136,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = @pay_period.payroll_items.find(params[:id])
+          @payroll_item = @pay_period.payroll_items.includes(:payroll_item_field_entries).find(params[:id])
         end
 
         def payroll_item_params
@@ -148,15 +152,76 @@ module Api
             ],
             custom_earnings: [ :label, :amount ],
             custom_deductions: [ :label, :amount ],
-            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
+            payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ],
+            payroll_field_entries: [
+              :id, :payroll_field_definition_id, :label, :kind, :tax_treatment,
+              :category, :amount, :source, :employee_paid, :employer_paid,
+              :active, :notes
+            ]
           )
 
-          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions, :payroll_adjustments).to_h.symbolize_keys
+          attrs = permitted.except(:wage_rate_hours, :custom_earnings, :custom_deductions, :payroll_adjustments, :payroll_field_entries).to_h.symbolize_keys
           attrs[:wage_rate_hours] = permitted[:wage_rate_hours] if permitted[:wage_rate_hours].present?
           attrs[:custom_earnings] = permitted[:custom_earnings]&.map(&:to_h) || [] if params.dig(:payroll_item, :custom_earnings)
           attrs[:custom_deductions] = PayrollItem.normalize_custom_deduction_entries(permitted[:custom_deductions]) if params.dig(:payroll_item, :custom_deductions)
           attrs[:payroll_adjustments] = PayrollItem.normalize_payroll_adjustments(permitted[:payroll_adjustments]) if params.dig(:payroll_item, :payroll_adjustments)
+          if params.dig(:payroll_item, :payroll_field_entries).present?
+            normalized_entries = normalize_payroll_field_entries(permitted[:payroll_field_entries])
+            attrs[:payroll_item_field_entries_attributes] = normalized_entries if normalized_entries.present?
+          end
           attrs
+        end
+
+        def normalize_payroll_field_entries(entries)
+          Array(entries).filter_map do |entry|
+            data = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry.to_h
+            amount = BigDecimal(data["amount"].to_s)
+            label = data["label"].to_s.strip
+            next if label.blank? || amount.negative? || !amount.finite?
+
+            field = nil
+            if data["payroll_field_definition_id"].present?
+              field = PayrollFieldDefinition.find_by(id: data["payroll_field_definition_id"], company_id: current_company_id)
+              raise ActiveRecord::RecordNotFound, "Payroll field definition no longer exists for this company" unless field
+            end
+
+            existing_entry = nil
+            if data["id"].present?
+              raise ActiveRecord::RecordNotFound, "Payroll field entry IDs cannot be submitted when creating a payroll item" unless @payroll_item
+
+              existing_entry = @payroll_item.payroll_item_field_entries.find_by(id: data["id"])
+              raise ActiveRecord::RecordNotFound, "Payroll field entry no longer exists for this payroll item" unless existing_entry
+              raise ActiveRecord::RecordNotFound, "Payroll field entry is inactive and cannot be edited" unless existing_entry.active?
+            end
+
+            source = normalized_payroll_field_entry_source(data["source"])
+            payload = {
+              id: data["id"],
+              payroll_field_definition_id: field&.id,
+              label: label,
+              kind: data["kind"].presence || field&.kind,
+              tax_treatment: data["tax_treatment"].presence || field&.tax_treatment,
+              category: data["category"].presence || field&.category || "other",
+              amount: amount.round(2),
+              source: source,
+              employee_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employee_paid") ? data["employee_paid"] : field&.employee_paid?),
+              employer_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employer_paid") ? data["employer_paid"] : field&.employer_paid?),
+              active: data.key?("active") ? ActiveModel::Type::Boolean.new.cast(data["active"]) : true,
+              notes: data["notes"].to_s.strip.presence
+            }
+            payload = payload.compact.merge(notes: payload[:notes])
+            if source == "manual" && existing_entry&.metadata.is_a?(Hash)
+              payload[:metadata] = amount == existing_entry.amount ? existing_entry.metadata : existing_entry.metadata.except("uncapped_amount")
+            end
+            payload
+          rescue ArgumentError, FloatDomainError
+            nil
+          end
+        end
+
+        def normalized_payroll_field_entry_source(value)
+          source = value.to_s
+          %w[manual employee_default].include?(source) ? source : "manual"
         end
 
         def save_payroll_item_and_clear_exclusion(payroll_item, employee)
@@ -168,6 +233,24 @@ module Api
           end
 
           true
+        end
+
+        def payroll_field_entry_json(entry)
+          {
+            id: entry.id,
+            payroll_item_id: entry.payroll_item_id,
+            payroll_field_definition_id: entry.payroll_field_definition_id,
+            label: entry.label,
+            kind: entry.kind,
+            tax_treatment: entry.tax_treatment,
+            category: entry.category,
+            amount: entry.amount.to_f,
+            source: entry.source,
+            employee_paid: entry.employee_paid,
+            employer_paid: entry.employer_paid,
+            active: entry.active,
+            notes: entry.notes
+          }
         end
 
         def payroll_item_json(item, detailed: false)
@@ -212,6 +295,7 @@ module Api
             custom_earnings: item.custom_earnings || [],
             custom_deductions: item.custom_deductions || [],
             payroll_adjustments: item.payroll_adjustments || [],
+            payroll_field_entries: item.payroll_item_field_entries.map { |entry| payroll_field_entry_json(entry) },
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours

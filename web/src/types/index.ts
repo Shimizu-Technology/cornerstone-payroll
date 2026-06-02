@@ -98,6 +98,61 @@ export type PayrollAdjustmentTreatment =
   | 'pre_tax_deduction'
   | 'post_tax_deduction';
 
+export type PayrollFieldKind = 'addition' | 'deduction' | 'employer_contribution';
+export type PayrollFieldTaxTreatment = PayrollAdjustmentTreatment | 'employer_contribution';
+export type PayrollFieldCategory = 'loan' | 'retirement' | 'insurance' | 'rent' | 'allotment' | 'reimbursement' | 'garnishment' | 'child_support' | 'phone' | 'benefit' | 'other';
+export type PayrollFieldAmountType = 'manual' | 'fixed' | 'percentage';
+
+export interface PayrollFieldDefinition {
+  id: number;
+  company_id: number;
+  name: string;
+  description?: string | null;
+  kind: PayrollFieldKind;
+  tax_treatment: PayrollFieldTaxTreatment;
+  category: PayrollFieldCategory;
+  amount_type: PayrollFieldAmountType;
+  default_amount?: number | null;
+  default_percentage?: number | null;
+  show_in_payroll_grid: boolean;
+  active: boolean;
+  sort_order: number;
+  payee_name?: string | null;
+  reference_number?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeePayrollField {
+  id: number;
+  employee_id: number;
+  payroll_field_definition_id: number;
+  amount?: number | null;
+  percentage?: number | null;
+  active: boolean;
+  start_date?: string | null;
+  end_date?: string | null;
+  notes?: string | null;
+  employee_loan_id?: number | null;
+  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
+}
+
+export interface PayrollItemFieldEntry {
+  id?: number;
+  payroll_item_id?: number;
+  payroll_field_definition_id?: number | null;
+  label: string;
+  kind: PayrollFieldKind;
+  tax_treatment: PayrollFieldTaxTreatment;
+  category: PayrollFieldCategory;
+  amount: number;
+  source?: 'employee_default' | 'manual' | 'import' | 'system';
+  employee_paid?: boolean;
+  employer_paid?: boolean;
+  active?: boolean;
+  notes?: string | null;
+}
+
 export interface PayrollAdjustment {
   label: string;
   amount: number;
@@ -150,6 +205,7 @@ export interface Employee {
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
   default_payroll_adjustments?: PayrollAdjustment[];
+  employee_payroll_fields?: EmployeePayrollField[];
   created_at: string;
   updated_at: string;
 }
@@ -413,6 +469,7 @@ export interface PayrollItem {
   custom_deductions?: CustomDeduction[];
   custom_deductions_total?: number;
   payroll_adjustments?: PayrollAdjustment[];
+  payroll_field_entries?: PayrollItemFieldEntry[];
   payroll_adjustment_totals?: {
     taxable_additions: number;
     non_taxable_additions: number;

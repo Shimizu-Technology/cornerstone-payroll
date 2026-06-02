@@ -127,6 +127,38 @@ class PayrollCalculator
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
   # Called before tax calculation so these reduce the FIT withholding base.
+  def calculate_base_gross_for_payroll_fields
+    @exclude_payroll_field_entry_totals = true
+    calculate_gross_pay
+  ensure
+    @exclude_payroll_field_entry_totals = false
+  end
+
+  def sync_payroll_field_entries_after_base_gross
+    restore_capped_payroll_field_entries!
+    payroll_item.apply_default_payroll_field_entries_if_unset!(employee, assignments: payroll_field_assignments_for_calculation)
+  end
+
+  def sync_percentage_payroll_field_entries_after_final_gross
+    payroll_item.refresh_percentage_payroll_field_entries_after_final_gross!(employee, assignments: payroll_field_assignments_for_calculation)
+  end
+
+  def payroll_field_assignments_for_calculation
+    @payroll_field_assignments_for_calculation ||= payroll_item.active_payroll_field_assignments_for(employee).to_a
+  end
+
+  def restore_capped_payroll_field_entries!
+    payroll_item.payroll_item_field_entries.each do |entry|
+      uncapped_amount = entry.metadata.is_a?(Hash) ? entry.metadata["uncapped_amount"] : nil
+      next if uncapped_amount.blank?
+
+      entry.amount = BigDecimal(uncapped_amount.to_s).round(2)
+      entry.metadata = entry.metadata.except("uncapped_amount")
+    rescue ArgumentError
+      next
+    end
+  end
+
   def pre_tax_employee_deductions_total
     employee.employee_deductions.active.includes(:deduction_type)
       .reject { |ed| skip_employee_deduction?(ed.deduction_type) }
@@ -168,11 +200,14 @@ class PayrollCalculator
 
     # Record employer retirement match as employer_contribution deductions
     if payroll_item.employer_retirement_match.to_f > 0
-      record_employer_contribution("401(k) Employer Match", payroll_item.employer_retirement_match)
+      record_employer_contribution("401(k) Employer Match", payroll_item.employer_retirement_match, sub_category: "retirement")
     end
     if payroll_item.employer_roth_retirement_match.to_f > 0
-      record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match)
+      record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match, sub_category: "retirement")
     end
+
+    record_payroll_field_employee_deductions
+    record_payroll_field_employer_contributions
 
     # Update aggregate fields for backward compatibility with existing code
     payroll_item.loan_payment = aggregate_loan
@@ -196,7 +231,10 @@ class PayrollCalculator
   end
 
   def custom_earnings_total
-    Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } + payroll_item.taxable_payroll_adjustments_total
+    total = Array(payroll_item.custom_earnings).sum { |ce| ce["amount"].to_f } +
+      payroll_item.taxable_payroll_adjustments_total
+    total += payroll_item.taxable_payroll_field_entries_total unless @exclude_payroll_field_entry_totals
+    total
   end
 
   def custom_deductions_total
@@ -208,7 +246,33 @@ class PayrollCalculator
   end
 
   def non_taxable_additions_total
-    payroll_item.non_taxable_pay.to_f + payroll_item.non_taxable_payroll_adjustments_total
+    payroll_item.non_taxable_pay.to_f +
+      payroll_item.non_taxable_payroll_adjustments_total +
+      payroll_item.non_taxable_payroll_field_entries_total
+  end
+
+  def record_payroll_field_employer_contributions
+    payroll_item.payroll_item_field_entries.each do |entry|
+      next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
+
+      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category)
+    end
+  end
+
+  def record_payroll_field_employee_deductions
+    payroll_item.payroll_item_field_entries.each do |entry|
+      next unless entry.active? && entry.kind == "deduction" && entry.amount.to_f.positive?
+      next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
+
+      category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
+      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category)
+      payroll_item.payroll_item_deductions.build(
+        deduction_type: deduction_type,
+        amount: entry.amount,
+        category: category,
+        label: entry.label
+      )
+    end
   end
 
   def calculate_totals
@@ -309,30 +373,65 @@ class PayrollCalculator
     )
   end
 
-  def record_employer_contribution(label, amount)
+  def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other")
+    company = payroll_item.company || pay_period.company
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
+    name = payroll_field_deduction_type_name(label, category, company: company)
+    existing = company.deduction_types.find_by(name: name, category: category)
+    return existing if existing
+
+    company.deduction_types.create!(
+      name: name,
+      category: category,
+      sub_category: sub_category
+    )
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+    existing = company.deduction_types.find_by(name: name, category: category)
+    return existing if existing
+
+    raise e
+  end
+
+  def payroll_field_deduction_type_name(label, category, company: nil)
+    category_label = category.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
+    base_name = "Payroll Field: #{label} (#{category_label})"
+    return base_name unless company
+
+    same_name = company.deduction_types.where(name: base_name)
+    return base_name if same_name.blank? || same_name.exists?(category: category)
+
+    "Payroll Field #{category_label}: #{label}"
+  end
+
+  def record_employer_contribution(label, amount, sub_category: "retirement")
     return if amount.to_f.zero?
+
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
 
     # Employer contributions don't need a DeductionType row — use a virtual record
     payroll_item.payroll_item_deductions.build(
-      deduction_type_id: find_or_create_employer_deduction_type(label).id,
+      deduction_type_id: find_or_create_employer_deduction_type(label, sub_category: sub_category).id,
       amount: amount,
       category: "employer_contribution",
       label: label
     )
   end
 
-  def find_or_create_employer_deduction_type(label)
+  def find_or_create_employer_deduction_type(label, sub_category: "retirement")
     company = payroll_item.company || pay_period.company
+    sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
     return existing if existing
 
-    legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
-    return ensure_employer_contribution_type!(legacy) if legacy
+    if sub_category == "retirement"
+      legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
+      return ensure_employer_contribution_type!(legacy) if legacy
+    end
 
     company.deduction_types.create!(
       name: label,
       category: "employer_contribution",
-      sub_category: "retirement"
+      sub_category: sub_category
     )
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
@@ -372,7 +471,7 @@ class PayrollCalculator
     return if payroll_item.correction_entry?
     return unless payroll_item.additional_withholding.to_f.positive?
 
-    available_pay = payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f
+    available_pay = payroll_item.gross_pay.to_f + non_taxable_additions_total
     excess = payroll_item.total_deductions.to_f - available_pay
     return unless excess.positive?
 
@@ -384,13 +483,14 @@ class PayrollCalculator
   def cap_deductions_to_available_pay!
     return if payroll_item.correction_entry?
 
-    available_pay = (payroll_item.gross_pay.to_f + payroll_item.non_taxable_pay.to_f).round(2)
+    available_pay = (payroll_item.gross_pay.to_f + non_taxable_additions_total).round(2)
     excess = (payroll_item.total_deductions.to_f - available_pay).round(2)
     return unless excess.positive?
 
     had_itemized_deductions = payroll_item.payroll_item_deductions.any?
 
     remaining = reduce_custom_deductions_by!(excess)
+    remaining = reduce_payroll_field_deductions_by!(remaining)
     remaining = reduce_payroll_item_deductions_by!(remaining)
     sync_aggregate_deductions_from_itemized! if had_itemized_deductions
 
@@ -434,6 +534,39 @@ class PayrollCalculator
     end
 
     payroll_item.custom_deductions = deductions.select { |deduction| deduction["amount"].to_f.positive? }
+    amount
+  end
+
+  def reduce_payroll_field_deductions_by!(amount)
+    return amount unless amount.positive?
+
+    deductions = payroll_item.payroll_item_field_entries.select do |entry|
+      entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
+    end
+
+    deductions.reverse_each do |entry|
+      current = entry.amount.to_f
+      reduction = [ current, amount ].min
+      metadata = entry.metadata || {}
+      entry.metadata = metadata.merge("uncapped_amount" => current.round(2)) if reduction.positive? && !metadata.key?("uncapped_amount")
+      next_amount = (current - reduction).round(2)
+      entry.amount = next_amount
+      payroll_item.payroll_item_deductions.each do |deduction|
+        deduction_category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
+        next unless deduction.category == deduction_category
+        next unless deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category, company: payroll_item.company || pay_period.company)
+
+        deduction.amount = next_amount
+      end
+      amount = (amount - reduction).round(2)
+      break unless amount.positive?
+    end
+
+    payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_f.zero? }.each do |deduction|
+      deduction.destroy! if deduction.persisted?
+      payroll_item.payroll_item_deductions.target.delete(deduction)
+    end
+
     amount
   end
 

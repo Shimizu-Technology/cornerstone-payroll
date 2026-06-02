@@ -69,6 +69,60 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(pay_period.payroll_items.where(employee_id: employee.id)).not_to exist
     end
 
+    it "returns a validation response if field entry ids are submitted on create" do
+      payroll_item.destroy!
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.deep_merge(
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: 123,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      )
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field entry IDs cannot be submitted")
+    end
+
+    it "returns a validation response for stale payroll field definitions" do
+      payroll_item.destroy!
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.deep_merge(
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: 999_999,
+              label: "Stale Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      )
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field definition no longer exists")
+    end
+
     it "returns a validation response if a concurrent add creates the same payroll item" do
       allow_any_instance_of(PayrollItem).to receive(:save!)
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
@@ -79,6 +133,345 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body).fetch("errors").first).to include("duplicate key value")
+    end
+  end
+
+  describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "returns a validation response when auto-calculation fails validation after update" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        auto_calculate: true,
+        payroll_item: {
+          hours_worked: 10
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+
+    it "returns a validation response when update hits a payroll field entry uniqueness race" do
+      allow_any_instance_of(PayrollItem).to receive(:update)
+        .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          hours_worked: 10
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("duplicate key value")
+    end
+
+    it "does not mark field entries overridden when normalization filters every submitted entry" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other"
+      )
+      payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount: 10,
+        source: "employee_default"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: field.id,
+              label: "",
+              kind: "addition",
+              tax_treatment: "taxable_addition",
+              category: "other",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.custom_columns_data || {}).not_to have_key("payroll_field_entries_overridden")
+      expect(payroll_item.payroll_item_field_entries.active.count).to eq(1)
+    end
+
+    it "clears payroll field entry notes when blank notes are submitted" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 10,
+        source: "manual",
+        notes: "Clear me"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              notes: "",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.notes).to be_nil
+    end
+
+    it "preserves capped-entry metadata when a submitted manual entry amount is unchanged" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 0,
+        source: "employee_default",
+        metadata: { "uncapped_amount" => 500.0 }
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 0,
+              source: "manual",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.metadata).to include("uncapped_amount" => 500.0)
+    end
+
+    it "normalizes privileged payroll field entry sources from API clients to manual" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 10,
+        source: "employee_default"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              source: "import",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.source).to eq("manual")
+    end
+
+    it "clears capped-entry metadata when an admin manually overrides the amount" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 0,
+        source: "employee_default",
+        metadata: { "uncapped_amount" => 500.0 }
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 25,
+              source: "manual",
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(entry.reload.amount.to_f).to eq(25.0)
+      expect(entry.metadata).not_to have_key("uncapped_amount")
+    end
+
+    it "returns a validation response for stale payroll field definition ids" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              payroll_field_definition_id: 999_999,
+              label: "Stale Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field definition no longer exists")
+    end
+
+    it "returns a validation response for inactive payroll field entry edits" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Inactive Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      entry = payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Inactive Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 10,
+        source: "employee_default",
+        active: false
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: entry.id,
+              payroll_field_definition_id: field.id,
+              label: "Inactive Field",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "rent",
+              amount: 20,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("inactive")
+      expect(entry.reload.amount.to_f).to eq(10.0)
+      expect(entry).not_to be_active
+    end
+
+    it "returns a validation response for stale payroll field entry ids" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan"
+      )
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          payroll_field_entries: [
+            {
+              id: 999_999,
+              payroll_field_definition_id: field.id,
+              label: "Loan",
+              kind: "deduction",
+              tax_treatment: "post_tax_deduction",
+              category: "loan",
+              amount: 10,
+              active: true
+            }
+          ]
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("errors").first).to include("Payroll field entry no longer exists")
+    end
+  end
+
+  describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
+    it "returns a validation response when recalculation fails validation" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to be_present
     end
   end
 

@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
-import { payPeriodsApi, employeesApi } from '@/services/api';
+import { payPeriodsApi, employeesApi, payrollFieldsApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
@@ -39,7 +39,7 @@ import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel'
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -238,6 +238,7 @@ export function PayPeriodDetail() {
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
   // can detect when the FIT auto-deposit amount has been overridden away
   // from the calculated total. Updated via the panel's onChecksLoaded prop.
@@ -318,9 +319,15 @@ export function PayPeriodDetail() {
         loadAllActiveEmployees(),
       ]);
 
+      const fieldsResponse = await payrollFieldsApi.list().catch((err) => {
+        console.warn('Failed to load payroll fields for pay period grid', err);
+        return { payroll_fields: [] };
+      });
+
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
+      setPayrollFields(fieldsResponse.payroll_fields);
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
       syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
     } catch (err) {
@@ -785,6 +792,11 @@ export function PayPeriodDetail() {
   const comparisonTotalRows = comparison?.employee_changes.length || 0;
   const comparisonRows = comparison?.employee_changes.slice(0, comparisonRowLimit) || [];
   const comparisonHiddenRows = Math.max(0, comparisonTotalRows - comparisonRows.length);
+
+  const visiblePayrollFields = payrollFields
+    .filter((field) => field.show_in_payroll_grid)
+    .filter((field) => payrollItems.some((item) => (item.payroll_field_entries || []).some((entry) => entry.active !== false && entry.payroll_field_definition_id === field.id)))
+    .sort((left, right) => (left.sort_order - right.sort_order) || left.name.localeCompare(right.name));
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
@@ -1727,7 +1739,7 @@ export function PayPeriodDetail() {
           const hasCustomEarnings = payrollItems.some(i => (i.custom_earnings || []).some((earning) => toNumber(earning.amount) > 0));
           const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
           const hasPayrollAdjustments = payrollItems.some(i => (i.payroll_adjustments || []).some((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0));
-          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
+          const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + visiblePayrollFields.length + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card>
@@ -1808,6 +1820,12 @@ export function PayPeriodDetail() {
                     {hasCustomEarnings && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Earn.</TableHead>}
                     {hasCustomDeductions && <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Custom Ded.</TableHead>}
                     {hasPayrollAdjustments && <TableHead className={`min-w-[180px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Adjustments</TableHead>}
+                    {visiblePayrollFields.map((field) => (
+                      <TableHead key={field.id} className={`min-w-[140px] bg-blue-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>
+                        <div>{field.name}</div>
+                        <div className="text-[10px] font-normal uppercase tracking-wide text-blue-500">{field.kind.replace(/_/g, ' ')}</div>
+                      </TableHead>
+                    ))}
                     {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
                     {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
@@ -2033,6 +2051,22 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           )}
+                          {visiblePayrollFields.map((field) => {
+                            const entry = (item.payroll_field_entries || []).find((candidate) => candidate.active !== false && candidate.payroll_field_definition_id === field.id);
+                            const amount = toNumber(entry?.amount);
+                            const isDeduction = field.kind === 'deduction';
+                            return (
+                              <TableCell key={`${item.id}-payroll-field-${field.id}`} className={`text-right ${rowTone}`}>
+                                {amount > 0 ? (
+                                  <span className={isDeduction ? 'font-medium text-red-600' : field.kind === 'employer_contribution' ? 'font-medium text-blue-700' : 'font-medium text-emerald-700'}>
+                                    {isDeduction ? '-' : '+'}{formatCurrency(amount)}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-300">—</span>
+                                )}
+                              </TableCell>
+                            );
+                          })}
                           {hasTips && (
                           <TableCell className={`text-right ${rowTone}`}>
                             {toNumber(item.reported_tips) > 0 ? (

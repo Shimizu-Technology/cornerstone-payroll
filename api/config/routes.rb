@@ -110,9 +110,16 @@ Rails.application.routes.draw do
         end
         resources :user_invitations, only: [ :create ]
 
+        resources :payroll_fields, except: [ :new, :edit ], controller: :payroll_fields
+
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :reactivate
+          end
+          resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
+            collection do
+              post :bulk_update
+            end
           end
         end
 

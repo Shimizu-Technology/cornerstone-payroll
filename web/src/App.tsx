@@ -27,6 +27,7 @@ const Organizations = lazy(() => import('@/pages/Organizations').then((module) =
 const AuditLogs = lazy(() => import('@/pages/AuditLogs').then((module) => ({ default: module.AuditLogs })));
 const CheckSettingsPage = lazy(() => import('@/pages/CheckSettings').then((module) => ({ default: module.CheckSettingsPage })));
 const EmployeeLoans = lazy(() => import('@/pages/EmployeeLoans'));
+const PayrollFields = lazy(() => import('@/pages/PayrollFields'));
 const Clients = lazy(() => import('@/pages/Clients').then((module) => ({ default: module.Clients })));
 const TimecardOcrTool = lazy(() => import('@/pages/TimecardOcrTool').then((module) => ({ default: module.TimecardOcrTool })));
 const GeneralTransmittals = lazy(() => import('@/pages/GeneralTransmittals').then((module) => ({ default: module.GeneralTransmittals })));
@@ -285,6 +286,7 @@ function AppRoutes() {
         <Route path="reports" element={isClient ? <ClientReports /> : <Reports />} />
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
+        <Route path="payroll-fields" element={<StaffOnlyRoute><PayrollFields /></StaffOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
         <Route path="tools/invoices" element={<StaffOnlyRoute><InvoiceMaker /></StaffOnlyRoute>} />

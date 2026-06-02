@@ -7,7 +7,8 @@
 # - No Social Security (employee or employer)
 # - No Medicare (employee or employer)
 # - No retirement contributions
-# - No employee deductions (loans, insurance, etc.)
+# - No automatic employee tax/benefit deductions
+# - Explicit contractor payroll-field/custom deductions are honored when configured
 #
 # Gross pay can be:
 # - Flat fee (salary_override on PayrollItem)
@@ -16,10 +17,15 @@
 #
 class ContractorPayrollCalculator < PayrollCalculator
   def calculate
+    calculate_base_gross_for_payroll_fields
+    sync_payroll_field_entries_after_base_gross
     calculate_gross_pay
+    sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
     clear_deduction_state
     zero_out_taxes
+    record_payroll_field_employee_deductions
+    record_payroll_field_employer_contributions
     calculate_totals
     calculate_net_pay
     update_ytd_on_item
@@ -96,6 +102,18 @@ class ContractorPayrollCalculator < PayrollCalculator
       end
     end
 
+    payroll_item.payroll_item_field_entries.each do |entry|
+      amt = entry.amount.to_f
+      next unless entry.active? && amt.positive?
+
+      case entry.tax_treatment
+      when "taxable_addition"
+        build_earning("other", entry.label, nil, nil, amt)
+      when "non_taxable_addition"
+        build_earning("non_taxable", entry.label, nil, nil, amt)
+      end
+    end
+
     nontax = payroll_item.non_taxable_pay.to_f
     build_earning("non_taxable", "Non-Taxable Pay", nil, nil, nontax) if nontax > 0
   end
@@ -114,7 +132,8 @@ class ContractorPayrollCalculator < PayrollCalculator
   end
 
   def clear_deduction_state
-    payroll_item.payroll_item_deductions.clear
+    payroll_item.payroll_item_deductions.destroy_all
+    payroll_item.payroll_item_deductions.reset
     payroll_item.loan_payment = 0
     payroll_item.insurance_payment = 0
   end
