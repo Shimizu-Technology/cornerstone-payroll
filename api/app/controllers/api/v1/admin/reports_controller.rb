@@ -1784,11 +1784,13 @@ module Api
 
         def employer_contributions_breakdown(item)
           field_contribution_entries = active_payroll_field_entries(item).select(&:employer_contribution?)
-          field_contribution_totals = field_contribution_entries.group_by { |entry| entry.label.to_s }.transform_values { |entries| entries.sum { |entry| entry.amount.to_f } }
+          field_contribution_amounts_by_label = field_contribution_entries
+            .group_by { |entry| entry.label.to_s }
+            .transform_values { |entries| entries.map { |entry| entry.amount.to_f.round(2) } }
 
           item.payroll_item_deductions
             .select(&:employer_contribution?)
-            .reject { |deduction| field_contribution_totals.fetch(deduction.label.to_s, nil)&.round(2) == deduction.amount.to_f.round(2) }
+            .reject { |deduction| consume_matching_field_contribution?(field_contribution_amounts_by_label, deduction) }
             .map { |deduction| deduction_row(deduction) } +
             field_contribution_entries.map do |entry|
               {
@@ -1798,6 +1800,17 @@ module Api
                 amount: entry.amount.to_f
               }
             end
+        end
+
+        def consume_matching_field_contribution?(amounts_by_label, deduction)
+          amounts = amounts_by_label[deduction.label.to_s]
+          return false unless amounts
+
+          index = amounts.index(deduction.amount.to_f.round(2))
+          return false unless index
+
+          amounts.delete_at(index)
+          true
         end
 
         def send_spreadsheet!(filename:, sheets:)

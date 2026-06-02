@@ -114,6 +114,27 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(csv).to include("2 employees")
     end
 
+    it "includes contractor payroll field columns and amounts" do
+      report_data[:contractors] = [
+        {
+          employee_id: 3,
+          employee_name: "Carl Contractor",
+          employment_type: "contractor",
+          gross_pay: 600.00,
+          net_pay: 575.00,
+          payroll_field_entries: [
+            { label: "Contractor Rent", tax_treatment: "post_tax_deduction", amount: 25.00 }
+          ]
+        }
+      ]
+
+      rows = CSV.parse(exporter.generate, headers: true)
+
+      expect(rows.headers).to include("Payroll Field - Contractor Rent (Post tax deduction)")
+      expect(rows.find { |row| row["Employee Name"] == "Carl Contractor" }["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
+      expect(rows[-1]["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
+    end
+
     it "keeps the TOTALS row aligned with the headers" do
       rows = CSV.parse(exporter.generate, headers: true)
       totals = rows[-1]
