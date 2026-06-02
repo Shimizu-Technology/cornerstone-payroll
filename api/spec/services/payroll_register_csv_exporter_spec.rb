@@ -47,11 +47,24 @@ RSpec.describe PayrollRegisterCsvExporter do
           pay_rate: 20.00,
           hours_worked: 80.0,
           overtime_hours: 5.0,
+          reported_tips: 40.00,
+          tips_paid_out: 30.00,
+          bonus: 10.00,
+          custom_earnings_total: 20.00,
+          custom_deductions_total: 10.00,
+          non_taxable_pay: 15.00,
           gross_pay: 1950.00,
           withholding_tax: 140.00,
+          additional_withholding: 5.00,
           social_security_tax: 120.90,
           medicare_tax: 28.28,
+          employer_social_security_tax: 120.00,
+          employer_medicare_tax: 28.28,
           retirement_payment: 78.00,
+          roth_retirement_payment: 30.00,
+          employer_retirement_match: 10.00,
+          employer_roth_retirement_match: 8.00,
+          loan_payment: 5.00,
           total_deductions: 367.18,
           net_pay: 1582.82,
           check_number: "10001"
@@ -63,11 +76,24 @@ RSpec.describe PayrollRegisterCsvExporter do
           pay_rate: 75_000.00,
           hours_worked: nil,
           overtime_hours: nil,
+          reported_tips: 60.00,
+          tips_paid_out: 50.00,
+          bonus: 15.00,
+          custom_earnings_total: 40.00,
+          custom_deductions_total: 20.00,
+          non_taxable_pay: 25.00,
           gross_pay: 3050.00,
           withholding_tax: 210.00,
+          additional_withholding: 10.00,
           social_security_tax: 189.10,
           medicare_tax: 44.22,
+          employer_social_security_tax: 190.00,
+          employer_medicare_tax: 44.22,
           retirement_payment: 122.00,
+          roth_retirement_payment: 45.00,
+          employer_retirement_match: 20.00,
+          employer_roth_retirement_match: 12.00,
+          loan_payment: 15.00,
           total_deductions: 565.32,
           net_pay: 2484.68,
           check_number: "10002"
@@ -121,6 +147,7 @@ RSpec.describe PayrollRegisterCsvExporter do
           employee_name: "Carl Contractor",
           employment_type: "contractor",
           gross_pay: 600.00,
+          total_deductions: 25.00,
           net_pay: 575.00,
           payroll_field_entries: [
             { label: "Contractor Rent", tax_treatment: "post_tax_deduction", amount: 25.00 }
@@ -132,6 +159,9 @@ RSpec.describe PayrollRegisterCsvExporter do
 
       expect(rows.headers).to include("Payroll Field - Contractor Rent (Post tax deduction)")
       expect(rows.find { |row| row["Employee Name"] == "Carl Contractor" }["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
+      expect(rows[-1]["Gross Pay"]).to eq("5600.00")
+      expect(rows[-1]["Total Deductions"]).to eq("957.50")
+      expect(rows[-1]["Net Pay"]).to eq("4642.50")
       expect(rows[-1]["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
     end
 
@@ -142,7 +172,7 @@ RSpec.describe PayrollRegisterCsvExporter do
       expect(totals.fields.length).to eq(described_class::HEADERS.length)
       expect(totals["Reported Tips"]).to eq("100.00")
       expect(totals["PTO Hours"]).to eq("")
-      expect(totals["401(k)"]).to eq("125.00")
+      expect(totals["401(k)"]).to eq("200.00")
       expect(totals["Roth 401(k)"]).to eq("75.00")
       expect(totals["Employer Match"]).to eq("30.00")
       expect(totals["Employer Roth Match"]).to eq("20.00")
