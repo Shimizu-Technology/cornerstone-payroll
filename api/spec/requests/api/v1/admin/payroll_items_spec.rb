@@ -137,6 +137,20 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "returns a validation response when update hits a payroll field entry uniqueness race" do
+      allow_any_instance_of(PayrollItem).to receive(:update)
+        .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          hours_worked: 10
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to include("duplicate key value")
+    end
+
     it "does not mark field entries overridden when normalization filters every submitted entry" do
       field = PayrollFieldDefinition.create!(
         company: company,
