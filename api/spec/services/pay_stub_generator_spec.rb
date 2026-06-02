@@ -154,6 +154,31 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$25.00")
   end
 
+  it "uses stored tax and retirement YTD snapshots in total deductions YTD" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8,
+      withholding_tax: 999,
+      social_security_tax: 999,
+      medicare_tax: 999,
+      retirement_payment: 999,
+      roth_retirement_payment: 999)
+    payroll_item.update!(
+      ytd_withholding_tax: 10,
+      ytd_social_security_tax: 20,
+      ytd_medicare_tax: 5,
+      ytd_retirement: 30,
+      ytd_roth_retirement: 7,
+      custom_deductions: []
+    )
+
+    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(72.0)
+  end
+
   it "does not include unrelated cross-tuple payroll field history in YTD deduction totals" do
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
     prior_item = create(:payroll_item,
