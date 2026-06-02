@@ -101,6 +101,34 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.net_pay.to_f).to eq(payroll_item.gross_pay.to_f - 35.0)
   end
 
+  it "itemizes payroll field deductions when the field label collides with another deduction type category" do
+    DeductionType.create!(
+      company: company,
+      name: "Health Insurance",
+      category: "pre_tax",
+      sub_category: "insurance",
+      active: true
+    )
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Health Insurance",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "insurance",
+      amount_type: "fixed",
+      default_amount: 25.00
+    )
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 25.00)
+
+    expect { described_class.new(employee, payroll_item).calculate }.not_to raise_error
+
+    deduction = payroll_item.payroll_item_deductions.reject(&:employer_contribution?).find { |item_deduction| item_deduction.label == "Health Insurance" }
+    expect(deduction).to be_present
+    expect(deduction.category).to eq("post_tax")
+    expect(deduction.deduction_type.name).to eq("Health Insurance (Post Tax)")
+    expect(payroll_item.total_deductions.to_f).to eq(25.0)
+  end
+
   it "clears stale deductions from a prior non-contractor calculation" do
     deduction_type = DeductionType.create!(
       company: company,
