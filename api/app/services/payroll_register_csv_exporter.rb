@@ -57,7 +57,7 @@ class PayrollRegisterCsvExporter
 
   def generate
     CSV.generate(headers: true, force_quotes: false) do |csv|
-      csv << HEADERS
+      csv << headers
 
       (report.dig(:employees) || []).each { |emp| csv << employee_row(emp) }
 
@@ -81,8 +81,26 @@ class PayrollRegisterCsvExporter
 
   private
 
+  def headers
+    HEADERS + payroll_field_columns.map { |column| "Payroll Field - #{column[:label]} (#{column[:tax_treatment].to_s.humanize})" }
+  end
+
+  def payroll_field_columns
+    @payroll_field_columns ||= (report.dig(:employees) || []).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+      .group_by { |entry| [ entry[:label], entry[:tax_treatment] ] }
+      .keys
+      .sort_by { |label, treatment| [ treatment.to_s, label.to_s ] }
+      .map { |label, treatment| { label: label, tax_treatment: treatment } }
+  end
+
+  def payroll_field_amount(emp, column)
+    Array(emp[:payroll_field_entries]).sum do |entry|
+      entry[:label].to_s == column[:label].to_s && entry[:tax_treatment].to_s == column[:tax_treatment].to_s ? entry[:amount].to_f : 0.0
+    end
+  end
+
   def employee_row(emp)
-    [
+    base_row = [
       sanitize_csv_field(emp[:employee_last_name]),
       sanitize_csv_field(emp[:employee_first_name]),
       sanitize_csv_field(emp[:employee_name]),
@@ -117,6 +135,7 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
+    base_row + payroll_field_columns.map { |column| format_currency(payroll_field_amount(emp, column)) }
   end
 
   def summary_row
@@ -158,7 +177,7 @@ class PayrollRegisterCsvExporter
       format_currency(s[:total_deductions]),
       format_currency(s[:total_net]),
       ""
-    ]
+    ] + payroll_field_columns.map { |column| format_currency((report.dig(:employees) || []).sum { |emp| payroll_field_amount(emp, column) }) }
   end
 
   def format_currency(value)

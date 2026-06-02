@@ -1376,6 +1376,31 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(disposition).to include(".csv")
     end
 
+    it "includes payroll field columns and amounts" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      pay_period.payroll_items.first.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 75.00,
+        source: "manual"
+      )
+
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      first_line = response.body.lines.first
+      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction)")
+      expect(response.body).to include("75.00")
+    end
+
     it "includes CSV header row with expected columns" do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
 
