@@ -89,7 +89,8 @@ class DeductionsContributionsReportPdfGenerator
 
   def render_deductions_section(pdf, items, category, title)
     all_labels = items.flat_map { |item|
-      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label)
+      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label) +
+        employee_payroll_field_deduction_entries(item, category).map(&:label)
     }.uniq.sort
     if category == "post_tax"
       custom_labels = items.flat_map { |item|
@@ -164,7 +165,7 @@ class DeductionsContributionsReportPdfGenerator
     pdf.move_down 6
 
     total_emp_taxes = items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }
-    total_deductions = items.sum { |i| i.payroll_item_deductions.reject(&:employer_contribution?).sum(&:amount) + i.custom_deductions_total.to_f }
+    total_deductions = items.sum { |i| employee_deductions_total(i) }
     total_employer = items.sum { |i|
       i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + employer_payroll_field_entries(i).sum(&:amount).to_f
@@ -203,16 +204,41 @@ class DeductionsContributionsReportPdfGenerator
   end
 
   def deduction_amount_for_label(item, label, category)
+    field_entries = employee_payroll_field_deduction_entries(item, category).select { |entry| entry.label == label }
+    field_amounts = field_entries.map { |entry| entry.amount.to_f.round(2) }
     amount = item.payroll_item_deductions
       .select { |deduction| deduction.label == label && deduction.category == category }
+      .reject { |deduction| consume_matching_amount?(field_amounts, deduction.amount.to_f) }
       .sum(&:amount)
       .to_f
+    amount += field_entries.sum { |entry| entry.amount.to_f }
     return amount unless category == "post_tax"
 
     amount + Array(item.custom_deductions).sum do |deduction|
       deduction_label = deduction["label"].presence || "Other Deduction"
       deduction_label == label ? deduction["amount"].to_f : 0
     end
+  end
+
+  def employee_deductions_total(item)
+    %w[pre_tax post_tax].sum do |category|
+      labels = item.payroll_item_deductions.select { |deduction| deduction.category == category }.map(&:label) +
+        employee_payroll_field_deduction_entries(item, category).map(&:label)
+      labels.uniq.sum { |label| deduction_amount_for_label(item, label, category) }
+    end
+  end
+
+  def employee_payroll_field_deduction_entries(item, category)
+    treatment = category == "pre_tax" ? "pre_tax_deduction" : "post_tax_deduction"
+    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }
+  end
+
+  def consume_matching_amount?(amounts, amount)
+    index = amounts.index(amount.round(2))
+    return false unless index
+
+    amounts.delete_at(index)
+    true
   end
 
   def render_table(pdf, data)
