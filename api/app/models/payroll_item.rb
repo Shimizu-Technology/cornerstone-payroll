@@ -294,7 +294,8 @@ class PayrollItem < ApplicationRecord
   def deactivate_stale_payroll_field_entries!(active_definition_ids)
     payroll_item_field_entries.each do |entry|
       next if entry.payroll_field_definition_id.blank?
-      next if entry.source.in?(%w[import manual])
+      next if entry.source == "import"
+      next if entry.source == "manual" && !imported_mosa_loan_entry_should_be_deactivated?(entry)
       next if entry.payroll_field_definition_id.in?(active_definition_ids)
 
       entry.active = false
@@ -307,6 +308,10 @@ class PayrollItem < ApplicationRecord
 
   def imported_mosa_loan_field_should_be_skipped?(field)
     import_source.present? && loan_deduction.to_f.positive? && field.category == "loan" && field.tax_treatment == "post_tax_deduction"
+  end
+
+  def imported_mosa_loan_entry_should_be_deactivated?(entry)
+    import_source.present? && loan_deduction.to_f.positive? && entry.category == "loan" && entry.tax_treatment == "post_tax_deduction"
   end
 
   def self.normalize_custom_deduction_entries(entries)

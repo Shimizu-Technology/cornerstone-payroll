@@ -404,6 +404,31 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_deductions.to_f).to be >= 150.0
     end
 
+    it "deactivates manually overridden loan field entries when a MoSa import loan becomes authoritative" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+
+      described_class.for(employee, payroll_item).calculate
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Loan" }
+      entry.assign_attributes(source: "manual", amount: 150.0)
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(entry).not_to be_active
+      expect(payroll_item.loan_payment.to_f).to eq(200.0)
+      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(0.0)
+    end
+
     it "adds newly assigned default payroll fields after another field was manually overridden" do
       rent_field = PayrollFieldDefinition.create!(
         company: company,

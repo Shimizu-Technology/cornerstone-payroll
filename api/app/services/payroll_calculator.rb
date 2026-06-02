@@ -376,16 +376,9 @@ class PayrollCalculator
   def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other")
     company = payroll_item.company || pay_period.company
     sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
-    existing = company.deduction_types.find_by(name: label, category: category)
+    name = payroll_field_deduction_type_name(label, category)
+    existing = company.deduction_types.find_by(name: name, category: category)
     return existing if existing
-
-    name = label
-    if company.deduction_types.exists?(name: label)
-      category_label = category.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
-      name = "#{label} (#{category_label})"
-      existing = company.deduction_types.find_by(name: name, category: category)
-      return existing if existing
-    end
 
     company.deduction_types.create!(
       name: name,
@@ -397,6 +390,11 @@ class PayrollCalculator
     return existing if existing
 
     raise e
+  end
+
+  def payroll_field_deduction_type_name(label, category)
+    category_label = category.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
+    "Payroll Field: #{label} (#{category_label})"
   end
 
   def record_employer_contribution(label, amount, sub_category: "retirement")
@@ -548,8 +546,9 @@ class PayrollCalculator
       next_amount = (current - reduction).round(2)
       entry.amount = next_amount
       payroll_item.payroll_item_deductions.each do |deduction|
-        next unless deduction.label == entry.label
-        next unless deduction.category == (entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax")
+        deduction_category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
+        next unless deduction.category == deduction_category
+        next unless deduction.deduction_type&.name == payroll_field_deduction_type_name(entry.label, deduction_category)
 
         deduction.amount = next_amount
       end
