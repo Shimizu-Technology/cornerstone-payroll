@@ -110,6 +110,50 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Post-Tax Deduction")
   end
 
+  it "prints total employer contribution YTD on pay stubs" do
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance"
+    )
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance",
+      amount: 15,
+      source: "manual",
+      employee_paid: false,
+      employer_paid: true
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance",
+      amount: 10,
+      source: "manual",
+      employee_paid: false,
+      employer_paid: true
+    )
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("TOTAL EMPLOYER CONTRIBUTIONS")
+    expect(text).to include("$25.00")
+  end
+
   it "limits payroll field YTD values to the current calendar year" do
     field = PayrollFieldDefinition.create!(
       company: company,
