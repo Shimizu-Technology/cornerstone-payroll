@@ -24,7 +24,7 @@ class DeductionsContributionsReportPdfGenerator
 
   def generate
     items = pay_period.payroll_items
-      .includes(:employee, payroll_item_deductions: :deduction_type)
+      .includes(:employee, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
       .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
@@ -128,24 +128,32 @@ class DeductionsContributionsReportPdfGenerator
     pdf.font_size(11) { pdf.text "Employer Taxes & Contributions", style: :bold, color: HEADER_BG }
     pdf.move_down 4
 
-    header = build_header(["Employee", "Employer SS", "Employer Medicare", "401(k) Match", "Total"])
+    field_labels = items.flat_map { |item| employer_payroll_field_entries(item).map(&:label) }.uniq.sort
+    header = build_header(["Employee", "Employer SS", "Employer Medicare", "401(k) Match"] + field_labels + ["Total"])
     rows = items.map do |item|
       ss = item.employer_social_security_tax.to_f
       med = item.employer_medicare_tax.to_f
       ret = item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f
-      employee_row(item.employee_full_name, [ss, med, ret, ss + med + ret])
+      field_amounts = field_labels.map { |label| employer_payroll_field_entries(item).select { |entry| entry.label == label }.sum(&:amount).to_f }
+      employee_row(item.employee_full_name, [ss, med, ret] + field_amounts + [ss + med + ret + field_amounts.sum])
     end
 
+    field_totals = field_labels.map { |label| items.sum { |i| employer_payroll_field_entries(i).select { |entry| entry.label == label }.sum(&:amount).to_f } }
     totals = totals_row("TOTALS", [
       items.sum { |i| i.employer_social_security_tax.to_f },
       items.sum { |i| i.employer_medicare_tax.to_f },
       items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f },
+      *field_totals,
       items.sum { |i| i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-                       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f }
+                       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f } + field_totals.sum
     ])
 
     render_table(pdf, [header] + rows + [totals])
     pdf.move_down 12
+  end
+
+  def employer_payroll_field_entries(item)
+    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == "employer_contribution" }
   end
 
   def render_grand_totals(pdf, items)
@@ -156,10 +164,10 @@ class DeductionsContributionsReportPdfGenerator
     pdf.move_down 6
 
     total_emp_taxes = items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }
-    total_deductions = items.sum { |i| i.payroll_item_deductions.sum(&:amount) + i.custom_deductions_total.to_f }
+    total_deductions = items.sum { |i| i.payroll_item_deductions.reject(&:employer_contribution?).sum(&:amount) + i.custom_deductions_total.to_f }
     total_employer = items.sum { |i|
       i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-      i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f
+      i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + employer_payroll_field_entries(i).sum(&:amount).to_f
     }
 
     pdf.font_size(10) do

@@ -1085,6 +1085,11 @@ module Api
               total_non_taxable_pay: w2_items.sum(&:non_taxable_pay),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+              total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+              total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+              total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+              total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
               total_withholding: w2_items.sum(&:withholding_tax),
               total_additional_withholding: w2_items.sum(&:additional_withholding),
               total_social_security: w2_items.sum(&:social_security_tax),
@@ -1401,6 +1406,7 @@ module Api
                                            .select(:id)
 
           items = PayrollItem.joins(:pay_period)
+                            .includes(:payroll_item_field_entries)
                             .where(company_id: current_company_id)
                             .not_voided
                             .where(pay_periods: {
@@ -1413,6 +1419,11 @@ module Api
             year: year,
             gross_pay: items.sum(:gross_pay),
             custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
             withholding_tax: items.sum(:withholding_tax),
             social_security_tax: items.sum(:social_security_tax),
             medicare_tax: items.sum(:medicare_tax),
@@ -1531,6 +1542,11 @@ module Api
             year: year,
             gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
             custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
             withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
@@ -1558,6 +1574,11 @@ module Api
             status: employee.status,
             gross_pay: ytd_items.sum { |item| item.gross_pay.to_f },
             custom_earnings_total: custom_totals[:custom_earnings_total],
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
             withholding_tax: ytd_items.sum { |item| item.withholding_tax.to_f },
             social_security_tax: ytd_items.sum { |item| item.social_security_tax.to_f },
             medicare_tax: ytd_items.sum { |item| item.medicare_tax.to_f },
@@ -1628,6 +1649,11 @@ module Api
               total_bonus: w2_items.sum(&:bonus),
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+              total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+              total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+              total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+              total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
               total_withholding: w2_items.sum(&:withholding_tax),
               total_social_security: w2_items.sum(&:social_security_tax),
               total_medicare: w2_items.sum(&:medicare_tax),
@@ -1681,18 +1707,6 @@ module Api
           active_payroll_field_entries(item).sum { |entry| entry.tax_treatment == treatment ? entry.amount.to_f : 0.0 }
         end
 
-        def payroll_field_group_totals(employees)
-          Array(employees).flat_map { |emp| Array(emp[:payroll_field_entries]) }.group_by { |entry| [ entry[:tax_treatment], entry[:label], entry[:kind], entry[:category] ] }.map do |(tax_treatment, label, kind, category), entries|
-            {
-              tax_treatment: tax_treatment,
-              label: label,
-              kind: kind,
-              category: category,
-              amount: entries.sum { |entry| entry[:amount].to_f }
-            }
-          end.sort_by { |row| [ row[:tax_treatment].to_s, row[:label].to_s ] }
-        end
-
         def employee_reportable_ytd_items(employee, year)
           reportable_period_ids = PayPeriod.reportable_committed
                                            .where(company_id: current_company_id)
@@ -1701,6 +1715,7 @@ module Api
 
           employee.payroll_items
                   .joins(:pay_period)
+                  .includes(:payroll_item_field_entries)
                   .where(company_id: current_company_id)
                   .not_voided
                   .where(pay_periods: { id: reportable_period_ids })
@@ -1896,7 +1911,8 @@ module Api
             emp[:employer_social_security_tax].to_f +
             emp[:employer_medicare_tax].to_f +
             emp[:employer_retirement_match].to_f +
-            emp[:employer_roth_retirement_match].to_f
+            emp[:employer_roth_retirement_match].to_f +
+            emp[:payroll_field_employer_contributions_total].to_f
 
           [
             emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
@@ -1920,6 +1936,11 @@ module Api
             [ "Bonus", summary[:total_bonus] ],
             [ "Custom Earnings", summary[:total_custom_earnings] ],
             [ "Custom Deductions", summary[:total_custom_deductions] ],
+            [ "Payroll Field Taxable Additions", summary[:total_payroll_field_taxable_additions] ],
+            [ "Payroll Field Non-Taxable Additions", summary[:total_payroll_field_non_taxable_additions] ],
+            [ "Payroll Field Pre-Tax Deductions", summary[:total_payroll_field_pre_tax_deductions] ],
+            [ "Payroll Field Post-Tax Deductions", summary[:total_payroll_field_post_tax_deductions] ],
+            [ "Payroll Field Employer Contributions", summary[:total_payroll_field_employer_contributions] ],
             [ "FIT", summary[:total_withholding] ],
             [ "SS Tax", summary[:total_social_security] ],
             [ "Medicare Tax", summary[:total_medicare] ],
@@ -1942,6 +1963,11 @@ module Api
             total_bonus: items.sum { |item| item[:bonus].to_f },
             total_custom_earnings: items.sum { |item| item[:custom_earnings_total].to_f },
             total_custom_deductions: items.sum { |item| item[:custom_deductions_total].to_f },
+            total_payroll_field_taxable_additions: items.sum { |item| item[:payroll_field_taxable_additions_total].to_f },
+            total_payroll_field_non_taxable_additions: items.sum { |item| item[:payroll_field_non_taxable_additions_total].to_f },
+            total_payroll_field_pre_tax_deductions: items.sum { |item| item[:payroll_field_pre_tax_deductions_total].to_f },
+            total_payroll_field_post_tax_deductions: items.sum { |item| item[:payroll_field_post_tax_deductions_total].to_f },
+            total_payroll_field_employer_contributions: items.sum { |item| item[:payroll_field_employer_contributions_total].to_f },
             total_withholding: items.sum { |item| item[:withholding_tax].to_f },
             total_social_security: items.sum { |item| item[:social_security_tax].to_f },
             total_medicare: items.sum { |item| item[:medicare_tax].to_f },
@@ -2058,6 +2084,11 @@ module Api
             [ "Tax Year", ytd[:year] ],
             [ "Gross Pay", ytd[:gross_pay] ],
             [ "Custom Earnings", ytd[:custom_earnings_total] ],
+            [ "Payroll Field Taxable Additions", ytd[:payroll_field_taxable_additions_total] ],
+            [ "Payroll Field Non-Taxable Additions", ytd[:payroll_field_non_taxable_additions_total] ],
+            [ "Payroll Field Pre-Tax Deductions", ytd[:payroll_field_pre_tax_deductions_total] ],
+            [ "Payroll Field Post-Tax Deductions", ytd[:payroll_field_post_tax_deductions_total] ],
+            [ "Payroll Field Employer Contributions", ytd[:payroll_field_employer_contributions_total] ],
             [ "FIT", ytd[:withholding_tax] ],
             [ "SS Tax", ytd[:social_security_tax] ],
             [ "Medicare Tax", ytd[:medicare_tax] ],
@@ -2086,14 +2117,18 @@ module Api
         def ytd_summary_sheets(report)
           rows = [ [
             "Last Name", "First Name", "Employee Name", "Type", "Status", "Gross Pay",
-            "Custom Earnings", "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
+            "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
+            "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
+            "Tips", "Tips Paid Out", "Bonus", "FIT", "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay"
           ] ]
           Array(report[:employees]).each do |emp|
             rows << [
               emp[:last_name], emp[:first_name], emp[:name], employment_type_label(emp[:employment_type]), emp[:status],
-              emp[:gross_pay], emp[:custom_earnings_total], emp[:tips], emp[:tips_paid_out], emp[:bonus],
-              emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
+              emp[:gross_pay], emp[:custom_earnings_total], emp[:payroll_field_taxable_additions_total],
+              emp[:payroll_field_non_taxable_additions_total], emp[:payroll_field_pre_tax_deductions_total],
+              emp[:payroll_field_post_tax_deductions_total], emp[:payroll_field_employer_contributions_total],
+              emp[:tips], emp[:tips_paid_out], emp[:bonus], emp[:withholding_tax], emp[:social_security_tax], emp[:medicare_tax],
               emp[:retirement], emp[:roth_retirement], emp[:total_deductions], emp[:custom_deductions_total], emp[:net_pay]
             ]
           end

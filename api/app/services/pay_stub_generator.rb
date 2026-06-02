@@ -527,14 +527,33 @@ class PayStubGenerator
   end
 
   def ytd_payroll_field_amount(entry)
-    PayrollItemFieldEntry.joins(payroll_item: :pay_period)
-      .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
-      .where(active: true, label: entry.label, tax_treatment: entry.tax_treatment, category: entry.category)
-      .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-        pay_date: payroll_item.pay_period.pay_date,
-        pay_period_id: payroll_item.pay_period.id)
-      .sum(:amount)
-      .to_f
+    ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.0)
+  end
+
+  def ytd_payroll_field_totals
+    @ytd_payroll_field_totals ||= begin
+      entries = payroll_item.payroll_item_field_entries.select(&:active?)
+      keys = entries.map { |entry| [ entry.label, entry.tax_treatment, entry.category ] }.uniq
+      if keys.empty?
+        {}
+      else
+        labels = keys.map(&:first).uniq
+        treatments = keys.map { |key| key[1] }.uniq
+        categories = keys.map { |key| key[2] }.uniq
+        raw_totals = PayrollItemFieldEntry.joins(payroll_item: :pay_period)
+          .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
+          .where(active: true, label: labels, tax_treatment: treatments, category: categories)
+          .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+            pay_date: payroll_item.pay_period.pay_date,
+            pay_period_id: payroll_item.pay_period.id)
+          .group(:label, :tax_treatment, :category)
+          .sum(:amount)
+
+        raw_totals.each_with_object(Hash.new(0.0)) do |((label, treatment, category), amount), totals|
+          totals[[ label, treatment, category ]] = amount.to_f
+        end
+      end
+    end
   end
 
   def employee_ytd_additional_withholding

@@ -23,8 +23,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       status: "draft")
   end
 
-  before do
-    CompanyAssignment.create!(user: client_user, company: company)
+  let!(:payroll_item) do
     create(:payroll_item,
       pay_period: pay_period,
       employee: employee,
@@ -39,6 +38,32 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       total_deductions: 280.0,
       custom_earnings: [ { "label" => "Certification Pay", "amount" => 50.0 } ],
       custom_deductions: [ { "label" => "Cash Advance", "amount" => 30.0 } ])
+  end
+
+  let!(:payroll_field_definition) do
+    PayrollFieldDefinition.create!(
+      company: company,
+      name: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent"
+    )
+  end
+
+  let!(:payroll_field_entry) do
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: payroll_field_definition,
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 75.0,
+      source: "manual"
+    )
+  end
+
+  before do
+    CompanyAssignment.create!(user: client_user, company: company)
 
     create(:payroll_item,
       pay_period: draft_pay_period,
@@ -66,7 +91,11 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response.parsed_body.dig("report", "summary", "employee_count")).to eq(1)
     expect(response.parsed_body.dig("report", "summary", "total_custom_earnings").to_f).to eq(50.0)
     expect(response.parsed_body.dig("report", "summary", "total_custom_deductions").to_f).to eq(30.0)
-    expect(response.parsed_body.dig("report", "employees", 0)).not_to have_key("check_number")
+    expect(response.parsed_body.dig("report", "summary", "total_payroll_field_post_tax_deductions").to_f).to eq(75.0)
+    employee_row = response.parsed_body.dig("report", "employees", 0)
+    expect(employee_row).not_to have_key("check_number")
+    expect(employee_row.dig("payroll_field_entries", 0, "label")).to eq("Rent Deduction")
+    expect(employee_row.dig("payroll_field_entries", 0, "amount").to_f).to eq(75.0)
 
     get "/api/v1/client/reports/payroll_register_pdf", params: { pay_period_id: pay_period.id }
     expect(response).to have_http_status(:ok)
@@ -82,8 +111,10 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(report.dig("company_totals", "gross_pay").to_f).to eq(1450.0)
     expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.0)
     expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(30.0)
+    expect(report.dig("company_totals", "payroll_field_post_tax_deductions_total").to_f).to eq(75.0)
     expect(report.fetch("employees").first.fetch("gross_pay").to_f).to eq(1450.0)
     expect(report.fetch("employees").first.fetch("custom_earnings_total").to_f).to eq(50.0)
     expect(report.fetch("employees").first.fetch("custom_deductions_total").to_f).to eq(30.0)
+    expect(report.fetch("employees").first.fetch("payroll_field_post_tax_deductions_total").to_f).to eq(75.0)
   end
 end
