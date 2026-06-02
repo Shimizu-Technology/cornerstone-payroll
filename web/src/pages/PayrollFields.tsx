@@ -119,6 +119,9 @@ export function PayrollFields() {
     if (!window.confirm(`Archive ${field.name}? Existing payroll history stays unchanged.`)) return;
     try {
       await payrollFieldsApi.archive(field.id);
+      if (editingId === field.id) {
+        resetDraft();
+      }
       await loadFields();
       setError(null);
     } catch (err) {
