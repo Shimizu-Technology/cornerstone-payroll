@@ -621,7 +621,8 @@ class CheckGenerator
           .sum(:amount)
 
         raw_totals.each_with_object(Hash.new(0.0)) do |((label, treatment, category), amount), totals|
-          totals[[ label, treatment, category ]] = amount.to_f
+          key = [ label, treatment, category ]
+          totals[key] = amount.to_f if keys.include?(key)
         end
       end
     end
