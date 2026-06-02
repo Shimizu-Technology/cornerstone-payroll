@@ -129,6 +129,34 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.total_deductions.to_f).to eq(25.0)
   end
 
+  it "uses a collision-safe payroll field deduction type name when a legacy type already owns the generated name" do
+    DeductionType.create!(
+      company: company,
+      name: "Payroll Field: Health Insurance (Post Tax)",
+      category: "pre_tax",
+      sub_category: "insurance",
+      active: true
+    )
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Health Insurance",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "insurance",
+      amount_type: "fixed",
+      default_amount: 25.00
+    )
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 25.00)
+
+    expect { described_class.new(employee, payroll_item).calculate }.not_to raise_error
+
+    deduction = payroll_item.payroll_item_deductions.reject(&:employer_contribution?).find { |item_deduction| item_deduction.label == "Health Insurance" }
+    expect(deduction).to be_present
+    expect(deduction.category).to eq("post_tax")
+    expect(deduction.deduction_type.name).to eq("Payroll Field Post Tax: Health Insurance")
+    expect(payroll_item.total_deductions.to_f).to eq(25.0)
+  end
+
   it "does not accumulate payroll field deduction rows on recalculation" do
     deduction_field = PayrollFieldDefinition.create!(
       company: company,
