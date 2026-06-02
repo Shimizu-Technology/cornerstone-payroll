@@ -238,7 +238,7 @@ class PayStubGenerator
     end
 
     payroll_field_entries_for("taxable_addition").each do |entry|
-      earnings_data << [ entry.label, "—", "—", format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+      earnings_data << [ entry.label, "—", "—", format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
     end
 
     # Gross total
@@ -385,7 +385,7 @@ class PayStubGenerator
     end
 
     payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
-      deductions_data << [ entry.label, format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+      deductions_data << [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
     end
 
     # Total deductions
@@ -424,7 +424,7 @@ class PayStubGenerator
     end
 
     payroll_field_entries_for("non_taxable_addition").each do |entry|
-      additions << [ entry.label, format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+      additions << [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] if entry.amount.to_f.positive?
     end
 
     return if additions.empty?
@@ -456,7 +456,7 @@ class PayStubGenerator
     end
     pdf.move_down 3
 
-    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map { |entry| [ entry.label, format_currency(entry.amount), "—" ] }
+    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map { |entry| [ entry.label, format_currency(entry.amount), format_currency(ytd_payroll_field_amount(entry)) ] }
     rows << [ { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold }, { content: format_currency(entries.sum { |entry| entry.amount.to_f }), font_style: :bold }, "—" ]
 
     pdf.font_size(8) do
@@ -524,6 +524,17 @@ class PayStubGenerator
 
   def payroll_field_entries_for(*treatments)
     payroll_item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
+  end
+
+  def ytd_payroll_field_amount(entry)
+    PayrollItemFieldEntry.joins(payroll_item: :pay_period)
+      .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
+      .where(active: true, label: entry.label, tax_treatment: entry.tax_treatment, category: entry.category)
+      .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+        pay_date: payroll_item.pay_period.pay_date,
+        pay_period_id: payroll_item.pay_period.id)
+      .sum(:amount)
+      .to_f
   end
 
   def employee_ytd_additional_withholding
