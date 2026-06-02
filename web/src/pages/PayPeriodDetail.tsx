@@ -497,6 +497,7 @@ export function PayPeriodDetail() {
       // Build salary overrides payload for variable salary employees.
       // Send zeroes too so clearing a variable salary amount removes stale overrides.
       const includedEmployeeIds = new Set([
+        ...Object.keys(hoursMap).map((employeeId) => Number(employeeId)).filter(Number.isFinite),
         ...payrollItems.map((pi) => pi.employee_id),
         ...additionalEmployeeIds,
       ]);
@@ -551,6 +552,7 @@ export function PayPeriodDetail() {
       setPayrollItems(response.pay_period.payroll_items || []);
       setHoursMap(buildHoursMap(response.pay_period.payroll_items || [], employees));
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
+      setSalaryOverrideMap((previous) => ({ ...previous, ...salary_overrides }));
       setAdditionalEmployeeIds(new Set());
 
       if (response.results.errors.length > 0) {
