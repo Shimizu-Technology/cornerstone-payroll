@@ -178,6 +178,50 @@ RSpec.describe CheckGenerator do
   end
 
   describe "year-to-date totals" do
+    it "limits payroll field YTD totals to the current calendar year" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      prior_year_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 12, 1),
+        end_date: Date.new(2025, 12, 14),
+        pay_date: Date.new(2025, 12, 19))
+      prior_year_item = create(:payroll_item,
+        pay_period: prior_year_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15.24)
+      prior_year_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 90.0,
+        source: "manual"
+      )
+      payroll_item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 25.0,
+        source: "manual"
+      )
+
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+
+      expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(25.0)
+      expect(generator.send(:ytd_visible_deds)).to eq(generator.send(:ytd)[:deds] + 25.0)
+    end
+
     it "exclude committed payroll from later pay dates" do
       later_period = create(:pay_period, :committed,
         company: company,
