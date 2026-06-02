@@ -206,6 +206,7 @@ class PayrollCalculator
       record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match, sub_category: "retirement")
     end
 
+    record_payroll_field_employee_deductions
     record_payroll_field_employer_contributions
 
     # Update aggregate fields for backward compatibility with existing code
@@ -237,13 +238,11 @@ class PayrollCalculator
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total +
-      payroll_item.post_tax_payroll_adjustments_total +
-      payroll_item.post_tax_payroll_field_entries_total
+    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
   end
 
   def pre_tax_payroll_adjustments_total
-    payroll_item.pre_tax_payroll_adjustments_total + payroll_item.pre_tax_payroll_field_entries_total
+    payroll_item.pre_tax_payroll_adjustments_total
   end
 
   def non_taxable_additions_total
@@ -546,9 +545,21 @@ class PayrollCalculator
       reduction = [ current, amount ].min
       metadata = entry.metadata || {}
       entry.metadata = metadata.merge("uncapped_amount" => current.round(2)) if reduction.positive? && !metadata.key?("uncapped_amount")
-      entry.amount = (current - reduction).round(2)
+      next_amount = (current - reduction).round(2)
+      entry.amount = next_amount
+      payroll_item.payroll_item_deductions.each do |deduction|
+        next unless deduction.label == entry.label
+        next unless deduction.category == (entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax")
+
+        deduction.amount = next_amount
+      end
       amount = (amount - reduction).round(2)
       break unless amount.positive?
+    end
+
+    payroll_item.payroll_item_deductions.select { |deduction| deduction.amount.to_f.zero? }.each do |deduction|
+      deduction.destroy! if deduction.persisted?
+      payroll_item.payroll_item_deductions.target.delete(deduction)
     end
 
     amount

@@ -31,7 +31,7 @@ class SalaryPayrollCalculator < PayrollCalculator
 
     pre_tax_ded = pre_tax_employee_deductions_total
     taxable_for_withholding = [
-      payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f - pre_tax_ded - pre_tax_payroll_adjustments_total,
+      payroll_item.gross_pay.to_f - payroll_item.retirement_payment.to_f - pre_tax_ded - pre_tax_payroll_adjustments_total - payroll_item.pre_tax_payroll_field_entries_total,
       0.0
     ].max
 

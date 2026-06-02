@@ -306,6 +306,37 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
     end
 
+    it "records salary and hourly payroll field deductions as itemized deduction rows" do
+      pre_tax_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Field 401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "fixed",
+        default_amount: 40.0
+      )
+      post_tax_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Field Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: pre_tax_field, amount: 40.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: post_tax_field, amount: 25.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      deductions = payroll_item.payroll_item_deductions.reject(&:employer_contribution?)
+      expect(deductions.map(&:label)).to include("Field 401(k)", "Field Rent")
+      expect(deductions.find { |deduction| deduction.label == "Field 401(k)" }.category).to eq("pre_tax")
+      expect(deductions.find { |deduction| deduction.label == "Field Rent" }.category).to eq("post_tax")
+      expect(deductions.sum { |deduction| deduction.label.in?(["Field 401(k)", "Field Rent"]) ? deduction.amount.to_f : 0.0 }).to eq(65.0)
+    end
+
     it "recomputes default percentage payroll fields when pay changes before manual override" do
       field = PayrollFieldDefinition.create!(
         company: company,
