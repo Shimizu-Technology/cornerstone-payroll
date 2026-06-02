@@ -50,6 +50,7 @@ class PayrollRegisterPdfGenerator
     render_header(pdf)
     render_pay_period_block(pdf)
     render_summary_block(pdf)
+    render_payroll_fields_summary(pdf)
     render_employee_table(pdf)
 
     pp = report[:pay_period] || {}
@@ -151,6 +152,36 @@ class PayrollRegisterPdfGenerator
 
     pdf.fill_color TEXT_DARK
     pdf.move_down 14
+  end
+
+  def render_payroll_fields_summary(pdf)
+    rows = payroll_field_total_rows
+    return if rows.empty?
+
+    pdf.start_new_page if pdf.cursor < 120
+    pdf.font_size(11) { pdf.text "Payroll Fields", style: :bold }
+    pdf.move_down 4
+
+    table_data = [[ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ]] + rows
+    pdf.table(table_data, header: true, width: pdf.bounds.width) do
+      row(0).font_style = :bold
+      row(0).background_color = HEADER_BG
+      row(0).text_color = "FFFFFF"
+      cells.size = 8
+      cells.padding = [ 3, 5 ]
+      columns(2..4).align = :right
+    end
+    pdf.move_down 14
+  end
+
+  def payroll_field_total_rows
+    entries = Array(report[:employees]).flat_map { |emp| Array(emp[:payroll_field_entries]) } +
+      Array(report[:contractors]).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+    entries.group_by { |entry| [ entry[:tax_treatment], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }
+      .sort_by { |key, _| key.map(&:to_s) }
+      .map do |(treatment, label, employee_paid, employer_paid), grouped|
+        [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+      end
   end
 
   # ─── Employee Table ─────────────────────────────────────────────────────────

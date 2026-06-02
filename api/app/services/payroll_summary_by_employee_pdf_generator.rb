@@ -27,7 +27,7 @@ class PayrollSummaryByEmployeePdfGenerator
 
   def generate
     items = pay_period.payroll_items
-      .includes(:employee, :payroll_item_earnings, payroll_item_deductions: :deduction_type)
+      .includes(:employee, :payroll_item_earnings, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
       .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
@@ -169,6 +169,13 @@ class PayrollSummaryByEmployeePdfGenerator
           earning ? fmt(earning.amount) : "—"
         }
       end
+
+      payroll_field_labels_for(group, "taxable_addition", "non_taxable_addition").each do |label|
+        render_labeled_row(pdf, label, group, label_width, col_width) { |item|
+          amount = payroll_field_amount_for_label(item, label, "taxable_addition", "non_taxable_addition")
+          amount.positive? ? fmt(amount) : "—"
+        }
+      end
     end
   end
 
@@ -252,11 +259,32 @@ class PayrollSummaryByEmployeePdfGenerator
       }
     end
 
+    payroll_field_labels_for(group, "employer_contribution").each do |label|
+      render_labeled_row(pdf, label, group, label_width, col_width) { |item|
+        amount = payroll_field_amount_for_label(item, label, "employer_contribution")
+        amount.positive? ? fmt(amount) : "—"
+      }
+    end
+
     render_labeled_row(pdf, "Total Employer Cost", group, label_width, col_width, bold: true) { |item|
       total = item.employer_social_security_tax.to_f + item.employer_medicare_tax.to_f +
-              item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f
+              item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f +
+              payroll_field_amount_for_label(item, nil, "employer_contribution")
       fmt(total)
     }
+  end
+
+  def payroll_field_labels_for(group, *treatments)
+    group.flat_map { |item| item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }.map(&:label) }.uniq
+  end
+
+  def payroll_field_amount_for_label(item, label, *treatments)
+    item.payroll_item_field_entries.sum do |entry|
+      next 0.0 unless entry.active? && treatments.include?(entry.tax_treatment)
+      next 0.0 if label && entry.label != label
+
+      entry.amount.to_f
+    end
   end
 
   def render_labeled_row(pdf, label, group, label_width, col_width, bold: false)
