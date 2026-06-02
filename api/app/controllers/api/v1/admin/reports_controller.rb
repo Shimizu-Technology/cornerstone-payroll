@@ -2258,7 +2258,7 @@ module Api
             [
               emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name], emp[:gross_pay],
               emp[:retirement_payment], emp[:roth_retirement_payment], field_employee_retirement, emp[:employer_retirement_match],
-              emp[:employer_roth_retirement_match], field_employer_retirement, emp[:total_retirement_payment].to_f + field_employee_retirement, emp[:total_employer_retirement_match].to_f + field_employer_retirement
+              emp[:employer_roth_retirement_match], field_employer_retirement, emp[:total_retirement_payment], emp[:total_employer_retirement_match]
             ]
           end
           [
