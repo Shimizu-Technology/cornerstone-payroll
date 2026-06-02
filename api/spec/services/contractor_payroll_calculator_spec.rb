@@ -129,6 +129,41 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.total_deductions.to_f).to eq(25.0)
   end
 
+  it "does not accumulate payroll field deduction rows on recalculation" do
+    deduction_field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Contractor Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount_type: "fixed",
+      default_amount: 25.00
+    )
+    contribution_field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Contractor Admin Fee",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "other",
+      amount_type: "fixed",
+      default_amount: 10.00
+    )
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: deduction_field, amount: 25.00)
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: contribution_field, amount: 10.00)
+
+    described_class.new(employee, payroll_item).calculate
+    payroll_item.save!
+    first_labels = payroll_item.reload.payroll_item_deductions.map(&:label)
+
+    described_class.new(employee, payroll_item).calculate
+    payroll_item.save!
+    second_labels = payroll_item.reload.payroll_item_deductions.map(&:label)
+
+    expect(first_labels).to match_array(["Contractor Rent Deduction", "Contractor Admin Fee"])
+    expect(second_labels).to match_array(first_labels)
+    expect(payroll_item.payroll_item_deductions.count).to eq(2)
+  end
+
   it "clears stale deductions from a prior non-contractor calculation" do
     deduction_type = DeductionType.create!(
       company: company,
