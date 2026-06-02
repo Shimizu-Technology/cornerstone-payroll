@@ -138,14 +138,6 @@ class ContractorPayrollCalculator < PayrollCalculator
     payroll_item.insurance_payment = 0
   end
 
-  def custom_deductions_total
-    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
-  end
-
-  def pre_tax_payroll_adjustments_total
-    payroll_item.pre_tax_payroll_adjustments_total
-  end
-
   def build_earning(category, label, hours, rate, amount)
     payroll_item.payroll_item_earnings.build(
       category: category,
