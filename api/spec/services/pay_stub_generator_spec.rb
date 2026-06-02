@@ -84,6 +84,46 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Post-Tax Deduction")
   end
 
+  it "limits payroll field YTD values to the current calendar year" do
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent"
+    )
+    prior_year_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2025, 12, 31))
+    prior_year_item = create(:payroll_item,
+      pay_period: prior_year_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_year_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 80,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 20,
+      source: "manual"
+    )
+
+    entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+    generator = described_class.new(payroll_item)
+
+    expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(20.0)
+  end
+
   it "does not include later same-pay-date custom deductions in YTD custom deduction totals" do
     later_period = create(
       :pay_period,

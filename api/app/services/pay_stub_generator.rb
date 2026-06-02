@@ -392,7 +392,7 @@ class PayStubGenerator
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
       { content: format_currency(payroll_item.total_deductions), font_style: :bold },
-      "—"
+      { content: format_currency(ytd_total_deductions), font_style: :bold }
     ]
 
     pdf.font_size(8) do
@@ -530,6 +530,32 @@ class PayStubGenerator
     ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.0)
   end
 
+  def ytd_total_deductions
+    ytd = employee_ytd_totals
+    ytd[:withholding_tax].to_f + ytd[:social_security_tax].to_f + ytd[:medicare_tax].to_f +
+      ytd[:additional_withholding].to_f + ytd[:retirement].to_f + ytd[:roth_retirement].to_f +
+      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + ytd[:tips_paid_out].to_f +
+      employee_ytd_custom_deductions_total + ytd_payroll_field_deductions_total
+  end
+
+  def visible_legacy_insurance_ytd
+    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
+
+    employee_ytd_totals[:insurance].to_f
+  end
+
+  def visible_legacy_loan_ytd
+    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
+
+    employee_ytd_totals[:loans].to_f
+  end
+
+  def ytd_payroll_field_deductions_total
+    ytd_payroll_field_totals.sum do |(_label, treatment, _category), amount|
+      %w[pre_tax_deduction post_tax_deduction].include?(treatment) ? amount.to_f : 0.0
+    end
+  end
+
   def ytd_payroll_field_totals
     @ytd_payroll_field_totals ||= begin
       entries = payroll_item.payroll_item_field_entries.select(&:active?)
@@ -540,11 +566,15 @@ class PayStubGenerator
         labels = keys.map(&:first).uniq
         treatments = keys.map { |key| key[1] }.uniq
         categories = keys.map { |key| key[2] }.uniq
+        pay_date = payroll_item.pay_period.pay_date || Date.current
+        year_start = Date.new(pay_date.year, 1, 1)
         raw_totals = PayrollItemFieldEntry.joins(payroll_item: :pay_period)
+          .merge(PayrollItem.not_voided)
           .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
+          .where(pay_periods: { pay_date: year_start..pay_date })
           .where(active: true, label: labels, tax_treatment: treatments, category: categories)
           .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-            pay_date: payroll_item.pay_period.pay_date,
+            pay_date: pay_date,
             pay_period_id: payroll_item.pay_period.id)
           .group(:label, :tax_treatment, :category)
           .sum(:amount)
@@ -556,22 +586,23 @@ class PayStubGenerator
     end
   end
 
+  def employee_ytd_totals
+    @employee_ytd_totals ||= begin
+      year = payroll_item.pay_period.pay_date&.year || Date.current.year
+      payroll_item.employee.ytd_totals_through(
+        year: year,
+        pay_date: payroll_item.pay_period.pay_date,
+        pay_period_id: payroll_item.pay_period_id
+      )
+    end
+  end
+
   def employee_ytd_additional_withholding
-    year = payroll_item.pay_period.pay_date&.year || Date.current.year
-    payroll_item.employee.ytd_totals_through(
-      year: year,
-      pay_date: payroll_item.pay_period.pay_date,
-      pay_period_id: payroll_item.pay_period_id
-    )[:additional_withholding].to_f
+    employee_ytd_totals[:additional_withholding].to_f
   end
 
   def employee_ytd_tips_paid_out
-    year = payroll_item.pay_period.pay_date&.year || Date.current.year
-    payroll_item.employee.ytd_totals_through(
-      year: year,
-      pay_date: payroll_item.pay_period.pay_date,
-      pay_period_id: payroll_item.pay_period_id
-    )[:tips_paid_out].to_f
+    employee_ytd_totals[:tips_paid_out].to_f
   end
 
   def employee_ytd_custom_deductions_by_label
@@ -594,12 +625,18 @@ class PayStubGenerator
     end
   end
 
+  def employee_ytd_custom_deductions_total
+    @employee_ytd_custom_deductions_total ||= custom_deduction_items.sum do |item|
+      item.custom_deductions_total.to_f + item.pre_tax_payroll_adjustments_total.to_f + item.post_tax_payroll_adjustments_total.to_f
+    end
+  end
+
   def custom_deduction_items
     year = payroll_item.pay_period.pay_date&.year || Date.current.year
 
     payroll_item.employee.payroll_items
       .joins(:pay_period)
-      .select(:id, :custom_deductions)
+      .select(:id, :custom_deductions, :payroll_adjustments)
       .not_voided
       .where(pay_periods: {
         company_id: payroll_item.company_id,

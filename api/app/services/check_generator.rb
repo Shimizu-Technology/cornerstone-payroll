@@ -548,7 +548,7 @@ class CheckGenerator
       rows << [
         { content: "TOTAL", font_style: :bold },
         { content: fn(cur_deds), font_style: :bold },
-        { content: fn(ytd[:deds]), font_style: :bold }
+        { content: fn(ytd_visible_deds), font_style: :bold }
       ]
     end
     rows
@@ -570,6 +570,29 @@ class CheckGenerator
     payroll_item.loan_payment.to_f
   end
 
+  def ytd_visible_deds
+    ytd[:retire] + ytd[:roth] + visible_legacy_insurance_ytd + visible_legacy_loan_ytd +
+      ytd[:tips_paid_out] + ytd[:custom_deds] + ytd_payroll_field_deductions_total
+  end
+
+  def visible_legacy_insurance_ytd
+    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "insurance" }
+
+    ytd[:ins]
+  end
+
+  def visible_legacy_loan_ytd
+    return 0.0 if payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").any? { |entry| entry.category == "loan" }
+
+    ytd[:loan]
+  end
+
+  def ytd_payroll_field_deductions_total
+    ytd_payroll_field_totals.sum do |(_label, treatment, _category), amount|
+      %w[pre_tax_deduction post_tax_deduction].include?(treatment) ? amount.to_f : 0.0
+    end
+  end
+
   def ytd_payroll_field_amount(entry)
     ytd_payroll_field_totals.fetch([ entry.label, entry.tax_treatment, entry.category ], 0.0)
   end
@@ -584,11 +607,15 @@ class CheckGenerator
         labels = keys.map(&:first).uniq
         treatments = keys.map { |key| key[1] }.uniq
         categories = keys.map { |key| key[2] }.uniq
+        pay_date = pay_period.pay_date || Date.current
+        year_start = Date.new(pay_date.year, 1, 1)
         raw_totals = PayrollItemFieldEntry.joins(payroll_item: :pay_period)
+          .merge(PayrollItem.not_voided)
           .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
+          .where(pay_periods: { pay_date: year_start..pay_date })
           .where(active: true, label: labels, tax_treatment: treatments, category: categories)
           .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-            pay_date: pay_period.pay_date,
+            pay_date: pay_date,
             pay_period_id: pay_period.id)
           .group(:label, :tax_treatment, :category)
           .sum(:amount)
