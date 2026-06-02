@@ -68,8 +68,8 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.net_pay.to_f).to eq(payroll_item.gross_pay.to_f - 30.0)
   end
 
-  it "does not reduce contractor net pay for employee-paid payroll field deductions" do
-    deduction_field = PayrollFieldDefinition.create!(
+  it "reduces contractor net pay for explicitly assigned payroll field deductions" do
+    post_tax_field = PayrollFieldDefinition.create!(
       company: company,
       name: "Contractor Rent Deduction",
       kind: "deduction",
@@ -78,18 +78,25 @@ RSpec.describe ContractorPayrollCalculator do
       amount_type: "fixed",
       default_amount: 25.00
     )
-    EmployeePayrollField.create!(
-      employee: employee,
-      payroll_field_definition: deduction_field,
-      amount: 25.00
+    pre_tax_field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Contractor Plan Deduction",
+      kind: "deduction",
+      tax_treatment: "pre_tax_deduction",
+      category: "benefit",
+      amount_type: "fixed",
+      default_amount: 10.00
     )
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: post_tax_field, amount: 25.00)
+    EmployeePayrollField.create!(employee: employee, payroll_field_definition: pre_tax_field, amount: 10.00)
 
     described_class.new(employee, payroll_item).calculate
 
     expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Contractor Rent Deduction" }.amount.to_f).to eq(25.0)
+    expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Contractor Plan Deduction" }.amount.to_f).to eq(10.0)
     expect(payroll_item.payroll_item_deductions.reject(&:employer_contribution?)).to be_empty
-    expect(payroll_item.total_deductions).to eq(0)
-    expect(payroll_item.net_pay).to eq(payroll_item.gross_pay)
+    expect(payroll_item.total_deductions.to_f).to eq(35.0)
+    expect(payroll_item.net_pay.to_f).to eq(payroll_item.gross_pay.to_f - 35.0)
   end
 
   it "clears stale deductions from a prior non-contractor calculation" do

@@ -212,18 +212,6 @@ class PayrollItem < ApplicationRecord
     self.payroll_adjustments = defaults if defaults.present?
   end
 
-  def payroll_field_entries_overridden?
-    return false unless custom_columns_data.is_a?(Hash)
-
-    ActiveModel::Type::Boolean.new.cast(custom_columns_data["payroll_field_entries_overridden"] || custom_columns_data[:payroll_field_entries_overridden])
-  end
-
-  def mark_payroll_field_entries_overridden!
-    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
-    data["payroll_field_entries_overridden"] = true
-    self.custom_columns_data = data
-  end
-
   def apply_default_payroll_field_entries_if_unset!(source_employee = employee, assignments: nil)
     assignments ||= active_payroll_field_assignments_for(source_employee)
     assigned_definition_ids = active_payroll_field_definition_ids(assignments)

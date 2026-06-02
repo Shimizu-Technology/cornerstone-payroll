@@ -93,15 +93,17 @@ module Api
         end
 
         def assignment_params
-          assignment_params_from(params.require(:employee_payroll_field))
+          assignment_params_from(params.require(:employee_payroll_field), allow_id: false)
         end
 
-        def assignment_params_from(raw_params)
+        def assignment_params_from(raw_params, allow_id: true)
           raw_hash = raw_params.respond_to?(:to_unsafe_h) ? raw_params.to_unsafe_h : raw_params.to_h
-          permitted = ActionController::Parameters.new(raw_hash).permit(
-            :id, :payroll_field_definition_id, :amount, :percentage, :active,
+          permitted_keys = [
+            :payroll_field_definition_id, :amount, :percentage, :active,
             :start_date, :end_date, :notes, :employee_loan_id
-          )
+          ]
+          permitted_keys.unshift(:id) if allow_id
+          permitted = ActionController::Parameters.new(raw_hash).permit(*permitted_keys)
 
           if permitted[:payroll_field_definition_id].present?
             field = PayrollFieldDefinition.find_by(id: permitted[:payroll_field_definition_id], company_id: current_company_id)

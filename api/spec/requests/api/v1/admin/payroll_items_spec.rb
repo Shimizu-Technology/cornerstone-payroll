@@ -172,7 +172,7 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       }
 
       expect(response).to have_http_status(:ok)
-      expect(payroll_item.reload.payroll_field_entries_overridden?).to be_falsey
+      expect(payroll_item.reload.custom_columns_data || {}).not_to have_key("payroll_field_entries_overridden")
       expect(payroll_item.payroll_item_field_entries.active.count).to eq(1)
     end
 

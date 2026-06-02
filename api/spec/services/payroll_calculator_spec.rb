@@ -364,7 +364,6 @@ RSpec.describe PayrollCalculator do
       described_class.for(employee, payroll_item).calculate
       entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Rent" }
       entry.assign_attributes(source: "manual", amount: 150.0)
-      payroll_item.mark_payroll_field_entries_overridden!
       assignment.update!(active: false)
 
       described_class.for(employee, payroll_item).calculate
@@ -389,7 +388,6 @@ RSpec.describe PayrollCalculator do
       described_class.for(employee, payroll_item).calculate
       rent_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
       rent_entry.assign_attributes(source: "manual", amount: 30.0)
-      payroll_item.mark_payroll_field_entries_overridden!
 
       phone_field = PayrollFieldDefinition.create!(
         company: company,
@@ -436,7 +434,6 @@ RSpec.describe PayrollCalculator do
       described_class.for(employee, payroll_item).calculate
       fixed_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
       fixed_entry.assign_attributes(source: "manual", amount: 30.0)
-      payroll_item.mark_payroll_field_entries_overridden!
 
       payroll_item.hours_worked = 80
       described_class.for(employee, payroll_item).calculate
@@ -467,7 +464,6 @@ RSpec.describe PayrollCalculator do
         employee_paid: true,
         active: true
       )
-      payroll_item.mark_payroll_field_entries_overridden!
 
       described_class.for(employee, payroll_item).calculate
       capped_amount = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Loan" }.amount.to_f

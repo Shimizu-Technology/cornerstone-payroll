@@ -7,7 +7,8 @@
 # - No Social Security (employee or employer)
 # - No Medicare (employee or employer)
 # - No retirement contributions
-# - No employee deductions (loans, insurance, etc.)
+# - No automatic employee tax/benefit deductions
+# - Explicit contractor payroll-field/custom deductions are honored when configured
 #
 # Gross pay can be:
 # - Flat fee (salary_override on PayrollItem)
@@ -136,11 +137,13 @@ class ContractorPayrollCalculator < PayrollCalculator
   end
 
   def custom_deductions_total
-    payroll_item.custom_deductions_total + payroll_item.post_tax_payroll_adjustments_total
+    payroll_item.custom_deductions_total +
+      payroll_item.post_tax_payroll_adjustments_total +
+      payroll_item.post_tax_payroll_field_entries_total
   end
 
   def pre_tax_payroll_adjustments_total
-    payroll_item.pre_tax_payroll_adjustments_total
+    payroll_item.pre_tax_payroll_adjustments_total + payroll_item.pre_tax_payroll_field_entries_total
   end
 
   def build_earning(category, label, hours, rate, amount)
