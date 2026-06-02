@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_25_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -310,6 +310,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
     t.index ["deduction_type_id"], name: "index_employee_loans_on_deduction_type_id"
     t.index ["employee_id", "status"], name: "index_employee_loans_on_employee_id_and_status"
     t.index ["employee_id"], name: "index_employee_loans_on_employee_id"
+  end
+
+  create_table "employee_payroll_fields", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.decimal "amount", precision: 10, scale: 2
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_loan_id"
+    t.date "end_date"
+    t.text "notes"
+    t.bigint "payroll_field_definition_id", null: false
+    t.decimal "percentage", precision: 8, scale: 4
+    t.date "start_date"
+    t.datetime "updated_at", null: false
+    t.index ["employee_id", "active"], name: "idx_employee_payroll_fields_employee_active"
+    t.index ["employee_id", "payroll_field_definition_id"], name: "idx_employee_payroll_fields_unique", unique: true
+    t.index ["employee_id"], name: "index_employee_payroll_fields_on_employee_id"
+    t.index ["employee_loan_id"], name: "index_employee_payroll_fields_on_employee_loan_id"
+    t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
 
   create_table "employee_wage_rates", force: :cascade do |t|
@@ -784,6 +803,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying, 'supplemental'::character varying]::text[])", name: "pay_periods_cycle_check"
   end
 
+  create_table "payroll_field_definitions", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.string "amount_type", default: "fixed", null: false
+    t.string "category", default: "other", null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.decimal "default_amount", precision: 10, scale: 2
+    t.decimal "default_percentage", precision: 8, scale: 4
+    t.text "description"
+    t.string "kind", null: false
+    t.string "name", null: false
+    t.string "payee_name"
+    t.string "reference_number"
+    t.boolean "show_in_payroll_grid", default: true, null: false
+    t.integer "sort_order", default: 0, null: false
+    t.string "tax_treatment", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "active", "sort_order"], name: "idx_payroll_fields_company_active_order"
+    t.index ["company_id", "name"], name: "idx_payroll_fields_company_name", unique: true
+    t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
+  end
+
   create_table "payroll_imports", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "excel_filename"
@@ -823,6 +864,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
     t.datetime "updated_at", null: false
     t.index ["payroll_item_id", "category", "label"], name: "idx_pi_earnings_on_pi_cat_label", unique: true
     t.index ["payroll_item_id"], name: "index_payroll_item_earnings_on_payroll_item_id"
+  end
+
+  create_table "payroll_item_field_entries", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.decimal "amount", precision: 10, scale: 2, default: "0.0", null: false
+    t.string "category", default: "other", null: false
+    t.datetime "created_at", null: false
+    t.boolean "employee_paid", default: true, null: false
+    t.boolean "employer_paid", default: false, null: false
+    t.string "kind", null: false
+    t.string "label", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.text "notes"
+    t.bigint "payroll_field_definition_id"
+    t.bigint "payroll_item_id", null: false
+    t.string "source", default: "employee_default", null: false
+    t.string "tax_treatment", null: false
+    t.datetime "updated_at", null: false
+    t.index ["payroll_field_definition_id"], name: "idx_payroll_item_field_entries_definition"
+    t.index ["payroll_item_id", "payroll_field_definition_id"], name: "idx_payroll_item_field_entries_unique_definition", unique: true
+    t.index ["payroll_item_id", "tax_treatment"], name: "idx_payroll_item_field_entries_treatment"
+    t.index ["payroll_item_id"], name: "idx_payroll_item_field_entries_item"
   end
 
   create_table "payroll_items", force: :cascade do |t|
@@ -1266,6 +1329,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
+  add_foreign_key "employee_payroll_fields", "employee_loans", on_delete: :nullify
+  add_foreign_key "employee_payroll_fields", "employees"
+  add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
   add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
@@ -1317,10 +1383,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_100000) do
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
+  add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_imports", "pay_periods"
   add_foreign_key "payroll_item_deductions", "deduction_types"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
+  add_foreign_key "payroll_item_field_entries", "payroll_field_definitions"
+  add_foreign_key "payroll_item_field_entries", "payroll_items"
   add_foreign_key "payroll_items", "companies", on_delete: :restrict
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"

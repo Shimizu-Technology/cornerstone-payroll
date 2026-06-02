@@ -242,7 +242,7 @@ module Api
 
           employees_by_id = Employee.where(id: employee_ids, company_id: current_company_id)
                                      .active
-                                     .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_wage_rates, :employee_ytd_totals)
+                                     .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
 
           preload_ytd_caches!(employees_by_id.values, @pay_period)
@@ -993,7 +993,7 @@ module Api
           }
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.includes(employee: :department).map do |item|
+            json[:payroll_items] = pay_period.payroll_items.includes(:payroll_item_field_entries, employee: :department).map do |item|
               payroll_item_json(item)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
@@ -1035,6 +1035,7 @@ module Api
             insurance_payment: item.insurance_payment,
             custom_deductions: item.custom_deductions || [],
             payroll_adjustments: item.payroll_adjustments || [],
+            payroll_field_entries: item.payroll_item_field_entries.map { |entry| payroll_field_entry_json(entry) },
             payroll_adjustment_totals: {
               taxable_additions: item.taxable_payroll_adjustments_total,
               non_taxable_additions: item.non_taxable_payroll_adjustments_total,
@@ -1064,6 +1065,24 @@ module Api
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
+          }
+        end
+
+        def payroll_field_entry_json(entry)
+          {
+            id: entry.id,
+            payroll_item_id: entry.payroll_item_id,
+            payroll_field_definition_id: entry.payroll_field_definition_id,
+            label: entry.label,
+            kind: entry.kind,
+            tax_treatment: entry.tax_treatment,
+            category: entry.category,
+            amount: entry.amount.to_f,
+            source: entry.source,
+            employee_paid: entry.employee_paid,
+            employer_paid: entry.employer_paid,
+            active: entry.active,
+            notes: entry.notes
           }
         end
 

@@ -3,7 +3,7 @@
 class DeductionType < ApplicationRecord
   CATEGORIES = %w[pre_tax post_tax employer_contribution].freeze
   SUB_CATEGORIES = %w[
-    retirement insurance garnishment loan rent phone
+    retirement insurance garnishment loan rent phone benefit
     allotment reimbursement child_support other
   ].freeze
 

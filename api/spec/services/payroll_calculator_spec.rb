@@ -31,7 +31,7 @@ RSpec.describe PayrollCalculator do
         .with(name: label, category: "employer_contribution", sub_category: "retirement")
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value"))
 
-      result = calculator.send(:find_or_create_employer_deduction_type, label)
+      result = calculator.send(:find_or_create_employer_deduction_type, label, sub_category: "retirement")
 
       expect(result).to eq(existing)
     end
@@ -46,7 +46,7 @@ RSpec.describe PayrollCalculator do
         active: true
       )
 
-      result = calculator.send(:find_or_create_employer_deduction_type, legacy.name)
+      result = calculator.send(:find_or_create_employer_deduction_type, legacy.name, sub_category: "retirement")
 
       expect(result.reload.category).to eq("employer_contribution")
     end
@@ -69,7 +69,7 @@ RSpec.describe PayrollCalculator do
       )
 
       expect {
-        calculator.send(:find_or_create_employer_deduction_type, conflicting.name)
+        calculator.send(:find_or_create_employer_deduction_type, conflicting.name, sub_category: "retirement")
       }.to raise_error(ActiveRecord::RecordInvalid)
 
       expect(conflicting.reload.category).to eq("pre_tax")
@@ -194,6 +194,402 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.total_additions).to eq(125.0)
       expect(payroll_item.total_deductions).to be >= 70.0
       expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Taxable Bonus", "Mileage")
+    end
+
+    it "snapshots assigned payroll fields into the payroll item and applies their tax treatment" do
+      taxable_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Client Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      deduction_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Auto Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 75.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: taxable_field, amount: 125.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: deduction_field, amount: 80.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      entries = payroll_item.payroll_item_field_entries.map { |entry| [ entry.label, entry.amount.to_f ] }.to_h
+      expect(entries).to include("Client Bonus" => 125.0, "Auto Loan" => 80.0)
+      expect(payroll_item.gross_pay).to eq(1_125.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 80.0
+      expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Client Bonus")
+    end
+
+    it "does not compound percentage-based taxable additions across recalculations" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Commission Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, percentage: 10.0)
+
+      3.times { described_class.for(employee, payroll_item).calculate }
+
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Commission Bonus" }
+      expect(entry.amount.to_f).to eq(100.0)
+      expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
+    end
+
+    it "calculates percentage non-taxable additions against gross after taxable field additions" do
+      taxable_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Commission Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      non_taxable_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Mileage Allowance",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "reimbursement",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: taxable_field, percentage: 10.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: non_taxable_field, percentage: 10.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      entries = payroll_item.payroll_item_field_entries.index_by(&:label)
+      expect(entries["Commission Bonus"].amount.to_f).to eq(100.0)
+      expect(entries["Mileage Allowance"].amount.to_f).to eq(110.0)
+      expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
+    end
+
+    it "calculates percentage deductions against gross after taxable field additions" do
+      bonus_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Commission Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      deduction_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: bonus_field, percentage: 10.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: deduction_field, percentage: 10.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      entries = payroll_item.payroll_item_field_entries.index_by(&:label)
+      expect(entries["Commission Bonus"].amount.to_f).to eq(100.0)
+      expect(entries["401(k)"].amount.to_f).to eq(110.0)
+      expect(payroll_item.gross_pay.to_f).to eq(1_100.0)
+    end
+
+    it "records salary and hourly payroll field deductions as itemized deduction rows" do
+      pre_tax_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Field 401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "fixed",
+        default_amount: 40.0
+      )
+      post_tax_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Field Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: pre_tax_field, amount: 40.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: post_tax_field, amount: 25.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      deductions = payroll_item.payroll_item_deductions.reject(&:employer_contribution?)
+      expect(deductions.map(&:label)).to include("Field 401(k)", "Field Rent")
+      expect(deductions.find { |deduction| deduction.label == "Field 401(k)" }.category).to eq("pre_tax")
+      expect(deductions.find { |deduction| deduction.label == "Field Rent" }.category).to eq("post_tax")
+      expect(deductions.sum { |deduction| deduction.label.in?(["Field 401(k)", "Field Rent"]) ? deduction.amount.to_f : 0.0 }).to eq(65.0)
+    end
+
+    it "recomputes default percentage payroll fields when pay changes before manual override" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 5.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, percentage: 5.0)
+
+      described_class.for(employee, payroll_item).calculate
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(50.0)
+
+      payroll_item.hours_worked = 80
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }.amount.to_f).to eq(40.0)
+    end
+
+    it "deactivates stale default field entries when an assignment is removed" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Stale Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+
+      described_class.for(employee, payroll_item).calculate
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Stale Bonus" }
+      assignment.update!(active: false)
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(entry).not_to be_active
+      expect(payroll_item.gross_pay.to_f).to eq(1_000.0)
+    end
+
+    it "preserves manually overridden field entries when the backing assignment is removed" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      assignment = EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+
+      described_class.for(employee, payroll_item).calculate
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Rent" }
+      entry.assign_attributes(source: "manual", amount: 150.0)
+      assignment.update!(active: false)
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(entry).to be_active
+      expect(entry.amount.to_f).to eq(150.0)
+      expect(payroll_item.total_deductions.to_f).to be >= 150.0
+    end
+
+    it "deactivates manually overridden loan field entries when a MoSa import loan becomes authoritative" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 100.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 100.0)
+
+      described_class.for(employee, payroll_item).calculate
+      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Manual Loan" }
+      entry.assign_attributes(source: "manual", amount: 150.0)
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(entry).not_to be_active
+      expect(payroll_item.loan_payment.to_f).to eq(200.0)
+      expect(payroll_item.post_tax_payroll_field_entries_total).to eq(0.0)
+    end
+
+    it "adds newly assigned default payroll fields after another field was manually overridden" do
+      rent_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: rent_field, amount: 25.0)
+
+      described_class.for(employee, payroll_item).calculate
+      rent_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
+      rent_entry.assign_attributes(source: "manual", amount: 30.0)
+
+      phone_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Phone Allowance",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "phone",
+        amount_type: "fixed",
+        default_amount: 20.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: phone_field, amount: 20.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      phone_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Phone Allowance" }
+      expect(rent_entry.amount.to_f).to eq(30.0)
+      expect(phone_entry).to be_present
+      expect(phone_entry.amount.to_f).to eq(20.0)
+      expect(phone_entry.source).to eq("employee_default")
+    end
+
+    it "refreshes untouched percentage fields after a different field is manually overridden" do
+      fixed_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 25.0
+      )
+      percent_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "401(k)",
+        kind: "deduction",
+        tax_treatment: "pre_tax_deduction",
+        category: "retirement",
+        amount_type: "percentage",
+        default_percentage: 10.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: fixed_field, amount: 25.0)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: percent_field, percentage: 10.0)
+
+      described_class.for(employee, payroll_item).calculate
+      fixed_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Rent" }
+      fixed_entry.assign_attributes(source: "manual", amount: 30.0)
+
+      payroll_item.hours_worked = 80
+      described_class.for(employee, payroll_item).calculate
+
+      percent_entry = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "401(k)" }
+      expect(fixed_entry.amount.to_f).to eq(30.0)
+      expect(percent_entry.amount.to_f).to eq(80.0)
+    end
+
+    it "restores manually overridden payroll field deductions after an insufficient-pay cap" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "manual"
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 2_000.0)
+      payroll_item.payroll_item_field_entries.build(
+        payroll_field_definition: field,
+        label: "Manual Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount: 2_000.0,
+        source: "manual",
+        employee_paid: true,
+        active: true
+      )
+
+      described_class.for(employee, payroll_item).calculate
+      capped_amount = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Loan" }.amount.to_f
+      expect(capped_amount).to be < 2_000.0
+
+      payroll_item.hours_worked = 300
+      described_class.for(employee, payroll_item).calculate
+
+      restored = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Manual Loan" }
+      expect(restored.amount.to_f).to eq(2_000.0)
+      expect(restored.metadata).not_to have_key("uncapped_amount")
+    end
+
+    it "does not double-deduct a MoSa imported loan with assigned loan payroll fields" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "MoSa Auto Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "fixed",
+        default_amount: 75.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field, amount: 75.0)
+      payroll_item.import_source = "mosa_revel"
+      payroll_item.loan_deduction = 200.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.payroll_item_field_entries.map(&:label)).not_to include("MoSa Auto Loan")
+      expect(payroll_item.loan_payment).to eq(200.0)
+    end
+
+    it "preserves benefit sub-category for employer contribution payroll fields" do
+      contribution_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employer Wellness",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "benefit",
+        amount_type: "fixed",
+        default_amount: 45.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: contribution_field, amount: 45.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      deduction = payroll_item.payroll_item_deductions.find { |item_deduction| item_deduction.label == "Employer Wellness" }
+      expect(deduction.deduction_type.sub_category).to eq("benefit")
+    end
+
+    it "records employer contribution payroll fields separately from employee deductions" do
+      contribution_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employer Health",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "insurance",
+        amount_type: "fixed",
+        default_amount: 50.0
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: contribution_field, amount: 60.0)
+
+      described_class.for(employee, payroll_item).calculate
+
+      contribution = payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Employer Health" }
+      expect(contribution).to be_employer_contribution
+      deduction = payroll_item.payroll_item_deductions.find { |item_deduction| item_deduction.label == "Employer Health" }
+      expect(deduction.deduction_type.sub_category).to eq("insurance")
+      expect(payroll_item.payroll_item_deductions.select(&:employer_contribution?).map(&:label)).to include("Employer Health")
     end
 
     it "floors adjusted FIT at zero when the adjustment would make it negative" do

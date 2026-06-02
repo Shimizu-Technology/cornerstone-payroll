@@ -13,7 +13,7 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { payrollItemsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
-import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment } from '@/types';
+import type { EmployeeWageRate, PayrollItem, PayrollItemWageRateHours, PayrollAdjustmentTreatment, PayrollItemFieldEntry } from '@/types';
 
 interface PayrollAdjustmentField {
   label: string;
@@ -41,6 +41,8 @@ interface PayrollItemEditModalProps {
   wageRates?: EmployeeWageRate[];
 }
 
+type EditablePayrollItemFieldEntry = PayrollItemFieldEntry & { dirty?: boolean };
+
 interface EditableFields {
   hours_worked: number;
   overtime_hours: number;
@@ -58,6 +60,7 @@ interface EditableFields {
   check_date: string;
   check_memo: string;
   payroll_adjustments: PayrollAdjustmentField[];
+  payroll_field_entries: EditablePayrollItemFieldEntry[];
 }
 
 export function PayrollItemEditModal({
@@ -87,8 +90,10 @@ export function PayrollItemEditModal({
     check_date: '',
     check_memo: '',
     payroll_adjustments: [],
+    payroll_field_entries: [],
   });
   const [saving, setSaving] = useState(false);
+  const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,8 +139,16 @@ export function PayrollItemEditModal({
               active: adjustment.active !== false,
             }))
           : [],
+        payroll_field_entries: (item.payroll_field_entries || [])
+          .filter(entry => entry.active === true)
+          .map(entry => ({
+            ...entry,
+            amount: Number(entry.amount) || 0,
+            active: true,
+          })),
       });
       setError(null);
+      setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
   }, [item, wageRates]);
@@ -212,6 +225,15 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const handlePayrollFieldEntryAmountChange = (index: number, amount: number | null) => {
+    setPayrollFieldEntriesDirty(true);
+    setFields((prev) => {
+      const updated = [...prev.payroll_field_entries];
+      updated[index] = { ...updated[index], amount: amount ?? 0, source: 'manual', dirty: true };
+      return { ...prev, payroll_field_entries: updated };
+    });
+  };
+
   const handleSaveAndRecalculate = async () => {
     setSaving(true);
     setError(null);
@@ -240,6 +262,20 @@ export function PayrollItemEditModal({
             active: adjustment.active !== false,
           })),
       };
+
+      if (payrollFieldEntriesDirty) {
+        payload.payroll_field_entries = fields.payroll_field_entries
+          .filter(entry => entry.dirty && entry.active === true)
+          .map(({ dirty: _dirty, ...entry }) => {
+            void _dirty;
+            return {
+            ...entry,
+            amount: Number(entry.amount) || 0,
+            source: 'manual' as const,
+            active: entry.active !== false,
+          };
+          });
+      }
 
       if (hasMultiRate) {
         payload.wage_rate_hours = fields.wage_rate_hours;
@@ -507,6 +543,34 @@ export function PayrollItemEditModal({
               </div>
             </div>
           </div>
+
+          {/* Company Payroll Fields */}
+          {fields.payroll_field_entries.length > 0 && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div className="mb-2">
+                <h4 className="text-sm font-medium text-gray-700">Company Payroll Fields</h4>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Client-wide fields assigned to this employee. Amounts can be overridden for this check without changing employee defaults.
+                </p>
+              </div>
+              <div className="space-y-2">
+                {fields.payroll_field_entries.map((entry, idx) => (
+                  <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{entry.label}</p>
+                      <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}</p>
+                    </div>
+                    <NumericInput
+                      value={Number(entry.amount) || 0}
+                      onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
+                      min={0}
+                      fixedDecimalsOnBlur={2}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Payroll Adjustments */}
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
