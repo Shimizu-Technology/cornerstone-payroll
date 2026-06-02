@@ -381,6 +381,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
+    it "returns a validation response when recalculation fails validation" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+  end
+
   describe "DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
     it "records the employee as excluded from the pay period" do
       expect {

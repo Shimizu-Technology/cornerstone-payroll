@@ -375,17 +375,29 @@ class PayrollCalculator
   end
 
   def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other")
+    company = payroll_item.company || pay_period.company
     sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
-    existing = payroll_item.company.deduction_types.find_by(name: label)
-    return existing if existing&.category == category && existing.sub_category == sub_category
+    existing = company.deduction_types.find_by(name: label, category: category)
+    return existing if existing
 
-    payroll_item.company.deduction_types.create!(
-      name: label,
+    name = label
+    if company.deduction_types.exists?(name: label)
+      category_label = category.to_s.tr("_", " ").split.map(&:capitalize).join(" ")
+      name = "#{label} (#{category_label})"
+      existing = company.deduction_types.find_by(name: name, category: category)
+      return existing if existing
+    end
+
+    company.deduction_types.create!(
+      name: name,
       category: category,
       sub_category: sub_category
     )
-  rescue ActiveRecord::RecordNotUnique
-    payroll_item.company.deduction_types.find_by!(name: label, category: category, sub_category: sub_category)
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
+    existing = company.deduction_types.find_by(name: name, category: category)
+    return existing if existing
+
+    raise e
   end
 
   def record_employer_contribution(label, amount, sub_category: "retirement")
