@@ -154,6 +154,44 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$25.00")
   end
 
+  it "does not include unrelated cross-tuple payroll field history in YTD deduction totals" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_field_entries.create!(
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "pre_tax_deduction",
+      category: "insurance",
+      amount: 999,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 20,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      label: "Uniform",
+      kind: "deduction",
+      tax_treatment: "pre_tax_deduction",
+      category: "insurance",
+      amount: 5,
+      source: "manual"
+    )
+
+    generator = described_class.new(payroll_item)
+
+    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(25.0)
+  end
+
   it "limits payroll field YTD values to the current calendar year" do
     field = PayrollFieldDefinition.create!(
       company: company,
