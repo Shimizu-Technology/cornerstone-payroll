@@ -45,6 +45,9 @@ class PayStubGenerator
     # Non-taxable additions that increase net pay but not gross wages
     render_non_taxable_additions(pdf)
 
+    # Employer-paid obligations that do not reduce net pay
+    render_employer_contributions(pdf)
+
     # Net Pay
     render_net_pay(pdf)
 
@@ -234,6 +237,10 @@ class PayStubGenerator
       end
     end
 
+    payroll_field_entries_for("taxable_addition").each do |entry|
+      earnings_data << [ entry.label, "—", "—", format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+    end
+
     # Gross total
     earnings_data << [
       { content: "GROSS PAY", font_style: :bold },
@@ -327,7 +334,7 @@ class PayStubGenerator
     end
 
     # Insurance
-    if payroll_item.insurance_payment.to_f > 0
+    if payroll_item.insurance_payment.to_f > 0 && payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").none? { |entry| entry.category == "insurance" }
       deductions_data << [
         "Health Insurance",
         format_currency(payroll_item.insurance_payment),
@@ -336,7 +343,7 @@ class PayStubGenerator
     end
 
     # Loan
-    if payroll_item.loan_payment.to_f > 0
+    if payroll_item.loan_payment.to_f > 0 && payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").none? { |entry| entry.category == "loan" }
       deductions_data << [
         "Loan Repayment",
         format_currency(payroll_item.loan_payment),
@@ -377,6 +384,10 @@ class PayStubGenerator
       ]
     end
 
+    payroll_field_entries_for("pre_tax_deduction", "post_tax_deduction").each do |entry|
+      deductions_data << [ entry.label, format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+    end
+
     # Total deductions
     deductions_data << [
       { content: "TOTAL DEDUCTIONS", font_style: :bold },
@@ -412,6 +423,10 @@ class PayStubGenerator
       additions << [ adjustment["label"].presence || "Non-Taxable Addition", format_currency(amount), "—" ]
     end
 
+    payroll_field_entries_for("non_taxable_addition").each do |entry|
+      additions << [ entry.label, format_currency(entry.amount), "—" ] if entry.amount.to_f.positive?
+    end
+
     return if additions.empty?
 
     pdf.font_size(10) do
@@ -426,6 +441,31 @@ class PayStubGenerator
         row(0).background_color = "EEEEEE"
         cells.padding = [ 3, 6 ]
         columns(1..2).align = :right
+      end
+    end
+
+    pdf.move_down 12
+  end
+
+  def render_employer_contributions(pdf)
+    entries = payroll_field_entries_for("employer_contribution").select { |entry| entry.amount.to_f.positive? }
+    return if entries.empty?
+
+    pdf.font_size(10) do
+      pdf.text "EMPLOYER CONTRIBUTIONS", style: :bold
+    end
+    pdf.move_down 3
+
+    rows = [ [ "Description", "Current", "YTD" ] ] + entries.map { |entry| [ entry.label, format_currency(entry.amount), "—" ] }
+    rows << [ { content: "TOTAL EMPLOYER CONTRIBUTIONS", font_style: :bold }, { content: format_currency(entries.sum { |entry| entry.amount.to_f }), font_style: :bold }, "—" ]
+
+    pdf.font_size(8) do
+      pdf.table(rows, header: true, width: pdf.bounds.width) do
+        row(0).font_style = :bold
+        row(0).background_color = "EEEEEE"
+        cells.padding = [ 3, 6 ]
+        columns(1..2).align = :right
+        row(-1).background_color = "F5F5F5"
       end
     end
 
@@ -480,6 +520,10 @@ class PayStubGenerator
 
   def guam_generated_timestamp
     Time.current.in_time_zone(GUAM_TIME_ZONE).strftime("%B %d, %Y at %I:%M %p ChST")
+  end
+
+  def payroll_field_entries_for(*treatments)
+    payroll_item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
   end
 
   def employee_ytd_additional_withholding

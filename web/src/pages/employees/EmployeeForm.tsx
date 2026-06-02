@@ -473,6 +473,11 @@ export function EmployeeForm() {
     setEmployeePayrollFields((prev) => prev.map((row) => row.temp_id === tempId ? { ...row, active: false, dirty: true } : row));
   };
 
+  const closeQuickPayrollField = () => {
+    setQuickPayrollField(initialQuickPayrollFieldDraft());
+    setShowQuickPayrollField(false);
+  };
+
   const updateQuickPayrollFieldKind = (kind: PayrollFieldKind) => {
     const tax_treatment: PayrollFieldTaxTreatment = kind === 'addition'
       ? 'taxable_addition'
@@ -1190,7 +1195,7 @@ export function EmployeeForm() {
                         This creates a field for the whole client and immediately assigns it to this employee.
                       </p>
                     </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setShowQuickPayrollField(false)}>
+                    <Button type="button" variant="ghost" size="sm" onClick={closeQuickPayrollField}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -1257,7 +1262,7 @@ export function EmployeeForm() {
                     <Button type="button" size="sm" onClick={createQuickPayrollField} disabled={quickPayrollFieldSaving || !quickPayrollField.name.trim()}>
                       Create and assign
                     </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setShowQuickPayrollField(false)}>
+                    <Button type="button" variant="outline" size="sm" onClick={closeQuickPayrollField}>
                       Cancel
                     </Button>
                   </div>

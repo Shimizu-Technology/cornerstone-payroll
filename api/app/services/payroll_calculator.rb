@@ -544,6 +544,8 @@ class PayrollCalculator
       entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
     end
 
+    ActiveRecord::Associations::Preloader.new(records: payroll_item.payroll_item_deductions, associations: :deduction_type).call
+
     deductions.reverse_each do |entry|
       current = entry.amount.to_f
       reduction = [ current, amount ].min
