@@ -59,7 +59,7 @@ class PayrollRegisterCsvExporter
     CSV.generate(headers: true, force_quotes: false) do |csv|
       csv << headers
 
-      (report.dig(:employees) || []).each { |emp| csv << employee_row(emp) }
+      payroll_rows.each { |emp| csv << employee_row(emp) }
 
       csv << summary_row
     end
@@ -85,8 +85,12 @@ class PayrollRegisterCsvExporter
     HEADERS + payroll_field_columns.map { |column| "Payroll Field - #{column[:label]} (#{column[:tax_treatment].to_s.humanize})" }
   end
 
+  def payroll_rows
+    Array(report.dig(:employees)) + Array(report.dig(:contractors))
+  end
+
   def payroll_field_columns
-    @payroll_field_columns ||= (report.dig(:employees) || []).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+    @payroll_field_columns ||= payroll_rows.flat_map { |emp| Array(emp[:payroll_field_entries]) }
       .group_by { |entry| [ entry[:label], entry[:tax_treatment] ] }
       .keys
       .sort_by { |label, treatment| [ treatment.to_s, label.to_s ] }
@@ -177,7 +181,7 @@ class PayrollRegisterCsvExporter
       format_currency(s[:total_deductions]),
       format_currency(s[:total_net]),
       ""
-    ] + payroll_field_columns.map { |column| format_currency((report.dig(:employees) || []).sum { |emp| payroll_field_amount(emp, column) }) }
+    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column) }) }
   end
 
   def format_currency(value)
