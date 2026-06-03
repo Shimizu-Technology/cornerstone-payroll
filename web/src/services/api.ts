@@ -1832,7 +1832,7 @@ export interface SavedTransmittal {
   report_list: string[];
   check_number_first: string | null;
   check_number_last: string | null;
-  payroll_check_numbers: string[];
+  payroll_check_numbers: string[] | null;
   non_employee_check_numbers: Record<string, string>;
   custom_entries: TransmittalCustomEntry[];
   generated_at: string | null;

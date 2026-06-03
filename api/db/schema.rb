@@ -1209,7 +1209,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.jsonb "non_employee_check_numbers", default: {}
     t.jsonb "notes", default: []
     t.bigint "pay_period_id", null: false
-    t.jsonb "payroll_check_numbers", default: []
+    t.jsonb "payroll_check_numbers"
     t.string "preparer_name"
     t.jsonb "report_list", default: []
     t.date "transmittal_date"

@@ -710,7 +710,7 @@ module Api
           items = pp.payroll_items.not_voided
           saved = pp.transmittal
           live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
-          check_numbers = saved ? Array(saved.payroll_check_numbers) : live_check_numbers
+          check_numbers = saved&.payroll_check_numbers.nil? ? live_check_numbers : Array(saved&.payroll_check_numbers)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
           total_fit  = items.sum(:withholding_tax)
@@ -755,7 +755,7 @@ module Api
               transmittal_date: saved.transmittal_date&.iso8601,
               check_number_first: saved.check_number_first,
               check_number_last: saved.check_number_last,
-              payroll_check_numbers: saved.payroll_check_numbers || [],
+              payroll_check_numbers: saved.payroll_check_numbers,
               non_employee_check_numbers: saved.non_employee_check_numbers,
               custom_entries: saved.custom_entries || [],
               generated_at: saved.generated_at&.iso8601,
@@ -1004,7 +1004,7 @@ module Api
           options[:payroll_check_numbers] = if options.key?(:payroll_check_numbers)
             options[:payroll_check_numbers]
           else
-            Array(transmittal&.payroll_check_numbers).presence || pay_period.payroll_items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+            transmittal&.payroll_check_numbers.nil? ? pay_period.payroll_items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] } : Array(transmittal.payroll_check_numbers)
           end
           options
         end
@@ -1019,7 +1019,7 @@ module Api
             transmittal_date: options.key?(:transmittal_date) ? options[:transmittal_date] : (transmittal.transmittal_date || Date.current),
             notes: options[:notes] || [],
             report_list: options.key?(:report_list) ? options[:report_list] : [],
-            payroll_check_numbers: options.key?(:payroll_check_numbers) ? options[:payroll_check_numbers] : (transmittal.payroll_check_numbers || []),
+            payroll_check_numbers: options.key?(:payroll_check_numbers) ? options[:payroll_check_numbers] : transmittal.payroll_check_numbers,
             check_number_first: options[:check_number_first],
             check_number_last: options[:check_number_last],
             non_employee_check_numbers: options[:non_employee_check_numbers] || {},
