@@ -75,6 +75,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(tax_totals["total_fica"].to_f).to eq(183.6)
       expect(tax_totals["total_drt_deposit"].to_f).to eq(100.0)
     end
+
+    it "preserves a saved transmittal date when a later generation omits the date param" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        transmittal_date: Date.new(2026, 1, 20)
+      )
+
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.transmittal_date).to eq(Date.new(2026, 1, 20))
+    end
   end
 
   describe "GET /api/v1/admin/reports/form_941_gu" do

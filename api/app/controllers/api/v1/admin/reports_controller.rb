@@ -994,7 +994,7 @@ module Api
           )
           transmittal.assign_attributes(
             preparer_name: options[:preparer_name],
-            transmittal_date: options[:transmittal_date] || Date.current,
+            transmittal_date: options.key?(:transmittal_date) ? options[:transmittal_date] : (transmittal.transmittal_date || Date.current),
             notes: options[:notes] || [],
             report_list: options.key?(:report_list) ? options[:report_list] : [],
             check_number_first: options[:check_number_first],
