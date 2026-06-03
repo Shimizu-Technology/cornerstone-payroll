@@ -392,6 +392,7 @@ function TransmittalEditorModal({
   const [transmittalDate, setTransmittalDate] = useState(localDateString);
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
+  const [payrollCheckNumbers, setPayrollCheckNumbers] = useState<string[]>([]);
   const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
   const [customEntries, setCustomEntries] = useState<TransmittalCustomEntry[]>([]);
   const [savedState, setSavedState] = useState<SavedTransmittal | null>(null);
@@ -429,6 +430,7 @@ function TransmittalEditorModal({
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
           setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
+          setPayrollCheckNumbers(saved.payroll_check_numbers?.length ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
@@ -442,6 +444,7 @@ function TransmittalEditorModal({
           setReportList([...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || '');
           setCheckLast(data.payroll_checks.last || '');
+          setPayrollCheckNumbers([...(data.payroll_checks.numbers || [])]);
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => { neNums[c.id] = c.check_number || ''; });
           setNeCheckNumbers(neNums);
@@ -477,6 +480,37 @@ function TransmittalEditorModal({
 
   if (!open) return null;
 
+  const formatCheckRanges = (numbers: string[]) => {
+    const clean = numbers.map(n => n.trim()).filter(Boolean);
+    const numeric = Array.from(new Set(clean.filter(n => /^\d+$/.test(n)).map(Number))).sort((a, b) => a - b);
+    const ranges: string[] = [];
+    let index = 0;
+    while (index < numeric.length) {
+      const start = numeric[index];
+      let end = start;
+      while (index + 1 < numeric.length && numeric[index + 1] === end + 1) {
+        index += 1;
+        end = numeric[index];
+      }
+      ranges.push(start === end ? `${start}` : `${start}-${end}`);
+      index += 1;
+    }
+    const nonNumeric = Array.from(new Set(clean.filter(n => !/^\d+$/.test(n)))).sort();
+    return [...ranges, ...nonNumeric].join(', ');
+  };
+
+  const updatePayrollCheckNumber = (index: number, value: string) => {
+    setPayrollCheckNumbers(prev => prev.map((number, idx) => idx === index ? value : number));
+  };
+
+  const addPayrollCheckNumber = () => setPayrollCheckNumbers(prev => [...prev, '']);
+
+  const removePayrollCheckNumber = (index: number) => {
+    setPayrollCheckNumbers(prev => prev.filter((_, idx) => idx !== index));
+  };
+
+  const displayCheckType = (type?: string | null) => type?.toLowerCase() === 'grt' ? 'GRT' : (type || '').toUpperCase();
+
   const handleAddNote = () => {
     const trimmed = newNote.trim();
     if (trimmed) {
@@ -511,6 +545,7 @@ function TransmittalEditorModal({
       reportList: reportList,
       checkNumberFirst: checkFirst.trim() || undefined,
       checkNumberLast: checkLast.trim() || undefined,
+      payrollCheckNumbers: payrollCheckNumbers.map(n => n.trim()).filter(Boolean),
       nonEmployeeCheckNumbers: hasNeOverrides ? neCheckNumbers : undefined,
       customEntries: validEntries.length > 0 ? validEntries : undefined,
     });
@@ -586,14 +621,33 @@ function TransmittalEditorModal({
                         <div>
                           <span>Checks #: </span>
                           <span className="font-medium text-gray-900">
-                            {preview.payroll_checks.ranges || [checkFirst, checkLast].filter(Boolean).join(' through ') || '—'}
+                            {formatCheckRanges(payrollCheckNumbers) || preview.payroll_checks.ranges || '—'}
                           </span>
                         </div>
-                        {preview.payroll_checks.numbers?.length > 0 && (
-                          <p className="text-xs text-gray-500">
-                            Exact issued checks: {preview.payroll_checks.numbers.join(', ')}
-                          </p>
-                        )}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                          {payrollCheckNumbers.map((number, idx) => (
+                            <div key={idx} className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={number}
+                                onChange={(e) => updatePayrollCheckNumber(idx, e.target.value)}
+                                className="w-full border rounded px-2 py-1 text-sm font-medium text-gray-900 text-center"
+                                aria-label={`Payroll check number ${idx + 1}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removePayrollCheckNumber(idx)}
+                                className="text-xs text-gray-400 hover:text-red-600 px-1"
+                                aria-label={`Remove payroll check number ${idx + 1}`}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <button type="button" onClick={addPayrollCheckNumber} className="text-xs text-blue-600 hover:text-blue-800">
+                          + Add payroll check #
+                        </button>
                       </div>
                     </div>
                   )}
@@ -602,7 +656,7 @@ function TransmittalEditorModal({
                   {preview.non_employee_checks.map((check, idx) => (
                     <div key={check.id}>
                       <p className="font-medium text-gray-900">
-                        {(preview.payroll_checks.count > 0 ? 2 : 1) + idx}) {check.payable_to} — {check.check_type}
+                        {(preview.payroll_checks.count > 0 ? 2 : 1) + idx}) {check.payable_to} — {displayCheckType(check.check_type)}
                       </p>
                       <div className="ml-6 text-gray-600 space-y-1 mt-1">
                         <div className="flex items-center gap-2">
@@ -617,7 +671,7 @@ function TransmittalEditorModal({
                         </div>
                         <p>Amount: <span className="font-medium text-gray-900">{fmt(check.amount)}</span></p>
                         <p>Payable to: <span className="font-medium text-gray-900">{check.payable_to}</span></p>
-                        {check.memo && <p>For: {check.check_type} — {check.memo}</p>}
+                        {check.memo && <p>For: {displayCheckType(check.check_type)} — {check.memo}</p>}
                         {check.description && <p>Description/Memo: {check.description}</p>}
                       </div>
                     </div>
@@ -1168,6 +1222,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       reportList: saved.report_list || [],
       checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
       checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
+      payrollCheckNumbers: saved.payroll_check_numbers?.length ? saved.payroll_check_numbers : preview?.payroll_checks.numbers,
       nonEmployeeCheckNumbers: liveNonEmployeeNumbers && Object.keys(liveNonEmployeeNumbers).length > 0
         ? liveNonEmployeeNumbers
         : saved.non_employee_check_numbers

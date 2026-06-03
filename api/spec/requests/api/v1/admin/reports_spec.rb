@@ -76,6 +76,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(tax_totals["total_drt_deposit"].to_f).to eq(100.0)
     end
 
+    it "saves editable payroll check numbers for generated transmittals" do
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_check_numbers: %w[3001 3005 3006]
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq(%w[3001 3005 3006])
+    end
+
     it "preserves a saved transmittal date when a later generation omits the date param" do
       Transmittal.create!(
         pay_period: pay_period,

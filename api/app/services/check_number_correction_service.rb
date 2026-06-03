@@ -79,9 +79,11 @@ class CheckNumberCorrectionService
     return unless transmittal
 
     numbers = transmittal_check_numbers
+    payroll_numbers = payroll_check_numbers.map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
     transmittal.update!(
       check_number_first: numbers.first,
       check_number_last: numbers.last,
+      payroll_check_numbers: payroll_numbers,
       non_employee_check_numbers: synced_non_employee_check_numbers(transmittal)
     )
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_03_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1209,6 +1209,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_120000) do
     t.jsonb "non_employee_check_numbers", default: {}
     t.jsonb "notes", default: []
     t.bigint "pay_period_id", null: false
+    t.jsonb "payroll_check_numbers", default: []
     t.string "preparer_name"
     t.jsonb "report_list", default: []
     t.date "transmittal_date"

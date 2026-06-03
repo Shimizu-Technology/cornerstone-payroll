@@ -44,6 +44,21 @@ RSpec.describe TransmittalLogPdfGenerator do
     expect(text).to include("Pay Day:          04/16/2026")
   end
 
+  it "prints non-employee GRT check type in all caps" do
+    pdf = described_class.new(pay_period).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
+
+    expect(text).to include("Check for Treasurer of Guam (GRT)")
+  end
+
+  it "uses editable payroll check numbers when provided" do
+    pdf = described_class.new(pay_period, payroll_check_numbers: %w[3001 3005 3006]).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
+
+    expect(text).to include("Checks #: 3001, 3005-3006")
+    expect(text).not_to include("1007")
+  end
+
   it "prints exact check ranges without implying missing check numbers were issued" do
     create(:payroll_item, :with_check,
       company: company,

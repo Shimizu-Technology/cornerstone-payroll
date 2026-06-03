@@ -81,6 +81,25 @@ class TransmittalLogPdfGenerator
     pdf.move_down 10
   end
 
+  def payroll_check_numbers
+    override = Array(options[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
+    return override if override.any?
+
+    pay_period.payroll_items
+      .not_voided
+      .where.not(check_number: nil)
+      .pluck(:check_number)
+      .map(&:to_s)
+      .sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+  end
+
+  def format_check_type(value)
+    text = value.to_s
+    return "GRT" if text.casecmp("grt").zero?
+
+    text.titleize
+  end
+
   def transmittal_date
     value = options[:transmittal_date]
     return value if value.is_a?(Date)
@@ -99,11 +118,7 @@ class TransmittalLogPdfGenerator
     ne_check_overrides = options[:non_employee_check_numbers] || {}
 
     # 1) Payroll checks
-    check_numbers = pay_period.payroll_items
-      .not_voided
-      .where.not(check_number: nil)
-      .pluck(:check_number)
-      .sort_by(&:to_i)
+    check_numbers = payroll_check_numbers
 
     if check_numbers.any?
       formatted_numbers = CheckNumberRangeFormatter.format(check_numbers)
@@ -125,7 +140,7 @@ class TransmittalLogPdfGenerator
       item_num += 1
       overridden_num = ne_check_overrides[check.id]
       check_label = overridden_num.present? ? overridden_num : (check.check_number.present? ? check.check_number : "____")
-      type_label = check.check_type.present? ? " (#{check.check_type.titleize})" : ""
+      type_label = check.check_type.present? ? " (#{format_check_type(check.check_type)})" : ""
 
       pdf.font_size(10) do
         pdf.text "#{item_num})  Check for #{check.payable_to}#{type_label}", style: :bold
