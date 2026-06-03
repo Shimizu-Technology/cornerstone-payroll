@@ -50,6 +50,7 @@ class PayrollRegisterPdfGenerator
     render_header(pdf)
     render_pay_period_block(pdf)
     render_summary_block(pdf)
+    render_payroll_fields_summary(pdf)
     render_employee_table(pdf)
 
     pp = report[:pay_period] || {}
@@ -125,10 +126,13 @@ class PayrollRegisterPdfGenerator
     rows = [
       [ "Employee Count",       s[:employee_count].to_s ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
+      [ "Reported Tips",        fmt(s[:total_reported_tips]) ],
+      [ "Tips Paid Out",        fmt(s[:total_tips_paid_out]) ],
       [ "Total Withholding",    fmt(s[:total_withholding]) ],
       [ "Total Social Security", fmt(s[:total_social_security]) ],
       [ "Total Medicare",       fmt(s[:total_medicare]) ],
       [ "Total Retirement",     fmt(s[:total_retirement]) ],
+      [ "Loan Payments",        fmt(s[:total_loan_payments]) ],
       [ "Total Deductions",     fmt(s[:total_deductions]) ],
       [ "Total Net Pay",        fmt(s[:total_net]) ]
     ]
@@ -151,6 +155,36 @@ class PayrollRegisterPdfGenerator
 
     pdf.fill_color TEXT_DARK
     pdf.move_down 14
+  end
+
+  def render_payroll_fields_summary(pdf)
+    rows = payroll_field_total_rows
+    return if rows.empty?
+
+    pdf.start_new_page if pdf.cursor < 120
+    pdf.font_size(11) { pdf.text "Payroll Fields", style: :bold }
+    pdf.move_down 4
+
+    table_data = [[ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ]] + rows
+    pdf.table(table_data, header: true, width: pdf.bounds.width) do
+      row(0).font_style = :bold
+      row(0).background_color = HEADER_BG
+      row(0).text_color = "FFFFFF"
+      cells.size = 8
+      cells.padding = [ 3, 5 ]
+      columns(2..4).align = :right
+    end
+    pdf.move_down 14
+  end
+
+  def payroll_field_total_rows
+    entries = Array(report[:employees]).flat_map { |emp| Array(emp[:payroll_field_entries]) } +
+      Array(report[:contractors]).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+    entries.group_by { |entry| [ entry[:tax_treatment], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }
+      .sort_by { |key, _| key.map(&:to_s) }
+      .map do |(treatment, label, employee_paid, employer_paid), grouped|
+        [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
+      end
   end
 
   # ─── Employee Table ─────────────────────────────────────────────────────────
@@ -225,11 +259,14 @@ class PayrollRegisterPdfGenerator
       { key: :hours_worked, label: "Hours", weight: 5, align: :right },
       { key: :overtime_hours, label: "OT Hrs", weight: 5, align: :right },
       { key: :gross_pay, label: "Gross Pay", weight: 8, align: :right },
+      { key: :reported_tips, label: "Tips", weight: 6, align: :right },
+      { key: :tips_paid_out, label: "Tips Out", weight: 6, align: :right },
       { key: :withholding_tax, label: "Withholding", weight: 8, align: :right },
       { key: :additional_withholding, label: "Addtl W/H", weight: 7, align: :right },
       { key: :social_security_tax, label: "Soc Sec", weight: 7, align: :right },
       { key: :medicare_tax, label: "Medicare", weight: 7, align: :right },
       { key: :retirement_payment, label: "Retirement", weight: 7, align: :right },
+      { key: :loan_payment, label: "Loan", weight: 6, align: :right },
       { key: :total_deductions, label: "Deductions", weight: 8, align: :right },
       { key: :net_pay, label: "Net Pay", weight: 8, align: :right },
       { key: :check_number, label: "Check #", weight: 8 }
@@ -258,6 +295,10 @@ class PayrollRegisterPdfGenerator
       fmt(summary[:total_gross])
     when :custom_earnings_total
       fmt(summary[:total_custom_earnings])
+    when :reported_tips
+      fmt(summary[:total_reported_tips])
+    when :tips_paid_out
+      fmt(summary[:total_tips_paid_out])
     when :withholding_tax
       fmt(summary[:total_withholding])
     when :additional_withholding
@@ -268,6 +309,8 @@ class PayrollRegisterPdfGenerator
       fmt(summary[:total_medicare])
     when :retirement_payment
       fmt(summary[:total_retirement])
+    when :loan_payment
+      fmt(summary[:total_loan_payments])
     when :custom_deductions_total
       fmt(summary[:total_custom_deductions])
     when :total_deductions

@@ -161,6 +161,8 @@ export function PayrollItemEditModal({
   const isContractorFlat = isContractor && contractorPayType !== 'hourly';
   const hasMultiRate = (item.employment_type === 'hourly' || isContractorHourly) && fields.wage_rate_hours.length > 1;
   const employeeAdditionalWithholding = Number(item.additional_withholding || 0);
+  const employeePaidPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment !== 'employer_contribution');
+  const employerContributionPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment === 'employer_contribution');
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -553,21 +555,51 @@ export function PayrollItemEditModal({
                   Client-wide fields assigned to this employee. Amounts can be overridden for this check without changing employee defaults.
                 </p>
               </div>
-              <div className="space-y-2">
-                {fields.payroll_field_entries.map((entry, idx) => (
-                  <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{entry.label}</p>
-                      <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}</p>
-                    </div>
-                    <NumericInput
-                      value={Number(entry.amount) || 0}
-                      onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
-                      min={0}
-                      fixedDecimalsOnBlur={2}
-                    />
+              <div className="space-y-4">
+                {employeePaidPayrollFieldEntries.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Employee additions and deductions</p>
+                    {employeePaidPayrollFieldEntries.map((entry) => {
+                      const idx = fields.payroll_field_entries.indexOf(entry);
+                      return (
+                        <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{entry.label}</p>
+                            <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}</p>
+                          </div>
+                          <NumericInput
+                            value={Number(entry.amount) || 0}
+                            onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
+                            min={0}
+                            fixedDecimalsOnBlur={2}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
-                ))}
+                )}
+                {employerContributionPayrollFieldEntries.length > 0 && (
+                  <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Employer contributions — do not reduce employee net pay</p>
+                    {employerContributionPayrollFieldEntries.map((entry) => {
+                      const idx = fields.payroll_field_entries.indexOf(entry);
+                      return (
+                        <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-violet-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{entry.label}</p>
+                            <p className="text-xs capitalize text-gray-500">Employer-paid · {entry.category.replace(/_/g, ' ')}</p>
+                          </div>
+                          <NumericInput
+                            value={Number(entry.amount) || 0}
+                            onValueChange={(value) => handlePayrollFieldEntryAmountChange(idx, value)}
+                            min={0}
+                            fixedDecimalsOnBlur={2}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -56,6 +56,68 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("Chief Stipend")
   end
 
+  it "prints legacy insurance and loan YTD values when those rows are visible" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    create(
+      :payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8,
+      insurance_payment: 30,
+      loan_payment: 15,
+      gross_pay: 160,
+      net_pay: 115,
+      total_deductions: 45
+    )
+    payroll_item.update!(insurance_payment: 10, loan_payment: 5, total_deductions: payroll_item.total_deductions.to_f + 15)
+
+    pdf = described_class.new(payroll_item).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Health Insurance")
+    expect(text).to include("Loan Repayment")
+    expect(text).to include("$40.00")
+    expect(text).to include("$20.00")
+  end
+
+  it "prints legacy itemized deductions and includes them in YTD total deductions" do
+    deduction_type = DeductionType.create!(
+      company: company,
+      name: "Garnishment",
+      category: "post_tax",
+      sub_category: "garnishment"
+    )
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_deductions.create!(
+      deduction_type: deduction_type,
+      label: "Garnishment",
+      category: "post_tax",
+      amount: 12
+    )
+    payroll_item.payroll_item_deductions.create!(
+      deduction_type: deduction_type,
+      label: "Garnishment",
+      category: "post_tax",
+      amount: 8
+    )
+    payroll_item.update!(custom_deductions: [])
+
+    generator = described_class.new(payroll_item)
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Garnishment")
+    expect(text).to include("$20.00")
+    expect(generator.send(:ytd_total_deductions)).to eq(20.0)
+  end
+
   it "prints custom deductions by label" do
     pdf = described_class.new(payroll_item).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
@@ -82,6 +144,153 @@ RSpec.describe PayStubGenerator do
     expect(text.scan("Reimbursement").count).to eq(1)
     expect(text).to include("Pre-Tax Deduction")
     expect(text).to include("Post-Tax Deduction")
+  end
+
+  it "prints total employer contribution YTD on pay stubs" do
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance"
+    )
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance",
+      amount: 15,
+      source: "manual",
+      employee_paid: false,
+      employer_paid: true
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Employer Health",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "insurance",
+      amount: 10,
+      source: "manual",
+      employee_paid: false,
+      employer_paid: true
+    )
+
+    text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("TOTAL EMPLOYER CONTRIBUTIONS")
+    expect(text).to include("$25.00")
+  end
+
+  it "uses stored tax and retirement YTD snapshots in total deductions YTD" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8,
+      withholding_tax: 999,
+      social_security_tax: 999,
+      medicare_tax: 999,
+      retirement_payment: 999,
+      roth_retirement_payment: 999)
+    payroll_item.update!(
+      ytd_withholding_tax: 10,
+      ytd_social_security_tax: 20,
+      ytd_medicare_tax: 5,
+      ytd_retirement: 30,
+      ytd_roth_retirement: 7,
+      custom_deductions: []
+    )
+
+    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(72.0)
+  end
+
+  it "does not include unrelated cross-tuple payroll field history in YTD deduction totals" do
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_field_entries.create!(
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "pre_tax_deduction",
+      category: "insurance",
+      amount: 999,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 20,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      label: "Uniform",
+      kind: "deduction",
+      tax_treatment: "pre_tax_deduction",
+      category: "insurance",
+      amount: 5,
+      source: "manual"
+    )
+
+    generator = described_class.new(payroll_item)
+
+    expect(generator.send(:ytd_payroll_field_deductions_total)).to eq(25.0)
+  end
+
+  it "limits payroll field YTD values to the current calendar year" do
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent"
+    )
+    prior_year_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2025, 12, 31))
+    prior_year_item = create(:payroll_item,
+      pay_period: prior_year_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_year_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 80,
+      source: "manual"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Rent Deduction",
+      kind: "deduction",
+      tax_treatment: "post_tax_deduction",
+      category: "rent",
+      amount: 20,
+      source: "manual"
+    )
+
+    entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.label == "Rent Deduction" }
+    generator = described_class.new(payroll_item)
+
+    expect(generator.send(:ytd_payroll_field_amount, entry)).to eq(20.0)
   end
 
   it "does not include later same-pay-date custom deductions in YTD custom deduction totals" do

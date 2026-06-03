@@ -73,7 +73,7 @@ module Api
           end
 
           pay_period = PayPeriod.reportable_committed
-                                .includes(payroll_items: :employee)
+                                .includes(payroll_items: [ :payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department } ])
                                 .find_by(id: pay_period_id, company_id: current_company_id)
 
           unless pay_period
@@ -119,6 +119,11 @@ module Api
               total_retirement: w2_items.sum(&:retirement_payment).to_f + w2_items.sum(&:roth_retirement_payment).to_f,
               total_custom_earnings: w2_items.sum { |item| custom_earnings_total(item) },
               total_custom_deductions: w2_items.sum { |item| custom_deductions_total(item) },
+              total_payroll_field_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+              total_payroll_field_non_taxable_additions: w2_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+              total_payroll_field_pre_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+              total_payroll_field_post_tax_deductions: w2_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+              total_payroll_field_employer_contributions: w2_items.sum { |item| payroll_field_total(item, "employer_contribution") },
               total_deductions: w2_items.sum(&:total_deductions),
               total_net: w2_items.sum(&:net_pay),
               contractor_total_gross: contractor_items.sum(&:gross_pay),
@@ -140,6 +145,7 @@ module Api
                                            .select(:id)
           items = employee.payroll_items
                           .joins(:pay_period)
+                          .includes(:payroll_item_field_entries)
                           .not_voided
                           .where(pay_periods: { id: reportable_period_ids })
           ytd_items = items.to_a
@@ -151,6 +157,11 @@ module Api
             status: employee.status,
             gross_pay: items.sum(:gross_pay),
             custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
+            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
+            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
+            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
+            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
+            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
             withholding_tax: items.sum(:withholding_tax),
             social_security_tax: items.sum(:social_security_tax),
             medicare_tax: items.sum(:medicare_tax),

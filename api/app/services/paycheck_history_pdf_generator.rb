@@ -22,7 +22,7 @@ class PaycheckHistoryPdfGenerator
 
   def generate
     items = pay_period.payroll_items
-      .includes(:employee)
+      .includes(:employee, :payroll_item_field_entries)
       .order("employees.last_name ASC, employees.first_name ASC")
 
     pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [36, 36, 50, 36])
@@ -45,6 +45,7 @@ class PaycheckHistoryPdfGenerator
 
     render_summary(pdf, items)
     render_checks_table(pdf, items)
+    render_payroll_fields_summary(pdf, items)
 
     render_with_footer(pdf,
       "#{company.name} \u2014 Paycheck History \u2014 #{pay_period.start_date} to #{pay_period.end_date} \u2014 CONFIDENTIAL"
@@ -122,6 +123,32 @@ class PaycheckHistoryPdfGenerator
       width: pdf.bounds.width,
       cell_style: { size: 7, padding: [3, 4], border_color: BORDER_GRAY, overflow: :shrink_to_fit }
     )
+  end
+
+  def render_payroll_fields_summary(pdf, items)
+    entries = items.reject(&:voided?).flat_map { |item| item.payroll_item_field_entries.select(&:active?) }
+    return if entries.empty?
+
+    pdf.start_new_page if pdf.cursor < 120
+    pdf.move_down 12
+    pdf.font_size(11) { pdf.text "Payroll Fields", style: :bold, color: HEADER_BG }
+    pdf.move_down 4
+
+    rows = [[ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ]] +
+      entries.group_by { |entry| [ entry.tax_treatment, entry.label, entry.employee_paid, entry.employer_paid ] }
+        .sort_by { |key, _| key.map(&:to_s) }
+        .map do |(treatment, label, employee_paid, employer_paid), grouped|
+          [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry.amount.to_f }) ]
+        end
+
+    pdf.table(rows, header: true, width: pdf.bounds.width) do
+      row(0).font_style = :bold
+      row(0).background_color = HEADER_BG
+      row(0).text_color = "FFFFFF"
+      cells.size = 8
+      cells.padding = [ 3, 5 ]
+      columns(2..4).align = :right
+    end
   end
 
   def fmt(value)

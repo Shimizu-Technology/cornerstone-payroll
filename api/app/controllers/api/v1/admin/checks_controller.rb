@@ -65,7 +65,7 @@ module Api
           end
 
           items = @pay_period.payroll_items
-                             .includes(:employee, :pay_period)
+                             .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                              .with_check_number
                              .order(Arel.sql("check_number::integer ASC"))
                              .to_a
@@ -660,7 +660,7 @@ module Api
         end
 
         def set_payroll_item
-          @payroll_item = PayrollItem.includes(:employee, { check_events: :user }, pay_period: :company).find(params[:payroll_item_id])
+          @payroll_item = PayrollItem.includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, check_events: :user, employee: :department, pay_period: :company }).find(params[:payroll_item_id])
           unless @payroll_item.pay_period.company_id == current_company_id
             render json: { error: "Payroll item not found" }, status: :not_found and return
           end
