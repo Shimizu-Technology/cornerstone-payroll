@@ -341,7 +341,7 @@ class CheckGenerator
     draw_summary_box(
       pdf,
       x: rx + stub_cfg["summary_x_offset"].to_f,
-      y: row3_top + stub_cfg["summary_y_offset"].to_f,
+      y: summary_box_y(sect_bot, row2_top, row3_top, stub_cfg),
       w: right_w,
       stub_cfg: stub_cfg
     )
@@ -683,6 +683,14 @@ class CheckGenerator
         pay_date: pay_period.pay_date,
         pay_period_id: pay_period.id)
       .to_a
+  end
+
+  def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg)
+    estimated_deductions_height = ((deduction_rows.size + 1) * 9.0) + 4.0
+    non_overlapping_top = deductions_top - estimated_deductions_height - 6.0
+    minimum_top = sect_bot + stub_cfg["summary_box_h"].to_f + 20.0
+
+    [ [default_top + stub_cfg["summary_y_offset"].to_f, non_overlapping_top].min, minimum_top ].max
   end
 
   # -----------------------------------------------------------------------
