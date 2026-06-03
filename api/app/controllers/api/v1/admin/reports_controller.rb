@@ -724,7 +724,9 @@ module Api
             payroll_checks: {
               count: check_numbers.size,
               first: check_numbers.first,
-              last: check_numbers.last
+              last: check_numbers.last,
+              numbers: check_numbers,
+              ranges: CheckNumberRangeFormatter.format(check_numbers)
             },
             non_employee_checks: ne_checks.map { |c|
               {

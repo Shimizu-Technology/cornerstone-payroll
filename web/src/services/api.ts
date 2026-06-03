@@ -1838,6 +1838,8 @@ export interface TransmittalPreview {
     count: number;
     first: string | null;
     last: string | null;
+    numbers: string[];
+    ranges: string;
   };
   non_employee_checks: {
     id: number;
