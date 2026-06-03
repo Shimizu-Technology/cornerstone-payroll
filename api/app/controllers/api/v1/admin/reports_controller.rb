@@ -710,7 +710,7 @@ module Api
           items = pp.payroll_items.not_voided
           saved = pp.transmittal
           live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
-          check_numbers = Array(saved&.payroll_check_numbers).presence || live_check_numbers
+          check_numbers = saved ? Array(saved.payroll_check_numbers) : live_check_numbers
           ne_checks = pp.non_employee_checks.active.order(:id)
 
           total_fit  = items.sum(:withholding_tax)
@@ -979,7 +979,7 @@ module Api
             opts[:transmittal_date] = parse_optional_iso_date(params[:transmittal_date], param_name: "transmittal_date")
             return opts if performed?
           end
-          if params[:payroll_check_numbers].present?
+          if params.key?(:payroll_check_numbers)
             opts[:payroll_check_numbers] = Array(params[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
           end
           opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?

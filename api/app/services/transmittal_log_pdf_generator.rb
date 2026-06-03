@@ -82,8 +82,9 @@ class TransmittalLogPdfGenerator
   end
 
   def payroll_check_numbers
-    override = Array(options[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
-    return override if override.any?
+    if options.key?(:payroll_check_numbers)
+      return Array(options[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
+    end
 
     pay_period.payroll_items
       .not_voided

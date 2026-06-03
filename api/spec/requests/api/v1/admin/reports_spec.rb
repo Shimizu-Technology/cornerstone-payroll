@@ -86,6 +86,22 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(pay_period.transmittal.reload.payroll_check_numbers).to eq(%w[3001 3005 3006])
     end
 
+    it "honors an explicitly empty payroll check number list" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        payroll_check_numbers: %w[3001 3005]
+      )
+
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_check_numbers: []
+      }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq([])
+    end
+
     it "preserves a saved transmittal date when a later generation omits the date param" do
       Transmittal.create!(
         pay_period: pay_period,

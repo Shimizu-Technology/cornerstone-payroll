@@ -430,7 +430,7 @@ function TransmittalEditorModal({
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
           setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
-          setPayrollCheckNumbers(saved.payroll_check_numbers?.length ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
+          setPayrollCheckNumbers(saved.payroll_check_numbers ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];
@@ -628,7 +628,7 @@ function TransmittalEditorModal({
                         <div>
                           <span>Checks #: </span>
                           <span className="font-medium text-gray-900">
-                            {formatCheckRanges(payrollCheckNumbers) || preview.payroll_checks.ranges || '—'}
+                            {formatCheckRanges(payrollCheckNumbers) || '—'}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
@@ -1229,7 +1229,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
       reportList: saved.report_list || [],
       checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,
       checkNumberLast: preview?.payroll_checks.last || saved.check_number_last || undefined,
-      payrollCheckNumbers: saved.payroll_check_numbers?.length ? saved.payroll_check_numbers : preview?.payroll_checks.numbers,
+      payrollCheckNumbers: saved.payroll_check_numbers ?? preview?.payroll_checks.numbers,
       nonEmployeeCheckNumbers: liveNonEmployeeNumbers && Object.keys(liveNonEmployeeNumbers).length > 0
         ? liveNonEmployeeNumbers
         : saved.non_employee_check_numbers
