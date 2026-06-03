@@ -518,6 +518,8 @@ function TransmittalEditorModal({
       .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
   };
 
+  const payrollCheckCount = payrollCheckNumbers.filter(n => n.trim()).length;
+
   const handleAddNote = () => {
     const trimmed = newNote.trim();
     if (trimmed) {
@@ -620,11 +622,11 @@ function TransmittalEditorModal({
                 <label className="block text-sm font-medium text-gray-700 mb-2">Documents Provided to Client</label>
                 <div className="bg-gray-50 border rounded-lg p-4 space-y-4 text-sm">
                   {/* Payroll Checks */}
-                  {preview.payroll_checks.count > 0 && (
+                  {payrollCheckCount > 0 && (
                     <div>
                       <p className="font-medium text-gray-900">1) Payroll Checks</p>
                       <div className="ml-6 text-gray-600 space-y-1.5 mt-1">
-                        <p>Number of Checks: <span className="font-medium text-gray-900">{payrollCheckNumbers.filter(n => n.trim()).length}</span></p>
+                        <p>Number of Checks: <span className="font-medium text-gray-900">{payrollCheckCount}</span></p>
                         <div>
                           <span>Checks #: </span>
                           <span className="font-medium text-gray-900">
@@ -663,7 +665,7 @@ function TransmittalEditorModal({
                   {preview.non_employee_checks.map((check, idx) => (
                     <div key={check.id}>
                       <p className="font-medium text-gray-900">
-                        {(preview.payroll_checks.count > 0 ? 2 : 1) + idx}) {check.payable_to} — {displayCheckType(check.check_type)}
+                        {(payrollCheckCount > 0 ? 2 : 1) + idx}) {check.payable_to} — {displayCheckType(check.check_type)}
                       </p>
                       <div className="ml-6 text-gray-600 space-y-1 mt-1">
                         <div className="flex items-center gap-2">
