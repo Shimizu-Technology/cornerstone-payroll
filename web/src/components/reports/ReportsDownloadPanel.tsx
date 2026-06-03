@@ -379,10 +379,17 @@ function TransmittalEditorModal({
   const [reportList, setReportList] = useState<string[]>(DEFAULT_REPORT_LIST);
   const [newNote, setNewNote] = useState('');
   const [newReport, setNewReport] = useState('');
+  const localDateString = () => {
+    const date = new Date();
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
   const [preview, setPreview] = useState<TransmittalPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [transmittalDate, setTransmittalDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [transmittalDate, setTransmittalDate] = useState(localDateString);
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
   const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
@@ -417,7 +424,7 @@ function TransmittalEditorModal({
         const saved = data.saved_transmittal;
         if (saved) {
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
-          setTransmittalDate(saved.transmittal_date || new Date().toISOString().slice(0, 10));
+          setTransmittalDate(saved.transmittal_date || localDateString());
           setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
@@ -431,7 +438,7 @@ function TransmittalEditorModal({
           setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
         } else {
           setPreparerName('Cornerstone Tax Services');
-          setTransmittalDate(new Date().toISOString().slice(0, 10));
+          setTransmittalDate(localDateString());
           setReportList([...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || '');
           setCheckLast(data.payroll_checks.last || '');

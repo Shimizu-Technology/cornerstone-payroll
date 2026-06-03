@@ -61,8 +61,10 @@ RSpec.describe TransmittalLogPdfGenerator do
     pdf = described_class.new(pay_period).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
 
-    expect(text).to include("Checks #: 1007, 1010-1011")
-    expect(text).not_to include("1007  through  1011")
+    normalized_text = text.gsub(/\s+/, " ")
+
+    expect(normalized_text).to include("Checks #: 1007, 1010-1011")
+    expect(normalized_text).not_to include("1007 through 1011")
   end
 
   it "keeps a normal pay-period transmittal on one page" do
