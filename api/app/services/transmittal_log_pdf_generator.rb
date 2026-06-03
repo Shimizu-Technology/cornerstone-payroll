@@ -96,15 +96,14 @@ class TransmittalLogPdfGenerator
       .sort_by(&:to_i)
 
     if check_numbers.any?
-      first_num = options[:check_number_first].presence || check_numbers.first
-      last_num = options[:check_number_last].presence || check_numbers.last
+      formatted_numbers = CheckNumberRangeFormatter.format(check_numbers)
 
       item_num += 1
       pdf.font_size(10) do
         pdf.text "#{item_num})  Payroll Checks", style: :bold
         pdf.indent(30) do
           pdf.text "Number of Checks:  #{check_numbers.size}"
-          pdf.text "Checks #  #{first_num}  through  #{last_num}"
+          pdf.text "Checks #:  #{formatted_numbers}"
         end
       end
       pdf.move_down 8

@@ -35,6 +35,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         pay_period: pay_period,
         employee: employee,
         company: company,
+        check_number: "1007",
         gross_pay: 1200.00,
         net_pay: 968.20,
         withholding_tax: 100.00,
@@ -42,6 +43,27 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         employer_social_security_tax: 74.40,
         medicare_tax: 17.40,
         employer_medicare_tax: 17.40)
+    end
+
+    it "reports non-contiguous check numbers as exact ranges" do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: create(:employee, company: company),
+        company: company,
+        check_number: "1010",
+        gross_pay: 100.00)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: create(:employee, company: company),
+        company: company,
+        check_number: "1011",
+        gross_pay: 100.00)
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq(%w[1007 1010 1011])
+      expect(payroll_checks["ranges"]).to eq("1007, 1010-1011")
     end
 
     it "reports total DRT deposit as FIT only" do

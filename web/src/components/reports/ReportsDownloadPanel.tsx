@@ -561,24 +561,17 @@ function TransmittalEditorModal({
                       <p className="font-medium text-gray-900">1) Payroll Checks</p>
                       <div className="ml-6 text-gray-600 space-y-1.5 mt-1">
                         <p>Number of Checks: <span className="font-medium text-gray-900">{preview.payroll_checks.count}</span></p>
-                        <div className="flex items-center gap-2">
-                          <span>Checks #</span>
-                          <input
-                            type="text"
-                            value={checkFirst}
-                            onChange={(e) => setCheckFirst(e.target.value)}
-                            className="w-20 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
-                            placeholder="First"
-                          />
-                          <span>through</span>
-                          <input
-                            type="text"
-                            value={checkLast}
-                            onChange={(e) => setCheckLast(e.target.value)}
-                            className="w-20 border rounded px-2 py-0.5 text-sm font-medium text-gray-900 text-center"
-                            placeholder="Last"
-                          />
+                        <div>
+                          <span>Checks #: </span>
+                          <span className="font-medium text-gray-900">
+                            {preview.payroll_checks.ranges || [checkFirst, checkLast].filter(Boolean).join(' through ') || '—'}
+                          </span>
                         </div>
+                        {preview.payroll_checks.numbers?.length > 0 && (
+                          <p className="text-xs text-gray-500">
+                            Exact issued checks: {preview.payroll_checks.numbers.join(', ')}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
