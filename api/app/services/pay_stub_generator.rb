@@ -351,6 +351,10 @@ class PayStubGenerator
       ]
     end
 
+    legacy_itemized_deduction_rows.each do |row|
+      deductions_data << [ row[:label], format_currency(row[:amount]), format_currency(row[:ytd]) ]
+    end
+
     if payroll_item.tips_paid_out.to_f > 0
       deductions_data << [
         "Tips Paid Out",
@@ -537,8 +541,64 @@ class PayStubGenerator
   def ytd_total_deductions
     payroll_item.ytd_withholding_tax.to_f + payroll_item.ytd_social_security_tax.to_f + payroll_item.ytd_medicare_tax.to_f +
       employee_ytd_additional_withholding + payroll_item.ytd_retirement.to_f + payroll_item.ytd_roth_retirement.to_f +
-      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + employee_ytd_tips_paid_out +
+      visible_legacy_insurance_ytd + visible_legacy_loan_ytd + legacy_itemized_deductions_ytd_total + employee_ytd_tips_paid_out +
       employee_ytd_custom_deductions_total + ytd_payroll_field_deductions_total
+  end
+
+  def legacy_itemized_deduction_rows
+    @legacy_itemized_deduction_rows ||= legacy_itemized_deductions_for_stub
+      .group_by(&:label)
+      .map do |label, deductions|
+        {
+          label: label,
+          amount: deductions.sum { |deduction| deduction.amount.to_f },
+          ytd: legacy_itemized_deductions_ytd_by_label.fetch(label, 0.0)
+        }
+      end
+      .sort_by { |row| row[:label].to_s }
+  end
+
+  def legacy_itemized_deductions_ytd_total
+    legacy_itemized_deduction_rows.sum { |row| row[:ytd].to_f }
+  end
+
+  def legacy_itemized_deductions_for_stub
+    payroll_item.payroll_item_deductions.select do |deduction|
+      next false unless deduction.pre_tax? || deduction.post_tax?
+      next false if payroll_field_backed_deduction?(deduction)
+
+      sub_category = deduction.deduction_type&.sub_category.to_s
+      !sub_category.in?(%w[retirement insurance loan])
+    end
+  end
+
+  def legacy_itemized_deductions_ytd_by_label
+    @legacy_itemized_deductions_ytd_by_label ||= begin
+      labels = legacy_itemized_deductions_for_stub.map(&:label).uniq
+      if labels.empty?
+        Hash.new(0.0)
+      else
+        pay_date = payroll_item.pay_period.pay_date || Date.current
+        year_start = Date.new(pay_date.year, 1, 1)
+        PayrollItemDeduction.joins(:deduction_type, payroll_item: :pay_period)
+          .merge(PayrollItem.not_voided)
+          .where(payroll_items: { employee_id: employee.id, company_id: payroll_item.company_id })
+          .where(pay_periods: { pay_date: year_start..pay_date })
+          .where(label: labels, category: %w[pre_tax post_tax])
+          .where("deduction_types.sub_category IS NULL OR deduction_types.sub_category NOT IN (?)", %w[retirement insurance loan])
+          .where.not("deduction_types.name LIKE ?", "Payroll Field%")
+          .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
+            pay_date: pay_date,
+            pay_period_id: payroll_item.pay_period.id)
+          .group(:label)
+          .sum(:amount)
+          .transform_values(&:to_f)
+      end
+    end
+  end
+
+  def payroll_field_backed_deduction?(deduction)
+    deduction.deduction_type&.name.to_s.start_with?("Payroll Field")
   end
 
   def visible_legacy_insurance_ytd
