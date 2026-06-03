@@ -430,7 +430,7 @@ function TransmittalEditorModal({
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
           setCheckLast(data.payroll_checks.last || saved.check_number_last || '');
-          setPayrollCheckNumbers(saved.payroll_check_numbers ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
+          setPayrollCheckNumbers(saved.payroll_check_numbers !== null ? [...saved.payroll_check_numbers] : [...(data.payroll_checks.numbers || [])]);
           const neNums: Record<number, string> = {};
           data.non_employee_checks.forEach(c => {
             const savedNum = saved.non_employee_check_numbers?.[String(c.id)];

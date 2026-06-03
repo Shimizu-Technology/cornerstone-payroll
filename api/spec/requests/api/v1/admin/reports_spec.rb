@@ -76,6 +76,28 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(tax_totals["total_drt_deposit"].to_f).to eq(100.0)
     end
 
+    it "falls back to live payroll checks for saved transmittals without an initialized check list" do
+      Transmittal.create!(pay_period: pay_period, company: company)
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq(%w[1007])
+      expect(payroll_checks["count"]).to eq(1)
+    end
+
+    it "previews an explicitly empty saved payroll check list as empty" do
+      Transmittal.create!(pay_period: pay_period, company: company, payroll_check_numbers: [])
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq([])
+      expect(payroll_checks["count"]).to eq(0)
+    end
+
     it "saves editable payroll check numbers for generated transmittals" do
       post "/api/v1/admin/reports/transmittal_log_pdf", params: {
         pay_period_id: pay_period.id,
