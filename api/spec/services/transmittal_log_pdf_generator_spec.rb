@@ -59,6 +59,14 @@ RSpec.describe TransmittalLogPdfGenerator do
     expect(text).not_to include("1007")
   end
 
+  it "honors an explicitly empty editable payroll check list" do
+    pdf = described_class.new(pay_period, payroll_check_numbers: []).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
+
+    expect(text).not_to include("Payroll Checks")
+    expect(text).not_to include("Checks #:")
+  end
+
   it "prints exact check ranges without implying missing check numbers were issued" do
     create(:payroll_item, :with_check,
       company: company,
