@@ -82,6 +82,42 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$20.00")
   end
 
+  it "prints legacy itemized deductions and includes them in YTD total deductions" do
+    deduction_type = DeductionType.create!(
+      company: company,
+      name: "Garnishment",
+      category: "post_tax",
+      sub_category: "garnishment"
+    )
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
+    prior_item = create(:payroll_item,
+      pay_period: prior_period,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20,
+      hours_worked: 8)
+    prior_item.payroll_item_deductions.create!(
+      deduction_type: deduction_type,
+      label: "Garnishment",
+      category: "post_tax",
+      amount: 12
+    )
+    payroll_item.payroll_item_deductions.create!(
+      deduction_type: deduction_type,
+      label: "Garnishment",
+      category: "post_tax",
+      amount: 8
+    )
+    payroll_item.update!(custom_deductions: [])
+
+    generator = described_class.new(payroll_item)
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+    expect(text).to include("Garnishment")
+    expect(text).to include("$20.00")
+    expect(generator.send(:ytd_total_deductions)).to eq(20.0)
+  end
+
   it "prints custom deductions by label" do
     pdf = described_class.new(payroll_item).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
