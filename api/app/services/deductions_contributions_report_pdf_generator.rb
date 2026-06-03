@@ -100,7 +100,9 @@ class DeductionsContributionsReportPdfGenerator
           deduction["label"].presence || "Other Deduction"
         end
       }
-      all_labels = (all_labels + custom_labels).uniq.sort
+      special_labels = []
+      special_labels << "Tips Paid Out" if items.any? { |item| item.tips_paid_out.to_f.positive? }
+      all_labels = (all_labels + custom_labels + special_labels).uniq.sort
     end
 
     return if all_labels.empty?
@@ -204,6 +206,8 @@ class DeductionsContributionsReportPdfGenerator
   end
 
   def deduction_amount_for_label(item, label, category)
+    return item.tips_paid_out.to_f if category == "post_tax" && label == "Tips Paid Out"
+
     field_entries = employee_payroll_field_deduction_entries(item, category).select { |entry| entry.label == label }
     amount = item.payroll_item_deductions
       .select { |deduction| deduction.label == label && deduction.category == category }
@@ -229,6 +233,7 @@ class DeductionsContributionsReportPdfGenerator
 
           deduction["label"].presence || "Other Deduction"
         end
+        labels << "Tips Paid Out" if item.tips_paid_out.to_f.positive?
       end
       labels.uniq.sum { |label| deduction_amount_for_label(item, label, category) }
     end

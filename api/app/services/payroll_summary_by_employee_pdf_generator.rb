@@ -170,6 +170,12 @@ class PayrollSummaryByEmployeePdfGenerator
         }
       end
 
+      if group.any? { |item| item.reported_tips.to_f.positive? }
+        render_labeled_row(pdf, "Reported Tips", group, label_width, col_width) { |item|
+          item.reported_tips.to_f.positive? ? fmt(item.reported_tips) : "—"
+        }
+      end
+
       payroll_field_labels_for(group, "taxable_addition", "non_taxable_addition").each do |label|
         render_labeled_row(pdf, label, group, label_width, col_width) { |item|
           amount = payroll_field_amount_for_label(item, label, "taxable_addition", "non_taxable_addition")
@@ -194,7 +200,16 @@ class PayrollSummaryByEmployeePdfGenerator
     else
       []
     end
-    all_labels = (deduction_labels + custom_labels).uniq
+    special_labels = if category == "post_tax"
+      labels = []
+      labels << "Tips Paid Out" if group.any? { |item| item.tips_paid_out.to_f.positive? }
+      labels << "Loan" if group.any? { |item| visible_legacy_loan_payment(item).positive? }
+      labels << "Health Insurance" if group.any? { |item| visible_legacy_insurance_payment(item).positive? }
+      labels
+    else
+      []
+    end
+    all_labels = (deduction_labels + custom_labels + special_labels).uniq
 
     if all_labels.empty?
       render_labeled_row(pdf, "(none)", group, label_width, col_width) { |_| "—" }
@@ -210,12 +225,18 @@ class PayrollSummaryByEmployeePdfGenerator
 
     render_labeled_row(pdf, "Subtotal", group, label_width, col_width, bold: true) { |item|
       total = item.payroll_item_deductions.select { |d| d.category == category }.sum(&:amount)
-      total += item.custom_deductions_total.to_f if category == "post_tax"
+      if category == "post_tax"
+        total += item.custom_deductions_total.to_f + item.tips_paid_out.to_f + visible_legacy_loan_payment(item) + visible_legacy_insurance_payment(item)
+      end
       total > 0 ? fmt(-total) : "—"
     }
   end
 
   def deduction_amount_for_label(item, label, category)
+    return item.tips_paid_out.to_f if category == "post_tax" && label == "Tips Paid Out"
+    return visible_legacy_loan_payment(item) if category == "post_tax" && label == "Loan" && visible_legacy_loan_payment(item).positive?
+    return visible_legacy_insurance_payment(item) if category == "post_tax" && label == "Health Insurance" && visible_legacy_insurance_payment(item).positive?
+
     amount = item.payroll_item_deductions
       .select { |deduction| deduction.label == label && deduction.category == category }
       .sum(&:amount)
@@ -226,6 +247,18 @@ class PayrollSummaryByEmployeePdfGenerator
       deduction_label = deduction["label"].presence || "Other Deduction"
       deduction_label == label ? deduction["amount"].to_f : 0
     end
+  end
+
+  def visible_legacy_loan_payment(item)
+    return 0.0 if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.loan? }
+
+    item.loan_payment.to_f
+  end
+
+  def visible_legacy_insurance_payment(item)
+    return 0.0 if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.sub_category == "insurance" }
+
+    item.insurance_payment.to_f
   end
 
   def render_tax_rows(pdf, group, label_width, col_width)
