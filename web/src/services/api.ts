@@ -1753,6 +1753,7 @@ export const reportsApi = {
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -1765,6 +1766,7 @@ export const reportsApi = {
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -1818,6 +1820,7 @@ export interface TransmittalOptions {
   reportList?: string[];
   checkNumberFirst?: string;
   checkNumberLast?: string;
+  payrollCheckNumbers?: string[];
   nonEmployeeCheckNumbers?: Record<number, string>;
   customEntries?: TransmittalCustomEntry[];
 }
@@ -1829,6 +1832,7 @@ export interface SavedTransmittal {
   report_list: string[];
   check_number_first: string | null;
   check_number_last: string | null;
+  payroll_check_numbers: string[];
   non_employee_check_numbers: Record<string, string>;
   custom_entries: TransmittalCustomEntry[];
   generated_at: string | null;
@@ -2308,6 +2312,7 @@ export const payrollReportsApi = {
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -2320,6 +2325,7 @@ export const payrollReportsApi = {
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
