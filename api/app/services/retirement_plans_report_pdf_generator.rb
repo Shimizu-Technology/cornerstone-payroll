@@ -22,7 +22,7 @@ class RetirementPlansReportPdfGenerator
 
   def generate
     items = pay_period.payroll_items
-      .includes(:employee)
+      .includes(:employee, :payroll_item_field_entries)
       .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
@@ -48,7 +48,8 @@ class RetirementPlansReportPdfGenerator
       item.retirement_payment.to_f > 0 ||
       item.roth_retirement_payment.to_f > 0 ||
       item.employer_retirement_match.to_f > 0 ||
-      item.employer_roth_retirement_match.to_f > 0
+      item.employer_roth_retirement_match.to_f > 0 ||
+      retirement_payroll_field_entries(item).any?
     end
 
     if retirement_items.empty?
@@ -76,7 +77,7 @@ class RetirementPlansReportPdfGenerator
   def render_contributions_table(pdf, items)
     header = [
       "Employee", "Gross Pay", "401(k) Pre-Tax", "401(k) Roth", "Employer Match (Pre-Tax)",
-      "Employer Match (Roth)", "Total Employee", "Total Employer", "Grand Total"
+      "Employer Match (Roth)", "Field Employee", "Field Employer", "Total Employee", "Total Employer", "Grand Total"
     ].map.with_index do |label, idx|
       { content: label, background_color: HEADER_BG, text_color: "FFFFFF",
         font_style: :bold, align: idx.zero? ? :left : :right }
@@ -87,6 +88,8 @@ class RetirementPlansReportPdfGenerator
       roth = item.roth_retirement_payment.to_f
       emp_match = item.employer_retirement_match.to_f
       roth_match = item.employer_roth_retirement_match.to_f
+      field_employee = retirement_payroll_field_entries(item).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f }
+      field_employer = retirement_payroll_field_entries(item).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 }
 
       [
         { content: item.employee_full_name },
@@ -95,9 +98,11 @@ class RetirementPlansReportPdfGenerator
         { content: fmt(roth), align: :right },
         { content: fmt(emp_match), align: :right },
         { content: fmt(roth_match), align: :right },
-        { content: fmt(pre_tax + roth), align: :right, font_style: :bold },
-        { content: fmt(emp_match + roth_match), align: :right, font_style: :bold },
-        { content: fmt(pre_tax + roth + emp_match + roth_match), align: :right, font_style: :bold }
+        { content: fmt(field_employee), align: :right },
+        { content: fmt(field_employer), align: :right },
+        { content: fmt(pre_tax + roth + field_employee), align: :right, font_style: :bold },
+        { content: fmt(emp_match + roth_match + field_employer), align: :right, font_style: :bold },
+        { content: fmt(pre_tax + roth + field_employee + emp_match + roth_match + field_employer), align: :right, font_style: :bold }
       ]
     end
 
@@ -115,6 +120,8 @@ class RetirementPlansReportPdfGenerator
     t_roth = items.sum { |i| i.roth_retirement_payment.to_f }
     t_emp = items.sum { |i| i.employer_retirement_match.to_f }
     t_roth_match = items.sum { |i| i.employer_roth_retirement_match.to_f }
+    t_field_employee = items.sum { |i| retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f } }
+    t_field_employer = items.sum { |i| retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 } }
 
     [
       { content: "TOTALS (#{items.size} employees)", font_style: :bold, background_color: SECTION_BG },
@@ -123,15 +130,17 @@ class RetirementPlansReportPdfGenerator
       { content: fmt(t_roth), align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(t_emp), align: :right, font_style: :bold, background_color: SECTION_BG },
       { content: fmt(t_roth_match), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_pre + t_roth), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_emp + t_roth_match), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_pre + t_roth + t_emp + t_roth_match), align: :right, font_style: :bold, background_color: SECTION_BG }
+      { content: fmt(t_field_employee), align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(t_pre + t_roth + t_field_employee), align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(t_emp + t_roth_match + t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG },
+      { content: fmt(t_pre + t_roth + t_field_employee + t_emp + t_roth_match + t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG }
     ]
   end
 
   def render_summary(pdf, items)
-    total_employee = items.sum { |i| i.retirement_payment.to_f + i.roth_retirement_payment.to_f }
-    total_employer = items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f }
+    total_employee = items.sum { |i| i.retirement_payment.to_f + i.roth_retirement_payment.to_f + retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f } }
+    total_employer = items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 } }
 
     pdf.font_size(10) do
       pdf.text "Total to be deducted from bank account for retirement provider:", style: :bold
@@ -139,6 +148,10 @@ class RetirementPlansReportPdfGenerator
       pdf.text "Employer contributions: #{fmt(total_employer)}"
       pdf.text "Combined total: #{fmt(total_employee + total_employer)}", style: :bold, color: HEADER_BG
     end
+  end
+
+  def retirement_payroll_field_entries(item)
+    item.payroll_item_field_entries.select { |entry| entry.active? && entry.category == "retirement" }
   end
 
   def fmt(value)

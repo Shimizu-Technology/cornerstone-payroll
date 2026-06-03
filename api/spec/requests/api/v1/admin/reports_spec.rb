@@ -1376,6 +1376,74 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(disposition).to include(".csv")
     end
 
+    it "does not double-count mirrored payroll field employer contributions in JSON" do
+      item = pay_period.payroll_items.first
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Employer Health",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "insurance"
+      )
+      [45.0, 60.0].each_with_index do |amount, index|
+        item.payroll_item_field_entries.create!(
+          payroll_field_definition: index.zero? ? field : nil,
+          label: "Employer Health",
+          kind: "employer_contribution",
+          tax_treatment: "employer_contribution",
+          category: "insurance",
+          amount: amount,
+          source: "manual",
+          employee_paid: false,
+          employer_paid: true
+        )
+        deduction_type = DeductionType.create!(
+          company: company,
+          name: "Payroll Field Employer Health #{index}",
+          category: "employer_contribution",
+          sub_category: "insurance"
+        )
+        item.payroll_item_deductions.create!(
+          deduction_type: deduction_type,
+          label: "Employer Health",
+          category: "employer_contribution",
+          amount: amount
+        )
+      end
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+
+      row = response.parsed_body["report"]["employees"].first
+      contribution_rows = row["employer_contributions_breakdown"].select { |entry| entry["label"] == "Employer Health" }
+      expect(contribution_rows.map { |entry| entry["amount"].to_f }).to contain_exactly(45.0, 60.0)
+      expect(contribution_rows).to all(include("deduction_type" => "Payroll Field"))
+    end
+
+    it "includes payroll field columns and amounts" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent"
+      )
+      pay_period.payroll_items.first.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: "Rent Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount: 75.00,
+        source: "manual"
+      )
+
+      get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+
+      first_line = response.body.lines.first
+      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction)")
+      expect(response.body).to include("75.00")
+    end
+
     it "includes CSV header row with expected columns" do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
 

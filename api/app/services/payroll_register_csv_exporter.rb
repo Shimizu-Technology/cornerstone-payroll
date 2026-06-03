@@ -57,9 +57,9 @@ class PayrollRegisterCsvExporter
 
   def generate
     CSV.generate(headers: true, force_quotes: false) do |csv|
-      csv << HEADERS
+      csv << headers
 
-      (report.dig(:employees) || []).each { |emp| csv << employee_row(emp) }
+      payroll_rows.each { |emp| csv << employee_row(emp) }
 
       csv << summary_row
     end
@@ -81,8 +81,30 @@ class PayrollRegisterCsvExporter
 
   private
 
+  def headers
+    HEADERS + payroll_field_columns.map { |column| "Payroll Field - #{column[:label]} (#{column[:tax_treatment].to_s.humanize})" }
+  end
+
+  def payroll_rows
+    Array(report.dig(:employees)) + Array(report.dig(:contractors))
+  end
+
+  def payroll_field_columns
+    @payroll_field_columns ||= payroll_rows.flat_map { |emp| Array(emp[:payroll_field_entries]) }
+      .group_by { |entry| [ entry[:label], entry[:tax_treatment] ] }
+      .keys
+      .sort_by { |label, treatment| [ treatment.to_s, label.to_s ] }
+      .map { |label, treatment| { label: label, tax_treatment: treatment } }
+  end
+
+  def payroll_field_amount(emp, column)
+    Array(emp[:payroll_field_entries]).sum do |entry|
+      entry[:label].to_s == column[:label].to_s && entry[:tax_treatment].to_s == column[:tax_treatment].to_s ? entry[:amount].to_f : 0.0
+    end
+  end
+
   def employee_row(emp)
-    [
+    base_row = [
       sanitize_csv_field(emp[:employee_last_name]),
       sanitize_csv_field(emp[:employee_first_name]),
       sanitize_csv_field(emp[:employee_name]),
@@ -117,15 +139,14 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
+    base_row + payroll_field_columns.map { |column| format_currency(payroll_field_amount(emp, column)) }
   end
 
   def summary_row
     s = report[:summary] || {}
-    total_traditional_retirement = s.key?(:total_traditional_retirement) ? s[:total_traditional_retirement] : s[:total_retirement]
-    total_employer_traditional_retirement = s.key?(:total_employer_traditional_retirement) ? s[:total_employer_traditional_retirement] : s[:total_employer_retirement]
 
     [
-      sanitize_csv_field("TOTALS (#{s[:employee_count]} employees)"),
+      sanitize_csv_field(summary_label(s)),
       "",
       "",
       "",
@@ -135,30 +156,42 @@ class PayrollRegisterCsvExporter
       "",
       "",
       "",
-      format_currency(s[:total_reported_tips]),
-      format_currency(s[:total_tips_paid_out]),
-      format_currency(s[:total_bonus]),
-      format_currency(s[:total_custom_earnings]),
-      format_currency(s[:total_non_taxable_pay]),
-      format_currency(s[:total_gross]),
-      format_currency(s[:total_withholding]),
-      format_currency(s[:total_additional_withholding]),
-      format_currency(s[:total_social_security]),
-      format_currency(s[:total_medicare]),
-      format_currency(s[:total_employer_social_security]),
-      format_currency(s[:total_employer_medicare]),
-      format_currency(total_traditional_retirement),
-      format_currency(s[:total_roth_retirement]),
-      format_currency(total_employer_traditional_retirement),
-      format_currency(s[:total_employer_roth_retirement]),
+      format_currency(total_for(:reported_tips)),
+      format_currency(total_for(:tips_paid_out)),
+      format_currency(total_for(:bonus)),
+      format_currency(total_for(:custom_earnings_total)),
+      format_currency(total_for(:non_taxable_pay)),
+      format_currency(total_for(:gross_pay)),
+      format_currency(total_for(:withholding_tax)),
+      format_currency(total_for(:additional_withholding)),
+      format_currency(total_for(:social_security_tax)),
+      format_currency(total_for(:medicare_tax)),
+      format_currency(total_for(:employer_social_security_tax)),
+      format_currency(total_for(:employer_medicare_tax)),
+      format_currency(total_for(:retirement_payment)),
+      format_currency(total_for(:roth_retirement_payment)),
+      format_currency(total_for(:employer_retirement_match)),
+      format_currency(total_for(:employer_roth_retirement_match)),
       "",
-      format_currency(s[:total_loan_payments]),
+      format_currency(total_for(:loan_payment)),
       "",
-      format_currency(s[:total_custom_deductions]),
-      format_currency(s[:total_deductions]),
-      format_currency(s[:total_net]),
+      format_currency(total_for(:custom_deductions_total)),
+      format_currency(total_for(:total_deductions)),
+      format_currency(total_for(:net_pay)),
       ""
-    ]
+    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column) }) }
+  end
+
+  def summary_label(summary)
+    employee_count = summary[:employee_count] || Array(report.dig(:employees)).size
+    contractor_count = summary[:contractor_count] || Array(report.dig(:contractors)).size
+    label = "TOTALS (#{employee_count} employees"
+    label += ", #{contractor_count} contractors" if contractor_count.to_i.positive?
+    "#{label})"
+  end
+
+  def total_for(key)
+    payroll_rows.sum { |row| row[key].to_f }
   end
 
   def format_currency(value)

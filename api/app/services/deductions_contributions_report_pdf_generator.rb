@@ -24,7 +24,7 @@ class DeductionsContributionsReportPdfGenerator
 
   def generate
     items = pay_period.payroll_items
-      .includes(:employee, payroll_item_deductions: :deduction_type)
+      .includes(:employee, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
       .not_voided
       .order("employees.last_name ASC, employees.first_name ASC")
 
@@ -89,7 +89,8 @@ class DeductionsContributionsReportPdfGenerator
 
   def render_deductions_section(pdf, items, category, title)
     all_labels = items.flat_map { |item|
-      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label)
+      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label) +
+        employee_payroll_field_deduction_entries(item, category).map(&:label)
     }.uniq.sort
     if category == "post_tax"
       custom_labels = items.flat_map { |item|
@@ -99,7 +100,9 @@ class DeductionsContributionsReportPdfGenerator
           deduction["label"].presence || "Other Deduction"
         end
       }
-      all_labels = (all_labels + custom_labels).uniq.sort
+      special_labels = []
+      special_labels << "Tips Paid Out" if items.any? { |item| item.tips_paid_out.to_f.positive? }
+      all_labels = (all_labels + custom_labels + special_labels).uniq.sort
     end
 
     return if all_labels.empty?
@@ -128,24 +131,32 @@ class DeductionsContributionsReportPdfGenerator
     pdf.font_size(11) { pdf.text "Employer Taxes & Contributions", style: :bold, color: HEADER_BG }
     pdf.move_down 4
 
-    header = build_header(["Employee", "Employer SS", "Employer Medicare", "401(k) Match", "Total"])
+    field_labels = items.flat_map { |item| employer_payroll_field_entries(item).map(&:label) }.uniq.sort
+    header = build_header(["Employee", "Employer SS", "Employer Medicare", "401(k) Match"] + field_labels + ["Total"])
     rows = items.map do |item|
       ss = item.employer_social_security_tax.to_f
       med = item.employer_medicare_tax.to_f
       ret = item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f
-      employee_row(item.employee_full_name, [ss, med, ret, ss + med + ret])
+      field_amounts = field_labels.map { |label| employer_payroll_field_entries(item).select { |entry| entry.label == label }.sum(&:amount).to_f }
+      employee_row(item.employee_full_name, [ss, med, ret] + field_amounts + [ss + med + ret + field_amounts.sum])
     end
 
+    field_totals = field_labels.map { |label| items.sum { |i| employer_payroll_field_entries(i).select { |entry| entry.label == label }.sum(&:amount).to_f } }
     totals = totals_row("TOTALS", [
       items.sum { |i| i.employer_social_security_tax.to_f },
       items.sum { |i| i.employer_medicare_tax.to_f },
       items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f },
+      *field_totals,
       items.sum { |i| i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-                       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f }
+                       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f } + field_totals.sum
     ])
 
     render_table(pdf, [header] + rows + [totals])
     pdf.move_down 12
+  end
+
+  def employer_payroll_field_entries(item)
+    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == "employer_contribution" }
   end
 
   def render_grand_totals(pdf, items)
@@ -156,10 +167,10 @@ class DeductionsContributionsReportPdfGenerator
     pdf.move_down 6
 
     total_emp_taxes = items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }
-    total_deductions = items.sum { |i| i.payroll_item_deductions.sum(&:amount) + i.custom_deductions_total.to_f }
+    total_deductions = items.sum { |i| employee_deductions_total(i) }
     total_employer = items.sum { |i|
       i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-      i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f
+      i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + employer_payroll_field_entries(i).sum(&:amount).to_f
     }
 
     pdf.font_size(10) do
@@ -195,10 +206,15 @@ class DeductionsContributionsReportPdfGenerator
   end
 
   def deduction_amount_for_label(item, label, category)
+    return item.tips_paid_out.to_f if category == "post_tax" && label == "Tips Paid Out"
+
+    field_entries = employee_payroll_field_deduction_entries(item, category).select { |entry| entry.label == label }
     amount = item.payroll_item_deductions
       .select { |deduction| deduction.label == label && deduction.category == category }
+      .reject { |deduction| payroll_field_mirrored_deduction?(deduction, field_entries) }
       .sum(&:amount)
       .to_f
+    amount += field_entries.sum { |entry| entry.amount.to_f }
     return amount unless category == "post_tax"
 
     amount + Array(item.custom_deductions).sum do |deduction|
@@ -206,6 +222,32 @@ class DeductionsContributionsReportPdfGenerator
       deduction_label == label ? deduction["amount"].to_f : 0
     end
   end
+
+  def employee_deductions_total(item)
+    %w[pre_tax post_tax].sum do |category|
+      labels = item.payroll_item_deductions.select { |deduction| deduction.category == category }.map(&:label) +
+        employee_payroll_field_deduction_entries(item, category).map(&:label)
+      if category == "post_tax"
+        labels += Array(item.custom_deductions).filter_map do |deduction|
+          next unless deduction["amount"].to_f.positive?
+
+          deduction["label"].presence || "Other Deduction"
+        end
+        labels << "Tips Paid Out" if item.tips_paid_out.to_f.positive?
+      end
+      labels.uniq.sum { |label| deduction_amount_for_label(item, label, category) }
+    end
+  end
+
+  def employee_payroll_field_deduction_entries(item, category)
+    treatment = category == "pre_tax" ? "pre_tax_deduction" : "post_tax_deduction"
+    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }
+  end
+
+  def payroll_field_mirrored_deduction?(deduction, field_entries)
+    field_entries.any? && deduction.deduction_type&.name.to_s.start_with?("Payroll Field")
+  end
+
 
   def render_table(pdf, data)
     pdf.table(data,
