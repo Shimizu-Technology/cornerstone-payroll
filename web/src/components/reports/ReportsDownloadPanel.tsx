@@ -382,6 +382,7 @@ function TransmittalEditorModal({
   const [preview, setPreview] = useState<TransmittalPreview | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [transmittalDate, setTransmittalDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [checkFirst, setCheckFirst] = useState('');
   const [checkLast, setCheckLast] = useState('');
   const [neCheckNumbers, setNeCheckNumbers] = useState<Record<number, string>>({});
@@ -416,6 +417,7 @@ function TransmittalEditorModal({
         const saved = data.saved_transmittal;
         if (saved) {
           setPreparerName(saved.preparer_name || 'Cornerstone Tax Services');
+          setTransmittalDate(saved.transmittal_date || new Date().toISOString().slice(0, 10));
           setNotes(saved.notes?.length ? [...saved.notes] : [...DEFAULT_NOTES]);
           setReportList(saved.report_list?.length ? [...saved.report_list] : [...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || saved.check_number_first || '');
@@ -429,6 +431,7 @@ function TransmittalEditorModal({
           setCustomEntries(saved.custom_entries?.length ? saved.custom_entries.map(e => ({ ...e })) : []);
         } else {
           setPreparerName('Cornerstone Tax Services');
+          setTransmittalDate(new Date().toISOString().slice(0, 10));
           setReportList([...DEFAULT_REPORT_LIST]);
           setCheckFirst(data.payroll_checks.first || '');
           setCheckLast(data.payroll_checks.last || '');
@@ -496,6 +499,7 @@ function TransmittalEditorModal({
     const validEntries = customEntries.filter(e => e.title.trim());
     onGenerate({
       preparerName: preparerName.trim() || undefined,
+      transmittalDate: transmittalDate || undefined,
       notes: notes.length > 0 ? notes : undefined,
       reportList: reportList,
       checkNumberFirst: checkFirst.trim() || undefined,
@@ -548,6 +552,17 @@ function TransmittalEditorModal({
                 placeholder="e.g. Cornerstone Tax Services"
                 className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Transmittal Date</label>
+              <input
+                type="date"
+                value={transmittalDate}
+                onChange={(e) => setTransmittalDate(e.target.value)}
+                className="w-full border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p className="mt-1 text-xs text-gray-500">Defaults to today; change it if the package will be delivered on a different date.</p>
             </div>
 
             {/* Documents Provided Preview */}
@@ -1141,6 +1156,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
     return {
       preparerName: saved.preparer_name || undefined,
+      transmittalDate: saved.transmittal_date || undefined,
       notes: saved.notes?.length ? saved.notes : undefined,
       reportList: saved.report_list || [],
       checkNumberFirst: preview?.payroll_checks.first || saved.check_number_first || undefined,

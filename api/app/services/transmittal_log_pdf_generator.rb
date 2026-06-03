@@ -69,7 +69,7 @@ class TransmittalLogPdfGenerator
     pdf.font_size(10) do
       label_width = 80
       pdf.text_box "Date:", at: [0, pdf.cursor], width: label_width
-      pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
+      pdf.text_box transmittal_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
       pdf.move_down 16
       pdf.text_box "Pay Day:", at: [0, pdf.cursor], width: label_width
       pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
@@ -79,6 +79,16 @@ class TransmittalLogPdfGenerator
       pdf.move_down 16
     end
     pdf.move_down 10
+  end
+
+  def transmittal_date
+    value = options[:transmittal_date]
+    return value if value.is_a?(Date)
+    return Date.iso8601(value.to_s) if value.present?
+
+    Date.current
+  rescue ArgumentError
+    Date.current
   end
 
   def render_documents_provided(pdf)

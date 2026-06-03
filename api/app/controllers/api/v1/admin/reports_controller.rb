@@ -752,6 +752,7 @@ module Api
               preparer_name: saved.preparer_name,
               notes: saved.notes,
               report_list: saved.report_list,
+              transmittal_date: saved.transmittal_date&.iso8601,
               check_number_first: saved.check_number_first,
               check_number_last: saved.check_number_last,
               non_employee_check_numbers: saved.non_employee_check_numbers,
@@ -770,6 +771,8 @@ module Api
           return unless pp
 
           options = transmittal_options
+          return if performed?
+
           save_transmittal_state!(pp, options)
           generator = TransmittalLogPdfGenerator.new(pp, options)
           send_data generator.generate,
@@ -787,6 +790,8 @@ module Api
           pdf = CombinePDF.new
           company = pp.company
           t_options = transmittal_options
+          return if performed?
+
           save_transmittal_state!(pp, t_options)
 
           generators = [
@@ -967,6 +972,10 @@ module Api
           opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
           opts[:notes] = Array(params[:notes]) if params[:notes].present?
           opts[:report_list] = Array(params[:report_list]) if params.key?(:report_list)
+          if params[:transmittal_date].present?
+            opts[:transmittal_date] = parse_optional_iso_date(params[:transmittal_date], param_name: "transmittal_date")
+            return opts if performed?
+          end
           opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
           opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
           if params[:non_employee_check_numbers].present?
@@ -985,6 +994,7 @@ module Api
           )
           transmittal.assign_attributes(
             preparer_name: options[:preparer_name],
+            transmittal_date: options[:transmittal_date] || Date.current,
             notes: options[:notes] || [],
             report_list: options.key?(:report_list) ? options[:report_list] : [],
             check_number_first: options[:check_number_first],

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_25_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_03_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1211,6 +1211,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_25_100000) do
     t.bigint "pay_period_id", null: false
     t.string "preparer_name"
     t.jsonb "report_list", default: []
+    t.date "transmittal_date"
     t.datetime "updated_at", null: false
     t.bigint "updated_by_id"
     t.index ["company_id"], name: "index_transmittals_on_company_id"
@@ -1329,7 +1330,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_25_100000) do
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"
-  add_foreign_key "employee_payroll_fields", "employee_loans", on_delete: :nullify
+  add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
   add_foreign_key "employee_wage_rates", "employees"

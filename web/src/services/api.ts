@@ -1748,6 +1748,7 @@ export const reportsApi = {
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
@@ -1759,6 +1760,7 @@ export const reportsApi = {
     api.postBlob('/admin/reports/full_print_package_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
@@ -1811,6 +1813,7 @@ export interface TransmittalCustomEntry {
 
 export interface TransmittalOptions {
   preparerName?: string;
+  transmittalDate?: string;
   notes?: string[];
   reportList?: string[];
   checkNumberFirst?: string;
@@ -1821,6 +1824,7 @@ export interface TransmittalOptions {
 
 export interface SavedTransmittal {
   preparer_name: string | null;
+  transmittal_date: string | null;
   notes: string[];
   report_list: string[];
   check_number_first: string | null;
@@ -2299,6 +2303,7 @@ export const payrollReportsApi = {
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
@@ -2310,6 +2315,7 @@ export const payrollReportsApi = {
     api.postBlob('/admin/reports/full_print_package_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,

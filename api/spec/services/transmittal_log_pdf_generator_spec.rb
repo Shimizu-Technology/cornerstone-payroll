@@ -36,6 +36,14 @@ RSpec.describe TransmittalLogPdfGenerator do
       memo: "FIT Withholding - PPE 04/14/2026 - Form 500")
   end
 
+  it "uses the transmittal date for Date while preserving pay date for Pay Day" do
+    pdf = described_class.new(pay_period, transmittal_date: Date.new(2026, 4, 20)).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
+
+    expect(text).to include("Date:             04/20/2026")
+    expect(text).to include("Pay Day:          04/16/2026")
+  end
+
   it "prints exact check ranges without implying missing check numbers were issued" do
     create(:payroll_item, :with_check,
       company: company,
