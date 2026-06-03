@@ -509,7 +509,14 @@ function TransmittalEditorModal({
     setPayrollCheckNumbers(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  const displayCheckType = (type?: string | null) => type?.toLowerCase() === 'grt' ? 'GRT' : (type || '').toUpperCase();
+  const displayCheckType = (type?: string | null) => {
+    if (!type) return '';
+    if (type.toLowerCase() === 'grt') return 'GRT';
+
+    return type
+      .replace(/_/g, ' ')
+      .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+  };
 
   const handleAddNote = () => {
     const trimmed = newNote.trim();
@@ -617,7 +624,7 @@ function TransmittalEditorModal({
                     <div>
                       <p className="font-medium text-gray-900">1) Payroll Checks</p>
                       <div className="ml-6 text-gray-600 space-y-1.5 mt-1">
-                        <p>Number of Checks: <span className="font-medium text-gray-900">{preview.payroll_checks.count}</span></p>
+                        <p>Number of Checks: <span className="font-medium text-gray-900">{payrollCheckNumbers.filter(n => n.trim()).length}</span></p>
                         <div>
                           <span>Checks #: </span>
                           <span className="font-medium text-gray-900">
