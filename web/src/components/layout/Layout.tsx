@@ -18,6 +18,7 @@ export function Layout() {
   const outlet = useOutlet();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteMode, setCommandPaletteMode] = useState<'all' | 'companies'>('all');
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
@@ -34,6 +35,11 @@ export function Layout() {
     });
   }, []);
 
+  const openCommandPalette = useCallback((mode: 'all' | 'companies' = 'all') => {
+    setCommandPaletteMode(mode);
+    setCommandPaletteOpen(true);
+  }, []);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -43,10 +49,10 @@ export function Layout() {
       }
 
       const usesCommandModifier = event.metaKey || event.ctrlKey;
-      if (!usesCommandModifier || event.altKey || event.shiftKey || isEditableShortcutTarget(event.target)) return;
+      if (!usesCommandModifier || event.altKey || isEditableShortcutTarget(event.target)) return;
 
       const key = event.key.toLowerCase();
-      if (key === 'b') {
+      if (key === 'b' && !event.shiftKey) {
         event.preventDefault();
         if (window.matchMedia('(min-width: 1024px)').matches) {
           toggleCollapse();
@@ -57,13 +63,13 @@ export function Layout() {
 
       if (key === 'k') {
         event.preventDefault();
-        setCommandPaletteOpen((current) => !current);
+        openCommandPalette(event.shiftKey ? 'companies' : 'all');
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [toggleCollapse]);
+  }, [openCommandPalette, toggleCollapse]);
 
   useEffect(() => {
     displayedCompanyIdRef.current = displayedCompanyId;
@@ -122,7 +128,7 @@ export function Layout() {
 
   return (
     <div className="flex h-screen bg-transparent text-neutral-950">
-      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => setCommandPaletteOpen(true)} />
+      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => openCommandPalette('all')} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
@@ -168,7 +174,7 @@ export function Layout() {
         </main>
       </div>
 
-      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
+      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} mode={commandPaletteMode} />
 
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
@@ -181,7 +187,7 @@ export function Layout() {
           <div className="absolute inset-y-0 left-0 flex w-[86vw] max-w-[320px]">
             <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => {
               setMobileNavOpen(false);
-              setCommandPaletteOpen(true);
+              openCommandPalette('all');
             }} />
             <button
               type="button"
