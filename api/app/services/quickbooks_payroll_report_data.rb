@@ -469,9 +469,19 @@ class QuickbooksPayrollReportData
     return false if field_entries.empty?
 
     deduction_type_name = deduction.deduction_type&.name.to_s
-    return false unless deduction_type_name.match?(/Payroll Field/i)
+    if deduction_type_name.match?(/Payroll Field/i)
+      return field_entries.any? { |entry| entry.label == deduction.label }
+    end
 
-    field_entries.any? { |entry| entry.label == deduction.label }
+    return false unless deduction.employer_contribution?
+
+    field_entries.any? { |entry| payroll_field_employer_contribution_matches_deduction?(entry, deduction) }
+  end
+
+  def payroll_field_employer_contribution_matches_deduction?(entry, deduction)
+    entry.label.to_s == deduction.label.to_s &&
+      entry.amount.to_f.round(2) == deduction.amount.to_f.round(2) &&
+      PayrollReportingGroups.normalize(entry.reporting_group) == PayrollReportingGroups.normalize(deduction.reporting_group)
   end
 
   def legacy_employer_retirement_deduction?(item, deduction)

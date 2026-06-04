@@ -76,6 +76,62 @@ RSpec.describe QuickbooksPayrollReportData do
     expect(entry.type).to eq("Roth 401(k)")
   end
 
+  it "does not double count employer-contribution payroll field entries mirrored as deductions" do
+    company = create(:company)
+    employee = create(:employee, company: company)
+    pay_period = create(:pay_period, :committed, company: company)
+    payroll_item = create(
+      :payroll_item,
+      pay_period: pay_period,
+      employee: employee,
+      company: company,
+      gross_pay: 1_000.00,
+      net_pay: 1_000.00
+    )
+    field = PayrollFieldDefinition.create!(
+      company: company,
+      name: "Roth 401(k) Match",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "retirement",
+      reporting_group: PayrollReportingGroups::GROUP_401K_AFTER_TAX,
+      amount_type: "fixed"
+    )
+    payroll_item.payroll_item_field_entries.create!(
+      payroll_field_definition: field,
+      label: "Roth 401(k) Match",
+      kind: "employer_contribution",
+      tax_treatment: "employer_contribution",
+      category: "retirement",
+      reporting_group: field.reporting_group,
+      amount: 50.00,
+      source: "manual"
+    )
+    deduction_type = DeductionType.create!(
+      company: company,
+      name: "Roth 401(k) Match",
+      category: "employer_contribution",
+      sub_category: "retirement",
+      reporting_group: field.reporting_group
+    )
+    payroll_item.payroll_item_deductions.create!(
+      deduction_type: deduction_type,
+      amount: 50.00,
+      category: "employer_contribution",
+      label: "Roth 401(k) Match",
+      reporting_group: field.reporting_group
+    )
+
+    data = described_class.new(pay_period)
+    entry = data.aggregate_deduction_contribution_rows.find { |candidate| candidate.reporting_group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }
+    retirement_row = data.retirement_rows.find { |candidate| candidate.group == PayrollReportingGroups::GROUP_401K_AFTER_TAX }
+
+    expect(entry.company_amount).to eq(50.00)
+    expect(data.employer_contribution_total(payroll_item)).to eq(50.00)
+    expect(data.total_payroll_cost(payroll_item)).to eq(1_050.00)
+    expect(retirement_row.company_amount).to eq(50.00)
+  end
+
   it "does not classify an arbitrary payroll field as 401(k) without retirement context or report group" do
     company = create(:company)
     employee = create(:employee, company: company)
