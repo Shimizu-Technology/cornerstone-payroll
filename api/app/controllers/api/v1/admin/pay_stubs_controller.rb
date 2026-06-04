@@ -83,9 +83,12 @@ module Api
 
           results = { success: [], errors: [] }
 
-          pay_period.payroll_items
-                    .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
-                    .each do |item|
+          eligible_items = pay_period.payroll_items
+                                     .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
+                                     .to_a
+                                     .select { |item| pay_stub_printable?(item) }
+
+          eligible_items.each do |item|
             begin
               generator = PayStubGenerator.new(item)
               pdf_data = generator.generate
@@ -111,7 +114,7 @@ module Api
 
           render json: {
             pay_period_id: pay_period.id,
-            total: pay_period.payroll_items.count,
+            total: eligible_items.count,
             generated: results[:success].count,
             errors: results[:errors].count,
             results: results
@@ -151,9 +154,18 @@ module Api
               }, status: :unprocessable_entity
             end
 
+            unpaid_items = selected_items.reject { |item| pay_stub_printable?(item) }
+            if unpaid_items.any?
+              names = unpaid_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
+              return render json: {
+                error: "Selected employees were not paid in this pay period",
+                details: "Remove #{names} from the selection and try again."
+              }, status: :unprocessable_entity
+            end
+
             items = selected_items
           else
-            items = base_items.not_voided.to_a
+            items = base_items.not_voided.to_a.select { |item| pay_stub_printable?(item) }
           end
 
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
@@ -227,6 +239,12 @@ module Api
 
         def storage_key
           pay_stub_key(@payroll_item)
+        end
+
+        def pay_stub_printable?(item)
+          return false if item.voided?
+
+          item.check_number.present? || item.gross_pay.to_d.positive? || item.net_pay.to_d.positive?
         end
 
         def pay_stub_key(item)
