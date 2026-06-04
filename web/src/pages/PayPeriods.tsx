@@ -5,6 +5,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import {
   Table,
   TableBody,
@@ -28,6 +29,77 @@ import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
+
+function PayPeriodMobileCard({
+  period,
+  actionInFlight,
+  onView,
+  onEdit,
+  onDelete,
+  onRun,
+  onApprove,
+  onCommit,
+}: {
+  period: PayPeriod;
+  actionInFlight: string | null;
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRun: () => void;
+  onApprove: () => void;
+  onCommit: () => void;
+}) {
+  const statusConfig = payPeriodStatusConfig[period.status];
+
+  return (
+    <MobileRecordCard>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
+          <p className="mt-1 text-sm text-neutral-500">
+            Pay date {new Date(period.pay_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          </p>
+        </div>
+        <Badge
+          variant={
+            period.correction_status === 'voided' ? 'danger' :
+              period.status === 'committed' ? 'success' :
+                period.status === 'approved' ? 'info' :
+                  period.status === 'calculated' ? 'warning' : 'default'
+          }
+        >
+          {period.correction_status === 'voided' ? 'Voided' : (statusConfig?.label || period.status)}
+        </Badge>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MobileField label="Employees" value={period.employee_count || 0} />
+        <MobileField label="Gross" value={period.total_gross ? formatCurrency(period.total_gross) : '—'} />
+        <MobileField label="Net" value={period.total_net ? formatCurrency(period.total_net) : '—'} />
+        <MobileField
+          label="Processed"
+          value={period.processed_at ? formatGuamDateTimeShort(period.processed_at) : 'Not processed'}
+        />
+      </div>
+      <MobileCardActions>
+        <Button variant="outline" size="sm" onClick={onView}>View</Button>
+        {period.status !== 'committed' && (
+          <>
+            <Button variant="ghost" size="sm" onClick={onEdit}>Edit</Button>
+            <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>
+          </>
+        )}
+        {period.status === 'draft' && <Button size="sm" onClick={onView}>Enter hours</Button>}
+        {period.status === 'calculated' && (
+          <>
+            <Button variant="outline" size="sm" onClick={onRun} disabled={actionInFlight !== null}>Recalculate</Button>
+            <Button size="sm" onClick={onApprove} disabled={actionInFlight !== null}>Approve</Button>
+          </>
+        )}
+        {period.status === 'approved' && <Button size="sm" onClick={onCommit} disabled={actionInFlight !== null}>Commit</Button>}
+      </MobileCardActions>
+    </MobileRecordCard>
+  );
+}
 
 export function PayPeriods() {
   const location = useLocation();
@@ -330,7 +402,7 @@ export function PayPeriods() {
         }
       />
 
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Error display */}
         {error && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
@@ -355,7 +427,7 @@ export function PayPeriods() {
         )}
 
         {/* Status filter tabs */}
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap">
           <Button
             variant={statusFilter === undefined ? 'primary' : 'outline'}
             size="sm"
@@ -385,11 +457,11 @@ export function PayPeriods() {
               className="pl-10"
             />
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
             <Select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              className="w-44"
+              className="w-full sm:w-44"
             >
               <option value="pay_period">Sort: Pay Period</option>
               <option value="pay_date">Sort: Pay Date</option>
@@ -402,7 +474,7 @@ export function PayPeriods() {
             <Select
               value={sortDirection}
               onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
-              className="w-32"
+              className="w-full sm:w-32"
             >
               <option value="asc">Oldest / Low</option>
               <option value="desc">Newest / High</option>
@@ -419,8 +491,25 @@ export function PayPeriods() {
               {searchTerm ? 'No pay periods match the current filters.' : 'No pay periods found. Create your first pay period to get started.'}
             </div>
           ) : (
-            <Table stickyHeader containerClassName="max-h-[32rem]">
-              <TableHeader>
+            <>
+              <div className="space-y-3 p-3 sm:hidden">
+                {visiblePayPeriods.map((period) => (
+                  <PayPeriodMobileCard
+                    key={period.id}
+                    period={period}
+                    actionInFlight={actionInFlight}
+                    onView={() => navigate(`/pay-periods/${period.id}`)}
+                    onEdit={() => openEditModal(period)}
+                    onDelete={() => handleDelete(period.id)}
+                    onRun={() => handleRunPayroll(period.id)}
+                    onApprove={() => handleApprove(period.id)}
+                    onCommit={() => handleCommit(period.id)}
+                  />
+                ))}
+              </div>
+              <div className="hidden sm:block">
+                <Table stickyHeader containerClassName="max-h-[32rem]">
+                  <TableHeader>
                 <TableRow>
                   <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-gray-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
@@ -572,8 +661,10 @@ export function PayPeriods() {
                     </TableRow>
                   );
                 })}
-              </TableBody>
-            </Table>
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </Card>
 
@@ -581,7 +672,7 @@ export function PayPeriods() {
         <Card className="mt-8">
           <div className="p-6">
             <h3 className="text-lg font-medium text-gray-900 mb-4">Payroll Workflow</h3>
-            <div className="flex items-center justify-between">
+            <div className="grid gap-4 sm:flex sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-gray-600">1</span>
@@ -591,7 +682,7 @@ export function PayPeriods() {
                   <p className="text-sm text-gray-500">Create pay period</p>
                 </div>
               </div>
-              <div className="flex-1 h-px bg-gray-300 mx-4" />
+              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-yellow-600">2</span>
@@ -601,7 +692,7 @@ export function PayPeriods() {
                   <p className="text-sm text-gray-500">Review totals</p>
                 </div>
               </div>
-              <div className="flex-1 h-px bg-gray-300 mx-4" />
+              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-blue-600">3</span>
@@ -611,7 +702,7 @@ export function PayPeriods() {
                   <p className="text-sm text-gray-500">Ready to commit</p>
                 </div>
               </div>
-              <div className="flex-1 h-px bg-gray-300 mx-4" />
+              <div className="hidden flex-1 h-px bg-gray-300 mx-4 sm:block" />
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
                   <span className="text-sm font-medium text-green-600">4</span>
@@ -637,7 +728,7 @@ export function PayPeriods() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="start_date">Start Date</Label>
                   <Input
@@ -721,7 +812,7 @@ export function PayPeriods() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="edit_start_date">Start Date</Label>
                   <Input

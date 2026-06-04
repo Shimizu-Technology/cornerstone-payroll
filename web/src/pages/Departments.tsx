@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -172,7 +173,7 @@ export function Departments() {
         }
       />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Error State */}
         {error && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
@@ -185,7 +186,7 @@ export function Departments() {
         {isAddingNew && (
           <Card className="mb-6 p-4">
             <h3 className="text-sm font-medium text-gray-900 mb-3">Add New Department</h3>
-            <div className="flex items-start gap-3">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start">
               <div className="flex-1">
                 <Input
                   placeholder="Department name"
@@ -242,8 +243,64 @@ export function Departments() {
           </div>
         ) : (
           /* Departments Table */
-          <Card>
-            <Table>
+          <>
+            <div className="space-y-3 sm:hidden">
+              {departments.map((dept) => (
+                <MobileRecordCard key={dept.id}>
+                  {editingId === dept.id ? (
+                    <div className="space-y-3">
+                      <Input
+                        value={editName}
+                        onChange={(e) => {
+                          setEditName(e.target.value);
+                          setEditError(null);
+                        }}
+                        error={editError || undefined}
+                        autoFocus
+                      />
+                      <MobileCardActions className="mt-0 grid grid-cols-2">
+                        <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                          <Check className="mr-1 h-4 w-4" />
+                          Save
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                          Cancel
+                        </Button>
+                      </MobileCardActions>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-700">
+                          <Building className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <p className="font-semibold text-neutral-950">{dept.name}</p>
+                            <Badge variant={dept.active ? 'success' : 'default'}>{dept.active ? 'Active' : 'Inactive'}</Badge>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Employees" value={dept.employee_count} />
+                            <MobileField label="Status" value={dept.active ? 'Active' : 'Inactive'} />
+                          </div>
+                          <MobileCardActions>
+                            <Button variant="outline" size="sm" onClick={() => handleStartEdit(dept)}>
+                              <Edit2 className="mr-1 h-4 w-4" />
+                              Edit
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleToggleActive(dept)} disabled={togglingId === dept.id}>
+                              {dept.active ? 'Deactivate' : 'Activate'}
+                            </Button>
+                          </MobileCardActions>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </MobileRecordCard>
+              ))}
+            </div>
+            <Card className="hidden sm:block">
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Department</TableHead>
@@ -334,8 +391,9 @@ export function Departments() {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          </Card>
+              </Table>
+            </Card>
+          </>
         )}
       </div>
     </div>

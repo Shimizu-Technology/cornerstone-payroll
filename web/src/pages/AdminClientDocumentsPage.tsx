@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
@@ -216,7 +217,7 @@ export function AdminClientDocumentsPage() {
     <div>
       <Header title="Client Documents" description="Review files uploaded through the client portal." />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         {success && <div className="rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-sm text-success-600">{success}</div>}
 
@@ -227,7 +228,7 @@ export function AdminClientDocumentsPage() {
           <MiniStat title="Categories" value={String(documentCategories.length - 1)} detail="Available filing buckets" icon={<FileText className="h-5 w-5" />} />
         </div>
 
-        <div className="max-w-xs">
+        <div className="w-full sm:max-w-xs">
           <Select value={category} onChange={(e) => setCategory(e.target.value)}>
             {documentCategories.map((option) => (
               <option key={option.value} value={option.value}>
@@ -350,8 +351,48 @@ export function AdminClientDocumentsPage() {
                 <p className="mt-1 text-sm text-neutral-500">Files shared through the portal will appear here as they come in.</p>
               </div>
             ) : (
-              <Table stickyHeader>
-                <TableHeader>
+              <>
+                <div className="space-y-3 sm:hidden">
+                  {documents.map((document) => (
+                    <MobileRecordCard key={document.id}>
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                          <FileText className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-neutral-950">{document.title}</p>
+                          <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Category" value={categoryLabel(document.category)} />
+                            <MobileField label="Employee" value={document.employee_name || 'General'} />
+                            <MobileField label="Uploaded by" value={document.uploaded_by_name || '—'} />
+                            <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
+                          </div>
+                          {document.notes && (
+                            <p className="mt-3 whitespace-pre-wrap rounded-xl bg-neutral-50 p-3 text-sm text-neutral-600">{document.notes}</p>
+                          )}
+                          <MobileCardActions>
+                            <Button variant="outline" size="sm" onClick={() => void previewDocumentFile(document)}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              Preview
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => void downloadDocument(document)}>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download
+                            </Button>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void deleteDocument(document)}>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </Button>
+                          </MobileCardActions>
+                        </div>
+                      </div>
+                    </MobileRecordCard>
+                  ))}
+                </div>
+                <div className="hidden sm:block">
+                  <Table stickyHeader>
+                    <TableHeader>
                   <TableRow>
                     <TableHead>Title</TableHead>
                     <TableHead>Category</TableHead>
@@ -394,8 +435,10 @@ export function AdminClientDocumentsPage() {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

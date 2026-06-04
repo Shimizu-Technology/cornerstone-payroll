@@ -3,6 +3,7 @@ import { Plus, Building2, Check, X, Pencil } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
@@ -169,7 +170,7 @@ export function Clients() {
         subtitle={canManageClients ? 'Manage payroll clients' : 'View and update assigned client contact details'}
       />
 
-      <div className="p-6 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {/* Error */}
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -397,8 +398,42 @@ export function Clients() {
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-500">Loading clients…</div>
         ) : (
-          <Card>
-            <Table>
+          <>
+            <div className="space-y-3 sm:hidden">
+              {companies.length === 0 ? (
+                <MobileRecordCard className="text-center text-sm text-neutral-500">
+                  {canManageClients ? 'No clients found. Add a new client to get started.' : 'No assigned clients found.'}
+                </MobileRecordCard>
+              ) : companies.map((c) => (
+                <MobileRecordCard key={c.id}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                      <Building2 className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-semibold text-neutral-950">{c.name}</p>
+                        <Badge variant={c.active !== false ? 'success' : 'default'}>{c.active !== false ? 'Active' : 'Inactive'}</Badge>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <MobileField label="Pay frequency" value={<span className="capitalize">{c.pay_frequency}</span>} />
+                        <MobileField label="Employees" value={`${c.active_employees} / ${c.total_employees}`} />
+                      </div>
+                      {canEditAssignedClients && (
+                        <MobileCardActions>
+                          <Button size="sm" variant="outline" onClick={() => handleEdit(c.id)} disabled={loadingEditId === c.id}>
+                            <Pencil className="mr-1 h-4 w-4" />
+                            {loadingEditId === c.id ? 'Loading...' : 'Edit'}
+                          </Button>
+                        </MobileCardActions>
+                      )}
+                    </div>
+                  </div>
+                </MobileRecordCard>
+              ))}
+            </div>
+            <Card className="hidden sm:block">
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Client Name</TableHead>
@@ -462,8 +497,9 @@ export function Clients() {
                   ))
                 )}
               </TableBody>
-            </Table>
-          </Card>
+              </Table>
+            </Card>
+          </>
         )}
       </div>
     </>

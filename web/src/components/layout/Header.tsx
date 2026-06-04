@@ -13,7 +13,7 @@ export function Header({ title, description, subtitle, actions }: HeaderProps) {
   const { activeCompany } = useCompany();
 
   return (
-    <div className="sticky top-0 z-10 border-b border-neutral-200/70 bg-white/80 px-4 py-5 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8">
+    <div className="sticky top-0 z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -26,11 +26,11 @@ export function Header({ title, description, subtitle, actions }: HeaderProps) {
               </span>
             )}
           </div>
-          <h1 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950 sm:text-3xl">{title}</h1>
+          <h1 className="font-display text-[1.65rem] font-extrabold leading-tight tracking-tight text-neutral-950 sm:text-3xl">{title}</h1>
           {helperText && <p className="mt-1.5 max-w-3xl text-sm leading-6 text-neutral-500">{helperText}</p>}
         </div>
         {actions && (
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3 [&>button]:w-full sm:[&>button]:w-auto">
             {actions}
           </div>
         )}
@@ -55,7 +55,7 @@ export function PageHeader({ title, description, actions }: PageHeaderProps) {
           {description && <p className="mt-1.5 max-w-3xl text-sm leading-6 text-neutral-500">{description}</p>}
         </div>
         {actions && (
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end sm:gap-3">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3 [&>button]:w-full sm:[&>button]:w-auto">
             {actions}
           </div>
         )}

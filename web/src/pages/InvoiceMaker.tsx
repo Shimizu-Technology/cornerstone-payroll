@@ -1233,7 +1233,7 @@ export function InvoiceMaker() {
   const invoiceHistoryPanel = (
     <Card>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Invoice History</h2>
             <p className="text-sm text-neutral-500">Saved invoices for this organization</p>
@@ -1333,7 +1333,7 @@ export function InvoiceMaker() {
             <Input value={recipientForm.name} onChange={(event) => setRecipientForm((current) => ({ ...current, name: event.target.value }))} placeholder="Recipient name" />
             <Input value={recipientForm.email} onChange={(event) => setRecipientForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
             <Textarea value={recipientForm.address} onChange={(event) => setRecipientForm((current) => ({ ...current, address: event.target.value }))} placeholder="Address" rows={2} />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <Input type="number" step="0.01" value={recipientForm.default_rate} onChange={(event) => setRecipientForm((current) => ({ ...current, default_rate: event.target.value }))} placeholder="Default rate" />
               <Input value={recipientForm.invoice_prefix} onChange={(event) => setRecipientForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Prefix" />
             </div>
@@ -1348,7 +1348,7 @@ export function InvoiceMaker() {
               <option value="tuition">Tuition invoice</option>
             </select>
             <Textarea value={recipientForm.payment_terms} onChange={(event) => setRecipientForm((current) => ({ ...current, payment_terms: event.target.value }))} placeholder="Payment terms" rows={2} />
-            <div className="flex justify-end gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button size="sm" variant="ghost" onClick={() => setShowRecipientForm(false)}>Cancel</Button>
               <Button size="sm" onClick={saveRecipient} disabled={recipientSaving}>
                 {recipientSaving ? 'Saving...' : 'Save Recipient'}
@@ -1377,7 +1377,7 @@ export function InvoiceMaker() {
   const billingProfilesPanel = (
     <Card>
       <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-base font-semibold text-neutral-900">Billing Profiles</h2>
             <p className="text-sm text-neutral-500">Invoice from identities</p>
@@ -1399,14 +1399,14 @@ export function InvoiceMaker() {
           <div className="space-y-3 rounded-xl border border-neutral-200 bg-neutral-50/70 p-3">
             <Input value={billingProfileForm.name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, name: event.target.value }))} placeholder="Profile name" />
             <Input value={billingProfileForm.legal_name} onChange={(event) => setBillingProfileForm((current) => ({ ...current, legal_name: event.target.value }))} placeholder="Legal/display name" />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <Input value={billingProfileForm.phone} onChange={(event) => setBillingProfileForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone" />
               <Input value={billingProfileForm.email} onChange={(event) => setBillingProfileForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" />
             </div>
             <Input value={billingProfileForm.website} onChange={(event) => setBillingProfileForm((current) => ({ ...current, website: event.target.value }))} placeholder="Website" />
             <Textarea value={billingProfileForm.address} onChange={(event) => setBillingProfileForm((current) => ({ ...current, address: event.target.value }))} placeholder="Remittance address" rows={2} />
             <Textarea value={billingProfileForm.payment_instructions} onChange={(event) => setBillingProfileForm((current) => ({ ...current, payment_instructions: event.target.value }))} placeholder="Payment instructions" rows={2} />
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <Input value={billingProfileForm.invoice_prefix} onChange={(event) => setBillingProfileForm((current) => ({ ...current, invoice_prefix: event.target.value }))} placeholder="Invoice prefix" />
               <Input value={billingProfileForm.remit_to} onChange={(event) => setBillingProfileForm((current) => ({ ...current, remit_to: event.target.value }))} placeholder="Checks payable to" />
             </div>
@@ -1416,7 +1416,7 @@ export function InvoiceMaker() {
               <input type="checkbox" checked={billingProfileForm.is_default} onChange={(event) => setBillingProfileForm((current) => ({ ...current, is_default: event.target.checked }))} />
               Use as default profile
             </label>
-            <div className="flex justify-end gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end">
               <Button size="sm" variant="ghost" onClick={() => setShowBillingProfileForm(false)}>Cancel</Button>
               <Button size="sm" onClick={saveBillingProfile} disabled={billingProfileSaving}>
                 {billingProfileSaving ? 'Saving...' : 'Save Profile'}
@@ -1498,7 +1498,7 @@ export function InvoiceMaker() {
         description="Create standalone invoices manually or with AI-assisted drafts for staff approval."
       />
 
-      <div className="px-6 pt-6 lg:px-8">
+      <div className="px-4 pt-4 sm:px-6 sm:pt-6 lg:px-8">
         <div className="inline-flex w-full rounded-2xl border border-neutral-200 bg-neutral-100 p-1 sm:w-auto">
           <button
             type="button"
@@ -1524,7 +1524,7 @@ export function InvoiceMaker() {
       </div>
 
       {invoiceMode === 'manual' ? (
-        <div className="grid gap-6 p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
+        <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[360px_minmax(0,1fr)] lg:p-8">
           <div className="space-y-6">
             {invoiceHistoryPanel}
             {billingProfilesPanel}
@@ -1547,7 +1547,7 @@ export function InvoiceMaker() {
                     {invoiceForm.generated_at && ` · Generated ${new Date(invoiceForm.generated_at).toLocaleDateString()}`}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
                   {invoiceForm.status && <Badge className={statusColors[invoiceForm.status]}>{invoiceStatusLabel(invoiceForm.status)}</Badge>}
                   {invoiceForm.id && invoiceForm.status === 'draft' && (
                     <Button
@@ -1578,7 +1578,7 @@ export function InvoiceMaker() {
 
               {invoiceForm.id && (
                 <div className="rounded-xl border border-neutral-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <h3 className="text-sm font-semibold text-neutral-900">Invoice lifecycle</h3>
                       <p className="text-xs text-neutral-500">Lifecycle timestamps for this invoice. Actor is shown only where the record stores accurate attribution.</p>
@@ -1649,7 +1649,7 @@ export function InvoiceMaker() {
                   <span className="text-sm font-medium text-neutral-700">Invoice Date</span>
                   <Input type="date" value={invoiceForm.invoice_date} onChange={(event) => setInvoiceForm((current) => ({ ...current, invoice_date: event.target.value }))} disabled={selectedInvoiceReadOnly} />
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="text-sm font-medium text-neutral-700">Period Start</span>
                     <Input type="date" value={invoiceForm.service_period_start} onChange={(event) => setInvoiceForm((current) => ({ ...current, service_period_start: event.target.value }))} disabled={selectedInvoiceReadOnly} />
@@ -1662,9 +1662,9 @@ export function InvoiceMaker() {
               </div>
 
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-neutral-500">Line Items</h3>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between gap-3 sm:justify-start">
                     <span className="text-sm font-medium text-neutral-700">{currency(invoiceTotal)}</span>
                     <Button type="button" size="sm" variant="outline" onClick={addLineItem} disabled={selectedInvoiceReadOnly}>
                       <Plus className="mr-1.5 h-4 w-4" />
@@ -1753,13 +1753,13 @@ export function InvoiceMaker() {
 
               {invoiceForm.id && invoiceForm.status && (statusActions[invoiceForm.status] || []).length > 0 && (
                 <div className="rounded-xl border border-neutral-200 bg-white p-3">
-                  <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <span className="text-sm font-medium text-neutral-700">Invoice workflow</span>
                     {invoiceForm.status === 'draft' && (
                       <span className="text-xs text-neutral-500">Generate PDF is the normal path to make this invoice PDF Ready.</span>
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
                     {(statusActions[invoiceForm.status] || []).map((status) => (
                       <Button key={status} type="button" size="sm" variant="outline" onClick={() => handleStatusChange(status)} disabled={statusBusy || invoiceForm.status === status}>
                         {statusActionLabel(status)}

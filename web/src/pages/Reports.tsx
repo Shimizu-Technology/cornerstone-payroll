@@ -196,7 +196,7 @@ function PayrollRegisterPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="pr-period" className="text-sm font-medium text-gray-700">
                 Pay Period
@@ -227,7 +227,7 @@ function PayrollRegisterPanel() {
             <Button onClick={loadReport} disabled={busy || !selectedPeriodId}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -235,7 +235,7 @@ function PayrollRegisterPanel() {
                 disabled={busy || !selectedPeriodId}
                 title="Download Payroll Register as CSV"
               >
-                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+                {exportingCsv ? 'Exporting…' : 'Download CSV'}
               </Button>
               <Button
                 variant="outline"
@@ -244,7 +244,7 @@ function PayrollRegisterPanel() {
                 disabled={busy || !selectedPeriodId}
                 title="Download Payroll Register as PDF"
               >
-                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+                {exportingPdf ? 'Exporting…' : 'Download PDF'}
               </Button>
               <Button
                 variant="outline"
@@ -253,7 +253,7 @@ function PayrollRegisterPanel() {
                 disabled={busy || !selectedPeriodId}
                 title="Download Payroll Register as Excel"
               >
-                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
+                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
               </Button>
             </div>
           </div>
@@ -455,7 +455,7 @@ function TaxSummaryPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="ts-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -497,7 +497,7 @@ function TaxSummaryPanel() {
             <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -505,7 +505,7 @@ function TaxSummaryPanel() {
                 disabled={busy}
                 title={`Download Tax Summary CSV for ${periodLabel}`}
               >
-                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+                {exportingCsv ? 'Exporting…' : 'Download CSV'}
               </Button>
               <Button
                 variant="outline"
@@ -514,7 +514,7 @@ function TaxSummaryPanel() {
                 disabled={busy}
                 title={`Download Tax Summary PDF for ${periodLabel}`}
               >
-                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+                {exportingPdf ? 'Exporting…' : 'Download PDF'}
               </Button>
               <Button
                 variant="outline"
@@ -523,7 +523,7 @@ function TaxSummaryPanel() {
                 disabled={busy}
                 title={`Download Tax Summary Excel for ${periodLabel}`}
               >
-                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
+                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
               </Button>
             </div>
           </div>
@@ -721,7 +721,7 @@ function W2GuPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="w2gu-year" className="text-sm font-medium text-gray-700">
                 Tax Year
@@ -771,7 +771,7 @@ function W2GuPanel() {
             </Button>
 
             {/* Export buttons */}
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -779,7 +779,7 @@ function W2GuPanel() {
                 disabled={busy}
                 title={`Download W-2GU CSV for ${year}`}
               >
-                {exportingCsv ? 'Exporting…' : '⬇ Download CSV'}
+                {exportingCsv ? 'Exporting…' : 'Download CSV'}
               </Button>
               <Button
                 variant="outline"
@@ -788,7 +788,7 @@ function W2GuPanel() {
                 disabled={busy}
                 title={`Download W-2GU PDF for ${year}`}
               >
-                {exportingPdf ? 'Exporting…' : '⬇ Download PDF'}
+                {exportingPdf ? 'Exporting…' : 'Download PDF'}
               </Button>
               <Button
                 variant="outline"
@@ -797,7 +797,7 @@ function W2GuPanel() {
                 disabled={busy}
                 title={`Download W-2GU Excel for ${year}`}
               >
-                {exportingXlsx ? 'Exporting…' : '⬇ Download Excel'}
+                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
               </Button>
             </div>
           </div>
@@ -1094,7 +1094,7 @@ function EmployeePayHistoryPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="eph-employee" className="text-sm font-medium text-gray-700">
                 Employee
@@ -1300,7 +1300,7 @@ function YtdSummaryPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -1504,7 +1504,7 @@ function EmployerLiabilityPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="el-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -1705,7 +1705,7 @@ function QuarterlyCompliancePacketPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="qcp-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -2137,7 +2137,7 @@ function QuarterlyOfficialFormModal({
       <div className="fixed inset-0 z-[60] bg-black/55" onClick={onClose} />
       <div className="fixed inset-0 z-[61] flex items-center justify-center p-3 xl:p-5">
         <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-          <div className="flex items-start justify-between border-b px-6 py-4">
+          <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
             <div>
               <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Official Form'}</h2>
               <p className="mt-1 text-sm text-gray-500">Review and adjust the filing values, then preview the official PDF before downloading or printing.</p>
@@ -2149,7 +2149,7 @@ function QuarterlyOfficialFormModal({
             <div className="overflow-y-auto bg-gray-50 p-5">
               {error ? <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
               {loading || !fields ? (
-                <div className="rounded-md border bg-white p-6 text-sm text-gray-500">Loading form values...</div>
+                <div className="rounded-md border bg-white p-4 text-sm text-gray-500 sm:p-6">Loading form values...</div>
               ) : (
                 <div className="space-y-5">
                   <section className="rounded-md border bg-white p-4">
@@ -2299,7 +2299,7 @@ function Form941GuPanel() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="f941-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -3052,7 +3052,7 @@ function ReportLibraryRow({
 function EmptyReportSearch({ onClear }: { onClear: () => void }) {
   return (
     <Card>
-      <CardContent className="flex flex-col items-center justify-center px-6 py-10 text-center">
+      <CardContent className="flex flex-col items-center justify-center px-4 py-10 text-center sm:px-6">
         <div className="rounded-2xl bg-neutral-100 p-3 text-neutral-500">
           {reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" />)}
         </div>
@@ -3159,9 +3159,9 @@ export function Reports() {
     <div>
       <Header title="Reports" description="Find, prepare, and export payroll and Guam compliance reports." />
 
-      <div className="space-y-8 p-6 lg:p-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         <Card className="overflow-hidden border-primary-200/80 bg-[linear-gradient(135deg,#ffffff_0%,#f4f8ff_55%,#fff8eb_100%)]">
-          <CardContent className="p-6 lg:p-7">
+          <CardContent className="p-4 sm:p-6 lg:p-7">
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-center">
               <div>
                 <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary-700">Reports center</p>
