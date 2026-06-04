@@ -21,6 +21,7 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     resource "*",
       headers: :any,
       methods: [ :get, :post, :put, :patch, :delete, :options, :head ],
+      expose: [ "Content-Disposition", "X-Pay-Stubs-Generated", "X-Pay-Stubs-Skipped" ],
       credentials: true
   end
 end

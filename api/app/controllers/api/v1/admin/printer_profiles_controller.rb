@@ -8,6 +8,7 @@ module Api
       # The `apply` action still writes to the currently active company's check
       # settings — that's the act of saying "use this printer here right now".
       class PrinterProfilesController < BaseController
+        before_action :require_manager_or_admin!, only: [:apply_to_all_companies]
         before_action :set_profile, only: [:show, :update, :destroy, :apply, :apply_to_all_companies]
 
         # GET /api/v1/admin/printer_profiles
