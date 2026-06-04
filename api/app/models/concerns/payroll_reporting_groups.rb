@@ -21,7 +21,7 @@ module PayrollReportingGroups
 
   TYPE_LABELS = {
     GROUP_401K_PRE_TAX => "401(k)",
-    GROUP_401K_AFTER_TAX => "SIMPLE 401(k)",
+    GROUP_401K_AFTER_TAX => "Roth 401(k)",
     GROUP_RETIREMENT_OTHER => "Retirement Plan"
   }.freeze
 
