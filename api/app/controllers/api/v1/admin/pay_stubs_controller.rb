@@ -83,9 +83,14 @@ module Api
 
           results = { success: [], errors: [] }
 
-          pay_period.payroll_items
-                    .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
-                    .each do |item|
+          all_items = pay_period.payroll_items
+                                .not_voided
+                                .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
+                                .to_a
+          eligible_items = all_items.select { |item| pay_stub_printable?(item) }
+          skipped_count = all_items.count - eligible_items.count
+
+          eligible_items.each do |item|
             begin
               generator = PayStubGenerator.new(item)
               pdf_data = generator.generate
@@ -111,8 +116,9 @@ module Api
 
           render json: {
             pay_period_id: pay_period.id,
-            total: pay_period.payroll_items.count,
+            total: all_items.count,
             generated: results[:success].count,
+            skipped: skipped_count,
             errors: results[:errors].count,
             results: results
           }
@@ -135,6 +141,8 @@ module Api
           base_items = pay_period.payroll_items
                                  .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
 
+          skipped_count = 0
+
           if requested_ids.any?
             selected_items = base_items.where(id: requested_ids).to_a
 
@@ -151,9 +159,20 @@ module Api
               }, status: :unprocessable_entity
             end
 
+            unpaid_items = selected_items.reject { |item| pay_stub_printable?(item) }
+            if unpaid_items.any?
+              names = unpaid_items.map { |item| item.employee&.full_name || "Payroll item ##{item.id}" }.to_sentence
+              return render json: {
+                error: "Selected employees were not paid in this pay period",
+                details: "Remove #{names} from the selection and try again."
+              }, status: :unprocessable_entity
+            end
+
             items = selected_items
           else
-            items = base_items.not_voided.to_a
+            all_items = base_items.not_voided.to_a
+            items = all_items.select { |item| pay_stub_printable?(item) }
+            skipped_count = all_items.count - items.count
           end
 
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
@@ -163,6 +182,8 @@ module Api
           end
 
           combined_pdf = combine_pdfs(items.map { |item| PayStubGenerator.new(item).generate })
+          response.set_header("X-Pay-Stubs-Generated", items.count.to_s)
+          response.set_header("X-Pay-Stubs-Skipped", skipped_count.to_s)
           pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           filename_prefix = requested_ids.any? ? "selected_paystubs" : "paystubs"
 
@@ -227,6 +248,12 @@ module Api
 
         def storage_key
           pay_stub_key(@payroll_item)
+        end
+
+        def pay_stub_printable?(item)
+          return false if item.voided?
+
+          item.check_number.present? || item.gross_pay.to_d.positive? || item.net_pay.to_d.positive?
         end
 
         def pay_stub_key(item)

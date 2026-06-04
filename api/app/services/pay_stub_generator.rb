@@ -114,7 +114,7 @@ class PayStubGenerator
       data = [
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
-        [ "Check #:", payroll_item.check_number || "Direct Deposit" ]
+        [ "Check #:", payroll_item.check_number.presence || "No check issued" ]
       ]
 
       pdf.table(data, cell_style: { borders: [], padding: [ 2, 10, 2, 0 ] }) do
