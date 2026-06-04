@@ -69,7 +69,7 @@ class TransmittalLogPdfGenerator
     pdf.font_size(10) do
       label_width = 80
       pdf.text_box "Date:", at: [0, pdf.cursor], width: label_width
-      pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
+      pdf.text_box transmittal_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
       pdf.move_down 16
       pdf.text_box "Pay Day:", at: [0, pdf.cursor], width: label_width
       pdf.text_box pay_period.pay_date.strftime("%m/%d/%Y"), at: [label_width, pdf.cursor]
@@ -81,6 +81,36 @@ class TransmittalLogPdfGenerator
     pdf.move_down 10
   end
 
+  def payroll_check_numbers
+    if options.key?(:payroll_check_numbers)
+      return Array(options[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
+    end
+
+    pay_period.payroll_items
+      .not_voided
+      .where.not(check_number: nil)
+      .pluck(:check_number)
+      .map(&:to_s)
+      .sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+  end
+
+  def format_check_type(value)
+    text = value.to_s
+    return "GRT" if text.casecmp("grt").zero?
+
+    text.titleize
+  end
+
+  def transmittal_date
+    value = options[:transmittal_date]
+    return value if value.is_a?(Date)
+    return Date.iso8601(value.to_s) if value.present?
+
+    Date.current
+  rescue ArgumentError
+    Date.current
+  end
+
   def render_documents_provided(pdf)
     pdf.font_size(11) { pdf.text "Documents Provided to Client:", style: :bold }
     pdf.move_down 8
@@ -89,22 +119,17 @@ class TransmittalLogPdfGenerator
     ne_check_overrides = options[:non_employee_check_numbers] || {}
 
     # 1) Payroll checks
-    check_numbers = pay_period.payroll_items
-      .not_voided
-      .where.not(check_number: nil)
-      .pluck(:check_number)
-      .sort_by(&:to_i)
+    check_numbers = payroll_check_numbers
 
     if check_numbers.any?
-      first_num = options[:check_number_first].presence || check_numbers.first
-      last_num = options[:check_number_last].presence || check_numbers.last
+      formatted_numbers = CheckNumberRangeFormatter.format(check_numbers)
 
       item_num += 1
       pdf.font_size(10) do
         pdf.text "#{item_num})  Payroll Checks", style: :bold
         pdf.indent(30) do
           pdf.text "Number of Checks:  #{check_numbers.size}"
-          pdf.text "Checks #  #{first_num}  through  #{last_num}"
+          pdf.text "Checks #:  #{formatted_numbers}"
         end
       end
       pdf.move_down 8
@@ -116,7 +141,7 @@ class TransmittalLogPdfGenerator
       item_num += 1
       overridden_num = ne_check_overrides[check.id]
       check_label = overridden_num.present? ? overridden_num : (check.check_number.present? ? check.check_number : "____")
-      type_label = check.check_type.present? ? " (#{check.check_type.titleize})" : ""
+      type_label = check.check_type.present? ? " (#{format_check_type(check.check_type)})" : ""
 
       pdf.font_size(10) do
         pdf.text "#{item_num})  Check for #{check.payable_to}#{type_label}", style: :bold

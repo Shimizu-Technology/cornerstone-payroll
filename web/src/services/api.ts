@@ -1748,10 +1748,12 @@ export const reportsApi = {
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -1759,10 +1761,12 @@ export const reportsApi = {
     api.postBlob('/admin/reports/full_print_package_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -1811,20 +1815,24 @@ export interface TransmittalCustomEntry {
 
 export interface TransmittalOptions {
   preparerName?: string;
+  transmittalDate?: string;
   notes?: string[];
   reportList?: string[];
   checkNumberFirst?: string;
   checkNumberLast?: string;
+  payrollCheckNumbers?: string[];
   nonEmployeeCheckNumbers?: Record<number, string>;
   customEntries?: TransmittalCustomEntry[];
 }
 
 export interface SavedTransmittal {
   preparer_name: string | null;
+  transmittal_date: string | null;
   notes: string[];
   report_list: string[];
   check_number_first: string | null;
   check_number_last: string | null;
+  payroll_check_numbers: string[] | null;
   non_employee_check_numbers: Record<string, string>;
   custom_entries: TransmittalCustomEntry[];
   generated_at: string | null;
@@ -1838,6 +1846,8 @@ export interface TransmittalPreview {
     count: number;
     first: string | null;
     last: string | null;
+    numbers: string[];
+    ranges: string;
   };
   non_employee_checks: {
     id: number;
@@ -2297,10 +2307,12 @@ export const payrollReportsApi = {
     api.postBlob('/admin/reports/transmittal_log_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
@@ -2308,10 +2320,12 @@ export const payrollReportsApi = {
     api.postBlob('/admin/reports/full_print_package_pdf', {
       pay_period_id: payPeriodId,
       preparer_name: options?.preparerName,
+      transmittal_date: options?.transmittalDate,
       notes: options?.notes,
       report_list: options?.reportList,
       check_number_first: options?.checkNumberFirst,
       check_number_last: options?.checkNumberLast,
+      payroll_check_numbers: options?.payrollCheckNumbers,
       non_employee_check_numbers: options?.nonEmployeeCheckNumbers,
       custom_entries: options?.customEntries,
     }),
