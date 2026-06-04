@@ -36,7 +36,7 @@ import {
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
-import type { Employee, Department, PaginationMeta } from '@/types';
+import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 
@@ -46,6 +46,10 @@ const TYPE_COLORS: Record<string, string> = {
   hourly: 'bg-blue-50 text-blue-700 border-blue-200',
   contractor: 'bg-amber-50 text-amber-700 border-amber-200',
 };
+
+function wageRateRowKey(employeeId: number, rate: EmployeeWageRate, index: number) {
+  return rate.id ? `${employeeId}-wage-rate-${rate.id}` : `${employeeId}-wage-rate-${index}-${rate.label}-${rate.rate}`;
+}
 
 export function EmployeeList() {
   const location = useLocation();
@@ -536,8 +540,8 @@ function EmployeeMobileCard({
           </div>
           {hasMultipleRates && (
             <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
-              {activeWageRates.map((rate) => (
-                <p key={`${employee.id}-${rate.label}`} className="text-xs text-neutral-600">
+              {activeWageRates.map((rate, index) => (
+                <p key={wageRateRowKey(employee.id, rate, index)} className="text-xs text-neutral-600">
                   <span className="font-semibold text-neutral-900">{rate.label}</span> {formatCurrency(rate.rate)}/hr
                 </p>
               ))}
@@ -599,8 +603,8 @@ function EmployeeTableRow({
         <div className="space-y-1">
           {hasMultipleRates ? (
             <div className="space-y-1">
-              {activeWageRates.map((rate) => (
-                <div key={`${employee.id}-${rate.label}`} className="text-xs">
+              {activeWageRates.map((rate, index) => (
+                <div key={wageRateRowKey(employee.id, rate, index)} className="text-xs">
                   <span className="font-medium text-gray-900">{rate.label}</span>{' '}
                   <span className="text-gray-500">{formatCurrency(rate.rate)}/hr</span>
                 </div>

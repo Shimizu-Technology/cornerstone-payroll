@@ -49,10 +49,13 @@ export function DialogContent({
   children,
   ...props
 }: DialogContentProps) {
+  const isTopAlignedDialog = typeof className === 'string' && className.includes('dialog-top');
+
   return (
     <div
       className={cn(
-        'mx-0 max-h-[92vh] overflow-y-auto rounded-t-3xl bg-white p-4 shadow-lg sm:mx-4 sm:rounded-lg sm:p-6',
+        'mx-0 max-h-[92vh] overflow-y-auto bg-white p-4 shadow-lg sm:mx-4 sm:rounded-lg sm:p-6',
+        isTopAlignedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg',
         className
       )}
       {...props}
