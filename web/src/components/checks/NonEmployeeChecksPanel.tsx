@@ -574,8 +574,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   key={check.id}
                   className={`border rounded-lg overflow-hidden ${check.voided ? 'bg-red-50 border-red-200' : 'hover:bg-gray-50'}`}
                 >
-                  <div className="flex items-center justify-between p-3">
-                    <div className="flex-1">
+                  <div className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-sm">{check.payable_to}</span>
                         <Badge variant="outline">{CHECK_TYPE_LABELS[check.check_type as NonEmployeeCheckType] || check.check_type}</Badge>
@@ -673,7 +673,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-1 shrink-0">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0 sm:gap-1 [&>button]:w-full sm:[&>button]:w-auto">
                       <Button
                         size="sm"
                         variant="outline"
@@ -713,8 +713,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         </Button>
                       )}
                       {voidingId === check.id && (
-                        <div className="flex gap-1">
-                          <input className="border rounded px-2 py-1 text-xs w-32" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
+                        <div className="col-span-2 grid grid-cols-1 gap-2 sm:flex sm:gap-1">
+                          <input className="w-full rounded border px-2 py-2 text-xs sm:w-32 sm:py-1" placeholder="Reason..." value={voidReason} onChange={e => setVoidReason(e.target.value)} />
                           <Button size="sm" variant="destructive" onClick={() => handleVoid(check.id)} disabled={voidConfirming}>
                             {voidConfirming ? 'Voiding...' : 'Confirm'}
                           </Button>

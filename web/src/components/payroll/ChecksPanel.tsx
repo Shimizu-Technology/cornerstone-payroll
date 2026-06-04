@@ -8,6 +8,7 @@ import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
 
@@ -452,8 +453,8 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   return (
     <div className="space-y-4">
       {/* Header + batch actions */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-4 text-sm text-gray-600">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
           {meta && (
             <>
               <span><span className="font-medium text-gray-900">{meta.total}</span> total</span>
@@ -472,7 +473,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           )}
         </div>
 
-        <div className="flex gap-2 items-center">
+        <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
           {isFirstHawaiian4Up && (
             <label className="flex items-center gap-2 text-sm text-gray-600">
               Start slot
@@ -499,7 +500,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
               onClick={handleMarkAllPrinted}
               disabled={batchLoading}
             >
-              ✓ Mark All Printed
+              Mark All Printed
             </Button>
           )}
           <Button
@@ -552,8 +553,129 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           {normalizedSearch ? 'No checks match this search.' : 'No checks found for this pay period.'}
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
+        <>
+          <div className="space-y-3 sm:hidden">
+            {filteredChecks.map((item) => {
+              const latestEvent = item.events?.[item.events.length - 1];
+              const shouldShowReason = Boolean(
+                latestEvent?.reason && ['voided', 'reprinted', 'replaced', 'renumbered'].includes(latestEvent.event_type)
+              );
+
+              return (
+                <MobileRecordCard key={item.id} tone={item.voided ? 'muted' : 'default'}>
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex min-w-0 items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 rounded border-gray-300"
+                        checked={selectedStubIdSet.has(item.id)}
+                        onChange={() => toggleStubSelection(item)}
+                        disabled={item.voided}
+                        aria-label={`Select pay stub for ${item.employee_name}`}
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-neutral-950">{item.employee_name}</p>
+                        {item.department_name && <p className="truncate text-sm text-neutral-500">{item.department_name}</p>}
+                      </div>
+                    </label>
+                    {checkStatusBadge(item)}
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MobileField label="Check #" value={item.check_number || '—'} />
+                    <MobileField label="Net pay" value={formatCurrency(item.net_pay)} />
+                  </div>
+
+                  {item.reprint_of_check_number && (
+                    <p className="mt-2 text-xs text-orange-700">Replaces #{item.reprint_of_check_number}</p>
+                  )}
+
+                  {latestEvent && (
+                    <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
+                      <p>
+                        Last event: {eventLabel(latestEvent.event_type)} #{latestEvent.check_number || '—'}
+                        {latestEvent.user_name ? ` by ${latestEvent.user_name}` : ''}
+                        {formatEventTime(latestEvent.created_at) ? ` · ${formatEventTime(latestEvent.created_at)}` : ''}
+                      </p>
+                      {shouldShowReason && <p className="mt-1 text-orange-700">Reason: {latestEvent.reason}</p>}
+                    </div>
+                  )}
+
+                  {editingCheckId === item.id ? (
+                    <div className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50 p-3">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={draftCheckNumber}
+                        onChange={(e) => setDraftCheckNumber(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveCheckNumber(item);
+                          if (e.key === 'Escape') cancelCheckNumberEdit();
+                        }}
+                        className="h-11 w-full rounded-xl border border-blue-300 px-3 font-mono text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        autoFocus
+                      />
+                      {checkNumberError?.id === item.id && (
+                        <p className="text-xs font-normal text-red-600">{checkNumberError.message}</p>
+                      )}
+                      <MobileCardActions className="mt-0 grid grid-cols-2">
+                        <Button size="sm" onClick={() => handleSaveCheckNumber(item)} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Save</Button>
+                        <Button size="sm" variant="outline" onClick={cancelCheckNumberEdit} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Cancel</Button>
+                      </MobileCardActions>
+                    </div>
+                  ) : (
+                    !item.voided && item.check_number && (
+                      <button
+                        type="button"
+                        onClick={() => startCheckNumberEdit(item)}
+                        className="mt-3 text-sm font-semibold text-blue-700"
+                      >
+                        Edit check number
+                      </button>
+                    )
+                  )}
+
+                  <MobileCardActions className="grid grid-cols-2">
+                    {item.check_number && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handlePreviewPdf(item)}
+                        disabled={isActionLoading(item.id, 'preview')}
+                        className={item.voided ? 'text-gray-500' : ''}
+                      >
+                        {isActionLoading(item.id, 'preview') ? 'Loading…' : item.voided ? 'Void PDF' : 'Preview'}
+                      </Button>
+                    )}
+                    {!item.voided && (
+                      <Button size="sm" variant="outline" onClick={() => void handlePrintStubForItem(item)} disabled={isActionLoading(item.id, 'stub')}>
+                        {isActionLoading(item.id, 'stub') ? 'Loading…' : 'Stub'}
+                      </Button>
+                    )}
+                    {!item.voided && (
+                      <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(item)} disabled={isActionLoading(item.id, 'markPrinted')}>
+                        {isActionLoading(item.id, 'markPrinted') ? 'Loading…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
+                      </Button>
+                    )}
+                    {!item.voided && item.check_number && (
+                      <Button size="sm" variant="outline" onClick={() => setReprintTarget(item)} disabled={actionLoading?.id === item.id} className="border-orange-300 text-orange-700 hover:bg-orange-50">
+                        Reissue
+                      </Button>
+                    )}
+                    {!item.voided && item.check_number && (
+                      <Button size="sm" variant="outline" onClick={() => setVoidTarget(item)} disabled={actionLoading?.id === item.id} className="border-red-300 text-red-700 hover:bg-red-50">
+                        Void
+                      </Button>
+                    )}
+                    {item.voided && <span className="text-xs italic text-red-600" title={item.void_reason ?? undefined}>Voided</span>}
+                  </MobileCardActions>
+                </MobileRecordCard>
+              );
+            })}
+          </div>
+
+          <div className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
+            <table className="min-w-[760px] w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">
                 <th className="w-10 px-3 py-2 text-left font-medium text-gray-600">
@@ -756,8 +878,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                 </tr>
               ))}
             </tbody>
-          </table>
-        </div>
+            </table>
+          </div>
+        </>
       )}
 
       {/* Modals */}

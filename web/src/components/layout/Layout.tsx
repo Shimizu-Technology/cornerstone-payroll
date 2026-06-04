@@ -147,7 +147,7 @@ export function Layout() {
           <div className="h-9 w-9" />
         </div>
 
-        <main className="relative flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
+        <main className="relative flex-1 overflow-x-hidden overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,0.42),rgba(248,250,252,0.74))]" aria-live="polite">
           <div
             className={`min-h-full transition-opacity duration-200 ease-out ${
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'

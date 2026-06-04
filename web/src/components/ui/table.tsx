@@ -16,7 +16,7 @@ interface StickyCellProps {
 
 const Table = forwardRef<HTMLTableElement, TableProps>(
   ({ className, containerClassName, stickyHeader = false, ...props }, ref) => (
-    <div className={cn('w-full overflow-auto', containerClassName)}>
+    <div className={cn('max-w-full overflow-auto overscroll-x-contain', containerClassName)}>
       <table
         ref={ref}
         className={cn(
