@@ -30,8 +30,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
         ImportModal additionally opts into `.dialog-top` so the workflow starts near the
         top of the viewport instead of the vertical midpoint.
       */}
-      <div className="relative z-10 h-full overflow-y-auto p-4 sm:p-6">
-        <div className="flex min-h-full items-center justify-center py-4 [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
+      <div className="relative z-10 h-full overflow-y-auto p-3 sm:p-6">
+        <div className="flex min-h-full items-end justify-center py-0 sm:items-center sm:py-4 [&:has(.dialog-top)]:items-start [&:has(.dialog-top)]:pt-8 sm:[&:has(.dialog-top)]:pt-12">
           <div className="relative w-full max-w-lg [&:has(.dialog-wide)]:max-w-7xl">{children}</div>
         </div>
       </div>
@@ -49,10 +49,13 @@ export function DialogContent({
   children,
   ...props
 }: DialogContentProps) {
+  const isTopAlignedDialog = typeof className === 'string' && className.includes('dialog-top');
+
   return (
     <div
       className={cn(
-        'bg-white rounded-lg shadow-lg p-6 mx-4',
+        'mx-0 max-h-[92vh] overflow-y-auto bg-white p-4 shadow-lg sm:mx-4 sm:rounded-lg sm:p-6',
+        isTopAlignedDialog ? 'rounded-3xl' : 'rounded-t-3xl rounded-b-none sm:rounded-lg',
         className
       )}
       {...props}

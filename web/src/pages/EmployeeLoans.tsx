@@ -243,9 +243,9 @@ export default function EmployeeLoans() {
         }
       />
 
-      <div className="p-6 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {/* Filters */}
-        <div className="flex gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:flex sm:gap-4 [&>select]:w-full sm:[&>select]:w-auto">
           <select className="border rounded px-3 py-2 text-sm" value={filterEmployee} onChange={e => setFilterEmployee(e.target.value)}>
             <option value="">All Employees</option>
             {employees.map(emp => (
@@ -278,7 +278,7 @@ export default function EmployeeLoans() {
               <input className="border rounded px-3 py-2 text-sm" type="date" value={formData.start_date} onChange={e => setFormData(p => ({ ...p, start_date: e.target.value }))} />
               <input className="border rounded px-3 py-2 text-sm" placeholder="Notes" value={formData.notes} onChange={e => setFormData(p => ({ ...p, notes: e.target.value }))} />
             </div>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:flex">
               <Button onClick={handleCreate} disabled={creatingLoan}>
                 {creatingLoan ? 'Creating...' : 'Create Loan'}
               </Button>
@@ -313,17 +313,17 @@ export default function EmployeeLoans() {
             {loans.map(loan => (
               <Card key={loan.id} className="overflow-hidden">
                 <div
-                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                  className="flex cursor-pointer flex-col gap-3 p-4 hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between"
                   onClick={() => handleExpandLoan(loan.id)}
                 >
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold">{loan.employee_name}</span>
                       <span className="text-gray-400">—</span>
                       <span className="text-gray-700">{loan.name}</span>
                       <Badge className={STATUS_COLORS[loan.status]}>{loan.status.replace('_', ' ')}</Badge>
                     </div>
-                    <div className="flex gap-6 text-sm text-gray-500 mt-1">
+                    <div className="mt-2 grid grid-cols-1 gap-1 text-sm text-gray-500 sm:flex sm:flex-wrap sm:gap-x-6 sm:gap-y-1">
                       <span>Original: {fmt(loan.original_amount)}</span>
                       <span className="font-semibold text-gray-900">Balance: {fmt(loan.current_balance)}</span>
                       {loan.payment_amount && <span>Per Period: {fmt(loan.payment_amount)}</span>}
@@ -351,8 +351,8 @@ export default function EmployeeLoans() {
                     )}
 
                     {/* Lifecycle Actions */}
-                    <div className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gray-200 bg-white p-3">
-                      <div className="mr-auto">
+                    <div className="mb-4 grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-white p-3 sm:flex sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
+                      <div className="sm:mr-auto">
                         <p className="text-sm font-semibold text-gray-900">Loan status controls</p>
                         <p className="text-xs text-gray-500">Close, pause, or remove accidental loan records without changing payroll history.</p>
                       </div>
@@ -378,16 +378,16 @@ export default function EmployeeLoans() {
 
                     {/* Quick Actions */}
                     {loan.status === 'active' && (
-                      <div className="flex flex-wrap gap-4 mb-4">
-                        <div className="flex items-center gap-2">
-                          <Input className="w-28 px-2 py-1 text-sm" type="text" inputMode="decimal" placeholder="Payment $" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
+                      <div className="mb-4 grid grid-cols-1 gap-3 lg:flex lg:flex-wrap lg:gap-4">
+                        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
+                          <Input className="w-full px-2 py-1 text-sm sm:w-28" type="text" inputMode="decimal" placeholder="Payment $" value={paymentAmount} onChange={e => setPaymentAmount(e.target.value)} />
                           <Button size="sm" onClick={() => handleRecordPayment(loan.id)} disabled={!paymentAmount || recordingPayment}>
                             {recordingPayment ? 'Recording...' : 'Record Payment'}
                           </Button>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Input className="w-28 px-2 py-1 text-sm" type="text" inputMode="decimal" placeholder="Addition $" value={additionAmount} onChange={e => setAdditionAmount(e.target.value)} />
-                          <Input className="w-32 px-2 py-1 text-sm" placeholder="Notes" value={additionNotes} onChange={e => setAdditionNotes(e.target.value)} />
+                        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
+                          <Input className="w-full px-2 py-1 text-sm sm:w-28" type="text" inputMode="decimal" placeholder="Addition $" value={additionAmount} onChange={e => setAdditionAmount(e.target.value)} />
+                          <Input className="w-full px-2 py-1 text-sm sm:w-32" placeholder="Notes" value={additionNotes} onChange={e => setAdditionNotes(e.target.value)} />
                           <Button size="sm" variant="outline" onClick={() => handleRecordAddition(loan.id)} disabled={!additionAmount || recordingAddition}>
                             {recordingAddition ? 'Adding...' : 'Add to Loan'}
                           </Button>
@@ -398,7 +398,8 @@ export default function EmployeeLoans() {
                     {/* Transaction History */}
                     <h4 className="font-semibold text-sm mb-2">Transaction History</h4>
                     {expandedLoan.transactions && expandedLoan.transactions.length > 0 ? (
-                      <table className="w-full text-sm">
+                      <div className="overflow-x-auto">
+                        <table className="min-w-[42rem] w-full text-sm">
                         <thead>
                           <tr className="border-b text-left text-gray-500">
                             <th className="py-1 pr-4">Date</th>
@@ -427,7 +428,8 @@ export default function EmployeeLoans() {
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                        </table>
+                      </div>
                     ) : (
                       <p className="text-gray-500 text-sm italic">No transactions recorded</p>
                     )}

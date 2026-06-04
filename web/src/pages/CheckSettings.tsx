@@ -656,7 +656,7 @@ export function CheckSettingsPage() {
 
         {/* Printer Profiles */}
         <Card>
-          <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex flex-col gap-4 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="font-semibold text-gray-900">Printer Profiles</h2>
               <p className="text-sm text-gray-500 mt-0.5">
@@ -679,7 +679,7 @@ export function CheckSettingsPage() {
                 )}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
               <Button variant="outline" size="sm" onClick={handleClearActiveProfile} disabled={!activePrinterProfileId}>
                 Use No Printer Profile
               </Button>
@@ -770,7 +770,7 @@ export function CheckSettingsPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">{profile.name}</span>
@@ -800,7 +800,7 @@ export function CheckSettingsPage() {
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-col gap-1 shrink-0">
+                    <div className="grid shrink-0 grid-cols-1 gap-2 sm:flex sm:flex-col sm:gap-1 [&>button]:w-full sm:[&>button]:w-auto">
                       <Button size="sm" onClick={() => handleApplyProfile(profile)}>
                         {profileMatchesCurrent ? 'Using for This Client' : 'Use for This Client'}
                       </Button>
@@ -810,7 +810,7 @@ export function CheckSettingsPage() {
                       <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
                         Save Draft to Profile
                       </Button>
-                      <div className="flex gap-1">
+                      <div className="grid grid-cols-2 gap-1 sm:flex">
                         <Button
                           variant="ghost"
                           size="sm"

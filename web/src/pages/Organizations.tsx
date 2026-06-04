@@ -3,6 +3,7 @@ import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldChe
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import {
@@ -291,7 +292,7 @@ export function Organizations() {
         }
       />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="p-4">
             <div className="flex items-center gap-3">
@@ -404,8 +405,83 @@ export function Organizations() {
             </div>
           </div>
         ) : (
-          <Card className="overflow-hidden">
-            <Table className="min-w-[1280px]" containerClassName="overflow-x-auto">
+          <>
+            <div className="space-y-3 sm:hidden">
+              {organizations.map((organization) => (
+                <MobileRecordCard key={organization.id}>
+                  {editingId === organization.id ? (
+                    <div className="space-y-3">
+                      <Input value={editName} onChange={(event) => setEditName(event.target.value)} />
+                      <Input value={editSlug} onChange={(event) => setEditSlug(event.target.value)} />
+                      <Select value={editStatus} onChange={(event) => setEditStatus(event.target.value as 'active' | 'inactive')}>
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                      </Select>
+                      <div className="flex items-center gap-3">
+                        <Input type="number" min={1} value={editClientLimit} onChange={(event) => setEditClientLimit(event.target.value)} disabled={editUnlimitedClients} />
+                        <label className="flex shrink-0 items-center gap-2 text-sm text-neutral-700">
+                          <input type="checkbox" className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" checked={editUnlimitedClients} onChange={(event) => setEditUnlimitedClients(event.target.checked)} />
+                          Unlimited
+                        </label>
+                      </div>
+                      {editError && <p className="text-xs text-danger-600">{editError}</p>}
+                      <MobileCardActions className="mt-0 grid grid-cols-2">
+                        <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>{isSavingEdit ? 'Saving...' : 'Save'}</Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditingId(null)} disabled={isSavingEdit}>Cancel</Button>
+                      </MobileCardActions>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                          <Building2 className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-neutral-950">{organization.name}</p>
+                              <p className="truncate text-sm text-neutral-500">{organization.slug}</p>
+                            </div>
+                            <span className={organization.status === 'active' ? 'text-sm font-medium text-green-700' : 'text-sm text-neutral-500'}>
+                              {organization.status === 'active' ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Clients" value={`${organization.active_companies_count} active / ${organization.companies_count}`} />
+                            <MobileField label="Users" value={organization.users_count} />
+                            <MobileField label="Limit" value={organization.unlimited_clients ? 'Unlimited' : organization.client_limit} />
+                            <MobileField label="Admins" value={organization.org_admins.length || 'None'} />
+                          </div>
+                          {organization.org_admins.length > 0 && (
+                            <div className="mt-3 space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+                              {organization.org_admins.map((admin) => (
+                                <div key={admin.id} className="flex items-center justify-between gap-2 text-sm">
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium text-neutral-800">{admin.name}</p>
+                                    <p className="truncate text-xs text-neutral-500">{admin.email}</p>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0" onClick={() => handleRenameAdmin(admin)} disabled={adminActionId === admin.id} title="Rename admin"><Pencil className="h-4 w-4" /></Button>
+                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0" onClick={() => handleToggleAdminActive(admin)} disabled={adminActionId === admin.id} title={admin.active === false ? 'Activate admin' : 'Deactivate admin'}>{admin.active === false ? <UserCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}</Button>
+                                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0 text-danger-600 hover:text-danger-700" onClick={() => handleDeleteAdmin(admin)} disabled={adminActionId === admin.id} title="Delete admin"><Trash2 className="h-4 w-4" /></Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <MobileCardActions>
+                            <Button size="sm" variant="outline" onClick={() => handleStartEdit(organization)}>Edit</Button>
+                            <Button size="sm" variant="outline" onClick={() => handleStartAdmin(organization)}>Add Admin</Button>
+                          </MobileCardActions>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </MobileRecordCard>
+              ))}
+            </div>
+            <Card className="hidden overflow-hidden sm:block">
+              <Table className="min-w-[1280px]" containerClassName="overflow-x-auto">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[300px]">Organization</TableHead>
@@ -571,7 +647,17 @@ export function Organizations() {
                 </div>
               </div>
             )}
-          </Card>
+            </Card>
+            {meta && meta.total_pages > 1 && (
+              <div className="mt-4 flex items-center justify-between sm:hidden">
+                <p className="text-sm text-neutral-500">Page {meta.current_page} of {meta.total_pages}</p>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" disabled={meta.current_page <= 1 || isLoading} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</Button>
+                  <Button size="sm" variant="outline" disabled={meta.current_page >= meta.total_pages || isLoading} onClick={() => setPage((current) => current + 1)}>Next</Button>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {adminOrgId && (

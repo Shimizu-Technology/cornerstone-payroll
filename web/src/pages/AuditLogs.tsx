@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import {
   Table,
@@ -132,7 +133,7 @@ export function AuditLogs() {
     <div>
       <Header title="Audit Logs" description="Track who changed what, when it happened, and what changed." />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mb-4 p-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Input
@@ -184,7 +185,26 @@ export function AuditLogs() {
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Card>
-              <Table>
+              <div className="space-y-3 p-3 sm:hidden">
+                {logs.map((log) => (
+                  <MobileRecordCard
+                    key={log.id}
+                    tone={selectedLogId === log.id ? 'primary' : 'default'}
+                    onClick={() => setSelectedLogId(log.id)}
+                  >
+                    <p className="font-semibold text-neutral-950">{formatAction(log.action)}</p>
+                    <p className="mt-1 text-sm text-neutral-500">
+                      {log.user_name || 'System'} • {new Date(log.created_at).toLocaleString()}
+                    </p>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MobileField label="Record" value={`${humanizeKey(log.record_type || 'General')}${log.record_id ? ` #${log.record_id}` : ''}`} />
+                      <MobileField label="IP" value={log.ip_address || '—'} />
+                    </div>
+                  </MobileRecordCard>
+                ))}
+              </div>
+              <div className="hidden sm:block">
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Time</TableHead>
@@ -212,7 +232,8 @@ export function AuditLogs() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                </Table>
+              </div>
             </Card>
 
             <Card>
