@@ -105,6 +105,7 @@ export function CheckSettingsPage() {
   const [editProfileDescription, setEditProfileDescription] = useState('');
   const [editProfileNotes, setEditProfileNotes] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
+  const [profileApplyingAllId, setProfileApplyingAllId] = useState<number | null>(null);
 
   const currentSettingsSnapshot = useMemo(() => checkSettingsSnapshot({
     stockType,
@@ -260,6 +261,11 @@ export function CheckSettingsPage() {
     }
   }, [stockType, loading, loadCheckLayout]);
 
+  const activeProfile = useMemo(
+    () => profiles.find((profile) => profile.id === activePrinterProfileId) || null,
+    [activePrinterProfileId, profiles]
+  );
+
   const parsedLayoutOverrides = useMemo(() => {
     try {
       const parsed = JSON.parse(layoutOverridesJson || '{}');
@@ -316,7 +322,7 @@ export function CheckSettingsPage() {
       });
       applySettingsToForm(data.check_settings);
       await loadCheckLayout(stockType);
-      setSuccess('Settings saved.');
+      setSuccess(data.check_settings.active_printer_profile_id ? 'Settings saved for this client.' : 'Custom check settings saved for this client.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -481,6 +487,30 @@ export function CheckSettingsPage() {
     }
   };
 
+  const handleApplyProfileToAllCompanies = async (profile: PrinterProfile) => {
+    const message = `Use "${profile.name}" for every client in this organization? This updates each client's check stock, alignment, and active printer profile.`;
+    if (!window.confirm(message)) return;
+
+    setError(null);
+    setSuccess(null);
+    setProfileApplyingAllId(profile.id);
+    try {
+      const result = await printerProfilesApi.applyToAllCompanies(profile.id);
+      const data = await checksApi.getSettings();
+      if (data.check_settings.check_stock_type !== stockType) {
+        skipNextLayoutEffectRef.current = true;
+      }
+      applySettingsToForm(data.check_settings);
+      await loadCheckLayout(data.check_settings.check_stock_type);
+      setSuccess(`Applied "${profile.name}" to ${result.applied_count} client${result.applied_count === 1 ? '' : 's'}.`);
+      await loadProfiles();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply printer profile to all clients');
+    } finally {
+      setProfileApplyingAllId(null);
+    }
+  };
+
   const handleClearActiveProfile = async () => {
     if (!window.confirm('Stop using a saved printer profile for this client? Current check settings will stay as-is.')) return;
     setError(null);
@@ -564,7 +594,7 @@ export function CheckSettingsPage() {
     setLayoutOverridesJson('{}');
     setActivePrinterProfileId(null);
     setActivePrinterProfileName(null);
-    setSuccess('Calibration draft reset to defaults. Click Save Settings to make it active without a saved printer profile.');
+    setSuccess('Calibration draft reset to defaults. Click Save Settings to save this custom setup for the active client.');
     setError(null);
   };
 
@@ -596,6 +626,34 @@ export function CheckSettingsPage() {
           </div>
         )}
 
+        <Card className="overflow-hidden border-slate-200 bg-white">
+          <div className="border-b bg-gradient-to-r from-slate-900 to-slate-700 px-5 py-4 text-white">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-300">Current printer source</p>
+            <h2 className="mt-1 text-lg font-semibold">
+              {activeProfile ? activeProfile.name : 'Custom settings for this client'}
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-slate-200">
+              {activeProfile
+                ? 'This client is using a shared organization printer profile. Use “Use for all clients” if this same office printer should follow you across every client.'
+                : 'No shared printer profile is selected. Save works as a client-specific custom override until you choose or create a printer profile.'}
+            </p>
+          </div>
+          <CardContent className="grid gap-3 p-4 text-sm md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Stock</p>
+              <p className="mt-1 font-semibold text-slate-900">{stockType === 'first_hawaiian_4up' ? 'First Hawaiian 4-Up' : stockType === 'top_check' ? 'Top Check' : 'Bottom Check'}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Alignment</p>
+              <p className="mt-1 font-mono font-semibold text-slate-900">X {offsetX || '0.000'} / Y {offsetY || '0.000'}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Save button</p>
+              <p className="mt-1 font-semibold text-slate-900">Saves this client’s active settings</p>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Printer Profiles */}
         <Card>
           <div className="p-4 border-b flex items-center justify-between">
@@ -606,13 +664,13 @@ export function CheckSettingsPage() {
               </p>
               <p className="text-xs text-blue-700 mt-1">
                 These profiles are shared with everyone in your organization &mdash; calibrate
-                an office printer once and reuse it across clients. <span className="font-medium">Use This Printer</span>
-                {' '}applies the profile to the active client only.
+                an office printer once and reuse it across clients. <span className="font-medium">Use for this client</span>
+                {' '}updates only the active client; <span className="font-medium">Use for all clients</span> applies the same printer everywhere.
               </p>
               <p className="mt-2 text-sm">
                 {activePrinterProfileId ? (
                   <span className="inline-flex items-center rounded-md border border-green-200 bg-green-50 px-2 py-1 font-medium text-green-800">
-                    Active printer: {activePrinterProfileName || profiles.find((profile) => profile.id === activePrinterProfileId)?.name || 'Selected profile'}
+                    Active printer: {activePrinterProfileName || activeProfile?.name || 'Selected profile'}
                   </span>
                 ) : (
                   <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700">
@@ -744,10 +802,13 @@ export function CheckSettingsPage() {
                     </div>
                     <div className="flex flex-col gap-1 shrink-0">
                       <Button size="sm" onClick={() => handleApplyProfile(profile)}>
-                        {profileMatchesCurrent ? 'Using This Printer' : 'Use This Printer'}
+                        {profileMatchesCurrent ? 'Using for This Client' : 'Use for This Client'}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => handleApplyProfileToAllCompanies(profile)} disabled={profileApplyingAllId === profile.id}>
+                        {profileApplyingAllId === profile.id ? 'Applying...' : 'Use for All Clients'}
                       </Button>
                       <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
-                        Overwrite with Current
+                        Save Draft to Profile
                       </Button>
                       <div className="flex gap-1">
                         <Button

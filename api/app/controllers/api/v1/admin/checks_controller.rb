@@ -459,6 +459,8 @@ module Api
           else
             render json: { errors: @company.errors.full_messages }, status: :unprocessable_entity
           end
+        rescue ArgumentError => e
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------
