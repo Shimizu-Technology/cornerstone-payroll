@@ -38,10 +38,10 @@ RSpec.describe TransmittalLogPdfGenerator do
 
   it "uses the transmittal date for Date while preserving pay date for Pay Day" do
     pdf = described_class.new(pay_period, transmittal_date: Date.new(2026, 4, 20)).generate
-    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
 
-    expect(text).to include("Date:             04/20/2026")
-    expect(text).to include("Pay Day:          04/16/2026")
+    expect(text).to include("Date: 04/20/2026")
+    expect(text).to include("Pay Day: 04/16/2026")
   end
 
   it "prints non-employee GRT check type in all caps" do
