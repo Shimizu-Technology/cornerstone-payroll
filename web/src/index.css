@@ -61,6 +61,12 @@ html,
 body,
 #root {
   min-height: 100%;
+  max-width: 100%;
+}
+
+html,
+body {
+  overflow-x: hidden;
 }
 
 html {
