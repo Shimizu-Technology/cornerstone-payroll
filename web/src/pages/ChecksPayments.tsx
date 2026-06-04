@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, Download, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
+import { CheckCircle2, Copy, Download, FileText, Printer, Search, Settings, Trash2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -79,23 +79,34 @@ interface FormState {
   line_items: VoucherLineItemForm[];
 }
 
-const initialForm: FormState = {
-  payable_to: '',
-  amount: '',
-  check_type: 'grt',
-  check_number: '',
-  payment_period_type: 'month',
-  tax_year: String(new Date().getFullYear()),
-  tax_quarter: String(Math.floor(new Date().getMonth() / 3) + 1),
-  tax_month: String(new Date().getMonth() + 1),
-  due_date: '',
-  payment_date: new Date().toISOString().slice(0, 10),
-  confirmation_number: '',
-  memo: '',
-  reference_number: '',
-  description: '',
-  line_items: [],
-};
+function localDateString() {
+  const date = new Date();
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function initialFormState(): FormState {
+  const today = new Date();
+  return {
+    payable_to: '',
+    amount: '',
+    check_type: 'grt',
+    check_number: '',
+    payment_period_type: 'month',
+    tax_year: String(today.getFullYear()),
+    tax_quarter: String(Math.floor(today.getMonth() / 3) + 1),
+    tax_month: String(today.getMonth() + 1),
+    due_date: '',
+    payment_date: localDateString(),
+    confirmation_number: '',
+    memo: '',
+    reference_number: '',
+    description: '',
+    line_items: [],
+  };
+}
 
 const fieldClassName = 'rounded-xl';
 
@@ -120,7 +131,7 @@ export function ChecksPayments() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState<FormState>(initialForm);
+  const [form, setForm] = useState<FormState>(() => initialFormState());
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('active');
   const [search, setSearch] = useState('');
@@ -226,13 +237,41 @@ export function ChecksPayments() {
     try {
       await nonEmployeeChecksApi.create(payload);
       setShowForm(false);
-      setForm(initialForm);
+      setForm(initialFormState());
       await loadChecks();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create check');
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleCloneCheck = (check: NonEmployeeCheck) => {
+    setError(null);
+    setShowForm(true);
+    setForm({
+      payable_to: check.payable_to || '',
+      amount: check.amount != null ? String(check.amount) : '',
+      check_type: check.check_type,
+      check_number: '',
+      payment_period_type: check.payment_period_type || 'none',
+      tax_year: check.tax_year ? String(check.tax_year) : String(new Date().getFullYear()),
+      tax_quarter: check.tax_quarter ? String(check.tax_quarter) : String(Math.floor(new Date().getMonth() / 3) + 1),
+      tax_month: check.tax_month ? String(check.tax_month) : String(new Date().getMonth() + 1),
+      due_date: check.due_date || '',
+      payment_date: localDateString(),
+      confirmation_number: '',
+      memo: check.memo || '',
+      reference_number: check.reference_number || '',
+      description: check.description || '',
+      line_items: (check.line_items || []).map((lineItem) => ({
+        description: lineItem.description || '',
+        reference_number: lineItem.reference_number || '',
+        service_period: lineItem.service_period || '',
+        amount: lineItem.amount != null ? String(lineItem.amount) : '',
+      })),
+    });
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
   const handleSavedCheck = (updated: NonEmployeeCheck) => {
@@ -381,6 +420,14 @@ export function ChecksPayments() {
     setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
+  const toggleCreateForm = () => {
+    setShowForm((current) => {
+      const next = !current;
+      if (next) setForm(initialFormState());
+      return next;
+    });
+  };
+
   const toggleHistory = (id: number) => {
     setHistoryIds(prev => {
       const next = new Set(prev);
@@ -395,7 +442,7 @@ export function ChecksPayments() {
         title="Checks & Payments"
         description="Standalone company checks for GRT, quarterly payments, vendors, reimbursements, and other non-pay-period disbursements."
         actions={
-          <Button onClick={() => setShowForm(prev => !prev)}>
+          <Button onClick={toggleCreateForm}>
             {showForm ? 'Cancel' : 'New Check'}
           </Button>
         }
@@ -661,6 +708,9 @@ export function ChecksPayments() {
                           <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" /> Mark Printed
                         </Button>
                       )}
+                      <Button size="sm" variant="outline" onClick={() => handleCloneCheck(check)}>
+                        <Copy className="mr-1.5 h-3.5 w-3.5" /> Clone
+                      </Button>
                       {!check.voided && <Button size="sm" variant="outline" onClick={() => setEditingCheck(check)}>Edit</Button>}
                       {!check.voided && voidingId !== check.id && (
                         <Button size="sm" variant="outline" className="border-red-300 text-red-600" onClick={() => setVoidingId(check.id)}>Void</Button>
