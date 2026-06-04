@@ -661,6 +661,15 @@ function TransmittalEditorModal({
                     </div>
                   )}
 
+                  {payrollCheckCount === 0 && (
+                    <div className="rounded-md border border-dashed border-gray-300 bg-white p-3 text-gray-600">
+                      <p className="text-sm">No payroll check numbers selected for this transmittal.</p>
+                      <button type="button" onClick={addPayrollCheckNumber} className="mt-2 text-xs text-blue-600 hover:text-blue-800">
+                        + Add payroll check #
+                      </button>
+                    </div>
+                  )}
+
                   {/* Non-Employee Checks */}
                   {preview.non_employee_checks.map((check, idx) => (
                     <div key={check.id}>
