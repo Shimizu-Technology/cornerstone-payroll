@@ -7,6 +7,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
+import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { adminClientDocumentsApi, clientDocumentsApi } from '@/services/api';
 import type { ClientDocument } from '@/services/api';
@@ -27,6 +28,8 @@ interface EmployeeDocumentsPanelProps {
   employeeId: number;
   employeeName: string;
   isClient: boolean;
+  className?: string;
+  headerAction?: React.ReactNode;
 }
 
 function formatFileSize(bytes: number) {
@@ -38,7 +41,7 @@ function categoryLabel(value: string) {
   return documentCategories.find((category) => category.value === value)?.label || value;
 }
 
-export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: EmployeeDocumentsPanelProps) {
+export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, className, headerAction }: EmployeeDocumentsPanelProps) {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,15 +115,20 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
   };
 
   const handleDownload = async (document: ClientDocument) => {
-    const file = await api.download(document.id);
-    const url = URL.createObjectURL(file.blob);
-    const link = window.document.createElement('a');
-    link.href = url;
-    link.download = file.filename || document.file_name;
-    window.document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    try {
+      setError(null);
+      const file = await api.download(document.id);
+      const url = URL.createObjectURL(file.blob);
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = file.filename || document.file_name;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download employee document');
+    }
   };
 
   const handlePreview = async (document: ClientDocument) => {
@@ -155,8 +163,8 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
   };
 
   return (
-    <Card className="mb-6 overflow-hidden border-slate-200">
-      <CardHeader className="border-b bg-gradient-to-r from-slate-50 to-white">
+    <Card className={cn('mb-6 overflow-hidden border-neutral-200/80', className)}>
+      <CardHeader className="border-b border-neutral-200/70 bg-gradient-to-r from-neutral-50 to-white">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle className="flex items-center gap-2">
@@ -167,8 +175,11 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
               Store W-4s, W-9s, direct deposit forms, IDs, and supporting files directly on {employeeName || 'this employee'}.
             </CardDescription>
           </div>
-          <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
-            {documents.length} file{documents.length === 1 ? '' : 's'}
+          <div className="flex items-center gap-2">
+            <div className="rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs font-medium text-neutral-600 shadow-sm">
+              {documents.length} file{documents.length === 1 ? '' : 's'}
+            </div>
+            {headerAction}
           </div>
         </div>
       </CardHeader>
@@ -176,10 +187,10 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
         {success && <div className="rounded-lg border border-success-100 bg-success-50 px-4 py-3 text-sm text-success-700">{success}</div>}
 
-        <form onSubmit={handleUpload} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+        <form onSubmit={handleUpload} className="rounded-2xl border border-neutral-200 bg-neutral-50/70 p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Title</label>
+              <label className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
               <Input
                 value={form.title}
                 onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
@@ -188,7 +199,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Document type</label>
+              <label className="mb-1 block text-sm font-medium text-neutral-700">Document type</label>
               <Select value={form.category} onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}>
                 {documentCategories.map((category) => (
                   <option key={category.value} value={category.value}>{category.label}</option>
@@ -196,29 +207,29 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
               </Select>
             </div>
             {!isClient && (
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700">
                 <input
                   type="checkbox"
                   checked={form.visible_to_client}
                   onChange={(event) => setForm((current) => ({ ...current, visible_to_client: event.target.checked }))}
-                  className="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                  className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
                 />
                 Visible in client portal
               </label>
             )}
             <div className={!isClient ? '' : 'md:col-span-2'}>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Files</label>
+              <label className="mb-1 block text-sm font-medium text-neutral-700">Files</label>
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
                 accept={ACCEPTED_UPLOAD_TYPES}
                 onChange={(event) => setForm((current) => ({ ...current, files: Array.from(event.target.files || []) }))}
-                className="block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                className="block w-full rounded-xl border border-neutral-300 bg-white px-3 py-2 text-sm"
               />
             </div>
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+              <label className="mb-1 block text-sm font-medium text-neutral-700">Notes</label>
               <Textarea
                 value={form.notes}
                 onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
@@ -231,7 +242,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
           {selectedFiles.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {selectedFiles.map((file) => (
-                <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700">
+                <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-1 text-xs text-neutral-700">
                   {file.name}
                   <button
                     type="button"
@@ -254,29 +265,29 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient }: E
         </form>
 
         {loading ? (
-          <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-500">Loading employee documents...</div>
+          <div className="rounded-xl border border-dashed border-neutral-200 py-8 text-center text-sm text-neutral-500">Loading employee documents...</div>
         ) : documents.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-white py-8 text-center">
-            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-50 text-slate-500">
+          <div className="rounded-xl border border-dashed border-neutral-300 bg-white py-8 text-center">
+            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-50 text-neutral-500">
               <FileText className="h-5 w-5" />
             </div>
-            <p className="mt-3 text-sm font-medium text-slate-900">No employee documents saved yet</p>
-            <p className="mt-1 text-xs text-slate-500">Upload the W-4 or supporting documents once and they stay attached to this record.</p>
+            <p className="mt-3 text-sm font-medium text-neutral-900">No employee documents saved yet</p>
+            <p className="mt-1 text-xs text-neutral-500">Upload the W-4 or supporting documents once and they stay attached to this record.</p>
           </div>
         ) : (
-          <div className="divide-y rounded-xl border border-slate-200 bg-white">
+          <div className="divide-y rounded-xl border border-neutral-200 bg-white">
             {documents.map((document) => (
               <div key={document.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-900">{document.title}</p>
-                  <p className="text-xs text-slate-500">
+                  <p className="truncate text-sm font-medium text-neutral-900">{document.title}</p>
+                  <p className="text-xs text-neutral-500">
                     {categoryLabel(document.category)} · {document.file_name} · {formatFileSize(document.file_size)}
                   </p>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-neutral-500">
                     Uploaded {new Date(document.created_at).toLocaleString()} by {document.uploaded_by_name || '—'}
                     {!document.visible_to_client && !isClient ? ' · Staff only' : ''}
                   </p>
-                  {document.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-slate-600">{document.notes}</p>}
+                  {document.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-neutral-600">{document.notes}</p>}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={() => void handlePreview(document)}>
