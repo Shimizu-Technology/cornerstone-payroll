@@ -154,6 +154,33 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       end
       expect(foreign_company.reload.check_stock_type).to eq("top_check")
     end
+
+    it "requires manager or admin access" do
+      accountant = User.create!(
+        company: company,
+        organization: organization,
+        email: "printer-accountant@example.com",
+        name: "Printer Accountant",
+        role: "accountant",
+        active: true
+      )
+      profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Firmwide Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0.125,
+        check_offset_y: -0.025
+      )
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user).and_return(accountant)
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user_id).and_return(accountant.id)
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(company.reload.check_stock_type).to eq("top_check")
+      expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
   end
 
   describe "POST /api/v1/admin/printer_profiles/clear_active" do

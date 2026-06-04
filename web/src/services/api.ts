@@ -11,6 +11,8 @@ interface RequestOptions extends RequestInit {
 export interface BlobDownload {
   blob: Blob;
   filename?: string;
+  generatedCount?: number;
+  skippedCount?: number;
 }
 
 function parseContentDispositionFilename(header: string | null): string | undefined {
@@ -215,8 +217,15 @@ class ApiClient {
     }
 
     const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
+    const generatedHeader = response.headers.get('X-Pay-Stubs-Generated');
+    const skippedHeader = response.headers.get('X-Pay-Stubs-Skipped');
     const blob = await response.blob();
-    return { blob, filename };
+    return {
+      blob,
+      filename,
+      generatedCount: generatedHeader ? Number(generatedHeader) : undefined,
+      skippedCount: skippedHeader ? Number(skippedHeader) : undefined,
+    };
   }
 
   // GET raw Blob with query params (for authenticated file downloads with year/filters)

@@ -83,10 +83,11 @@ module Api
 
           results = { success: [], errors: [] }
 
-          eligible_items = pay_period.payroll_items
-                                     .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
-                                     .to_a
-                                     .select { |item| pay_stub_printable?(item) }
+          all_items = pay_period.payroll_items
+                                .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
+                                .to_a
+          eligible_items = all_items.select { |item| pay_stub_printable?(item) }
+          skipped_count = all_items.count - eligible_items.count
 
           eligible_items.each do |item|
             begin
@@ -114,8 +115,9 @@ module Api
 
           render json: {
             pay_period_id: pay_period.id,
-            total: eligible_items.count,
+            total: all_items.count,
             generated: results[:success].count,
+            skipped: skipped_count,
             errors: results[:errors].count,
             results: results
           }
@@ -137,6 +139,8 @@ module Api
           requested_ids = Array(params[:payroll_item_ids]).compact_blank.map(&:to_i).uniq
           base_items = pay_period.payroll_items
                                  .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
+
+          skipped_count = 0
 
           if requested_ids.any?
             selected_items = base_items.where(id: requested_ids).to_a
@@ -165,7 +169,9 @@ module Api
 
             items = selected_items
           else
-            items = base_items.not_voided.to_a.select { |item| pay_stub_printable?(item) }
+            all_items = base_items.not_voided.to_a
+            items = all_items.select { |item| pay_stub_printable?(item) }
+            skipped_count = all_items.count - items.count
           end
 
           items = items.sort_by { |item| [ item.employee&.last_name.to_s.downcase, item.employee&.first_name.to_s.downcase, item.id ] }
@@ -175,6 +181,8 @@ module Api
           end
 
           combined_pdf = combine_pdfs(items.map { |item| PayStubGenerator.new(item).generate })
+          response.set_header("X-Pay-Stubs-Generated", items.count.to_s)
+          response.set_header("X-Pay-Stubs-Skipped", skipped_count.to_s)
           pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           filename_prefix = requested_ids.any? ? "selected_paystubs" : "paystubs"
 
