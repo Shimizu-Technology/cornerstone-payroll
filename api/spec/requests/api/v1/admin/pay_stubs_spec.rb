@@ -101,9 +101,11 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
     end
 
-    it "reports skipped payroll items with no pay activity" do
+    it "reports skipped payroll items with no pay activity without counting voided checks" do
       unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
+      voided_employee = create(:employee, company: company, department: department, first_name: "Vera", last_name: "Voided")
       create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
+      create(:payroll_item, :voided, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
 
       post "/api/v1/admin/pay_stubs/batch_generate", params: { pay_period_id: pay_period.id }
 
