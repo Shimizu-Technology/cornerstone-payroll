@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
+import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldAmountType } from '@/types';
@@ -807,6 +808,18 @@ export function EmployeeForm() {
             <RotateCcw className="w-4 h-4 mr-2" />
             {isReactivating ? 'Reactivating...' : 'Reactivate'}
           </Button>
+        </div>
+      )}
+
+      {isEditing && id && (
+        <div className="px-6 pt-6 lg:px-8">
+          <div className="max-w-4xl">
+            <EmployeeDocumentsPanel
+              employeeId={parseInt(id, 10)}
+              employeeName={[form.first_name, form.last_name].filter(Boolean).join(' ')}
+              isClient={isClient}
+            />
+          </div>
         </div>
       )}
 
