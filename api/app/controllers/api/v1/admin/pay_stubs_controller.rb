@@ -84,6 +84,7 @@ module Api
           results = { success: [], errors: [] }
 
           all_items = pay_period.payroll_items
+                                .not_voided
                                 .includes(:payroll_item_earnings, :payroll_item_field_entries, { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company })
                                 .to_a
           eligible_items = all_items.select { |item| pay_stub_printable?(item) }
