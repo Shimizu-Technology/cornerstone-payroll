@@ -32,9 +32,12 @@ import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 import { cn } from '@/lib/utils';
 
+type CommandPaletteMode = 'all' | 'companies';
+
 interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: CommandPaletteMode;
 }
 
 type CommandKind = 'navigation' | 'company';
@@ -71,7 +74,7 @@ function scoreCommand(command: CommandItem, query: string) {
   return terms.every((term) => haystack.includes(term)) ? 25 : 0;
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, mode = 'all' }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, isSuperAdmin, isClient } = useAuth();
@@ -388,15 +391,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     return items;
   }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isSuperAdmin]);
 
+  const visibleCommands = useMemo(
+    () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,
+    [commands, mode]
+  );
+
   const filteredCommands = useMemo(() => {
     const normalizedQuery = normalize(query);
-    return commands
+    return visibleCommands
       .map((command, index) => ({ command, index, score: scoreCommand(command, normalizedQuery) }))
       .filter((row) => row.score > 0)
       .sort((left, right) => right.score - left.score || left.index - right.index)
       .map((row) => row.command)
       .slice(0, 12);
-  }, [commands, query]);
+  }, [query, visibleCommands]);
 
   const safeSelectedIndex = filteredCommands.length === 0
     ? -1
@@ -415,7 +423,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       inputRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(focusTimer);
-  }, [open]);
+  }, [mode, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -449,8 +457,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   if (!open || typeof document === 'undefined') return null;
 
+  const isCompanyMode = mode === 'companies';
+  const emptyTitle = isCompanyMode ? 'No matching clients' : 'No matching commands';
+  const emptyDescription = isCompanyMode
+    ? 'Try searching by client or company name.'
+    : 'Try searching for payroll, reports, employees, or a client name.';
+
   return createPortal(
-    <div className="fixed inset-0 z-[140] overflow-hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div className="fixed inset-0 z-[140] overflow-hidden" role="dialog" aria-modal="true" aria-label={isCompanyMode ? 'Switch client' : 'Command palette'}>
       <button
         type="button"
         aria-label="Close command palette"
@@ -495,11 +509,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     runCommand(filteredCommands[safeSelectedIndex]);
                   }
                 }}
-                placeholder="Search sidebar pages, reports, actions, or clients..."
+                placeholder={isCompanyMode ? 'Search clients...' : 'Search sidebar pages, reports, actions, or clients...'}
                 className="h-10 flex-1 bg-transparent text-base font-medium text-neutral-950 outline-none placeholder:text-neutral-400"
               />
               <div className="hidden items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 sm:flex">
-                {platformShortcut('K')}
+                {platformShortcut(isCompanyMode ? 'Shift K' : 'K')}
               </div>
               <button
                 type="button"
@@ -515,8 +529,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <div className="max-h-[min(68vh,34rem)] overflow-y-auto p-2">
             {filteredCommands.length === 0 ? (
               <div className="px-5 py-12 text-center">
-                <p className="text-sm font-semibold text-neutral-900">No matching commands</p>
-                <p className="mt-1 text-sm text-neutral-500">Try searching for payroll, reports, employees, or a client name.</p>
+                <p className="text-sm font-semibold text-neutral-900">{emptyTitle}</p>
+                <p className="mt-1 text-sm text-neutral-500">{emptyDescription}</p>
               </div>
             ) : (
               <div className="space-y-1">
