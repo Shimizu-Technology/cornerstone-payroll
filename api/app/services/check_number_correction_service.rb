@@ -36,7 +36,7 @@ class CheckNumberCorrectionService
         ip_address: ip_address
       )
 
-      sync_transmittal!
+      sync_transmittal!(old_check_number)
       sync_signoff_sheet!(old_check_number)
     end
 
@@ -74,12 +74,12 @@ class CheckNumberCorrectionService
     company.update!(next_check_number: next_number)
   end
 
-  def sync_transmittal!
+  def sync_transmittal!(old_check_number)
     transmittal = pay_period.transmittal
     return unless transmittal
 
-    numbers = transmittal_check_numbers
-    payroll_numbers = payroll_check_numbers.map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+    payroll_numbers = synced_payroll_check_numbers(transmittal, old_check_number)
+    numbers = sorted_check_numbers(payroll_numbers + non_employee_check_numbers.map(&:to_s))
     transmittal.update!(
       check_number_first: numbers.first,
       check_number_last: numbers.last,
@@ -107,9 +107,18 @@ class CheckNumberCorrectionService
     sheet.update!(entries: entries) if updated
   end
 
-  def transmittal_check_numbers
-    (payroll_check_numbers + non_employee_check_numbers)
-      .sort_by { |number| [number.to_s.to_i, number.to_s] }
+  def synced_payroll_check_numbers(transmittal, old_check_number)
+    if transmittal.payroll_check_numbers.nil?
+      return sorted_check_numbers(payroll_check_numbers.map(&:to_s))
+    end
+
+    Array(transmittal.payroll_check_numbers).map do |number|
+      number.to_s == old_check_number.to_s ? new_check_number : number
+    end
+  end
+
+  def sorted_check_numbers(numbers)
+    numbers.sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
   end
 
   def payroll_check_numbers
