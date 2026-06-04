@@ -36,6 +36,60 @@ RSpec.describe TransmittalLogPdfGenerator do
       memo: "FIT Withholding - PPE 04/14/2026 - Form 500")
   end
 
+  it "uses the transmittal date for Date while preserving pay date for Pay Day" do
+    pdf = described_class.new(pay_period, transmittal_date: Date.new(2026, 4, 20)).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
+
+    expect(text).to include("Date: 04/20/2026")
+    expect(text).to include("Pay Day: 04/16/2026")
+  end
+
+  it "prints non-employee GRT check type in all caps" do
+    pdf = described_class.new(pay_period).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
+
+    expect(text).to include("Check for Treasurer of Guam (GRT)")
+  end
+
+  it "uses editable payroll check numbers when provided" do
+    pdf = described_class.new(pay_period, payroll_check_numbers: %w[3001 3005 3006]).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
+
+    expect(text).to include("Checks #: 3001, 3005-3006")
+    expect(text).not_to include("1007")
+  end
+
+  it "honors an explicitly empty editable payroll check list" do
+    pdf = described_class.new(pay_period, payroll_check_numbers: []).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.gsub(/\s+/, " ")
+
+    expect(text).not_to include("Payroll Checks")
+    expect(text).not_to include("Checks #:")
+  end
+
+  it "prints exact check ranges without implying missing check numbers were issued" do
+    create(:payroll_item, :with_check,
+      company: company,
+      employee: create(:employee, company: company),
+      pay_period: pay_period,
+      check_number: "1010",
+      gross_pay: 100.00)
+    create(:payroll_item, :with_check,
+      company: company,
+      employee: create(:employee, company: company),
+      pay_period: pay_period,
+      check_number: "1011",
+      gross_pay: 100.00)
+
+    pdf = described_class.new(pay_period).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.first.text
+
+    normalized_text = text.gsub(/\s+/, " ")
+
+    expect(normalized_text).to include("Checks #: 1007, 1010-1011")
+    expect(normalized_text).not_to include("1007 through 1011")
+  end
+
   it "keeps a normal pay-period transmittal on one page" do
     pdf = described_class.new(
       pay_period,

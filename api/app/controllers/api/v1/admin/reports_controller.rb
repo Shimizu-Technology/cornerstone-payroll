@@ -708,7 +708,9 @@ module Api
           return unless pp
 
           items = pp.payroll_items.not_voided
-          check_numbers = items.where.not(check_number: nil).pluck(:check_number).sort_by(&:to_i)
+          saved = pp.transmittal
+          live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+          check_numbers = saved&.payroll_check_numbers.nil? ? live_check_numbers : Array(saved&.payroll_check_numbers)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
           total_fit  = items.sum(:withholding_tax)
@@ -718,13 +720,13 @@ module Api
           er_med     = items.sum(:employer_medicare_tax)
           total_fica = emp_ss + er_ss + emp_med + er_med
 
-          saved = pp.transmittal
-
           render json: {
             payroll_checks: {
               count: check_numbers.size,
               first: check_numbers.first,
-              last: check_numbers.last
+              last: check_numbers.last,
+              numbers: check_numbers,
+              ranges: CheckNumberRangeFormatter.format(check_numbers)
             },
             non_employee_checks: ne_checks.map { |c|
               {
@@ -750,8 +752,10 @@ module Api
               preparer_name: saved.preparer_name,
               notes: saved.notes,
               report_list: saved.report_list,
+              transmittal_date: saved.transmittal_date&.iso8601,
               check_number_first: saved.check_number_first,
               check_number_last: saved.check_number_last,
+              payroll_check_numbers: saved.payroll_check_numbers,
               non_employee_check_numbers: saved.non_employee_check_numbers,
               custom_entries: saved.custom_entries || [],
               generated_at: saved.generated_at&.iso8601,
@@ -768,6 +772,9 @@ module Api
           return unless pp
 
           options = transmittal_options
+          return if performed?
+
+          options = resolve_transmittal_defaults(pp, options)
           save_transmittal_state!(pp, options)
           generator = TransmittalLogPdfGenerator.new(pp, options)
           send_data generator.generate,
@@ -785,6 +792,9 @@ module Api
           pdf = CombinePDF.new
           company = pp.company
           t_options = transmittal_options
+          return if performed?
+
+          t_options = resolve_transmittal_defaults(pp, t_options)
           save_transmittal_state!(pp, t_options)
 
           generators = [
@@ -965,6 +975,13 @@ module Api
           opts[:preparer_name] = params[:preparer_name] if params[:preparer_name].present?
           opts[:notes] = Array(params[:notes]) if params[:notes].present?
           opts[:report_list] = Array(params[:report_list]) if params.key?(:report_list)
+          if params[:transmittal_date].present?
+            opts[:transmittal_date] = parse_optional_iso_date(params[:transmittal_date], param_name: "transmittal_date")
+            return opts if performed?
+          end
+          if params.key?(:payroll_check_numbers)
+            opts[:payroll_check_numbers] = Array(params[:payroll_check_numbers]).map(&:to_s).map(&:strip).reject(&:blank?)
+          end
           opts[:check_number_first] = params[:check_number_first] if params[:check_number_first].present?
           opts[:check_number_last] = params[:check_number_last] if params[:check_number_last].present?
           if params[:non_employee_check_numbers].present?
@@ -976,6 +993,22 @@ module Api
           opts
         end
 
+        def resolve_transmittal_defaults(pay_period, options)
+          transmittal = pay_period.transmittal
+          options = options.dup
+          options[:transmittal_date] = if options.key?(:transmittal_date)
+            options[:transmittal_date]
+          else
+            transmittal&.transmittal_date || Date.current
+          end
+          options[:payroll_check_numbers] = if options.key?(:payroll_check_numbers)
+            options[:payroll_check_numbers]
+          else
+            transmittal&.payroll_check_numbers.nil? ? pay_period.payroll_items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] } : Array(transmittal.payroll_check_numbers)
+          end
+          options
+        end
+
         def save_transmittal_state!(pay_period, options)
           transmittal = pay_period.transmittal || pay_period.build_transmittal(
             company_id: pay_period.company_id,
@@ -983,8 +1016,10 @@ module Api
           )
           transmittal.assign_attributes(
             preparer_name: options[:preparer_name],
+            transmittal_date: options.key?(:transmittal_date) ? options[:transmittal_date] : (transmittal.transmittal_date || Date.current),
             notes: options[:notes] || [],
             report_list: options.key?(:report_list) ? options[:report_list] : [],
+            payroll_check_numbers: options.key?(:payroll_check_numbers) ? options[:payroll_check_numbers] : transmittal.payroll_check_numbers,
             check_number_first: options[:check_number_first],
             check_number_last: options[:check_number_last],
             non_employee_check_numbers: options[:non_employee_check_numbers] || {},

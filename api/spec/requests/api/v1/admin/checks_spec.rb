@@ -429,9 +429,40 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:ok)
       expect(pay_period.transmittal.reload.check_number_first).to eq("3001")
       expect(pay_period.transmittal.check_number_last).to eq("3011")
+      expect(pay_period.transmittal.payroll_check_numbers).to eq(%w[3001 3010])
       expect(pay_period.transmittal.non_employee_check_numbers[non_employee_check.id.to_s]).to eq("3011")
       synced_entry = pay_period.check_signoff_sheet.reload.entries.find { |entry| entry["name"] == "Reyes, Alice" }
       expect(synced_entry["check_number"]).to eq("3010")
+    end
+
+    it "surgically updates customized transmittal payroll check lists" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        payroll_check_numbers: %w[custom-a 3000 3999],
+        non_employee_check_numbers: {}
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Corrected after print test" }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq(%w[custom-a 3010 3999])
+    end
+
+    it "preserves explicitly empty transmittal payroll check lists during correction" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        payroll_check_numbers: [],
+        non_employee_check_numbers: {}
+      )
+
+      patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+        params: { check_number: "3010", reason: "Corrected after print test" }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq([])
     end
 
     it "only syncs the matching sign-off row when names repeat" do

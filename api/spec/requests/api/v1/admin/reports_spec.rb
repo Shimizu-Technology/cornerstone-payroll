@@ -35,6 +35,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         pay_period: pay_period,
         employee: employee,
         company: company,
+        check_number: "1007",
         gross_pay: 1200.00,
         net_pay: 968.20,
         withholding_tax: 100.00,
@@ -42,6 +43,27 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         employer_social_security_tax: 74.40,
         medicare_tax: 17.40,
         employer_medicare_tax: 17.40)
+    end
+
+    it "reports non-contiguous check numbers as exact ranges" do
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: create(:employee, company: company),
+        company: company,
+        check_number: "1010",
+        gross_pay: 100.00)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: create(:employee, company: company),
+        company: company,
+        check_number: "1011",
+        gross_pay: 100.00)
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq(%w[1007 1010 1011])
+      expect(payroll_checks["ranges"]).to eq("1007, 1010-1011")
     end
 
     it "reports total DRT deposit as FIT only" do
@@ -52,6 +74,67 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(tax_totals["fit"].to_f).to eq(100.0)
       expect(tax_totals["total_fica"].to_f).to eq(183.6)
       expect(tax_totals["total_drt_deposit"].to_f).to eq(100.0)
+    end
+
+    it "falls back to live payroll checks for saved transmittals without an initialized check list" do
+      Transmittal.create!(pay_period: pay_period, company: company)
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq(%w[1007])
+      expect(payroll_checks["count"]).to eq(1)
+    end
+
+    it "previews an explicitly empty saved payroll check list as empty" do
+      Transmittal.create!(pay_period: pay_period, company: company, payroll_check_numbers: [])
+
+      get "/api/v1/admin/reports/transmittal_preview", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      payroll_checks = response.parsed_body["payroll_checks"]
+      expect(payroll_checks["numbers"]).to eq([])
+      expect(payroll_checks["count"]).to eq(0)
+    end
+
+    it "saves editable payroll check numbers for generated transmittals" do
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_check_numbers: %w[3001 3005 3006]
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq(%w[3001 3005 3006])
+    end
+
+    it "honors an explicitly empty payroll check number list" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        payroll_check_numbers: %w[3001 3005]
+      )
+
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_check_numbers: []
+      }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.payroll_check_numbers).to eq([])
+    end
+
+    it "preserves a saved transmittal date when a later generation omits the date param" do
+      Transmittal.create!(
+        pay_period: pay_period,
+        company: company,
+        transmittal_date: Date.new(2026, 1, 20)
+      )
+
+      post "/api/v1/admin/reports/transmittal_log_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.transmittal.reload.transmittal_date).to eq(Date.new(2026, 1, 20))
     end
   end
 
