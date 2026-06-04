@@ -1744,20 +1744,20 @@ export function PayPeriodDetail() {
           const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + visiblePayrollFields.length + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
           const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
-          <Card>
-            <div className="p-4 border-b">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+          <Card className="overflow-hidden">
+            <div className="border-b p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
                   <h3 className="font-semibold text-gray-900">Employee Payroll</h3>
-                  <p className="text-sm text-gray-500 mt-1">
+                  <p className="mt-1 text-sm text-gray-500">
                     Salary employees listed first, then hourly alphabetically.
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-3">
+                <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:shrink-0 lg:grid-cols-none lg:flex lg:flex-wrap lg:items-center">
                   <Select
                     value={employeeTypeFilter}
                     onChange={(event) => setEmployeeTypeFilter(event.target.value as typeof employeeTypeFilter)}
-                    className="w-36"
+                    className="w-full lg:w-36"
                   >
                     <option value="all">All Types</option>
                     <option value="salary">Salary</option>
@@ -1767,7 +1767,7 @@ export function PayPeriodDetail() {
                   <Select
                     value={departmentFilter}
                     onChange={(event) => setDepartmentFilter(event.target.value)}
-                    className="w-44"
+                    className="w-full lg:w-44"
                   >
                     <option value="all">All Departments</option>
                     {departmentOptions.map(([deptId, deptName]) => (
@@ -1781,7 +1781,7 @@ export function PayPeriodDetail() {
                       setResultsSortBy(sortBy);
                       setResultsSortDirection(direction);
                     }}
-                    className="w-44"
+                    className="w-full lg:w-44"
                   >
                     <option value="name:asc">Name A-Z</option>
                     <option value="name:desc">Name Z-A</option>
@@ -1796,13 +1796,13 @@ export function PayPeriodDetail() {
                     <option value="fit:desc">FIT High-Low</option>
                     <option value="fit:asc">FIT Low-High</option>
                   </Select>
-                  <div className="relative">
+                  <div className="relative sm:col-span-2 lg:col-span-1">
                     <input
                       type="text"
                       placeholder="Search employees and checks..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-56 border border-gray-300 rounded-lg pl-8 pr-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full rounded-lg border border-gray-300 py-2.5 pl-8 pr-3 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 lg:w-56"
                     />
                     <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1811,7 +1811,7 @@ export function PayPeriodDetail() {
                 </div>
               </div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
               <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1640px]">
                 <TableHeader>
                   <TableRow>
