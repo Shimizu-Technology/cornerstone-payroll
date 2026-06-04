@@ -2039,6 +2039,8 @@ export const printerProfilesApi = {
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
     api.post<{ printer_profile: PrinterProfile; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply`),
+  applyToAllCompanies: (id: number) =>
+    api.post<{ printer_profile: PrinterProfile; applied_count: number; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply_to_all_companies`),
   clearActive: () =>
     api.post<{ check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>('/admin/printer_profiles/clear_active'),
 };
