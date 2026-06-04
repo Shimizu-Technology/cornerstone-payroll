@@ -674,7 +674,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
             })}
           </div>
 
-          <div className="hidden max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] sm:block">
+          <div className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
             <table className="min-w-[760px] w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-gray-200 bg-gray-50">

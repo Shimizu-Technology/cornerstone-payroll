@@ -1811,7 +1811,7 @@ export function PayPeriodDetail() {
                 </div>
               </div>
             </div>
-            <div className="max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]">
+            <div className="max-w-full overflow-x-auto overscroll-x-contain">
               <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1640px]">
                 <TableHeader>
                   <TableRow>
