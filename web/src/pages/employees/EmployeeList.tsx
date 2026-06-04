@@ -16,6 +16,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import {
@@ -236,10 +237,10 @@ export function EmployeeList() {
         }
       />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Filters */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1 max-w-md">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row">
+          <div className="relative flex-1 sm:max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               type="text"
@@ -250,11 +251,11 @@ export function EmployeeList() {
             />
           </div>
           
-          <div className="flex gap-3 flex-wrap">
+          <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
             <Select
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
-              className="w-36"
+              className="w-full sm:w-36"
             >
               <option value="active">Active</option>
               <option value="all">All Status</option>
@@ -265,7 +266,7 @@ export function EmployeeList() {
             <Select
               value={employmentType}
               onChange={(e) => updateFilter('employment_type', e.target.value)}
-              className="w-36"
+              className="w-full sm:w-36"
             >
               <option value="">All Types</option>
               <option value="salary">Salary</option>
@@ -276,7 +277,7 @@ export function EmployeeList() {
             <Select
               value={departmentId}
               onChange={(e) => updateFilter('department_id', e.target.value)}
-              className="w-44"
+              className="w-full sm:w-44"
             >
               <option value="">All Departments</option>
               {departments.map((dept) => (
@@ -370,9 +371,20 @@ export function EmployeeList() {
                       </span>
                     </button>
                     {!isCollapsed && (
-                      <Card>
-                        <Table stickyHeader containerClassName="max-h-[32rem]">
-                          <TableHeader>
+                      <>
+                        <div className="space-y-3 sm:hidden">
+                          {groupEmployees.map((employee) => (
+                            <EmployeeMobileCard
+                              key={employee.id}
+                              employee={employee}
+                              departments={departments}
+                              onEdit={() => navigate(`/employees/${employee.id}`)}
+                            />
+                          ))}
+                        </div>
+                        <Card className="hidden sm:block">
+                          <Table stickyHeader containerClassName="max-h-[32rem]">
+                            <TableHeader>
                             <TableRow>
                               <SortableHead
                                 label="Employee"
@@ -420,9 +432,10 @@ export function EmployeeList() {
                                 onEdit={() => navigate(`/employees/${employee.id}`)}
                               />
                             ))}
-                          </TableBody>
-                        </Table>
-                      </Card>
+                            </TableBody>
+                          </Table>
+                        </Card>
+                      </>
                     )}
                   </div>
                 );
@@ -466,6 +479,76 @@ export function EmployeeList() {
         onComplete={() => { setShowBulkImport(false); fetchEmployees(); }}
       />
     </div>
+  );
+}
+
+function EmployeeMobileCard({
+  employee,
+  departments,
+  onEdit,
+}: {
+  employee: Employee;
+  departments: (Department & { employee_count: number })[];
+  onEdit: () => void;
+}) {
+  const statusConfig = employeeStatusConfig[employee.status];
+  const deptName = departments.find(d => d.id === employee.department_id)?.name;
+  const activeWageRates = (employee.wage_rates || []).filter((rate) => rate.active !== false);
+  const supportsHourlyMultiRate =
+    employee.employment_type === 'hourly' ||
+    (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly');
+  const hasMultipleRates = supportsHourlyMultiRate && activeWageRates.length > 1;
+  const payRateLabel = hasMultipleRates
+    ? `${activeWageRates.length} hourly rates`
+    : employee.employment_type === 'salary' && (employee.salary_type === 'variable' || employee.pay_rate === 0)
+      ? 'Variable'
+      : employee.employment_type === 'hourly'
+        ? `${formatCurrency(employee.pay_rate)}/hr`
+        : employee.employment_type === 'contractor'
+          ? employee.contractor_pay_type === 'hourly'
+            ? `${formatCurrency(employee.pay_rate)}/hr`
+            : `${formatCurrency(employee.pay_rate)}/period`
+          : employee.salary_type === 'per_period'
+            ? `${formatCurrency(employee.pay_rate)}/period`
+            : `${formatCurrency(employee.pay_rate)}/yr`;
+
+  return (
+    <MobileRecordCard>
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
+          {getInitials(employee.first_name, employee.last_name)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-semibold text-neutral-950">{employee.first_name} {employee.last_name}</p>
+              {employee.email && <p className="truncate text-sm text-neutral-500">{employee.email}</p>}
+            </div>
+            <Badge
+              variant={employee.status === 'active' ? 'success' : employee.status === 'inactive' ? 'default' : 'danger'}
+            >
+              {statusConfig.label}
+            </Badge>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <MobileField label="Department" value={deptName || '—'} />
+            <MobileField label="Pay" value={payRateLabel} />
+          </div>
+          {hasMultipleRates && (
+            <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+              {activeWageRates.map((rate) => (
+                <p key={`${employee.id}-${rate.label}`} className="text-xs text-neutral-600">
+                  <span className="font-semibold text-neutral-900">{rate.label}</span> {formatCurrency(rate.rate)}/hr
+                </p>
+              ))}
+            </div>
+          )}
+          <MobileCardActions>
+            <Button variant="outline" size="sm" onClick={onEdit}>Edit employee</Button>
+          </MobileCardActions>
+        </div>
+      </div>
+    </MobileRecordCard>
   );
 }
 

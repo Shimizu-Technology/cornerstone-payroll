@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { NumericInput } from '@/components/ui/numeric-input';
 import {
   taxConfigsApi,
@@ -260,10 +261,53 @@ export default function TaxConfigs() {
         }
       />
 
-      <div className="p-6 lg:p-8 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
 
       {/* Tax Years List */}
-      <div className="bg-white shadow rounded-lg overflow-hidden">
+      <div className="space-y-3 sm:hidden">
+        {configs.map((config) => (
+          <MobileRecordCard
+            key={config.id}
+            tone={selectedConfig?.id === config.id ? 'primary' : 'default'}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-lg font-semibold text-neutral-950">{config.tax_year}</p>
+                <p className="text-sm text-neutral-500">Updated {new Date(config.updated_at).toLocaleDateString()}</p>
+              </div>
+              {config.is_active ? (
+                <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Active</span>
+              ) : (
+                <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700">Inactive</span>
+              )}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <MobileField label="SS Wage Base" value={formatCurrency(config.ss_wage_base)} />
+              <MobileField label="Status" value={config.is_active ? 'Active' : 'Inactive'} />
+            </div>
+            <MobileCardActions>
+              <Button size="sm" variant="outline" onClick={() => fetchConfigDetails(config.id)}>
+                View details
+              </Button>
+              {!config.is_active && (
+                <Button size="sm" variant="outline" onClick={() => activateConfig(config.id)} disabled={activatingId === config.id}>
+                  Activate
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => fetchAuditLogs(config.id)}>
+                <History className="mr-1 h-4 w-4" />
+                History
+              </Button>
+              {!config.is_active && (
+                <Button size="sm" variant="ghost" className="text-danger-700" onClick={() => deleteConfig(config.id, config.tax_year)} disabled={deletingId === config.id}>
+                  Delete
+                </Button>
+              )}
+            </MobileCardActions>
+          </MobileRecordCard>
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto rounded-lg bg-white shadow sm:block">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>

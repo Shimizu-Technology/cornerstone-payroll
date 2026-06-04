@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
@@ -127,15 +128,20 @@ export function ClientDocuments() {
   };
 
   const handleDownload = async (document: ClientDocument) => {
-    const file = await clientDocumentsApi.download(document.id);
-    const url = URL.createObjectURL(file.blob);
-    const link = window.document.createElement('a');
-    link.href = url;
-    link.download = file.filename || document.file_name;
-    window.document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
+    try {
+      setError(null);
+      const file = await clientDocumentsApi.download(document.id);
+      const url = URL.createObjectURL(file.blob);
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = file.filename || document.file_name;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to download document');
+    }
   };
 
   const handlePreview = async (document: ClientDocument) => {
@@ -186,7 +192,7 @@ export function ClientDocuments() {
     <div>
       <Header title="Documents" description="Securely upload and manage client documents." />
 
-      <div className="p-6 lg:p-8 space-y-8">
+      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && <Banner tone="error" message={error} />}
         {success && <Banner tone="success" message={success} />}
 
@@ -380,8 +386,45 @@ export function ClientDocuments() {
                 <p className="mt-1 text-sm text-neutral-500">Your uploaded files will appear here after the first successful upload.</p>
               </div>
             ) : (
-              <Table stickyHeader>
-                <TableHeader>
+              <>
+                <div className="space-y-3 sm:hidden">
+                  {documents.map((document) => (
+                    <MobileRecordCard key={document.id}>
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                          <FileText className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold text-neutral-950">{document.title}</p>
+                          <p className="mt-1 truncate text-sm text-neutral-500">{document.file_name} · {formatFileSize(document.file_size)}</p>
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Category" value={categoryLabel(document.category)} />
+                            <MobileField label="Employee" value={document.employee_name || 'General'} />
+                            <MobileField label="Uploaded by" value={document.uploaded_by_name || '—'} />
+                            <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
+                          </div>
+                          <MobileCardActions>
+                            <Button variant="outline" size="sm" onClick={() => void handlePreview(document)}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              Preview
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => void handleDownload(document)}>
+                              <Download className="mr-2 h-4 w-4" />
+                              Download
+                            </Button>
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => void handleDelete(document)}>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </Button>
+                          </MobileCardActions>
+                        </div>
+                      </div>
+                    </MobileRecordCard>
+                  ))}
+                </div>
+                <div className="hidden sm:block">
+                  <Table stickyHeader>
+                    <TableHeader>
                   <TableRow>
                     <TableHead>Title</TableHead>
                     <TableHead>Category</TableHead>
@@ -422,8 +465,10 @@ export function ClientDocuments() {
                       </TableCell>
                     </TableRow>
                   ))}
-                </TableBody>
-              </Table>
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
