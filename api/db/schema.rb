@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -223,10 +223,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.string "name", null: false
     t.string "payee_name"
     t.string "reference_number"
+    t.string "reporting_group"
     t.string "sub_category"
     t.datetime "updated_at", null: false
     t.index ["category"], name: "index_deduction_types_on_category"
     t.index ["company_id", "name"], name: "index_deduction_types_on_company_id_and_name", unique: true
+    t.index ["company_id", "reporting_group"], name: "idx_deduction_types_company_reporting_group"
     t.index ["company_id", "sub_category"], name: "index_deduction_types_on_company_id_and_sub_category"
     t.index ["company_id"], name: "index_deduction_types_on_company_id"
   end
@@ -816,12 +818,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.string "name", null: false
     t.string "payee_name"
     t.string "reference_number"
+    t.string "reporting_group"
     t.boolean "show_in_payroll_grid", default: true, null: false
     t.integer "sort_order", default: 0, null: false
     t.string "tax_treatment", null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "active", "sort_order"], name: "idx_payroll_fields_company_active_order"
     t.index ["company_id", "name"], name: "idx_payroll_fields_company_name", unique: true
+    t.index ["company_id", "reporting_group"], name: "idx_payroll_fields_company_reporting_group"
     t.index ["company_id"], name: "index_payroll_field_definitions_on_company_id"
   end
 
@@ -847,10 +851,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.bigint "deduction_type_id", null: false
     t.string "label", null: false
     t.bigint "payroll_item_id", null: false
+    t.string "reporting_group"
     t.datetime "updated_at", null: false
     t.index ["deduction_type_id"], name: "index_payroll_item_deductions_on_deduction_type_id"
     t.index ["payroll_item_id", "deduction_type_id"], name: "idx_pi_deductions_on_pi_and_dt", unique: true
     t.index ["payroll_item_id"], name: "index_payroll_item_deductions_on_payroll_item_id"
+    t.index ["reporting_group"], name: "idx_payroll_item_deductions_reporting_group"
   end
 
   create_table "payroll_item_earnings", force: :cascade do |t|
@@ -879,6 +885,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.text "notes"
     t.bigint "payroll_field_definition_id"
     t.bigint "payroll_item_id", null: false
+    t.string "reporting_group"
     t.string "source", default: "employee_default", null: false
     t.string "tax_treatment", null: false
     t.datetime "updated_at", null: false
@@ -886,6 +893,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_03_121000) do
     t.index ["payroll_item_id", "payroll_field_definition_id"], name: "idx_payroll_item_field_entries_unique_definition", unique: true
     t.index ["payroll_item_id", "tax_treatment"], name: "idx_payroll_item_field_entries_treatment"
     t.index ["payroll_item_id"], name: "idx_payroll_item_field_entries_item"
+    t.index ["reporting_group"], name: "idx_payroll_item_field_entries_reporting_group"
   end
 
   create_table "payroll_items", force: :cascade do |t|

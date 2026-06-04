@@ -1077,6 +1077,7 @@ module Api
             kind: entry.kind,
             tax_treatment: entry.tax_treatment,
             category: entry.category,
+            reporting_group: entry.reporting_group,
             amount: entry.amount.to_f,
             source: entry.source,
             employee_paid: entry.employee_paid,

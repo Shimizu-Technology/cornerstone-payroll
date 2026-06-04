@@ -90,7 +90,7 @@ class PayrollCalculator
       ytd_ss_tax: ytd_ss_before,
       withholding_gross: withholding_gross
     }
-    if tax_calculator.method(:calculate).parameters.any? { |type, name| [:key, :keyreq].include?(type) && name == :w4_dependent_credit }
+    if tax_calculator.method(:calculate).parameters.any? { |type, name| [ :key, :keyreq ].include?(type) && name == :w4_dependent_credit }
       tax_args[:w4_dependent_credit] = employee.w4_dependent_credit.to_f
     end
 
@@ -187,7 +187,8 @@ class PayrollCalculator
         deduction_type: dt,
         amount: amount,
         category: dt.category,
-        label: dt.name
+        label: dt.name,
+        reporting_group: reporting_group_for_deduction_type(dt)
       )
 
       case dt.sub_category
@@ -200,10 +201,20 @@ class PayrollCalculator
 
     # Record employer retirement match as employer_contribution deductions
     if payroll_item.employer_retirement_match.to_f > 0
-      record_employer_contribution("401(k) Employer Match", payroll_item.employer_retirement_match, sub_category: "retirement")
+      record_employer_contribution(
+        "401(k) Employer Match",
+        payroll_item.employer_retirement_match,
+        sub_category: "retirement",
+        reporting_group: PayrollReportingGroups::GROUP_401K_PRE_TAX
+      )
     end
     if payroll_item.employer_roth_retirement_match.to_f > 0
-      record_employer_contribution("Roth 401(k) Employer Match", payroll_item.employer_roth_retirement_match, sub_category: "retirement")
+      record_employer_contribution(
+        "Roth 401(k) Employer Match",
+        payroll_item.employer_roth_retirement_match,
+        sub_category: "retirement",
+        reporting_group: PayrollReportingGroups::GROUP_401K_AFTER_TAX
+      )
     end
 
     record_payroll_field_employee_deductions
@@ -255,7 +266,7 @@ class PayrollCalculator
     payroll_item.payroll_item_field_entries.each do |entry|
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
-      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category)
+      record_employer_contribution(entry.label, entry.amount, sub_category: entry.category, reporting_group: entry.reporting_group)
     end
   end
 
@@ -265,12 +276,13 @@ class PayrollCalculator
       next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
 
       category = entry.tax_treatment == "pre_tax_deduction" ? "pre_tax" : "post_tax"
-      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category)
+      deduction_type = find_or_create_payroll_field_deduction_type(entry.label, category: category, sub_category: entry.category, reporting_group: entry.reporting_group)
       payroll_item.payroll_item_deductions.build(
         deduction_type: deduction_type,
         amount: entry.amount,
         category: category,
-        label: entry.label
+        label: entry.label,
+        reporting_group: entry.reporting_group
       )
     end
   end
@@ -373,18 +385,24 @@ class PayrollCalculator
     )
   end
 
-  def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other")
+  def find_or_create_payroll_field_deduction_type(label, category:, sub_category: "other", reporting_group: nil)
     company = payroll_item.company || pay_period.company
     sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
+    normalized_group = PayrollReportingGroups.normalize(reporting_group)
     name = payroll_field_deduction_type_name(label, category, company: company)
     existing = company.deduction_types.find_by(name: name, category: category)
-    return existing if existing
+    if existing
+      existing.update!(reporting_group: normalized_group) if normalized_group.present? && existing.reporting_group.blank?
+      return existing
+    end
 
-    company.deduction_types.create!(
+    attrs = {
       name: name,
       category: category,
       sub_category: sub_category
-    )
+    }
+    attrs[:reporting_group] = normalized_group if normalized_group.present?
+    company.deduction_types.create!(**attrs)
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
     existing = company.deduction_types.find_by(name: name, category: category)
     return existing if existing
@@ -403,41 +421,58 @@ class PayrollCalculator
     "Payroll Field #{category_label}: #{label}"
   end
 
-  def record_employer_contribution(label, amount, sub_category: "retirement")
+  def record_employer_contribution(label, amount, sub_category: "retirement", reporting_group: nil)
     return if amount.to_f.zero?
 
     sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
+    normalized_group = PayrollReportingGroups.normalize(reporting_group)
 
     # Employer contributions don't need a DeductionType row — use a virtual record
     payroll_item.payroll_item_deductions.build(
-      deduction_type_id: find_or_create_employer_deduction_type(label, sub_category: sub_category).id,
+      deduction_type_id: find_or_create_employer_deduction_type(label, sub_category: sub_category, reporting_group: normalized_group).id,
       amount: amount,
       category: "employer_contribution",
-      label: label
+      label: label,
+      reporting_group: normalized_group
     )
   end
 
-  def find_or_create_employer_deduction_type(label, sub_category: "retirement")
+  def find_or_create_employer_deduction_type(label, sub_category: "retirement", reporting_group: nil)
     company = payroll_item.company || pay_period.company
     sub_category = DeductionType::SUB_CATEGORIES.include?(sub_category.to_s) ? sub_category.to_s : "other"
+    normalized_group = PayrollReportingGroups.normalize(reporting_group)
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
-    return existing if existing
+    if existing
+      existing.update!(reporting_group: normalized_group) if normalized_group.present? && existing.reporting_group.blank?
+      return existing
+    end
 
     if sub_category == "retirement"
       legacy = company.deduction_types.find_by(name: label, category: "pre_tax", sub_category: "retirement")
-      return ensure_employer_contribution_type!(legacy) if legacy
+      return ensure_employer_contribution_type!(legacy, reporting_group: normalized_group) if legacy
     end
 
-    company.deduction_types.create!(
+    attrs = {
       name: label,
       category: "employer_contribution",
       sub_category: sub_category
-    )
+    }
+    attrs[:reporting_group] = normalized_group if normalized_group.present?
+    company.deduction_types.create!(**attrs)
   rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid => e
     existing = company.deduction_types.find_by(name: label, category: "employer_contribution")
     return existing if existing
 
     raise e
+  end
+
+  def reporting_group_for_deduction_type(deduction_type)
+    PayrollReportingGroups.infer_retirement_group(
+      explicit_group: deduction_type&.reporting_group,
+      label: deduction_type&.name,
+      category: deduction_type&.sub_category,
+      deduction_category: deduction_type&.category
+    )
   end
 
   def skip_employee_deduction?(deduction_type)
@@ -613,15 +648,21 @@ class PayrollCalculator
       end
   end
 
-  def ensure_employer_contribution_type!(deduction_type)
-    return deduction_type if deduction_type.employer_contribution?
+  def ensure_employer_contribution_type!(deduction_type, reporting_group: nil)
+    normalized_group = PayrollReportingGroups.normalize(reporting_group)
+    if deduction_type.employer_contribution?
+      deduction_type.update!(reporting_group: normalized_group) if normalized_group.present? && deduction_type.reporting_group.blank?
+      return deduction_type
+    end
 
     if deduction_type.employee_deductions.exists?
       deduction_type.errors.add(:base, "#{deduction_type.name} is already used by employee deductions and cannot be repurposed as an employer contribution")
       raise ActiveRecord::RecordInvalid.new(deduction_type)
     end
 
-    deduction_type.update!(category: "employer_contribution")
+    attrs = { category: "employer_contribution" }
+    attrs[:reporting_group] = normalized_group if normalized_group.present?
+    deduction_type.update!(attrs)
     deduction_type
   end
 end

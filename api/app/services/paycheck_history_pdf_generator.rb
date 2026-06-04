@@ -3,30 +3,36 @@
 require "prawn"
 require "prawn/table"
 
-# Generates a Paycheck History PDF showing every check issued for a pay period.
+# QuickBooks-style Paycheck History with Cornerstone check/status detail.
 class PaycheckHistoryPdfGenerator
-  include PdfFooter
+  QB_BORDER = "B7BDC7"
+  QB_HEADER_BG = "F2F2F2"
+  QB_TOTAL_BG = "F7F7F7"
+  TEXT = "3B3B3B"
+  MUTED = "666666"
 
-  HEADER_BG   = "2B4090"
-  SECTION_BG  = "F0F4FF"
-  BORDER_GRAY = "CCCCCC"
-  TEXT_DARK   = "1A1A2E"
-  TEXT_MUTED  = "666666"
-
-  attr_reader :pay_period, :company
+  attr_reader :pay_period, :company, :data
 
   def initialize(pay_period)
     @pay_period = pay_period
     @company = pay_period.company
+    @data = QuickbooksPayrollReportData.new(pay_period)
   end
 
   def generate
-    items = pay_period.payroll_items
-      .includes(:employee, :payroll_item_field_entries)
-      .order("employees.last_name ASC, employees.first_name ASC")
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 36, 36, 46, 36 ])
+    render_header(pdf)
 
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [36, 36, 50, 36])
-    render_document(pdf, items.to_a)
+    rows = data.paycheck_history_rows(include_voided: true)
+    if rows.empty?
+      pdf.text "No paychecks found.", style: :italic, color: MUTED
+    else
+      render_history_table(pdf, rows)
+      render_detail_table(pdf, rows)
+    end
+
+    render_footer(pdf)
+    pdf.render
   end
 
   def filename
@@ -35,123 +41,85 @@ class PaycheckHistoryPdfGenerator
 
   private
 
-  def render_document(pdf, items)
-    render_header(pdf)
-
-    if items.empty?
-      pdf.text "No paychecks found.", style: :italic, color: TEXT_MUTED
-      return
-    end
-
-    render_summary(pdf, items)
-    render_checks_table(pdf, items)
-    render_payroll_fields_summary(pdf, items)
-
-    render_with_footer(pdf,
-      "#{company.name} \u2014 Paycheck History \u2014 #{pay_period.start_date} to #{pay_period.end_date} \u2014 CONFIDENTIAL"
-    )
-  end
-
   def render_header(pdf)
-    pdf.font_size(16) { pdf.text company.name, style: :bold, color: HEADER_BG }
-    pdf.font_size(11) { pdf.text "Paycheck History", color: TEXT_DARK }
-    pdf.font_size(9) do
-      pdf.text "Pay Period: #{pay_period.start_date.strftime('%b %d, %Y')} – #{pay_period.end_date.strftime('%b %d, %Y')}  |  Pay Date: #{pay_period.pay_date.strftime('%b %d, %Y')}", color: TEXT_MUTED
-    end
+    pdf.fill_color TEXT
+    pdf.font_size(13) { pdf.text company.name, align: :center }
     pdf.move_down 12
+    pdf.font_size(20) { pdf.text "Paycheck history report", align: :center }
+    pdf.move_down 12
+    pdf.font_size(14) { pdf.text "Paychecks #{data.qb_date_range_label.sub(/\AFrom/, 'from')}", align: :center }
+    pdf.move_down 24
   end
 
-  def render_summary(pdf, items)
-    active = items.reject(&:voided?)
-    voided = items.select(&:voided?)
-
-    pdf.font_size(10) do
-      pdf.text "Total Checks: #{active.size}  |  Voided: #{voided.size}  |  Total Net Pay: #{fmt(active.sum { |i| i.net_pay.to_f })}", style: :bold
+  def render_history_table(pdf, rows)
+    table_rows = [ [ "Pay date", "Name", "Total pay", "Net pay", "Pay method", "Check #", "Status" ] ]
+    rows.each do |row|
+      table_rows << [ date(row[:pay_date]), row[:employee_name], money(row[:total_pay]), money(row[:net_pay]), row[:pay_method], row[:check_number].presence || "—", row[:status].to_s.titleize ]
     end
+    table_rows << [ "Total", "#{rows.count} paychecks", money(rows.sum { |row| row[:total_pay].to_f }), money(rows.sum { |row| row[:net_pay].to_f }), "", "", "" ]
+
+    pdf.table(table_rows, header: true, width: 700, column_widths: [ 80, 190, 95, 95, 90, 75, 75 ], cell_style: { overflow: :shrink_to_fit, min_font_size: 7 }) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.6
+      cells.padding = [ 7, 7 ]
+      cells.size = 10
+      cells.text_color = TEXT
+      row(0).background_color = QB_HEADER_BG
+      row(0).font_style = :normal
+      row(-1).background_color = QB_TOTAL_BG
+      columns(2..3).align = :right
+    end
+    pdf.move_down 20
+  end
+
+  def render_detail_table(pdf, rows)
+    start_new_page_if_needed(pdf, 150)
+    pdf.font_size(12) { pdf.text "Payroll detail", style: :bold, color: TEXT }
     pdf.move_down 8
-  end
 
-  def render_checks_table(pdf, items)
-    header = [
-      "Check #", "Employee", "Type", "Gross Pay", "FIT", "SS", "Medicare",
-      "Retirement", "Other Ded.", "Total Ded.", "Net Pay", "Status"
-    ].map do |label|
-      { content: label, background_color: HEADER_BG, text_color: "FFFFFF",
-        font_style: :bold, align: label == "Employee" || label == "Type" || label == "Status" ? :left : :right }
+    table_rows = [ [ "Employee", "Gross pay", "Taxes", "Deductions", "Net pay", "Employer cost" ] ]
+    rows.each do |row|
+      table_rows << [ row[:employee_name], money(row[:gross_pay]), money(row[:taxes]), money(row[:deductions]), money(row[:net_pay]), money(row[:employer_cost]) ]
     end
-
-    rows = items.map do |item|
-      status = item.check_status || "—"
-      other_ded = item.total_deductions.to_f - item.withholding_tax.to_f -
-                  item.social_security_tax.to_f - item.medicare_tax.to_f -
-                  item.retirement_payment.to_f - item.roth_retirement_payment.to_f
-      [
-        { content: item.check_number || "—" },
-        { content: item.employee_full_name },
-        { content: item.employment_type.capitalize },
-        { content: fmt(item.gross_pay), align: :right },
-        { content: fmt(item.withholding_tax), align: :right },
-        { content: fmt(item.social_security_tax), align: :right },
-        { content: fmt(item.medicare_tax), align: :right },
-        { content: fmt(item.retirement_payment.to_f + item.roth_retirement_payment.to_f), align: :right },
-        { content: fmt([other_ded, 0].max), align: :right },
-        { content: fmt(item.total_deductions), align: :right },
-        { content: fmt(item.net_pay), align: :right },
-        { content: status.capitalize, font_style: item.voided? ? :bold_italic : :normal,
-          text_color: item.voided? ? "CC0000" : TEXT_DARK }
-      ]
-    end
-
-    # Totals
-    active = items.reject(&:voided?)
-    totals = [
-      { content: "TOTALS", font_style: :bold, background_color: SECTION_BG },
-      { content: "#{active.size} checks", background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.gross_pay.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.withholding_tax.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.social_security_tax.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.medicare_tax.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.retirement_payment.to_f + i.roth_retirement_payment.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.total_deductions.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(active.sum { |i| i.net_pay.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: "", background_color: SECTION_BG }
+    table_rows << [
+      "Total",
+      money(rows.sum { |row| row[:gross_pay].to_f }),
+      money(rows.sum { |row| row[:taxes].to_f }),
+      money(rows.sum { |row| row[:deductions].to_f }),
+      money(rows.sum { |row| row[:net_pay].to_f }),
+      money(rows.sum { |row| row[:employer_cost].to_f })
     ]
 
-    pdf.table([header] + rows + [totals],
-      width: pdf.bounds.width,
-      cell_style: { size: 7, padding: [3, 4], border_color: BORDER_GRAY, overflow: :shrink_to_fit }
-    )
-  end
-
-  def render_payroll_fields_summary(pdf, items)
-    entries = items.reject(&:voided?).flat_map { |item| item.payroll_item_field_entries.select(&:active?) }
-    return if entries.empty?
-
-    pdf.start_new_page if pdf.cursor < 120
-    pdf.move_down 12
-    pdf.font_size(11) { pdf.text "Payroll Fields", style: :bold, color: HEADER_BG }
-    pdf.move_down 4
-
-    rows = [[ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ]] +
-      entries.group_by { |entry| [ entry.tax_treatment, entry.label, entry.employee_paid, entry.employer_paid ] }
-        .sort_by { |key, _| key.map(&:to_s) }
-        .map do |(treatment, label, employee_paid, employer_paid), grouped|
-          [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry.amount.to_f }) ]
-        end
-
-    pdf.table(rows, header: true, width: pdf.bounds.width) do
-      row(0).font_style = :bold
-      row(0).background_color = HEADER_BG
-      row(0).text_color = "FFFFFF"
+    pdf.table(table_rows, header: true, width: pdf.bounds.width) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.5
+      cells.padding = [ 4, 5 ]
       cells.size = 8
-      cells.padding = [ 3, 5 ]
-      columns(2..4).align = :right
+      row(0).background_color = QB_HEADER_BG
+      row(-1).background_color = QB_TOTAL_BG
+      columns(1..5).align = :right
     end
   end
 
-  def fmt(value)
+  def start_new_page_if_needed(pdf, height)
+    pdf.start_new_page if pdf.cursor < height
+  end
+
+  def date(value)
+    value&.strftime("%m/%d/%Y") || "—"
+  end
+
+  def money(value)
     "$#{format('%.2f', value.to_f)}"
+  end
+
+  def render_footer(pdf)
+    pdf.repeat(:all) do
+      pdf.canvas do
+        pdf.fill_color MUTED
+        pdf.font_size(8) { pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ] }
+      end
+    end
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
   end
 end
