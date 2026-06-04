@@ -129,13 +129,13 @@ class QuickbooksPayrollReportData
 
   def pre_tax_retirement_deduction_lines_for(item)
     deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.employee_amount.to_f.positive? && (entry.bucket == "pre_tax" || entry.reporting_group.present?) }
+      .select { |entry| entry.employee_amount.to_f.positive? && entry.bucket == "pre_tax" }
       .map { |entry| Line.new(label: entry.description, amount: entry.employee_amount.to_f) }
   end
 
   def after_tax_deduction_lines_for(item)
     deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.employee_amount.to_f.positive? && entry.bucket == "post_tax" && entry.reporting_group.blank? }
+      .select { |entry| entry.employee_amount.to_f.positive? && entry.bucket == "post_tax" }
       .map { |entry| Line.new(label: entry.description, amount: entry.employee_amount.to_f) }
   end
 
