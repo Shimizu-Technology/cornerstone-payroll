@@ -726,6 +726,16 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body.dig("check_settings", "active_printer_profile_id")).to eq(profile.id)
     end
 
+    it "returns validation errors instead of 500s for malformed offset values" do
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_offset_x: "not-a-number"
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join).to include("check_offset_x must be a number")
+    end
+
     it "allows accountants to update check settings for their assigned companies" do
       accountant_user = User.create!(
         company: company,

@@ -38,6 +38,16 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  it "does not label missing check numbers as direct deposit" do
+    payroll_item.update!(check_number: nil)
+
+    pdf = described_class.new(payroll_item).generate
+    text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+
+    expect(text).to include("Check #: No check issued")
+    expect(text).not_to include("Direct Deposit")
+  end
+
   it "prints supplemental earnings even when stored earning rows are partial" do
     payroll_item.payroll_item_earnings.create!(
       category: "regular",

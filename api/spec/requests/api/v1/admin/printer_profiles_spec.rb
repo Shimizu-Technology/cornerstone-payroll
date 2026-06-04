@@ -128,6 +128,61 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/printer_profiles/:id/apply_to_all_companies" do
+    it "applies an organization printer profile to every company in the organization" do
+      foreign_company = create(:company, organization: foreign_organization, check_stock_type: "top_check")
+      profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Firmwide Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0.125,
+        check_offset_y: -0.025,
+        check_layout_config: { "check_face" => { "memo" => { "x" => 50 } } }
+      )
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("applied_count")).to eq(2)
+      [ company, other_company ].each do |client|
+        client.reload
+        expect(client.check_stock_type).to eq("bottom_check")
+        expect(client.check_offset_x.to_d).to eq(0.125.to_d)
+        expect(client.check_offset_y.to_d).to eq(-0.025.to_d)
+        expect(client.check_layout_config).to eq("check_face" => { "memo" => { "x" => 50 } })
+        expect(client.active_printer_profile_id).to eq(profile.id)
+      end
+      expect(foreign_company.reload.check_stock_type).to eq("top_check")
+    end
+
+    it "requires manager or admin access" do
+      accountant = User.create!(
+        company: company,
+        organization: organization,
+        email: "printer-accountant@example.com",
+        name: "Printer Accountant",
+        role: "accountant",
+        active: true
+      )
+      profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Firmwide Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0.125,
+        check_offset_y: -0.025
+      )
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user).and_return(accountant)
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user_id).and_return(accountant.id)
+
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(company.reload.check_stock_type).to eq("top_check")
+      expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
+  end
+
   describe "POST /api/v1/admin/printer_profiles/clear_active" do
     it "clears the active printer profile without changing the current calibration" do
       profile = PrinterProfile.create!(

@@ -96,6 +96,27 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_stubs/batch_generate" do
+    before do
+      allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
+    end
+
+    it "reports skipped payroll items with no pay activity without counting voided checks" do
+      unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
+      voided_employee = create(:employee, company: company, department: department, first_name: "Vera", last_name: "Voided")
+      create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
+      create(:payroll_item, :voided, pay_period: pay_period, employee: voided_employee, gross_pay: 1200, net_pay: 960)
+
+      post "/api/v1/admin/pay_stubs/batch_generate", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("total")).to eq(3)
+      expect(response.parsed_body.fetch("generated")).to eq(2)
+      expect(response.parsed_body.fetch("skipped")).to eq(1)
+      expect(response.parsed_body.fetch("errors")).to eq(0)
+    end
+  end
+
   describe "POST /api/v1/admin/pay_stubs/batch_pdf" do
     before do
       allow_any_instance_of(Api::V1::Admin::PayStubsController).to receive(:r2_configured?).and_return(false)
@@ -108,6 +129,18 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response.headers["Content-Type"]).to include("application/pdf")
       expect(response.headers["Content-Disposition"]).to include("paystubs_2026-04-15.pdf")
       expect(response.body).to start_with("%PDF")
+      expect(CombinePDF.parse(response.body).pages.count).to eq(2)
+    end
+
+    it "skips payroll items with no pay activity when printing all pay stubs" do
+      unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
+      create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["X-Pay-Stubs-Generated"]).to eq("2")
+      expect(response.headers["X-Pay-Stubs-Skipped"]).to eq("1")
       expect(CombinePDF.parse(response.body).pages.count).to eq(2)
     end
 
@@ -133,6 +166,20 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
 
       expect(response).to have_http_status(:not_found)
       expect(response.parsed_body.fetch("error")).to eq("One or more selected pay stubs were not found")
+    end
+
+    it "reports selected unpaid payroll items clearly" do
+      unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
+      unpaid_item = create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: {
+        pay_period_id: pay_period.id,
+        payroll_item_ids: [ unpaid_item.id ]
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to eq("Selected employees were not paid in this pay period")
+      expect(response.parsed_body.fetch("details")).to include(unpaid_employee.full_name)
     end
 
     it "reports selected voided payroll items clearly" do

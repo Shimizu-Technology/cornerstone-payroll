@@ -14,6 +14,16 @@ function isApplePlatform() {
 }
 
 export function platformShortcut(key: string) {
-  const normalizedKey = key.trim().toUpperCase();
-  return isApplePlatform() ? `⌘${normalizedKey}` : `Ctrl ${normalizedKey}`;
+  const parts = key
+    .trim()
+    .toUpperCase()
+    .replace(/[+]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const hasShift = parts.includes('SHIFT') || parts.includes('⇧');
+  const normalizedKey = parts.filter((part) => part !== 'SHIFT' && part !== '⇧').join(' ');
+
+  return isApplePlatform()
+    ? `${hasShift ? '⇧' : ''}⌘${normalizedKey}`
+    : `Ctrl ${hasShift ? 'Shift ' : ''}${normalizedKey}`;
 }

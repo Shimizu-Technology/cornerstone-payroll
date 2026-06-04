@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldAmountType } from '@/types';
@@ -200,6 +202,7 @@ export function EmployeeForm() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
+  const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -760,6 +763,8 @@ export function EmployeeForm() {
   const getFieldError = (field: string): string | undefined => {
     return errors[field]?.[0];
   };
+
+  const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
 
   if (isLoading) {
     return (
@@ -1750,6 +1755,54 @@ export function EmployeeForm() {
           </div>
         </div>
       </form>
+
+      {isEditing && id && (
+        <div className="px-6 pb-8 lg:px-8">
+          <Card className="max-w-4xl border-neutral-200/80 bg-white/95">
+            <CardHeader>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700 ring-1 ring-primary-100">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle>Employee Documents</CardTitle>
+                    <CardDescription>
+                      W-4s, W-9s, direct deposit forms, IDs, and supporting files for {employeeDisplayName}.
+                    </CardDescription>
+                  </div>
+                </div>
+                <Button type="button" variant="outline" onClick={() => setEmployeeDocumentsOpen(true)}>
+                  Manage documents
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm leading-6 text-neutral-600">
+                Documents are tucked away here so the employee profile stays focused on payroll setup. Open the manager when you need to upload, preview, download, or remove employee files.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {isEditing && id && (
+        <Dialog open={employeeDocumentsOpen} onOpenChange={setEmployeeDocumentsOpen}>
+          <DialogContent className="dialog-wide dialog-top mx-auto max-h-[calc(100vh-4rem)] max-w-5xl overflow-y-auto p-0">
+            <EmployeeDocumentsPanel
+              employeeId={parseInt(id, 10)}
+              employeeName={employeeDisplayName}
+              isClient={isClient}
+              className="mb-0 border-0 shadow-none ring-0"
+              headerAction={
+                <Button type="button" variant="outline" size="sm" onClick={() => setEmployeeDocumentsOpen(false)}>
+                  Close
+                </Button>
+              }
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

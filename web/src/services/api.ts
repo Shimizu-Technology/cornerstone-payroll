@@ -11,6 +11,8 @@ interface RequestOptions extends RequestInit {
 export interface BlobDownload {
   blob: Blob;
   filename?: string;
+  generatedCount?: number;
+  skippedCount?: number;
 }
 
 function parseContentDispositionFilename(header: string | null): string | undefined {
@@ -215,8 +217,15 @@ class ApiClient {
     }
 
     const filename = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
+    const generatedHeader = response.headers.get('X-Pay-Stubs-Generated');
+    const skippedHeader = response.headers.get('X-Pay-Stubs-Skipped');
     const blob = await response.blob();
-    return { blob, filename };
+    return {
+      blob,
+      filename,
+      generatedCount: generatedHeader ? Number(generatedHeader) : undefined,
+      skippedCount: skippedHeader ? Number(skippedHeader) : undefined,
+    };
   }
 
   // GET raw Blob with query params (for authenticated file downloads with year/filters)
@@ -2039,6 +2048,8 @@ export const printerProfilesApi = {
     api.delete<void>(`/admin/printer_profiles/${id}`),
   apply: (id: number) =>
     api.post<{ printer_profile: PrinterProfile; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply`),
+  applyToAllCompanies: (id: number) =>
+    api.post<{ printer_profile: PrinterProfile; applied_count: number; check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>(`/admin/printer_profiles/${id}/apply_to_all_companies`),
   clearActive: () =>
     api.post<{ check_settings: Pick<CheckSettings, 'check_stock_type' | 'check_offset_x' | 'check_offset_y' | 'check_layout_config' | 'active_printer_profile_id' | 'active_printer_profile_name'> }>('/admin/printer_profiles/clear_active'),
 };

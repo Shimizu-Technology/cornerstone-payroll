@@ -248,6 +248,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const selectedStubRequestIds = () =>
     selectedStubIds.length > 0 ? selectedStubIds : undefined;
 
+  const notifySkippedPayStubs = (skippedCount?: number) => {
+    if (!skippedCount || selectedStubIds.length > 0) return;
+    alert(`${skippedCount} employee${skippedCount === 1 ? '' : 's'} with no pay activity were skipped.`);
+  };
+
   const handleDownloadPayStubs = async () => {
     setBatchLoading(true);
     setBatchAction(selectedStubIds.length > 0 ? 'Generating selected pay stubs...' : 'Generating pay stubs...');
@@ -259,6 +264,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       a.href = url;
       a.download = result.filename || `paystubs_${payPeriod.pay_date ?? 'undated'}.pdf`;
       a.click();
+      notifySkippedPayStubs(result.skippedCount);
       setTimeout(() => URL.revokeObjectURL(url), 100);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to download pay stubs');
@@ -277,6 +283,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       const url = URL.createObjectURL(result.blob);
       const printWindow = window.open(url);
       if (printWindow) {
+        notifySkippedPayStubs(result.skippedCount);
         printWindow.addEventListener('load', () => {
           printWindow.print();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
