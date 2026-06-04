@@ -595,7 +595,7 @@ export function ChecksPayments() {
                 Open Check Settings
               </Link>
             </div>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:flex">
               <Button onClick={handleCreate} disabled={creating}>{creating ? 'Creating...' : 'Create Check'}</Button>
               <Button variant="outline" onClick={() => setShowForm(false)} disabled={creating}>Cancel</Button>
             </div>
@@ -613,7 +613,7 @@ export function ChecksPayments() {
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>*]:w-full sm:[&>*]:w-auto">
               <select className="rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
                 <option value="all">All types</option>
                 {STANDALONE_TYPES.map(type => <option key={type} value={type}>{CHECK_TYPE_LABELS[type]}</option>)}
@@ -696,7 +696,7 @@ export function ChecksPayments() {
                         </div>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:justify-end [&>button]:w-full sm:[&>button]:w-auto">
                       <Button size="sm" variant="outline" onClick={() => handlePreview(check)} disabled={busyId === check.id}>
                         <FileText className="mr-1.5 h-3.5 w-3.5" /> Preview
                       </Button>
@@ -717,7 +717,7 @@ export function ChecksPayments() {
                       )}
                       {voidingId === check.id && (
                         <>
-                          <Input className="h-9 w-44" placeholder="Void reason" value={voidReason} onChange={e => setVoidReason(e.target.value)} />
+                          <Input className="col-span-2 h-10 w-full sm:w-44" placeholder="Void reason" value={voidReason} onChange={e => setVoidReason(e.target.value)} />
                           <Button size="sm" variant="destructive" onClick={() => handleVoid(check)} disabled={busyId === check.id}>Confirm</Button>
                         </>
                       )}

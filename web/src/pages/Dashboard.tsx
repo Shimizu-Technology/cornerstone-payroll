@@ -83,7 +83,7 @@ export function Dashboard() {
         actions={<Button onClick={() => navigate('/pay-periods')}>Manage Pay Periods</Button>}
       />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {error && (
           <div className="mb-6 rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
             {error}
@@ -94,18 +94,18 @@ export function Dashboard() {
           <CardContent className="relative p-0">
             <div className="absolute right-0 top-0 h-52 w-52 translate-x-1/3 -translate-y-1/3 rounded-full bg-primary-200/50 blur-3xl" />
             <div className="absolute bottom-0 right-24 h-40 w-40 translate-y-1/2 rounded-full bg-accent-200/45 blur-3xl" />
-            <div className="relative grid gap-8 p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-8">
+            <div className="relative grid gap-6 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8 lg:p-8">
               <div>
                 <p className="inline-flex rounded-full border border-primary-200 bg-white/70 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-primary-800">
                   Payroll command center
                 </p>
-                <h2 className="mt-4 max-w-3xl font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance lg:text-4xl">
+                <h2 className="mt-4 max-w-3xl font-display text-2xl font-extrabold tracking-tight text-neutral-950 text-balance sm:text-3xl lg:text-4xl">
                   Run the pay cycle with fewer handoffs and a clearer audit trail.
                 </h2>
                 <p className="mt-3 max-w-2xl text-base leading-7 text-neutral-600">
                   Start with the current period, then move through checks, reports, and Guam compliance from one operational workspace.
                 </p>
-                <div className="mt-6 flex flex-wrap items-center gap-3">
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
                   <Button onClick={() => navigate(currentPayPeriod ? `/pay-periods/${currentPayPeriod.id}` : '/pay-periods')}>
                     {currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
                     <ArrowRight className="ml-2 h-4 w-4" />
@@ -229,7 +229,7 @@ export function Dashboard() {
                       <p className="font-display text-2xl font-extrabold text-success-700">{formatCurrency(currentPayPeriod.total_net)}</p>
                     </div>
                   </div>
-                  <div className="mt-5 flex flex-wrap gap-2">
+                  <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
                     <Button size="sm" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Open period</Button>
                     {currentPayPeriod.status === 'draft' && (
                       <Button size="sm" variant="secondary" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Process payroll</Button>
@@ -260,7 +260,7 @@ export function Dashboard() {
                 {stats.recent_payrolls.map((payroll) => (
                   <div
                     key={payroll.id}
-                    className="-mx-2 flex cursor-pointer items-center justify-between rounded-xl border border-transparent px-3 py-3 transition-all hover:border-primary-200 hover:bg-primary-50/60"
+                    className="-mx-2 flex cursor-pointer flex-col gap-2 rounded-xl border border-transparent px-3 py-3 transition-all hover:border-primary-200 hover:bg-primary-50/60 sm:flex-row sm:items-center sm:justify-between"
                     onClick={() => navigate(`/pay-periods/${payroll.id}`)}
                   >
                     <div>

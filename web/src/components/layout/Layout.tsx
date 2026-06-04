@@ -140,7 +140,10 @@ export function Layout() {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
+          <div className="min-w-0 text-center">
+            <p className="text-sm font-semibold tracking-tight text-neutral-900">Cornerstone Payroll</p>
+            <p className="truncate text-xs font-medium text-primary-700">{activeCompany?.name || 'Payroll workspace'}</p>
+          </div>
           <div className="h-9 w-9" />
         </div>
 

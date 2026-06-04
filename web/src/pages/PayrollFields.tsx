@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { payrollFieldsApi } from '@/services/api';
@@ -209,8 +210,32 @@ export function PayrollFields() {
             ) : fields.length === 0 ? (
               <div className="py-8 text-center text-sm text-gray-500">No payroll fields yet.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-[58rem] w-full text-sm">
+              <>
+                <div className="space-y-3 py-4 sm:hidden">
+                  {fields.map((field) => (
+                    <MobileRecordCard key={field.id}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-neutral-950">{field.name}</p>
+                          <p className="mt-1 text-sm capitalize text-neutral-500">{field.kind.replace(/_/g, ' ')}</p>
+                        </div>
+                        <span className={field.active ? 'text-sm font-medium text-green-700' : 'text-sm text-neutral-500'}>{field.active ? 'Active' : 'Archived'}</span>
+                      </div>
+                      <div className="mt-4 grid grid-cols-2 gap-3">
+                        <MobileField label="Treatment" value={<span className="capitalize">{field.tax_treatment.replace(/_/g, ' ')}</span>} />
+                        <MobileField label="Category" value={<span className="capitalize">{field.category.replace(/_/g, ' ')}</span>} />
+                        <MobileField label="Default" value={field.amount_type === 'percentage' ? `${field.default_percentage || 0}%` : field.amount_type === 'fixed' ? `$${Number(field.default_amount || 0).toFixed(2)}` : 'Manual'} />
+                        <MobileField label="Payroll review" value={field.show_in_payroll_grid === false ? 'Hidden' : 'Shown'} />
+                      </div>
+                      <MobileCardActions>
+                        <Button variant="outline" size="sm" onClick={() => editField(field)}>Edit</Button>
+                        {field.active && <Button variant="ghost" size="sm" onClick={() => archiveField(field)}>Archive</Button>}
+                      </MobileCardActions>
+                    </MobileRecordCard>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto sm:block">
+                  <table className="min-w-[58rem] w-full text-sm">
                   <thead className="border-b bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                     <tr>
                       <th className="px-4 py-3 text-left">Name</th>
@@ -240,8 +265,9 @@ export function PayrollFields() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

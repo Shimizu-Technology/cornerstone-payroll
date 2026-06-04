@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import {
@@ -364,7 +365,7 @@ export function Users() {
         }
       />
 
-      <div className="p-6 lg:p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         {/* Role Descriptions */}
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <h4 className="text-sm font-semibold text-blue-900 mb-2">Role Permissions</h4>
@@ -453,9 +454,86 @@ export function Users() {
             </div>
           </div>
         ) : (
-          <Card>
-            <Table>
-              <TableHeader>
+          <>
+            <div className="space-y-3 sm:hidden">
+              {users.map((user) => (
+                <MobileRecordCard key={user.id}>
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+                      <UserCircle className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {editingId === user.id ? (
+                        <div className="space-y-3">
+                          <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <Select value={editRole} onChange={(e) => setEditRole(e.target.value as UserRole)}>
+                            {roleOptions.map((role) => (
+                              <option key={role.value} value={role.value}>{role.label}</option>
+                            ))}
+                          </Select>
+                          {needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds) : (
+                            <p className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-500">
+                              This role does not use payroll client assignments. Saving will clear any existing client assignments.
+                            </p>
+                          )}
+                          {editError && <p className="text-sm text-danger-600">{editError}</p>}
+                          <MobileCardActions className="mt-0 grid grid-cols-2">
+                            <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                              <Check className="mr-1 h-4 w-4" />
+                              {isSavingEdit ? 'Saving...' : 'Save'}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={handleCancelEdit} disabled={isSavingEdit}>Cancel</Button>
+                          </MobileCardActions>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate font-semibold text-neutral-950">{user.name}</p>
+                              <p className="truncate text-sm text-neutral-500">{user.email}</p>
+                            </div>
+                            {user.active === false ? <span className="text-sm text-neutral-500">Inactive</span> : <span className="text-sm font-medium text-green-600">Active</span>}
+                          </div>
+                          {user.invitation_pending && (
+                            <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-700">
+                              <Mail className="h-3 w-3" />
+                              Pending invite
+                            </span>
+                          )}
+                          <div className="mt-4 grid grid-cols-2 gap-3">
+                            <MobileField label="Role" value={roleOptions.find((role) => role.value === user.role)?.label || user.role} />
+                            <MobileField label="Last login" value={user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : '—'} />
+                          </div>
+                          <div className="mt-3">{renderAssignedCompanies(user)}</div>
+                          <MobileCardActions>
+                            <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
+                            {user.invitation_pending && (
+                              <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
+                                <RefreshCw className={`mr-1 h-4 w-4 ${resendingId === user.id ? 'animate-spin' : ''}`} />
+                                Resend
+                              </Button>
+                            )}
+                            {user.id !== currentUser?.id && (
+                              <>
+                                <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
+                                  {user.active === false ? 'Activate' : 'Deactivate'}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="text-danger-700" onClick={() => handleDeleteUser(user)} disabled={deletingId === user.id || togglingId === user.id}>
+                                  Delete
+                                </Button>
+                              </>
+                            )}
+                          </MobileCardActions>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </MobileRecordCard>
+              ))}
+            </div>
+            <Card className="hidden sm:block">
+              <Table>
+                <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
@@ -594,8 +672,9 @@ export function Users() {
                   </Fragment>
                 ))}
               </TableBody>
-            </Table>
-          </Card>
+              </Table>
+            </Card>
+          </>
         )}
       </div>
     </div>
