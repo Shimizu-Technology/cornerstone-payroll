@@ -565,7 +565,7 @@ export function PayrollItemEditModal({
                         <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-blue-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
                           <div>
                             <p className="text-sm font-medium text-gray-900">{entry.label}</p>
-                            <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}</p>
+                            <p className="text-xs capitalize text-gray-500">{entry.kind.replace(/_/g, ' ')} · {entry.tax_treatment.replace(/_/g, ' ')} · {entry.category.replace(/_/g, ' ')}{entry.reporting_group ? ` · ${entry.reporting_group.replace(/_/g, ' ')}` : ''}</p>
                           </div>
                           <NumericInput
                             value={Number(entry.amount) || 0}
@@ -587,7 +587,7 @@ export function PayrollItemEditModal({
                         <div key={`${entry.payroll_field_definition_id || entry.label}-${idx}`} className="grid grid-cols-1 gap-2 rounded-lg border border-violet-100 bg-white p-3 md:grid-cols-[minmax(0,1fr)_9rem] md:items-center">
                           <div>
                             <p className="text-sm font-medium text-gray-900">{entry.label}</p>
-                            <p className="text-xs capitalize text-gray-500">Employer-paid · {entry.category.replace(/_/g, ' ')}</p>
+                            <p className="text-xs capitalize text-gray-500">Employer-paid · {entry.category.replace(/_/g, ' ')}{entry.reporting_group ? ` · ${entry.reporting_group.replace(/_/g, ' ')}` : ''}</p>
                           </div>
                           <NumericInput
                             value={Number(entry.amount) || 0}

@@ -141,6 +141,7 @@ module Api
               kind: field.kind,
               tax_treatment: field.tax_treatment,
               category: field.category,
+              reporting_group: field.reporting_group,
               amount_type: field.amount_type,
               default_amount: field.default_amount&.to_f,
               default_percentage: field.default_percentage&.to_f,

@@ -155,7 +155,7 @@ module Api
             payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ],
             payroll_field_entries: [
               :id, :payroll_field_definition_id, :label, :kind, :tax_treatment,
-              :category, :amount, :source, :employee_paid, :employer_paid,
+              :category, :reporting_group, :amount, :source, :employee_paid, :employer_paid,
               :active, :notes
             ]
           )
@@ -202,6 +202,7 @@ module Api
               kind: data["kind"].presence || field&.kind,
               tax_treatment: data["tax_treatment"].presence || field&.tax_treatment,
               category: data["category"].presence || field&.category || "other",
+              reporting_group: PayrollReportingGroups.normalize(data["reporting_group"].presence || field&.reporting_group),
               amount: amount.round(2),
               source: source,
               employee_paid: ActiveModel::Type::Boolean.new.cast(data.key?("employee_paid") ? data["employee_paid"] : field&.employee_paid?),
@@ -244,6 +245,7 @@ module Api
             kind: entry.kind,
             tax_treatment: entry.tax_treatment,
             category: entry.category,
+            reporting_group: entry.reporting_group,
             amount: entry.amount.to_f,
             source: entry.source,
             employee_paid: entry.employee_paid,
