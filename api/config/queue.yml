@@ -3,7 +3,10 @@ default: &default
     - polling_interval: 1
       batch_size: 500
   workers:
-    - queues: "default"
+    # Include Solid Queue's recurring command queue so scheduled maintenance
+    # jobs (for example, clearing finished Solid Queue jobs) do not pile up.
+    # Keep default first so user-facing jobs are always preferred.
+    - queues: [ "default", "solid_queue_recurring" ]
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
       polling_interval: 0.1
