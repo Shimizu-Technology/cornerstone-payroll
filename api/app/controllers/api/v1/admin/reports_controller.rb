@@ -608,7 +608,7 @@ module Api
           report_data = build_pay_period_payroll_items_report(pp)
           send_spreadsheet!(
             filename: "payroll_summary_by_employee_#{pp.start_date}_to_#{pp.end_date}.xlsx",
-            sheets: payroll_summary_by_employee_sheets(report_data)
+            sheets: payroll_summary_by_employee_sheets(report_data, pp)
           )
         end
 
@@ -709,7 +709,7 @@ module Api
 
           items = pp.payroll_items.not_voided
           saved = pp.transmittal
-          live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+          live_check_numbers = items.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] }
           check_numbers = saved&.payroll_check_numbers.nil? ? live_check_numbers : Array(saved&.payroll_check_numbers)
           ne_checks = pp.non_employee_checks.active.order(:id)
 
@@ -1004,7 +1004,7 @@ module Api
           options[:payroll_check_numbers] = if options.key?(:payroll_check_numbers)
             options[:payroll_check_numbers]
           else
-            transmittal&.payroll_check_numbers.nil? ? pay_period.payroll_items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] } : Array(transmittal.payroll_check_numbers)
+            transmittal&.payroll_check_numbers.nil? ? pay_period.payroll_items.not_voided.where.not(check_number: nil).pluck(:check_number).map(&:to_s).sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] } : Array(transmittal.payroll_check_numbers)
           end
           options
         end
@@ -1726,6 +1726,7 @@ module Api
               kind: entry.kind,
               tax_treatment: entry.tax_treatment,
               category: entry.category,
+              reporting_group: entry.reporting_group,
               source: entry.source,
               employee_paid: entry.employee_paid,
               employer_paid: entry.employer_paid,
@@ -1902,6 +1903,10 @@ module Api
           end
         end
 
+        def report_group_label(group)
+          PayrollReportingGroups.label(group) || group.to_s.presence
+        end
+
         PAYROLL_REGISTER_HEADERS = [
           "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
           "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
@@ -1936,11 +1941,14 @@ module Api
           "Employer Roth Match", "Total Payroll Cost"
         ].freeze
 
-        def payroll_summary_by_employee_sheets(report)
+        def payroll_summary_by_employee_sheets(report, pay_period = nil)
+          pay_period ||= PayPeriod.find_by(id: report_value(report, :pay_period, :id))
           employees = Array(report[:employees])
           contractors = Array(report[:contractors])
           summary_rows = employees.map { |emp| payroll_summary_by_employee_row(emp) }
-          sheets = [
+          sheets = []
+          sheets << quickbooks_payroll_summary_sheet(pay_period) if pay_period
+          sheets += [
             { name: "Employee Summary", rows: [ PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS ] + summary_rows },
             payroll_summary_totals_sheet(report[:summary] || {}),
             earnings_breakdown_sheet(report),
@@ -1958,6 +1966,64 @@ module Api
           end
           sheets << report_info_sheet(report, title: "Payroll Summary by Employee")
           sheets
+        end
+
+        def quickbooks_payroll_summary_sheet(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          items = qb.items
+          headers = [ "Item", "Total" ] + items.map { |item| qb.qb_employee_name(item.employee) }
+          rows = [ [ pay_period.company.name ], [ "Payroll summary by employee report" ], [ qb.qb_date_range_label ], [], headers ]
+
+          add_qb_matrix_row(rows, "Hours - total", items.sum { |item| item.total_hours.to_f }, items.map { |item| item.total_hours.to_f })
+          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item) }).select { |line| line.hours.to_f.positive? && line.label != "Gross" }.each do |line|
+            add_qb_matrix_row(rows, "Hours - #{line.label}", line.hours.to_f, items.map { |item| (qb.earnings_lines_for(item).find { |candidate| candidate.label == line.label }&.hours || 0).to_f })
+          end
+
+          add_qb_matrix_row(rows, "Gross pay - total", items.sum { |item| item.gross_pay.to_f }, items.map { |item| item.gross_pay.to_f })
+          qb.aggregate_lines(items.flat_map { |item| qb.earnings_lines_for(item).drop(1) }).each do |line|
+            add_qb_matrix_row(rows, "Gross pay - #{line.label}", line.amount.to_f, items.map { |item| (qb.earnings_lines_for(item).find { |candidate| candidate.label == line.label }&.amount || 0).to_f })
+          end
+          pre_tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.pre_tax_retirement_deduction_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Pre-tax / retirement deductions - total", -items.sum { |item| qb.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_f } }, items.map { |item| -qb.pre_tax_retirement_deduction_lines_for(item).sum { |line| line.amount.to_f } })
+          pre_tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Pre-tax / retirement deductions - #{label}", -items.sum { |item| qb.pre_tax_retirement_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.pre_tax_retirement_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          add_qb_matrix_row(rows, "Adjusted gross", items.sum { |item| qb.employee_adjusted_gross(item) }, items.map { |item| qb.employee_adjusted_gross(item) })
+
+          add_qb_matrix_row(rows, "Other pay - total", items.sum { |item| qb.other_pay_lines_for(item).sum { |line| line.amount.to_f } }, items.map { |item| qb.other_pay_lines_for(item).sum { |line| line.amount.to_f } })
+          qb.aggregate_lines(items.flat_map { |item| qb.other_pay_lines_for(item) }).each do |line|
+            add_qb_matrix_row(rows, "Other pay - #{line.label}", line.amount.to_f, items.map { |item| (qb.other_pay_lines_for(item).find { |candidate| candidate.label == line.label }&.amount || 0).to_f })
+          end
+
+          add_qb_matrix_row(rows, "Employee taxes & deductions - total", -items.sum { |item| qb.employee_tax_total(item) + qb.employee_after_tax_total(item) }, items.map { |item| -(qb.employee_tax_total(item) + qb.employee_after_tax_total(item)) })
+          add_qb_matrix_row(rows, "Employee taxes - total", -items.sum { |item| qb.employee_tax_total(item) }, items.map { |item| -qb.employee_tax_total(item) })
+          tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.employee_tax_lines_for(item) }).map(&:label)
+          tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Employee taxes - #{label}", -items.sum { |item| qb.employee_tax_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.employee_tax_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          after_tax_labels = qb.aggregate_lines(items.flat_map { |item| qb.after_tax_deduction_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Employee after-tax deductions - total", -items.sum { |item| qb.employee_after_tax_total(item) }, items.map { |item| -qb.employee_after_tax_total(item) })
+          after_tax_labels.each do |label|
+            add_qb_matrix_row(rows, "Employee after-tax deductions - #{label}", -items.sum { |item| qb.after_tax_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| -qb.after_tax_deduction_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+
+          add_qb_matrix_row(rows, "Net pay", items.sum { |item| item.net_pay.to_f }, items.map { |item| item.net_pay.to_f })
+          add_qb_matrix_row(rows, "Employer taxes & contributions - total", items.sum { |item| qb.employer_tax_total(item) + qb.employer_contribution_total(item) }, items.map { |item| qb.employer_tax_total(item) + qb.employer_contribution_total(item) })
+          add_qb_matrix_row(rows, "Employer taxes - total", items.sum { |item| qb.employer_tax_total(item) }, items.map { |item| qb.employer_tax_total(item) })
+          add_qb_matrix_row(rows, "Employer taxes - Social Security Employer", items.sum { |item| item.employer_social_security_tax.to_f }, items.map { |item| item.employer_social_security_tax.to_f })
+          add_qb_matrix_row(rows, "Employer taxes - Medicare Employer", items.sum { |item| item.employer_medicare_tax.to_f }, items.map { |item| item.employer_medicare_tax.to_f })
+          employer_labels = qb.aggregate_lines(items.flat_map { |item| qb.employer_contribution_lines_for(item) }).map(&:label)
+          add_qb_matrix_row(rows, "Company contributions - total", items.sum { |item| qb.employer_contribution_total(item) }, items.map { |item| qb.employer_contribution_total(item) })
+          employer_labels.each do |label|
+            add_qb_matrix_row(rows, "Company contributions - #{label}", items.sum { |item| qb.employer_contribution_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } }, items.map { |item| qb.employer_contribution_lines_for(item).select { |line| line.label == label }.sum { |line| line.amount.to_f } })
+          end
+          add_qb_matrix_row(rows, "Total payroll cost", items.sum { |item| qb.total_payroll_cost(item) }, items.map { |item| qb.total_payroll_cost(item) })
+
+          { name: "QB Summary Matrix", rows: rows }
+        end
+
+        def add_qb_matrix_row(rows, label, total, values)
+          rows << [ label, total ] + values
         end
 
         def payroll_summary_by_employee_row(emp)
@@ -2076,12 +2142,12 @@ module Api
         end
 
         def payroll_field_breakdown_sheet(report)
-          rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Category", "Field", "Source", "Employee Paid", "Employer Paid", "Amount" ] ]
+          rows = [ [ "Last Name", "First Name", "Employee Name", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Source", "Employee Paid", "Employer Paid", "Amount" ] ]
           (Array(report[:employees]) + Array(report[:contractors])).each do |emp|
             Array(emp[:payroll_field_entries]).each do |entry|
               rows << [
                 emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name],
-                entry[:kind], entry[:tax_treatment], entry[:category], entry[:label], entry[:source],
+                entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:source],
                 entry[:employee_paid], entry[:employer_paid], entry[:amount]
               ]
             end
@@ -2091,18 +2157,18 @@ module Api
 
         def payroll_field_totals_sheet(report)
           entries = (Array(report[:employees]) + Array(report[:contractors])).flat_map { |emp| Array(emp[:payroll_field_entries]) }
-          rows = [ [ "Kind", "Tax Treatment", "Category", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
-          entries.group_by { |entry| [ entry[:kind], entry[:tax_treatment], entry[:category], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }.sort_by { |key, _| key.map(&:to_s) }.each do |(kind, treatment, category, label, employee_paid, employer_paid), grouped|
-            rows << [ kind, treatment, category, label, employee_paid, employer_paid, grouped.sum { |entry| entry[:amount].to_f } ]
+          rows = [ [ "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
+          entries.group_by { |entry| [ entry[:kind], entry[:tax_treatment], entry[:category], entry[:reporting_group], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }.sort_by { |key, _| key.map(&:to_s) }.each do |(kind, treatment, category, reporting_group, label, employee_paid, employer_paid), grouped|
+            rows << [ kind, treatment, category, report_group_label(reporting_group), label, employee_paid, employer_paid, grouped.sum { |entry| entry[:amount].to_f } ]
           end
           { name: "Payroll Fields Totals", rows: rows }
         end
 
         def employee_pay_history_field_breakdown_sheet(report)
-          rows = [ [ "Pay Date", "Period", "Kind", "Tax Treatment", "Category", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
+          rows = [ [ "Pay Date", "Period", "Kind", "Tax Treatment", "Category", "Report Group", "Field", "Employee Paid", "Employer Paid", "Amount" ] ]
           Array(report[:history]).each do |item|
             Array(item[:payroll_field_entries]).each do |entry|
-              rows << [ item[:pay_date], item[:period_description], entry[:kind], entry[:tax_treatment], entry[:category], entry[:label], entry[:employee_paid], entry[:employer_paid], entry[:amount] ]
+              rows << [ item[:pay_date], item[:period_description], entry[:kind], entry[:tax_treatment], entry[:category], report_group_label(entry[:reporting_group]), entry[:label], entry[:employee_paid], entry[:employer_paid], entry[:amount] ]
             end
           end
           { name: "Payroll Fields", rows: rows }
@@ -2320,7 +2386,22 @@ module Api
 
         def deductions_contributions_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          aggregate_rows = [ [ "Description", "Type", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.aggregate_deduction_contribution_rows.map do |entry|
+              employee_amount = entry.employee_amount.to_f
+              company_amount = entry.company_amount.to_f
+              [ entry.description, entry.type, employee_amount, company_amount, employee_amount + company_amount ]
+            end
+          detail_rows = [ [ "Employee", "Description", "Type", "Employee Deductions", "Company Contributions", "Plan Total", "Source" ] ] +
+            qb.deduction_contribution_entries.map do |entry|
+              employee_amount = entry.employee_amount.to_f
+              company_amount = entry.company_amount.to_f
+              [ entry.employee_name, entry.description, entry.type, employee_amount, company_amount, employee_amount + company_amount, entry.source ]
+            end
           [
+            { name: "QB Ded-Contrib", rows: aggregate_rows },
+            { name: "Employee Detail", rows: detail_rows },
             deductions_breakdown_sheet(report),
             payroll_field_breakdown_sheet(report),
             payroll_field_totals_sheet(report),
@@ -2331,8 +2412,19 @@ module Api
 
         def paycheck_history_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          history_rows = [ [ "Pay Date", "Name", "Total Pay", "Net Pay", "Pay Method", "Check #", "Status" ] ] +
+            qb.paycheck_history_rows(include_voided: true).map do |row|
+              [ row[:pay_date], row[:employee_name], row[:total_pay], row[:net_pay], row[:pay_method], row[:check_number], row[:status] ]
+            end
+          detail_rows = [ [ "Pay Date", "Name", "Gross Pay", "Taxes", "Deductions", "Net Pay", "Employer Cost", "Check #", "Status" ] ] +
+            qb.paycheck_history_rows(include_voided: true).map do |row|
+              [ row[:pay_date], row[:employee_name], row[:gross_pay], row[:taxes], row[:deductions], row[:net_pay], row[:employer_cost], row[:check_number], row[:status] ]
+            end
           [
-            { name: "Paycheck History", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
+            { name: "QB Paycheck History", rows: history_rows },
+            { name: "Payroll Detail", rows: detail_rows },
+            { name: "Payroll Register Rows", rows: [ PAYROLL_REGISTER_HEADERS ] + (Array(report[:employees]) + Array(report[:contractors])).map { |emp| payroll_export_row(emp) } },
             payroll_field_breakdown_sheet(report),
             report_info_sheet(report, title: "Paycheck History", description: REPORT_DESCRIPTIONS[:paycheck_history])
           ]
@@ -2340,20 +2432,20 @@ module Api
 
         def retirement_plans_sheets(pay_period)
           report = build_pay_period_payroll_items_report(pay_period)
-          headers = [ "Last Name", "First Name", "Employee Name", "Gross Pay", "401(k)", "Roth 401(k)", "Payroll Field Employee Retirement", "Employer Match", "Employer Roth Match", "Payroll Field Employer Retirement", "Total Employee", "Total Employer" ]
-          rows = Array(report[:employees]).map do |emp|
-            field_employee_retirement = Array(emp[:payroll_field_entries]).sum { |entry| entry[:category] == "retirement" && entry[:tax_treatment] != "employer_contribution" ? entry[:amount].to_f : 0.0 }
-            field_employer_retirement = Array(emp[:payroll_field_entries]).sum { |entry| entry[:category] == "retirement" && entry[:tax_treatment] == "employer_contribution" ? entry[:amount].to_f : 0.0 }
-            [
-              emp[:employee_last_name], emp[:employee_first_name], emp[:employee_name], emp[:gross_pay],
-              emp[:retirement_payment], emp[:roth_retirement_payment], field_employee_retirement, emp[:employer_retirement_match],
-              emp[:employer_roth_retirement_match], field_employer_retirement,
-              emp[:total_retirement_payment].to_f + field_employee_retirement,
-              emp[:total_employer_retirement_match].to_f + field_employer_retirement
-            ]
-          end
+          qb = QuickbooksPayrollReportData.new(pay_period)
+          retirement_rows = [ [ "Plan Section", "Employee", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.retirement_rows.map do |row|
+              [ PayrollReportingGroups.label(row.group) || row.group, row.employee_name, row.employee_amount, row.company_amount, row.employee_amount.to_f + row.company_amount.to_f ]
+            end
+          aggregate_rows = [ [ "Plan Section", "Employee Deductions", "Company Contributions", "Plan Total" ] ] +
+            qb.retirement_rows.group_by(&:group).map do |group, grouped|
+              employee_amount = grouped.sum { |row| row.employee_amount.to_f }
+              company_amount = grouped.sum { |row| row.company_amount.to_f }
+              [ PayrollReportingGroups.label(group) || group, employee_amount, company_amount, employee_amount + company_amount ]
+            end
           [
-            { name: "Retirement", rows: [ headers ] + rows },
+            { name: "QB Retirement", rows: retirement_rows },
+            { name: "Retirement Totals", rows: aggregate_rows },
             payroll_field_breakdown_sheet(report),
             report_info_sheet(report, title: "Retirement Plans Report", description: REPORT_DESCRIPTIONS[:retirement_plans])
           ]

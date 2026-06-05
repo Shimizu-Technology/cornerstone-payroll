@@ -233,6 +233,7 @@ class PayrollItem < ApplicationRecord
         amount: amount,
         employee_paid: field.employee_paid?,
         employer_paid: field.employer_paid?,
+        reporting_group: field.reporting_group,
         active: true,
         notes: assignment.notes
       }

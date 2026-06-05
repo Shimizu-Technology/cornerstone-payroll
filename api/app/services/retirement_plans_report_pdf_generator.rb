@@ -3,31 +3,38 @@
 require "prawn"
 require "prawn/table"
 
-# Generates a Retirement Plans Report PDF showing 401(k) / retirement contributions.
+# QuickBooks-style Retirement Plans Report. Sections are driven by explicit
+# reporting_group metadata when present, with safe retirement/401(k) inference
+# only for already-retirement-specific legacy data.
 class RetirementPlansReportPdfGenerator
-  include PdfFooter
+  QB_BORDER = "B7BDC7"
+  QB_HEADER_BG = "F2F2F2"
+  QB_TOTAL_BG = "F7F7F7"
+  TEXT = "3B3B3B"
+  MUTED = "666666"
 
-  HEADER_BG   = "2B4090"
-  SECTION_BG  = "F0F4FF"
-  BORDER_GRAY = "CCCCCC"
-  TEXT_DARK   = "1A1A2E"
-  TEXT_MUTED  = "666666"
-
-  attr_reader :pay_period, :company
+  attr_reader :pay_period, :company, :data
 
   def initialize(pay_period)
     @pay_period = pay_period
     @company = pay_period.company
+    @data = QuickbooksPayrollReportData.new(pay_period)
   end
 
   def generate
-    items = pay_period.payroll_items
-      .includes(:employee, :payroll_item_field_entries)
-      .not_voided
-      .order("employees.last_name ASC, employees.first_name ASC")
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 36, 46, 36 ])
+    render_header(pdf)
 
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 36, 50, 36])
-    render_document(pdf, items.to_a)
+    rows = data.retirement_rows
+    if rows.empty?
+      pdf.text "No retirement contributions found for this pay period.", style: :italic, color: MUTED
+    else
+      render_sections(pdf, rows)
+      render_provider_summary(pdf, rows)
+    end
+
+    render_footer(pdf)
+    pdf.render
   end
 
   def filename
@@ -36,125 +43,89 @@ class RetirementPlansReportPdfGenerator
 
   private
 
-  def render_document(pdf, items)
-    render_header(pdf)
-
-    if items.empty?
-      pdf.text "No payroll items found.", style: :italic, color: TEXT_MUTED
-      return
-    end
-
-    retirement_items = items.select do |item|
-      item.retirement_payment.to_f > 0 ||
-      item.roth_retirement_payment.to_f > 0 ||
-      item.employer_retirement_match.to_f > 0 ||
-      item.employer_roth_retirement_match.to_f > 0 ||
-      retirement_payroll_field_entries(item).any?
-    end
-
-    if retirement_items.empty?
-      pdf.text "No retirement contributions found for this pay period.", style: :italic, color: TEXT_MUTED
-      return
-    end
-
-    render_contributions_table(pdf, retirement_items)
-    render_summary(pdf, retirement_items)
-
-    render_with_footer(pdf,
-      "#{company.name} \u2014 Retirement Plans Report \u2014 #{pay_period.start_date} to #{pay_period.end_date} \u2014 CONFIDENTIAL"
-    )
-  end
-
   def render_header(pdf)
-    pdf.font_size(16) { pdf.text company.name, style: :bold, color: HEADER_BG }
-    pdf.font_size(11) { pdf.text "Retirement Plans Report", color: TEXT_DARK }
-    pdf.font_size(9) do
-      pdf.text "Pay Period: #{pay_period.start_date.strftime('%b %d, %Y')} – #{pay_period.end_date.strftime('%b %d, %Y')}  |  Pay Date: #{pay_period.pay_date.strftime('%b %d, %Y')}", color: TEXT_MUTED
-    end
-    pdf.move_down 14
-  end
-
-  def render_contributions_table(pdf, items)
-    header = [
-      "Employee", "Gross Pay", "401(k) Pre-Tax", "401(k) Roth", "Employer Match (Pre-Tax)",
-      "Employer Match (Roth)", "Field Employee", "Field Employer", "Total Employee", "Total Employer", "Grand Total"
-    ].map.with_index do |label, idx|
-      { content: label, background_color: HEADER_BG, text_color: "FFFFFF",
-        font_style: :bold, align: idx.zero? ? :left : :right }
-    end
-
-    rows = items.map do |item|
-      pre_tax = item.retirement_payment.to_f
-      roth = item.roth_retirement_payment.to_f
-      emp_match = item.employer_retirement_match.to_f
-      roth_match = item.employer_roth_retirement_match.to_f
-      field_employee = retirement_payroll_field_entries(item).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f }
-      field_employer = retirement_payroll_field_entries(item).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 }
-
-      [
-        { content: item.employee_full_name },
-        { content: fmt(item.gross_pay), align: :right },
-        { content: fmt(pre_tax), align: :right },
-        { content: fmt(roth), align: :right },
-        { content: fmt(emp_match), align: :right },
-        { content: fmt(roth_match), align: :right },
-        { content: fmt(field_employee), align: :right },
-        { content: fmt(field_employer), align: :right },
-        { content: fmt(pre_tax + roth + field_employee), align: :right, font_style: :bold },
-        { content: fmt(emp_match + roth_match + field_employer), align: :right, font_style: :bold },
-        { content: fmt(pre_tax + roth + field_employee + emp_match + roth_match + field_employer), align: :right, font_style: :bold }
-      ]
-    end
-
-    totals = totals_row(items)
-
-    pdf.table([header] + rows + [totals],
-      width: pdf.bounds.width,
-      cell_style: { size: 7, padding: [3, 5], border_color: BORDER_GRAY, overflow: :shrink_to_fit }
-    )
+    pdf.fill_color TEXT
+    pdf.font_size(13) { pdf.text company.name, align: :center }
     pdf.move_down 12
+    pdf.font_size(20) { pdf.text "Retirement plans report", align: :center }
+    pdf.move_down 12
+    pdf.font_size(14) { pdf.text data.qb_date_range_label(include_locations: false), align: :center }
+    pdf.move_down 24
   end
 
-  def totals_row(items)
-    t_pre = items.sum { |i| i.retirement_payment.to_f }
-    t_roth = items.sum { |i| i.roth_retirement_payment.to_f }
-    t_emp = items.sum { |i| i.employer_retirement_match.to_f }
-    t_roth_match = items.sum { |i| i.employer_roth_retirement_match.to_f }
-    t_field_employee = items.sum { |i| retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f } }
-    t_field_employer = items.sum { |i| retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 } }
+  def render_sections(pdf, rows)
+    rows.group_by(&:group).sort_by { |group, _| retirement_group_rank(group) }.each do |group, group_rows|
+      start_new_page_if_needed(pdf, 160)
+      pdf.font_size(18) { pdf.text PayrollReportingGroups.label(group) || group.to_s, color: TEXT }
+      pdf.move_down 10
 
-    [
-      { content: "TOTALS (#{items.size} employees)", font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(items.sum { |i| i.gross_pay.to_f }), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_pre), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_roth), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_emp), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_roth_match), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_field_employee), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_pre + t_roth + t_field_employee), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_emp + t_roth_match + t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG },
-      { content: fmt(t_pre + t_roth + t_field_employee + t_emp + t_roth_match + t_field_employer), align: :right, font_style: :bold, background_color: SECTION_BG }
-    ]
+      table_rows = [ [ "Employee", "Employee deductions", "Company contributions", "Plan total" ] ]
+      group_rows.each do |row|
+        table_rows << [ row.employee_name, money(row.employee_amount), money(row.company_amount), money(row.employee_amount.to_f + row.company_amount.to_f) ]
+      end
+      table_rows << [
+        "Total",
+        money(group_rows.sum { |row| row.employee_amount.to_f }),
+        money(group_rows.sum { |row| row.company_amount.to_f }),
+        money(group_rows.sum { |row| row.employee_amount.to_f + row.company_amount.to_f })
+      ]
+
+      pdf.table(table_rows, header: true, width: pdf.bounds.width, column_widths: [ 210, 110, 130, 90 ], cell_style: { overflow: :shrink_to_fit, min_font_size: 6 }) do
+        cells.border_color = QB_BORDER
+        cells.border_width = 0.6
+        cells.padding = [ 7, 8 ]
+        cells.size = 9
+        cells.text_color = TEXT
+        row(0).background_color = QB_HEADER_BG
+        row(0).font_style = :normal
+        row(-1).background_color = QB_TOTAL_BG
+        columns(1..3).align = :right
+      end
+      pdf.move_down 24
+    end
   end
 
-  def render_summary(pdf, items)
-    total_employee = items.sum { |i| i.retirement_payment.to_f + i.roth_retirement_payment.to_f + retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? 0.0 : entry.amount.to_f } }
-    total_employer = items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + retirement_payroll_field_entries(i).sum { |entry| entry.tax_treatment == "employer_contribution" ? entry.amount.to_f : 0.0 } }
+  def render_provider_summary(pdf, rows)
+    start_new_page_if_needed(pdf, 90)
+    total_employee = rows.sum { |row| row.employee_amount.to_f }
+    total_company = rows.sum { |row| row.company_amount.to_f }
 
     pdf.font_size(10) do
-      pdf.text "Total to be deducted from bank account for retirement provider:", style: :bold
-      pdf.text "Employee contributions: #{fmt(total_employee)}"
-      pdf.text "Employer contributions: #{fmt(total_employer)}"
-      pdf.text "Combined total: #{fmt(total_employee + total_employer)}", style: :bold, color: HEADER_BG
+      pdf.text "Total to be deducted from bank account for retirement provider:", style: :bold, color: TEXT
+      pdf.text "Employee contributions: #{money(total_employee)}"
+      pdf.text "Employer contributions: #{money(total_company)}"
+      pdf.text "Combined total: #{money(total_employee + total_company)}", style: :bold
     end
   end
 
-  def retirement_payroll_field_entries(item)
-    item.payroll_item_field_entries.select { |entry| entry.active? && entry.category == "retirement" }
+  def retirement_group_rank(group)
+    case group
+    when PayrollReportingGroups::GROUP_401K_PRE_TAX
+      0
+    when PayrollReportingGroups::GROUP_401K_AFTER_TAX
+      1
+    when PayrollReportingGroups::GROUP_RETIREMENT_OTHER
+      2
+    else
+      99
+    end
   end
 
-  def fmt(value)
+  def start_new_page_if_needed(pdf, height)
+    pdf.start_new_page if pdf.cursor < height
+  end
+
+  def money(value)
     "$#{format('%.2f', value.to_f)}"
+  end
+
+  def render_footer(pdf)
+    pdf.repeat(:all) do
+      pdf.canvas do
+        pdf.fill_color MUTED
+        pdf.font_size(8) { pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ] }
+      end
+    end
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
   end
 end

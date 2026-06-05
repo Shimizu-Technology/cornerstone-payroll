@@ -101,6 +101,7 @@ export type PayrollAdjustmentTreatment =
 export type PayrollFieldKind = 'addition' | 'deduction' | 'employer_contribution';
 export type PayrollFieldTaxTreatment = PayrollAdjustmentTreatment | 'employer_contribution';
 export type PayrollFieldCategory = 'loan' | 'retirement' | 'insurance' | 'rent' | 'allotment' | 'reimbursement' | 'garnishment' | 'child_support' | 'phone' | 'benefit' | 'other';
+export type PayrollFieldReportingGroup = '401k_pre_tax' | '401k_after_tax' | 'retirement_other';
 export type PayrollFieldAmountType = 'manual' | 'fixed' | 'percentage';
 
 export interface PayrollFieldDefinition {
@@ -111,6 +112,7 @@ export interface PayrollFieldDefinition {
   kind: PayrollFieldKind;
   tax_treatment: PayrollFieldTaxTreatment;
   category: PayrollFieldCategory;
+  reporting_group?: PayrollFieldReportingGroup | null;
   amount_type: PayrollFieldAmountType;
   default_amount?: number | null;
   default_percentage?: number | null;
@@ -134,7 +136,7 @@ export interface EmployeePayrollField {
   end_date?: string | null;
   notes?: string | null;
   employee_loan_id?: number | null;
-  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
+  payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
 }
 
 export interface PayrollItemFieldEntry {
@@ -145,6 +147,7 @@ export interface PayrollItemFieldEntry {
   kind: PayrollFieldKind;
   tax_treatment: PayrollFieldTaxTreatment;
   category: PayrollFieldCategory;
+  reporting_group?: PayrollFieldReportingGroup | null;
   amount: number;
   source?: 'employee_default' | 'manual' | 'import' | 'system';
   employee_paid?: boolean;
