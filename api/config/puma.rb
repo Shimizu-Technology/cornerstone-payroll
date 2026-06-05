@@ -41,7 +41,10 @@ workers requested_workers >= 2 ? requested_workers : 0
 plugin :tmp_restart
 
 # Run the Solid Queue supervisor inside of Puma for single-server deployments.
-plugin :solid_queue if ENV["SOLID_QUEUE_IN_PUMA"]
+# Treat only explicit truthy values as enabled so SOLID_QUEUE_IN_PUMA=false
+# does not accidentally boot the supervisor.
+solid_queue_in_puma = %w[1 true t yes y on].include?(ENV.fetch("SOLID_QUEUE_IN_PUMA", "false").to_s.strip.downcase)
+plugin :solid_queue if solid_queue_in_puma
 
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
 # In other environments, only set the PID file if requested.
