@@ -3,36 +3,31 @@
 require "prawn"
 require "prawn/table"
 
-# Generates a detailed Payroll Summary by Employee PDF modeled after the QuickBooks report.
-# Shows per-employee breakdown: earnings, pre-tax deductions, taxes, after-tax deductions,
-# net pay, employer taxes, employer contributions, and total payroll cost.
+# QuickBooks-style Payroll Summary by Employee.
+# The report keeps Cornerstone's richer detail while using the familiar QB
+# grouped columns: Hours, Gross pay, Other pay, Employee taxes/deductions,
+# Net pay, Employer taxes/contributions, and Total payroll cost.
 class PayrollSummaryByEmployeePdfGenerator
-  include PdfFooter
+  QB_BORDER = "B7BDC7"
+  QB_HEADER_BG = "F2F2F2"
+  QB_TOTAL_BG = "F7F7F7"
+  TEXT = "3B3B3B"
+  MUTED = "666666"
 
-  HEADER_BG   = "2B4090"
-  SECTION_BG  = "F0F4FF"
-  ALT_ROW_BG  = "F9FAFB"
-  BORDER_GRAY = "CCCCCC"
-  TEXT_DARK   = "1A1A2E"
-  TEXT_MUTED  = "666666"
-
-  EMPLOYEES_PER_PAGE = 5
-
-  attr_reader :pay_period, :company
+  attr_reader :pay_period, :company, :data
 
   def initialize(pay_period)
     @pay_period = pay_period
     @company = pay_period.company
+    @data = QuickbooksPayrollReportData.new(pay_period)
   end
 
   def generate
-    items = pay_period.payroll_items
-      .includes(:employee, :payroll_item_earnings, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-      .not_voided
-      .order("employees.last_name ASC, employees.first_name ASC")
-
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [30, 30, 44, 30])
-    render_document(pdf, items)
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :landscape, margin: [ 30, 10, 36, 10 ])
+    render_header(pdf)
+    render_table(pdf)
+    render_footer(pdf)
+    pdf.render
   end
 
   def filename
@@ -41,336 +36,194 @@ class PayrollSummaryByEmployeePdfGenerator
 
   private
 
-  def render_document(pdf, items)
-    all_items = items.to_a
-    return render_empty(pdf) if all_items.empty?
-
-    totals = compute_totals(all_items)
-    all_items.each_slice(EMPLOYEES_PER_PAGE).with_index do |group, page_idx|
-      pdf.start_new_page unless page_idx.zero?
-      render_page(pdf, group, totals, page_idx, (all_items.size.to_f / EMPLOYEES_PER_PAGE).ceil)
-    end
-
-    render_with_footer(pdf,
-      "#{company.name} \u2014 Payroll Summary by Employee \u2014 #{pay_period.start_date} to #{pay_period.end_date} \u2014 CONFIDENTIAL"
-    )
-  end
-
-  def render_page(pdf, group, totals, page_idx, total_pages)
-    render_header(pdf)
-
-    col_width = (pdf.bounds.width - 140) / group.size
-    label_width = 140
-
-    # Employee name column headers
-    render_employee_name_header(pdf, group, label_width, col_width)
-
-    # Hours section
-    render_section_header(pdf, "Hours")
-    render_employee_earnings_rows(pdf, group, label_width, col_width, "hours")
-
-    # Gross / Earnings section
-    render_section_header(pdf, "Gross Earnings")
-    render_employee_earnings_rows(pdf, group, label_width, col_width, "earnings")
-
-    # Pre-tax deductions
-    render_section_header(pdf, "Pre-tax Deductions")
-    render_deduction_rows(pdf, group, label_width, col_width, "pre_tax")
-
-    # Adjusted Gross
-    render_summary_row(pdf, "Adjusted Gross", group, label_width, col_width) { |item|
-      adjusted = item.gross_pay.to_f - item.retirement_payment.to_f - item.roth_retirement_payment.to_f
-      fmt(adjusted)
-    }
-    pdf.move_down 4
-
-    # Employee Taxes
-    render_section_header(pdf, "Employee Taxes")
-    render_tax_rows(pdf, group, label_width, col_width)
-
-    # After-tax deductions
-    render_section_header(pdf, "After-tax Deductions")
-    render_deduction_rows(pdf, group, label_width, col_width, "post_tax")
-
-    # Net Pay
-    render_summary_row(pdf, "Net Pay", group, label_width, col_width, bold: true) { |item|
-      fmt(item.net_pay)
-    }
-    pdf.move_down 8
-
-    # Employer Taxes & Contributions
-    render_section_header(pdf, "Employer Taxes & Contributions")
-    render_employer_rows(pdf, group, label_width, col_width)
-
-    # Total Payroll Cost
-    render_summary_row(pdf, "Total Payroll Cost", group, label_width, col_width, bold: true) { |item|
-      total_cost = item.gross_pay.to_f + item.employer_social_security_tax.to_f +
-                   item.employer_medicare_tax.to_f + item.employer_retirement_match.to_f +
-                   item.employer_roth_retirement_match.to_f
-      fmt(total_cost)
-    }
-  end
-
   def render_header(pdf)
-    pdf.font_size(14) { pdf.text company.name, style: :bold, color: HEADER_BG }
-    pdf.font_size(10) { pdf.text "Payroll Summary by Employee", color: TEXT_DARK }
-    period_text = "Pay Period: #{pay_period.start_date.strftime('%b %d, %Y')} – #{pay_period.end_date.strftime('%b %d, %Y')}  |  Pay Date: #{pay_period.pay_date.strftime('%b %d, %Y')}"
-    pdf.font_size(8) { pdf.text period_text, color: TEXT_MUTED }
-    pdf.move_down 10
+    pdf.fill_color TEXT
+    pdf.font_size(11) { pdf.text company.name, align: :center }
+    pdf.move_down 8
+    pdf.font_size(17) { pdf.text "Payroll summary by employee report", align: :center }
+    pdf.move_down 8
+    pdf.font_size(12) { pdf.text data.qb_date_range_label, align: :center }
+    pdf.move_down 18
   end
 
-  def render_employee_name_header(pdf, group, label_width, col_width)
-    y = pdf.cursor
-    pdf.fill_color HEADER_BG
-    pdf.fill_rectangle([0, y + 2], pdf.bounds.width, 16)
-    pdf.font_size(8) do
-      pdf.bounding_box([0, y], width: label_width, height: 14) do
-        pdf.text "Employee", style: :bold, color: "FFFFFF", valign: :center
-      end
-      group.each_with_index do |item, idx|
-        x = label_width + (idx * col_width)
-        name = item.employee&.full_name || "Unknown"
-        type_label = item.employment_type == "contractor" ? " (1099)" : ""
-        pdf.bounding_box([x, y], width: col_width, height: 14) do
-          pdf.text "#{name}#{type_label}", align: :right, style: :bold, color: "FFFFFF",
-                   size: 7, overflow: :shrink_to_fit
-        end
-      end
-    end
-    pdf.fill_color TEXT_DARK
-    pdf.move_down 6
-  end
+  def render_table(pdf)
+    rows = [ header_row, total_row ] + data.items.map { |item| employee_row(item) }
 
-  def render_section_header(pdf, title)
-    pdf.fill_color HEADER_BG
-    pdf.font_size(9) { pdf.text title, style: :bold, color: HEADER_BG }
-    pdf.fill_color TEXT_DARK
-    pdf.move_down 2
-  end
-
-  def render_employee_earnings_rows(pdf, group, label_width, col_width, mode)
-    if mode == "hours"
-      render_labeled_row(pdf, "Total Hours", group, label_width, col_width) { |item|
-        h = item.total_hours.round(2)
-        h > 0 ? "#{h}h" : "—"
-      }
-    else
-      render_labeled_row(pdf, "Gross Pay", group, label_width, col_width) { |item|
-        fmt(item.gross_pay)
-      }
-
-      earnings_labels = group.flat_map { |item|
-        item.payroll_item_earnings.map(&:label)
-      }.uniq
-
-      earnings_labels.each do |label|
-        render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-          earning = item.payroll_item_earnings.find { |e| e.label == label }
-          earning ? fmt(earning.amount) : "—"
-        }
-      end
-
-      if group.any? { |item| item.reported_tips.to_f.positive? }
-        render_labeled_row(pdf, "Reported Tips", group, label_width, col_width) { |item|
-          item.reported_tips.to_f.positive? ? fmt(item.reported_tips) : "—"
-        }
-      end
-
-      payroll_field_labels_for(group, "taxable_addition", "non_taxable_addition").each do |label|
-        render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-          amount = payroll_field_amount_for_label(item, label, "taxable_addition", "non_taxable_addition")
-          amount.positive? ? fmt(amount) : "—"
-        }
-      end
+    pdf.table(rows, header: true, width: pdf.bounds.width, column_widths: column_widths, cell_style: { size: 6.5, padding: [ 4, 2 ], overflow: :shrink_to_fit, min_font_size: 4 }) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.6
+      cells.padding = [ 4, 2 ]
+      cells.size = 6.5
+      cells.text_color = TEXT
+      row(0).background_color = QB_HEADER_BG
+      row(0).font_style = :normal
+      row(0).size = 7
+      row(1).background_color = QB_TOTAL_BG
+      columns(1..7).align = :right
+      columns(0).align = :left
+      self.header = true
     end
   end
 
-  def render_deduction_rows(pdf, group, label_width, col_width, category)
-    deduction_labels = group.flat_map { |item|
-      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label)
-    }.uniq
-    custom_labels = if category == "post_tax"
-      group.flat_map { |item|
-        Array(item.custom_deductions).filter_map do |deduction|
-          next unless deduction["amount"].to_f.positive?
+  def header_row
+    [
+      "Name",
+      "Hours",
+      "Gross pay",
+      "Other pay",
+      "Employee taxes & deductions",
+      "Net pay",
+      "Employer taxes & contributions",
+      "Total payroll\ncost"
+    ]
+  end
 
-          deduction["label"].presence || "Other Deduction"
-        end
-      }.uniq
-    else
-      []
-    end
-    special_labels = if category == "post_tax"
-      labels = []
-      labels << "Tips Paid Out" if group.any? { |item| item.tips_paid_out.to_f.positive? }
-      labels << "Loan" if group.any? { |item| visible_legacy_loan_payment(item).positive? }
-      labels << "Health Insurance" if group.any? { |item| visible_legacy_insurance_payment(item).positive? }
-      labels
-    else
-      []
-    end
-    all_labels = (deduction_labels + custom_labels + special_labels).uniq
+  def total_row
+    summary = data.total_summary
+    pre_tax_lines = data.aggregate_lines(data.items.flat_map { |item| data.pre_tax_retirement_deduction_lines_for(item) })
+    after_tax_lines = data.aggregate_lines(data.items.flat_map { |item| data.after_tax_deduction_lines_for(item) })
+    tax_lines = aggregate_tax_lines
+    employer_contribution_lines = data.aggregate_lines(data.items.flat_map { |item| data.employer_contribution_lines_for(item) })
 
-    if all_labels.empty?
-      render_labeled_row(pdf, "(none)", group, label_width, col_width) { |_| "—" }
-      return
-    end
+    [
+      "Total",
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Gross", hours: summary.total_hours) ] + aggregate_hours_lines),
+      gross_cell(summary.gross_pay, aggregate_earnings_lines, pre_tax_lines, data.items.sum { |item| data.employee_adjusted_gross(item) }),
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: summary.other_pay) ] + aggregate_other_pay_lines),
+      employee_taxes_cell(summary.employee_taxes, tax_lines, summary.after_tax_deductions, after_tax_lines),
+      money(summary.net_pay),
+      employer_cell(
+        summary.employer_taxes,
+        employer_contribution_lines,
+        ss: data.items.sum { |item| item.employer_social_security_tax.to_f },
+        medicare: data.items.sum { |item| item.employer_medicare_tax.to_f }
+      ),
+      money(summary.total_payroll_cost)
+    ]
+  end
 
-    all_labels.each do |label|
-      render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        amount = deduction_amount_for_label(item, label, category)
-        amount.positive? ? fmt(-amount) : "—"
-      }
-    end
+  def employee_row(item)
+    pre_tax_lines = data.pre_tax_retirement_deduction_lines_for(item)
+    after_tax_lines = data.after_tax_deduction_lines_for(item)
+    tax_lines = data.employee_tax_lines_for(item)
+    employer_lines = data.employer_contribution_lines_for(item)
 
-    render_labeled_row(pdf, "Subtotal", group, label_width, col_width, bold: true) { |item|
-      total = item.payroll_item_deductions.select { |d| d.category == category }.sum(&:amount)
-      if category == "post_tax"
-        total += item.custom_deductions_total.to_f + item.tips_paid_out.to_f + visible_legacy_loan_payment(item) + visible_legacy_insurance_payment(item)
+    [
+      data.qb_employee_name(item.employee),
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Gross", hours: item.total_hours.to_f) ]),
+      gross_cell(item.gross_pay.to_f, data.earnings_lines_for(item).drop(1), pre_tax_lines, data.employee_adjusted_gross(item)),
+      lines_cell([ QuickbooksPayrollReportData::Line.new(label: "Total", amount: data.other_pay_lines_for(item).sum { |line| line.amount.to_f }) ] + data.other_pay_lines_for(item)),
+      employee_taxes_cell(data.employee_tax_total(item), tax_lines, data.employee_after_tax_total(item), after_tax_lines),
+      money(item.net_pay),
+      employer_cell(data.employer_tax_total(item), employer_lines, ss: item.employer_social_security_tax.to_f, medicare: item.employer_medicare_tax.to_f),
+      money(data.total_payroll_cost(item))
+    ]
+  end
+
+  def gross_cell(gross_total, earning_lines, pre_tax_lines, adjusted_gross)
+    lines = [ QuickbooksPayrollReportData::Line.new(label: "Gross", amount: gross_total) ]
+    lines += earning_lines
+    if pre_tax_lines.any?
+      lines << QuickbooksPayrollReportData::Line.new(label: "Pre-tax / retirement deductions", amount: pre_tax_lines.sum { |line| line.amount.to_f })
+      lines += pre_tax_lines.map { |line| QuickbooksPayrollReportData::Line.new(label: "  #{line.label}", amount: line.amount) }
+    end
+    lines << QuickbooksPayrollReportData::Line.new(label: "Adjusted gross", amount: adjusted_gross)
+    lines_cell(lines, negative_labels: [ "Pre-tax / retirement deductions", *pre_tax_lines.map { |line| "  #{line.label}" } ])
+  end
+
+  def employee_taxes_cell(tax_total, tax_lines, after_tax_total, after_tax_lines)
+    total = tax_total.to_f + after_tax_total.to_f
+    lines = [
+      QuickbooksPayrollReportData::Line.new(label: "Total", amount: total),
+      QuickbooksPayrollReportData::Line.new(label: "Employee taxes", amount: tax_total)
+    ]
+    lines += tax_lines.map { |line| QuickbooksPayrollReportData::Line.new(label: "  #{line.label}", amount: line.amount) }
+    if after_tax_lines.any?
+      lines << QuickbooksPayrollReportData::Line.new(label: "After-tax deductions", amount: after_tax_total)
+      lines += after_tax_lines.map { |line| QuickbooksPayrollReportData::Line.new(label: "  #{line.label}", amount: line.amount) }
+    end
+    lines_cell(lines, negative: true)
+  end
+
+  def employer_cell(employer_tax_total, contribution_lines, ss:, medicare:)
+    contribution_total = contribution_lines.sum { |line| line.amount.to_f }
+    lines = [
+      QuickbooksPayrollReportData::Line.new(label: "Total", amount: employer_tax_total.to_f + contribution_total),
+      QuickbooksPayrollReportData::Line.new(label: "Employer taxes", amount: employer_tax_total),
+      QuickbooksPayrollReportData::Line.new(label: "  Social Security Employer", amount: ss),
+      QuickbooksPayrollReportData::Line.new(label: "  Medicare Employer", amount: medicare)
+    ]
+    if contribution_lines.any?
+      lines << QuickbooksPayrollReportData::Line.new(label: "Contributions", amount: contribution_total)
+      lines += contribution_lines.map { |line| QuickbooksPayrollReportData::Line.new(label: "  #{line.label}", amount: line.amount) }
+    end
+    lines_cell(lines)
+  end
+
+  def lines_cell(lines, negative: false, negative_labels: [])
+    present = lines.select { |line| line.amount.present? || line.hours.present? }
+    return "" if present.empty?
+
+    present.map do |line|
+      amount = if line.amount.present?
+        money(line.amount.to_f, negative: negative || negative_labels.include?(line.label))
       end
-      total > 0 ? fmt(-total) : "—"
-    }
+      hours = hours_text(line.hours)
+      values = [ hours, amount ].compact.join("  ")
+      values.present? ? "#{line.label}    #{values}" : line.label
+    end.join("\n")
+  end
+
+  def aggregate_earnings_lines
+    data.aggregate_lines(data.items.flat_map { |item| data.earnings_lines_for(item).drop(1) })
+  end
+
+  def aggregate_hours_lines
+    aggregate_earnings_lines.select { |line| line.hours.to_f.positive? }
+  end
+
+  def aggregate_other_pay_lines
+    data.aggregate_lines(data.items.flat_map { |item| data.other_pay_lines_for(item) })
+  end
+
+  def aggregate_tax_lines
+    data.aggregate_lines(data.items.flat_map { |item| data.employee_tax_lines_for(item) })
   end
 
   def deduction_amount_for_label(item, label, category)
-    return item.tips_paid_out.to_f if category == "post_tax" && label == "Tips Paid Out"
-    return visible_legacy_loan_payment(item) if category == "post_tax" && label == "Loan" && visible_legacy_loan_payment(item).positive?
-    return visible_legacy_insurance_payment(item) if category == "post_tax" && label == "Health Insurance" && visible_legacy_insurance_payment(item).positive?
-
-    amount = item.payroll_item_deductions
-      .select { |deduction| deduction.label == label && deduction.category == category }
-      .sum(&:amount)
-      .to_f
-    return amount unless category == "post_tax"
-
-    amount + Array(item.custom_deductions).sum do |deduction|
-      deduction_label = deduction["label"].presence || "Other Deduction"
-      deduction_label == label ? deduction["amount"].to_f : 0
-    end
+    data.deduction_contribution_entries_for_item(item)
+      .select { |entry| entry.bucket == category && entry.description == label }
+      .sum { |entry| entry.employee_amount.to_f }
   end
 
-  def visible_legacy_loan_payment(item)
-    return 0.0 if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.loan? }
-
-    item.loan_payment.to_f
+  def column_widths
+    [ 68, 78, 140, 78, 140, 64, 140, 64 ]
   end
 
-  def visible_legacy_insurance_payment(item)
-    return 0.0 if item.payroll_item_deductions.any? { |deduction| deduction.deduction_type&.sub_category == "insurance" }
+  def money(value, negative: false)
+    val = value.to_f
+    return "$0.00" if val.zero?
 
-    item.insurance_payment.to_f
+    prefix = negative || val.negative? ? "-" : ""
+    "#{prefix}$#{format('%.2f', val.abs)}"
   end
 
-  def render_tax_rows(pdf, group, label_width, col_width)
-    [
-      ["Federal/Guam Income Tax", ->(item) { item.withholding_tax }],
-      ["Social Security",         ->(item) { item.social_security_tax }],
-      ["Medicare",                 ->(item) { item.medicare_tax }]
-    ].each do |label, accessor|
-      render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        val = accessor.call(item).to_f
-        val > 0 ? fmt(-val) : "—"
-      }
-    end
+  def hours_text(value)
+    hours = value.to_f
+    return nil unless hours.positive?
 
-    render_labeled_row(pdf, "Total Employee Taxes", group, label_width, col_width, bold: true) { |item|
-      total = item.withholding_tax.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
-      fmt(-total)
-    }
+    "#{format('%.2f', hours).sub(/\.00\z/, '')}h"
   end
 
-  def render_employer_rows(pdf, group, label_width, col_width)
-    [
-      ["Social Security Employer",  ->(item) { item.employer_social_security_tax }],
-      ["Medicare Employer",          ->(item) { item.employer_medicare_tax }],
-      ["401(k) Employer Match",      ->(item) { item.employer_retirement_match }],
-      ["Roth 401(k) Employer Match", ->(item) { item.employer_roth_retirement_match }]
-    ].each do |label, accessor|
-      render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        val = accessor.call(item).to_f
-        val > 0 ? fmt(val) : "—"
-      }
-    end
-
-    payroll_field_labels_for(group, "employer_contribution").each do |label|
-      render_labeled_row(pdf, label, group, label_width, col_width) { |item|
-        amount = payroll_field_amount_for_label(item, label, "employer_contribution")
-        amount.positive? ? fmt(amount) : "—"
-      }
-    end
-
-    render_labeled_row(pdf, "Total Employer Cost", group, label_width, col_width, bold: true) { |item|
-      total = item.employer_social_security_tax.to_f + item.employer_medicare_tax.to_f +
-              item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f +
-              payroll_field_amount_for_label(item, nil, "employer_contribution")
-      fmt(total)
-    }
-  end
-
-  def payroll_field_labels_for(group, *treatments)
-    group.flat_map { |item| item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }.map(&:label) }.uniq
-  end
-
-  def payroll_field_amount_for_label(item, label, *treatments)
-    item.payroll_item_field_entries.sum do |entry|
-      next 0.0 unless entry.active? && treatments.include?(entry.tax_treatment)
-      next 0.0 if label && entry.label != label
-
-      entry.amount.to_f
-    end
-  end
-
-  def render_labeled_row(pdf, label, group, label_width, col_width, bold: false)
-    return if pdf.cursor < 20
-    pdf.start_new_page if pdf.cursor < 20
-
-    y = pdf.cursor
-    style = bold ? :bold : :normal
-    pdf.font_size(7) do
-      pdf.bounding_box([0, y], width: label_width, height: 12) do
-        pdf.text label, style: style, color: TEXT_DARK, overflow: :shrink_to_fit
-      end
-      group.each_with_index do |item, idx|
-        x = label_width + (idx * col_width)
-        pdf.bounding_box([x, y], width: col_width, height: 12) do
-          pdf.text(yield(item), align: :right, style: style, color: TEXT_DARK)
+  def render_footer(pdf)
+    pdf.repeat(:all) do
+      pdf.canvas do
+        pdf.fill_color MUTED
+        pdf.font_size(8) do
+          pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ]
         end
       end
     end
-    pdf.move_down 1
-  end
-
-  def render_summary_row(pdf, label, group, label_width, col_width, bold: false)
-    pdf.stroke_color BORDER_GRAY
-    pdf.stroke_horizontal_line 0, pdf.bounds.width
-    pdf.move_down 2
-    render_labeled_row(pdf, label, group, label_width, col_width, bold: bold) { |item| yield(item) }
-    pdf.move_down 2
-  end
-
-  def render_empty(pdf)
-    render_header(pdf)
-    pdf.text "No payroll items found for this pay period.", style: :italic, color: TEXT_MUTED
-  end
-
-  def compute_totals(items)
-    {
-      gross: items.sum { |i| i.gross_pay.to_f },
-      net: items.sum { |i| i.net_pay.to_f },
-      withholding: items.sum { |i| i.withholding_tax.to_f },
-      ss: items.sum { |i| i.social_security_tax.to_f },
-      medicare: items.sum { |i| i.medicare_tax.to_f },
-      employer_ss: items.sum { |i| i.employer_social_security_tax.to_f },
-      employer_medicare: items.sum { |i| i.employer_medicare_tax.to_f }
-    }
-  end
-
-  def fmt(value)
-    val = value.to_f
-    if val < 0
-      "-$#{format('%.2f', val.abs)}"
-    else
-      "$#{format('%.2f', val)}"
-    end
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
   end
 end

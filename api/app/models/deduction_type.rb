@@ -6,6 +6,7 @@ class DeductionType < ApplicationRecord
     retirement insurance garnishment loan rent phone benefit
     allotment reimbursement child_support other
   ].freeze
+  REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :company
   has_many :employee_deductions, dependent: :destroy
@@ -17,6 +18,9 @@ class DeductionType < ApplicationRecord
   validates :name, uniqueness: { scope: :company_id }
   validates :category, inclusion: { in: CATEGORIES }
   validates :sub_category, inclusion: { in: SUB_CATEGORIES }, allow_nil: true
+  validates :reporting_group, inclusion: { in: REPORTING_GROUPS }, allow_nil: true
+
+  before_validation :normalize_reporting_group
 
   scope :active, -> { where(active: true) }
   scope :pre_tax, -> { where(category: "pre_tax") }
@@ -43,5 +47,11 @@ class DeductionType < ApplicationRecord
 
   def garnishment?
     sub_category.in?(%w[garnishment child_support])
+  end
+
+  private
+
+  def normalize_reporting_group
+    self.reporting_group = PayrollReportingGroups.normalize(reporting_group)
   end
 end

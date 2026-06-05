@@ -11,7 +11,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldAmountType } from '@/types';
+import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -80,6 +80,7 @@ interface QuickPayrollFieldDraft {
   kind: PayrollFieldKind;
   tax_treatment: PayrollFieldTaxTreatment;
   category: PayrollFieldCategory;
+  reporting_group?: PayrollFieldReportingGroup | null;
   amount_type: PayrollFieldAmountType;
   default_amount: number;
   default_percentage: number;
@@ -116,6 +117,7 @@ const initialQuickPayrollFieldDraft = (): QuickPayrollFieldDraft => ({
   kind: 'deduction',
   tax_treatment: 'post_tax_deduction',
   category: 'other',
+  reporting_group: null,
   amount_type: 'fixed',
   default_amount: 0,
   default_percentage: 0,
@@ -123,6 +125,13 @@ const initialQuickPayrollFieldDraft = (): QuickPayrollFieldDraft => ({
 
 const toCurrencyDraft = (value: number | null | undefined): string =>
   String(roundCurrencyValue(Number(value) || 0));
+
+const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string }> = [
+  { value: '', label: 'No special report group' },
+  { value: '401k_pre_tax', label: '401(k) Pre-Tax' },
+  { value: '401k_after_tax', label: '401(k) After Tax / Roth' },
+  { value: 'retirement_other', label: 'Other Retirement' },
+];
 
 const adjustmentTreatmentOptions: Array<{
   value: PayrollAdjustmentTreatment;
@@ -499,6 +508,7 @@ export function EmployeeForm() {
         ...quickPayrollField,
         name: quickPayrollField.name.trim(),
         default_amount: quickPayrollField.amount_type === 'fixed' ? roundCurrencyValue(quickPayrollField.default_amount) : null,
+        reporting_group: quickPayrollField.reporting_group || null,
         default_percentage: quickPayrollField.amount_type === 'percentage' ? Number(quickPayrollField.default_percentage) || 0 : null,
         show_in_payroll_grid: true,
       };
@@ -1236,6 +1246,14 @@ export function EmployeeForm() {
                       <Select value={quickPayrollField.category} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, category: event.target.value as PayrollFieldCategory }))}>
                         {['loan', 'retirement', 'insurance', 'rent', 'allotment', 'reimbursement', 'garnishment', 'child_support', 'phone', 'benefit', 'other'].map((category) => (
                           <option key={category} value={category}>{category.replace(/_/g, ' ')}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">Report group</label>
+                      <Select value={quickPayrollField.reporting_group || ''} onChange={(event) => setQuickPayrollField((prev) => ({ ...prev, reporting_group: event.target.value ? event.target.value as PayrollFieldReportingGroup : null }))}>
+                        {reportingGroupOptions.map((option) => (
+                          <option key={option.value || 'none'} value={option.value}>{option.label}</option>
                         ))}
                       </Select>
                     </div>

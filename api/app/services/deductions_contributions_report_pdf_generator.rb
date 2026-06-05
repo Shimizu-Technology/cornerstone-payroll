@@ -3,33 +3,38 @@
 require "prawn"
 require "prawn/table"
 
-# Generates a Deductions and Contributions Report PDF.
-# Shows all deductions and employer contributions aggregated by category/type,
-# with per-employee breakdowns.
+# QuickBooks-style Deductions and Contributions report with Cornerstone detail.
+# The first table mirrors QB's aggregate Description/Type/Employee/Company/Plan
+# layout. Additional sections keep the richer employee-level and tax detail.
 class DeductionsContributionsReportPdfGenerator
-  include PdfFooter
+  QB_BORDER = "B7BDC7"
+  QB_HEADER_BG = "F2F2F2"
+  QB_TOTAL_BG = "F7F7F7"
+  TEXT = "3B3B3B"
+  MUTED = "666666"
 
-  HEADER_BG   = "2B4090"
-  SECTION_BG  = "F0F4FF"
-  BORDER_GRAY = "CCCCCC"
-  TEXT_DARK   = "1A1A2E"
-  TEXT_MUTED  = "666666"
-
-  attr_reader :pay_period, :company
+  attr_reader :pay_period, :company, :data
 
   def initialize(pay_period)
     @pay_period = pay_period
     @company = pay_period.company
+    @data = QuickbooksPayrollReportData.new(pay_period)
   end
 
   def generate
-    items = pay_period.payroll_items
-      .includes(:employee, :payroll_item_field_entries, payroll_item_deductions: :deduction_type)
-      .not_voided
-      .order("employees.last_name ASC, employees.first_name ASC")
+    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 36, 46, 36 ])
+    render_header(pdf)
 
-    pdf = Prawn::Document.new(page_size: "LETTER", page_layout: :portrait, margin: [36, 36, 50, 36])
-    render_document(pdf, items.to_a)
+    if data.items.empty?
+      pdf.text "No payroll items found.", style: :italic, color: MUTED
+    else
+      render_aggregate_table(pdf)
+      render_employee_detail(pdf)
+      render_tax_detail(pdf)
+    end
+
+    render_footer(pdf)
+    pdf.render
   end
 
   def filename
@@ -38,230 +43,138 @@ class DeductionsContributionsReportPdfGenerator
 
   private
 
-  def render_document(pdf, items)
-    render_header(pdf)
-
-    if items.empty?
-      pdf.text "No payroll items found.", style: :italic, color: TEXT_MUTED
-      return
-    end
-
-    render_employee_taxes_section(pdf, items)
-    render_deductions_section(pdf, items, "pre_tax", "Pre-Tax Deductions")
-    render_deductions_section(pdf, items, "post_tax", "After-Tax Deductions")
-    render_employer_section(pdf, items)
-    render_grand_totals(pdf, items)
-
-    render_with_footer(pdf,
-      "#{company.name} \u2014 Deductions & Contributions \u2014 #{pay_period.start_date} to #{pay_period.end_date} \u2014 CONFIDENTIAL"
-    )
-  end
-
   def render_header(pdf)
-    pdf.font_size(16) { pdf.text company.name, style: :bold, color: HEADER_BG }
-    pdf.font_size(11) { pdf.text "Deductions and Contributions Report", color: TEXT_DARK }
-    pdf.font_size(9) do
-      pdf.text "Pay Period: #{pay_period.start_date.strftime('%b %d, %Y')} – #{pay_period.end_date.strftime('%b %d, %Y')}  |  Pay Date: #{pay_period.pay_date.strftime('%b %d, %Y')}", color: TEXT_MUTED
-    end
-    pdf.move_down 14
-  end
-
-  def render_employee_taxes_section(pdf, items)
-    pdf.font_size(11) { pdf.text "Employee Tax Withholdings", style: :bold, color: HEADER_BG }
-    pdf.move_down 4
-
-    header = build_header(["Employee", "FIT", "Social Security", "Medicare", "Total Taxes"])
-    rows = items.map do |item|
-      employee_row(item.employee_full_name,
-        [item.withholding_tax, item.social_security_tax, item.medicare_tax,
-         item.withholding_tax.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f])
-    end
-
-    totals = totals_row("TOTALS",
-      [items.sum { |i| i.withholding_tax.to_f },
-       items.sum { |i| i.social_security_tax.to_f },
-       items.sum { |i| i.medicare_tax.to_f },
-       items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }])
-
-    render_table(pdf, [header] + rows + [totals])
+    pdf.fill_color TEXT
+    pdf.font_size(13) { pdf.text company.name, align: :center }
     pdf.move_down 12
+    pdf.font_size(20) { pdf.text "Deductions and Contributions Report", align: :center }
+    pdf.move_down 12
+    pdf.font_size(14) { pdf.text data.qb_date_range_label(include_locations: false), align: :center }
+    pdf.move_down 24
   end
 
-  def render_deductions_section(pdf, items, category, title)
-    all_labels = items.flat_map { |item|
-      item.payroll_item_deductions.select { |d| d.category == category }.map(&:label) +
-        employee_payroll_field_deduction_entries(item, category).map(&:label)
-    }.uniq.sort
-    if category == "post_tax"
-      custom_labels = items.flat_map { |item|
-        Array(item.custom_deductions).filter_map do |deduction|
-          next unless deduction["amount"].to_f.positive?
-
-          deduction["label"].presence || "Other Deduction"
-        end
-      }
-      special_labels = []
-      special_labels << "Tips Paid Out" if items.any? { |item| item.tips_paid_out.to_f.positive? }
-      all_labels = (all_labels + custom_labels + special_labels).uniq.sort
+  def render_aggregate_table(pdf)
+    rows = [ [ "Description", "Type", "Employee deductions", "Company contributions", "Plan total" ] ]
+    data.aggregate_deduction_contribution_rows.each do |entry|
+      employee_amount = entry.employee_amount.to_f
+      company_amount = entry.company_amount.to_f
+      rows << [ entry.description, entry.type, money(employee_amount), money(company_amount), money(employee_amount + company_amount) ]
     end
 
-    return if all_labels.empty?
+    total_employee = data.aggregate_deduction_contribution_rows.sum { |entry| entry.employee_amount.to_f }
+    total_company = data.aggregate_deduction_contribution_rows.sum { |entry| entry.company_amount.to_f }
+    rows << [ "Total", "", money(total_employee), money(total_company), money(total_employee + total_company) ]
 
-    pdf.font_size(11) { pdf.text title, style: :bold, color: HEADER_BG }
-    pdf.move_down 4
+    pdf.table(rows, header: true, width: pdf.bounds.width, column_widths: [ 120, 120, 90, 105, 105 ], cell_style: { overflow: :shrink_to_fit, min_font_size: 6 }) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.6
+      cells.padding = [ 6, 5 ]
+      cells.size = 9
+      cells.text_color = TEXT
+      row(0).background_color = QB_HEADER_BG
+      row(0).font_style = :normal
+      row(-1).background_color = QB_TOTAL_BG
+      columns(2..4).align = :right
+    end
+    pdf.move_down 18
+  end
 
-    header = build_header(["Employee"] + all_labels + ["Total"])
-    rows = items.map do |item|
-      amounts = all_labels.map do |label|
-        deduction_amount_for_label(item, label, category)
+  def render_employee_detail(pdf)
+    return if data.deduction_contribution_entries.empty?
+
+    start_new_page_if_needed(pdf, 140)
+    section_title(pdf, "Employee detail")
+    rows = [ [ "Employee", "Description", "Type", "Employee deductions", "Company contributions", "Plan total" ] ]
+    employee_detail_entries.each do |entry|
+      employee_amount = entry.employee_amount.to_f
+      company_amount = entry.company_amount.to_f
+      rows << [ entry.employee_name, entry.description, entry.type, money(employee_amount), money(company_amount), money(employee_amount + company_amount) ]
+    end
+
+    pdf.table(rows, header: true, width: pdf.bounds.width, column_widths: [ 95, 105, 115, 75, 85, 65 ], cell_style: { overflow: :shrink_to_fit, min_font_size: 5 }) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.5
+      cells.padding = [ 4, 5 ]
+      cells.size = 7.5
+      row(0).background_color = QB_HEADER_BG
+      columns(3..5).align = :right
+    end
+    pdf.move_down 16
+  end
+
+  def render_tax_detail(pdf)
+    start_new_page_if_needed(pdf, 160)
+    section_title(pdf, "Employee tax withholdings detail")
+    rows = [ [ "Employee", "Federal Income", "Social Security", "Medicare", "Additional W/H", "Total taxes" ] ]
+    data.tax_withholding_detail_rows.each do |row|
+      rows << [ row[:employee_name], money(row[:fit]), money(row[:social_security]), money(row[:medicare]), money(row[:additional_withholding]), money(row[:total]) ]
+    end
+    totals = data.tax_withholding_detail_rows.each_with_object(Hash.new(0.0)) do |row, acc|
+      %i[fit social_security medicare additional_withholding total].each { |key| acc[key] += row[key].to_f }
+    end
+    rows << [ "Total", money(totals[:fit]), money(totals[:social_security]), money(totals[:medicare]), money(totals[:additional_withholding]), money(totals[:total]) ]
+
+    pdf.table(rows, header: true, width: pdf.bounds.width) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.5
+      cells.padding = [ 4, 5 ]
+      cells.size = 7.5
+      row(0).background_color = QB_HEADER_BG
+      row(-1).background_color = QB_TOTAL_BG
+      columns(1..5).align = :right
+    end
+  end
+
+  def employee_detail_entries
+    data.deduction_contribution_entries
+      .group_by { |entry| [ entry.employee_name, entry.description, entry.type, entry.reporting_group ] }
+      .map do |(employee_name, description, type, reporting_group), grouped|
+        QuickbooksPayrollReportData::DeductionContributionEntry.new(
+          employee_name: employee_name,
+          description: description,
+          type: type,
+          reporting_group: reporting_group,
+          employee_amount: grouped.sum { |entry| entry.employee_amount.to_f },
+          company_amount: grouped.sum { |entry| entry.company_amount.to_f },
+          bucket: grouped.first&.bucket,
+          source: grouped.map(&:source).uniq.join(", ")
+        )
       end
-      employee_row(item.employee_full_name, amounts + [amounts.sum])
-    end
-
-    col_totals = all_labels.map.with_index do |_, idx|
-      rows.sum { |r| r[idx + 1][:content].to_s.gsub(/[$,]/, "").to_f }
-    end
-    totals = totals_row("TOTALS", col_totals + [col_totals.sum])
-
-    render_table(pdf, [header] + rows + [totals])
-    pdf.move_down 12
+      .sort_by { |entry| [ entry.employee_name.to_s.downcase, entry.description.to_s.downcase ] }
   end
 
-  def render_employer_section(pdf, items)
-    pdf.font_size(11) { pdf.text "Employer Taxes & Contributions", style: :bold, color: HEADER_BG }
-    pdf.move_down 4
-
-    field_labels = items.flat_map { |item| employer_payroll_field_entries(item).map(&:label) }.uniq.sort
-    header = build_header(["Employee", "Employer SS", "Employer Medicare", "401(k) Match"] + field_labels + ["Total"])
-    rows = items.map do |item|
-      ss = item.employer_social_security_tax.to_f
-      med = item.employer_medicare_tax.to_f
-      ret = item.employer_retirement_match.to_f + item.employer_roth_retirement_match.to_f
-      field_amounts = field_labels.map { |label| employer_payroll_field_entries(item).select { |entry| entry.label == label }.sum(&:amount).to_f }
-      employee_row(item.employee_full_name, [ss, med, ret] + field_amounts + [ss + med + ret + field_amounts.sum])
-    end
-
-    field_totals = field_labels.map { |label| items.sum { |i| employer_payroll_field_entries(i).select { |entry| entry.label == label }.sum(&:amount).to_f } }
-    totals = totals_row("TOTALS", [
-      items.sum { |i| i.employer_social_security_tax.to_f },
-      items.sum { |i| i.employer_medicare_tax.to_f },
-      items.sum { |i| i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f },
-      *field_totals,
-      items.sum { |i| i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-                       i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f } + field_totals.sum
-    ])
-
-    render_table(pdf, [header] + rows + [totals])
-    pdf.move_down 12
-  end
-
-  def employer_payroll_field_entries(item)
-    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == "employer_contribution" }
-  end
-
-  def render_grand_totals(pdf, items)
-    pdf.stroke_color HEADER_BG
-    pdf.line_width = 2
-    pdf.stroke_horizontal_rule
-    pdf.line_width = 1
-    pdf.move_down 6
-
-    total_emp_taxes = items.sum { |i| i.withholding_tax.to_f + i.social_security_tax.to_f + i.medicare_tax.to_f }
-    total_deductions = items.sum { |i| employee_deductions_total(i) }
-    total_employer = items.sum { |i|
-      i.employer_social_security_tax.to_f + i.employer_medicare_tax.to_f +
-      i.employer_retirement_match.to_f + i.employer_roth_retirement_match.to_f + employer_payroll_field_entries(i).sum(&:amount).to_f
-    }
-
-    pdf.font_size(10) do
-      pdf.text "Grand Totals", style: :bold, color: HEADER_BG
-      pdf.move_down 4
-      pdf.text "Total Employee Taxes: #{fmt(total_emp_taxes)}"
-      pdf.text "Total Employee Deductions: #{fmt(total_deductions)}"
-      pdf.text "Total Employer Contributions: #{fmt(total_employer)}"
-      pdf.move_down 2
-      pdf.text "Combined Total: #{fmt(total_emp_taxes + total_deductions + total_employer)}", style: :bold
-    end
-  end
-
-  def build_header(labels)
-    labels.map.with_index do |label, idx|
-      {
-        content: label,
-        background_color: HEADER_BG,
-        text_color: "FFFFFF",
-        font_style: :bold,
-        align: idx.zero? ? :left : :right
-      }
-    end
-  end
-
-  def employee_row(name, amounts)
-    [{ content: name }] + amounts.map { |a| { content: fmt(a), align: :right } }
-  end
-
-  def totals_row(label, amounts)
-    [{ content: label, font_style: :bold, background_color: SECTION_BG }] +
-      amounts.map { |a| { content: fmt(a), align: :right, font_style: :bold, background_color: SECTION_BG } }
-  end
-
+  # Compatibility helpers used by existing specs and useful for targeted tests.
   def deduction_amount_for_label(item, label, category)
-    return item.tips_paid_out.to_f if category == "post_tax" && label == "Tips Paid Out"
-
-    field_entries = employee_payroll_field_deduction_entries(item, category).select { |entry| entry.label == label }
-    amount = item.payroll_item_deductions
-      .select { |deduction| deduction.label == label && deduction.category == category }
-      .reject { |deduction| payroll_field_mirrored_deduction?(deduction, field_entries) }
-      .sum(&:amount)
-      .to_f
-    amount += field_entries.sum { |entry| entry.amount.to_f }
-    return amount unless category == "post_tax"
-
-    amount + Array(item.custom_deductions).sum do |deduction|
-      deduction_label = deduction["label"].presence || "Other Deduction"
-      deduction_label == label ? deduction["amount"].to_f : 0
-    end
+    data.deduction_contribution_entries_for_item(item)
+      .select { |entry| entry.bucket == category && entry.description == label }
+      .sum { |entry| entry.employee_amount.to_f }
   end
 
   def employee_deductions_total(item)
-    %w[pre_tax post_tax].sum do |category|
-      labels = item.payroll_item_deductions.select { |deduction| deduction.category == category }.map(&:label) +
-        employee_payroll_field_deduction_entries(item, category).map(&:label)
-      if category == "post_tax"
-        labels += Array(item.custom_deductions).filter_map do |deduction|
-          next unless deduction["amount"].to_f.positive?
+    data.deduction_contribution_entries_for_item(item).sum { |entry| entry.employee_amount.to_f }
+  end
 
-          deduction["label"].presence || "Other Deduction"
-        end
-        labels << "Tips Paid Out" if item.tips_paid_out.to_f.positive?
+  def section_title(pdf, title)
+    pdf.fill_color TEXT
+    pdf.font_size(13) { pdf.text title, style: :bold }
+    pdf.move_down 8
+  end
+
+  def start_new_page_if_needed(pdf, height)
+    pdf.start_new_page if pdf.cursor < height
+  end
+
+  def money(value)
+    "$#{format('%.2f', value.to_f)}"
+  end
+
+  def render_footer(pdf)
+    pdf.repeat(:all) do
+      pdf.canvas do
+        pdf.fill_color MUTED
+        pdf.font_size(8) { pdf.draw_text data.generated_at_label, at: [ pdf.bounds.width / 2 - 70, 18 ] }
       end
-      labels.uniq.sum { |label| deduction_amount_for_label(item, label, category) }
     end
-  end
-
-  def employee_payroll_field_deduction_entries(item, category)
-    treatment = category == "pre_tax" ? "pre_tax_deduction" : "post_tax_deduction"
-    item.payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }
-  end
-
-  def payroll_field_mirrored_deduction?(deduction, field_entries)
-    field_entries.any? && deduction.deduction_type&.name.to_s.start_with?("Payroll Field")
-  end
-
-
-  def render_table(pdf, data)
-    pdf.table(data,
-      width: pdf.bounds.width,
-      cell_style: { size: 7, padding: [3, 4], border_color: BORDER_GRAY, overflow: :shrink_to_fit }
-    )
-  end
-
-  def fmt(value)
-    val = value.to_f
-    if val < 0
-      "-$#{format('%.2f', val.abs)}"
-    else
-      "$#{format('%.2f', val)}"
-    end
+    pdf.number_pages "<page>", at: [ pdf.bounds.right - 20, 18 ], size: 8, align: :right, color: MUTED
   end
 end

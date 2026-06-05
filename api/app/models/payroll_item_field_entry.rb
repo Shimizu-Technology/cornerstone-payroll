@@ -2,6 +2,7 @@
 
 class PayrollItemFieldEntry < ApplicationRecord
   SOURCES = %w[employee_default manual import system].freeze
+  REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :payroll_item
   belongs_to :payroll_field_definition, optional: true
@@ -12,6 +13,7 @@ class PayrollItemFieldEntry < ApplicationRecord
   validates :category, inclusion: { in: PayrollFieldDefinition::CATEGORIES }
   validates :source, inclusion: { in: SOURCES }
   validates :amount, numericality: { greater_than_or_equal_to: 0 }
+  validates :reporting_group, inclusion: { in: REPORTING_GROUPS }, allow_nil: true
   validates :payroll_field_definition_id, uniqueness: { scope: :payroll_item_id }, allow_nil: true
   validate :kind_matches_tax_treatment
 
@@ -40,7 +42,13 @@ class PayrollItemFieldEntry < ApplicationRecord
     tax_treatment == "employer_contribution"
   end
 
+  before_validation :normalize_reporting_group
+
   private
+
+  def normalize_reporting_group
+    self.reporting_group = PayrollReportingGroups.normalize(reporting_group)
+  end
 
   def kind_matches_tax_treatment
     valid = case kind

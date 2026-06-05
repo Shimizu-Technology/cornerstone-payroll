@@ -6,7 +6,7 @@ import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { payrollFieldsApi } from '@/services/api';
-import type { PayrollFieldAmountType, PayrollFieldCategory, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment } from '@/types';
+import type { PayrollFieldAmountType, PayrollFieldCategory, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldReportingGroup, PayrollFieldTaxTreatment } from '@/types';
 
 const kindOptions: Array<{ value: PayrollFieldKind; label: string; description: string }> = [
   { value: 'addition', label: 'Addition', description: 'Adds pay to the employee check.' },
@@ -16,6 +16,12 @@ const kindOptions: Array<{ value: PayrollFieldKind; label: string; description: 
 
 const categoryOptions: PayrollFieldCategory[] = ['loan', 'retirement', 'insurance', 'rent', 'allotment', 'reimbursement', 'garnishment', 'child_support', 'phone', 'benefit', 'other'];
 const amountTypeOptions: PayrollFieldAmountType[] = ['fixed', 'percentage', 'manual'];
+const reportingGroupOptions: Array<{ value: '' | PayrollFieldReportingGroup; label: string; helper: string }> = [
+  { value: '', label: 'No special report group', helper: 'Shows by its field name/category only.' },
+  { value: '401k_pre_tax', label: '401(k) Pre-Tax', helper: 'Traditional 401(k) deduction or match.' },
+  { value: '401k_after_tax', label: '401(k) After Tax / Roth', helper: 'Roth or after-tax 401(k) deduction or match.' },
+  { value: 'retirement_other', label: 'Other Retirement', helper: 'Retirement-related, but not a 401(k) bucket.' },
+];
 
 const treatmentOptionsForKind = (kind: PayrollFieldKind): Array<{ value: PayrollFieldTaxTreatment; label: string }> => {
   if (kind === 'addition') {
@@ -38,6 +44,7 @@ const defaultField: Partial<PayrollFieldDefinition> = {
   kind: 'deduction',
   tax_treatment: 'post_tax_deduction',
   category: 'other',
+  reporting_group: null,
   amount_type: 'fixed',
   default_amount: 0,
   default_percentage: 0,
@@ -94,6 +101,7 @@ export function PayrollFields() {
       const payload = {
         ...draft,
         name: draft.name.trim(),
+        reporting_group: draft.reporting_group || null,
         default_amount: draft.amount_type === 'fixed' ? Number(draft.default_amount || 0) : null,
         default_percentage: draft.amount_type === 'percentage' ? Number(draft.default_percentage || 0) : null,
       };
@@ -171,6 +179,15 @@ export function PayrollFields() {
                 </Select>
               </div>
               <div>
+                <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Report group</label>
+                <Select value={draft.reporting_group || ''} onChange={(e) => setDraft((prev) => ({ ...prev, reporting_group: e.target.value ? e.target.value as PayrollFieldReportingGroup : null }))}>
+                  {reportingGroupOptions.map((option) => <option key={option.value || 'none'} value={option.value}>{option.label}</option>)}
+                </Select>
+                <p className="mt-1 text-xs text-gray-500">
+                  {reportingGroupOptions.find((option) => option.value === (draft.reporting_group || ''))?.helper}
+                </p>
+              </div>
+              <div>
                 <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">Default</label>
                 <Select value={draft.amount_type || 'fixed'} onChange={(e) => setDraft((prev) => ({ ...prev, amount_type: e.target.value as PayrollFieldAmountType }))}>
                   {amountTypeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
@@ -224,6 +241,7 @@ export function PayrollFields() {
                       <div className="mt-4 grid grid-cols-2 gap-3">
                         <MobileField label="Treatment" value={<span className="capitalize">{field.tax_treatment.replace(/_/g, ' ')}</span>} />
                         <MobileField label="Category" value={<span className="capitalize">{field.category.replace(/_/g, ' ')}</span>} />
+                        <MobileField label="Report group" value={field.reporting_group ? reportingGroupOptions.find((option) => option.value === field.reporting_group)?.label || field.reporting_group : 'None'} />
                         <MobileField label="Default" value={field.amount_type === 'percentage' ? `${field.default_percentage || 0}%` : field.amount_type === 'fixed' ? `$${Number(field.default_amount || 0).toFixed(2)}` : 'Manual'} />
                         <MobileField label="Payroll review" value={field.show_in_payroll_grid === false ? 'Hidden' : 'Shown'} />
                       </div>
@@ -235,13 +253,14 @@ export function PayrollFields() {
                   ))}
                 </div>
                 <div className="hidden overflow-x-auto sm:block">
-                  <table className="min-w-[58rem] w-full text-sm">
+                  <table className="min-w-[68rem] w-full text-sm">
                   <thead className="border-b bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                     <tr>
                       <th className="px-4 py-3 text-left">Name</th>
                       <th className="px-4 py-3 text-left">Type</th>
                       <th className="px-4 py-3 text-left">Treatment</th>
                       <th className="px-4 py-3 text-left">Category</th>
+                      <th className="px-4 py-3 text-left">Report group</th>
                       <th className="px-4 py-3 text-right">Default</th>
                       <th className="px-4 py-3 text-left">Status</th>
                       <th className="px-4 py-3 text-right">Actions</th>
@@ -254,6 +273,7 @@ export function PayrollFields() {
                         <td className="px-4 py-3 capitalize">{field.kind.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3 capitalize">{field.tax_treatment.replace(/_/g, ' ')}</td>
                         <td className="px-4 py-3 capitalize">{field.category.replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-3">{field.reporting_group ? reportingGroupOptions.find((option) => option.value === field.reporting_group)?.label || field.reporting_group : '—'}</td>
                         <td className="px-4 py-3 text-right font-mono">
                           {field.amount_type === 'percentage' ? `${field.default_percentage || 0}%` : field.amount_type === 'fixed' ? `$${Number(field.default_amount || 0).toFixed(2)}` : 'Manual'}
                         </td>

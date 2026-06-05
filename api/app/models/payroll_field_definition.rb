@@ -14,6 +14,7 @@ class PayrollFieldDefinition < ApplicationRecord
     garnishment child_support phone benefit other
   ].freeze
   AMOUNT_TYPES = %w[manual fixed percentage].freeze
+  REPORTING_GROUPS = PayrollReportingGroups::GROUPS
 
   belongs_to :company
   has_many :employee_payroll_fields, dependent: :destroy
@@ -25,6 +26,7 @@ class PayrollFieldDefinition < ApplicationRecord
   validates :tax_treatment, inclusion: { in: TAX_TREATMENTS }
   validates :category, inclusion: { in: CATEGORIES }
   validates :amount_type, inclusion: { in: AMOUNT_TYPES }
+  validates :reporting_group, inclusion: { in: REPORTING_GROUPS }, allow_nil: true
   validates :default_amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :default_percentage, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validate :kind_matches_tax_treatment
@@ -62,6 +64,7 @@ class PayrollFieldDefinition < ApplicationRecord
     self.amount_type = "fixed" if amount_type.blank?
     self.default_amount = nil if default_amount.to_s.blank?
     self.default_percentage = nil if default_percentage.to_s.blank?
+    self.reporting_group = PayrollReportingGroups.normalize(reporting_group)
   end
 
   def kind_matches_tax_treatment

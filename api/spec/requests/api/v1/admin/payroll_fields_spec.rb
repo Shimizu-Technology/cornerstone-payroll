@@ -45,6 +45,25 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       expect(json["tax_treatment"]).to eq("post_tax_deduction")
     end
 
+    it "persists report grouping metadata for QuickBooks-style retirement reports" do
+      post "/api/v1/admin/payroll_fields", params: {
+        payroll_field: {
+          name: "401(k) Pre-Tax",
+          kind: "deduction",
+          tax_treatment: "pre_tax_deduction",
+          category: "retirement",
+          reporting_group: PayrollReportingGroups::GROUP_401K_PRE_TAX,
+          amount_type: "percentage",
+          default_percentage: 4.0
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      json = response.parsed_body.fetch("payroll_field")
+      expect(json["reporting_group"]).to eq(PayrollReportingGroups::GROUP_401K_PRE_TAX)
+      expect(PayrollFieldDefinition.find(json["id"]).reporting_group).to eq(PayrollReportingGroups::GROUP_401K_PRE_TAX)
+    end
+
     it "returns validation errors when a duplicate create hits the database unique index" do
       allow_any_instance_of(PayrollFieldDefinition).to receive(:save)
         .and_raise(ActiveRecord::RecordNotUnique.new("duplicate key value violates unique constraint"))

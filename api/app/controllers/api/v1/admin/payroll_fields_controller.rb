@@ -55,7 +55,7 @@ module Api
 
         def payroll_field_params
           params.require(:payroll_field).permit(
-            :name, :description, :kind, :tax_treatment, :category, :amount_type,
+            :name, :description, :kind, :tax_treatment, :category, :reporting_group, :amount_type,
             :default_amount, :default_percentage, :show_in_payroll_grid, :active,
             :sort_order, :payee_name, :reference_number
           )
@@ -70,6 +70,7 @@ module Api
             kind: field.kind,
             tax_treatment: field.tax_treatment,
             category: field.category,
+            reporting_group: field.reporting_group,
             amount_type: field.amount_type,
             default_amount: field.default_amount&.to_f,
             default_percentage: field.default_percentage&.to_f,
