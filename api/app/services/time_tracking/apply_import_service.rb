@@ -253,17 +253,14 @@ module TimeTracking
     end
 
     def wage_rate_for_category(category, active_rates, override_by_category_key)
-      override_rate_id = category_match_keys(category).filter_map { |key| override_by_category_key[key] }.first
+      override_rate_id = category_override_keys(category).filter_map { |key| override_by_category_key[key] }.first
       return active_rates.find { |rate| rate.id == override_rate_id } if override_rate_id.present?
 
       preview_rate_id = category["employee_wage_rate_id"] || category[:employee_wage_rate_id]
       matched = active_rates.find { |rate| rate.id == preview_rate_id.to_i } if preview_rate_id.present?
       return matched if matched
 
-      label_match = active_rates.find do |rate|
-        rate_key = normalize_match_key(rate.label)
-        category_match_keys(category).any? { |key| key == rate_key || key.include?(rate_key) || rate_key.include?(key) }
-      end
+      label_match = label_wage_rate_for_category(category, active_rates)
       return label_match if label_match
 
       effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
@@ -273,12 +270,39 @@ module TimeTracking
       matches_by_rate.one? ? matches_by_rate.first : nil
     end
 
-    def category_match_keys(category)
+    def category_override_keys(category)
       [
         category["source_category_id"] || category[:source_category_id],
         category["key"] || category[:key],
         category["name"] || category[:name]
       ].compact_blank.map { |value| normalize_match_key(value) }
+    end
+
+    def label_wage_rate_for_category(category, active_rates)
+      candidates = wage_rate_label_candidates(category)
+      matches = active_rates.select do |rate|
+        rate_key = normalize_match_key(rate.label)
+        candidates.any? { |candidate| candidate == rate_key || source_prefixed_candidate_matches_rate?(candidate, rate_key) }
+      end
+
+      matches.one? ? matches.first : nil
+    end
+
+    def wage_rate_label_candidates(category)
+      [ category["key"] || category[:key], category["name"] || category[:name] ]
+        .compact_blank
+        .map { |value| normalize_match_key(value) }
+        .reject(&:blank?)
+        .uniq
+    end
+
+    def source_prefixed_candidate_matches_rate?(candidate, rate_key)
+      candidate_tokens = candidate.split
+      rate_tokens = rate_key.split
+      return false if rate_tokens.length < 2
+      return false if candidate_tokens.length <= rate_tokens.length
+
+      candidate_tokens.last(rate_tokens.length) == rate_tokens
     end
 
     def category_total_hours(category)

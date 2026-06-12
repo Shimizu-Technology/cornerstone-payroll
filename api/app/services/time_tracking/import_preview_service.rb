@@ -188,11 +188,7 @@ module TimeTracking
     end
 
     def find_wage_rate_for_category(category, active_rates)
-      normalized_candidates = [ category[:key], category[:name] ].compact.map { |value| normalize_match_key(value) }
-      label_match = active_rates.find do |rate|
-        rate_key = normalize_match_key(rate.label)
-        normalized_candidates.any? { |candidate| candidate == rate_key || candidate.include?(rate_key) || rate_key.include?(candidate) }
-      end
+      label_match = label_wage_rate_for_category(category, active_rates)
       return { wage_rate: label_match, method: "label" } if label_match
 
       effective_rate_cents = category[:effective_rate_cents].presence&.to_i
@@ -200,6 +196,33 @@ module TimeTracking
 
       matches_by_rate = active_rates.select { |rate| (BigDecimal(rate.rate.to_s) * 100).round.to_i == effective_rate_cents }
       matches_by_rate.one? ? { wage_rate: matches_by_rate.first, method: "effective_rate" } : { wage_rate: nil, method: nil }
+    end
+
+    def label_wage_rate_for_category(category, active_rates)
+      candidates = wage_rate_label_candidates(category)
+      matches = active_rates.select do |rate|
+        rate_key = normalize_match_key(rate.label)
+        candidates.any? { |candidate| candidate == rate_key || source_prefixed_candidate_matches_rate?(candidate, rate_key) }
+      end
+
+      matches.one? ? matches.first : nil
+    end
+
+    def wage_rate_label_candidates(category)
+      [ category[:key] || category["key"], category[:name] || category["name"] ]
+        .compact_blank
+        .map { |value| normalize_match_key(value) }
+        .reject(&:blank?)
+        .uniq
+    end
+
+    def source_prefixed_candidate_matches_rate?(candidate, rate_key)
+      candidate_tokens = candidate.split
+      rate_tokens = rate_key.split
+      return false if rate_tokens.length < 2
+      return false if candidate_tokens.length <= rate_tokens.length
+
+      candidate_tokens.last(rate_tokens.length) == rate_tokens
     end
 
     def warnings_for(source_employee, issues, match, split, categories, multi_rate_employee)
