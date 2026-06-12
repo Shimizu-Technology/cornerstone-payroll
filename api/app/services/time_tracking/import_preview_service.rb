@@ -86,10 +86,10 @@ module TimeTracking
       rows = Array(raw["employees"]).filter_map do |source_employee|
         match = matcher.match(source_employee)
         split = overtime.split_days(source_employee["days"])
-        categories = category_buckets_for(split[:days])
-        categories = match_wage_rate_buckets(categories, match[:employee_id])
+        wage_rate_match = match_wage_rate_buckets(category_buckets_for(split[:days]), match[:employee_id])
+        categories = wage_rate_match[:categories]
         issues = source_employee["issues"] || {}
-        warnings = warnings_for(source_employee, issues, match, split, categories)
+        warnings = warnings_for(source_employee, issues, match, split, categories, wage_rate_match[:multi_rate_employee])
 
         next if split[:total_hours].to_f <= 0 && warnings.empty?
 
@@ -165,15 +165,17 @@ module TimeTracking
     end
 
     def match_wage_rate_buckets(categories, employee_id)
-      return categories if categories.blank? || employee_id.blank?
+      match = { categories: categories, multi_rate_employee: false }
+      return match if categories.blank? || employee_id.blank?
 
       employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
-      return categories unless employee&.hourly? || employee&.contractor_hourly?
+      return match unless employee&.hourly? || employee&.contractor_hourly?
 
       active_rates = employee.active_wage_rates.to_a
-      return categories if active_rates.length <= 1
+      return match if active_rates.length <= 1
 
-      categories.map do |category|
+      match[:multi_rate_employee] = true
+      match[:categories] = categories.map do |category|
         wage_rate = find_wage_rate_for_category(category, active_rates)
         category.merge(
           employee_wage_rate_id: wage_rate&.id,
@@ -181,6 +183,7 @@ module TimeTracking
           wage_rate_match_method: wage_rate.present? ? "label" : nil
         )
       end
+      match
     end
 
     def find_wage_rate_for_category(category, active_rates)
@@ -198,7 +201,7 @@ module TimeTracking
       matches_by_rate.one? ? matches_by_rate.first : nil
     end
 
-    def warnings_for(source_employee, issues, match, split, categories)
+    def warnings_for(source_employee, issues, match, split, categories, multi_rate_employee)
       warnings = []
       warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this source user'} to a payroll employee before importing") if match[:employee_id].blank? && split[:total_hours].to_f.positive?
       warnings << warning("pending_entries", "#{issues['pending_count']} pending time entries need review") if issues["pending_count"].to_i.positive?
@@ -210,7 +213,7 @@ module TimeTracking
       Array(categories).each do |category|
         next unless category[:total_hours].to_f.positive?
         next if category[:employee_wage_rate_id].present?
-        next unless multi_rate_employee?(match[:employee_id])
+        next unless multi_rate_employee
 
         warnings << warning(
           "unmapped_wage_rate",
@@ -221,15 +224,6 @@ module TimeTracking
         )
       end
       warnings
-    end
-
-    def multi_rate_employee?(employee_id)
-      return false if employee_id.blank?
-
-      employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
-      return false unless employee&.hourly? || employee&.contractor_hourly?
-
-      employee.active_wage_rates.to_a.length > 1
     end
 
     def normalize_match_key(value)

@@ -41,8 +41,7 @@ module TimeTracking
           end
 
           blocking_warnings = Array(row["warnings"]).reject do |warning|
-            warning_code = warning.respond_to?(:[]) ? warning["code"] || warning[:code] : nil
-            warning_code == "unmatched_employee" && employee_id.present?
+            resolved_warning?(warning, employee_id)
           end
           if blocking_warnings.any?
             results[:errors] << { source_user_id: source_user_id, error: "Resolve time tracking warnings before importing" }
@@ -126,6 +125,21 @@ module TimeTracking
     end
 
     private
+
+    def resolved_warning?(warning, employee_id)
+      warning_code = warning.respond_to?(:[]) ? warning["code"] || warning[:code] : nil
+
+      case warning_code
+      when "unmatched_employee"
+        employee_id.present?
+      when "unmapped_wage_rate"
+        # Wage-rate mappings are supplied at apply time, so the stale preview warning
+        # should not block before build_wage_rate_entries can validate the mapping.
+        true
+      else
+        false
+      end
+    end
 
     def apply_imported_hours!(item, employee, row, override, preserved_holiday_hours:, preserved_pto_hours:)
       categories = Array(row["categories"] || row[:categories]).select { |category| category_total_hours(category).positive? }

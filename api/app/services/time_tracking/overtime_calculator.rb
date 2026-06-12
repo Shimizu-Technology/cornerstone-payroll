@@ -69,15 +69,23 @@ module TimeTracking
       category ||= {}
       regular_present = category.key?("regular_hours") || category.key?(:regular_hours)
       overtime_present = category.key?("overtime_hours") || category.key?(:overtime_hours)
-      total_hours = category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]
+      total_hours = (category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]).to_f
+      regular_hours = regular_present ? (category["regular_hours"] || category[:regular_hours]).to_f : nil
+      overtime_hours = overtime_present ? (category["overtime_hours"] || category[:overtime_hours]).to_f : nil
+
+      if regular_present && !overtime_present
+        overtime_hours = [ total_hours - regular_hours.to_f, 0.0 ].max
+      elsif overtime_present && !regular_present
+        regular_hours = [ total_hours - overtime_hours.to_f, 0.0 ].max
+      end
 
       {
         source_category_id: (category["source_category_id"] || category[:source_category_id]).to_s.presence,
         key: (category["key"] || category[:key]).to_s.presence,
         name: category["name"] || category[:name] || "Uncategorized",
-        total_hours: total_hours.to_f,
-        regular_hours: regular_present ? (category["regular_hours"] || category[:regular_hours]).to_f : nil,
-        overtime_hours: overtime_present ? (category["overtime_hours"] || category[:overtime_hours]).to_f : nil,
+        total_hours: total_hours,
+        regular_hours: regular_hours,
+        overtime_hours: overtime_hours,
         split_provided: regular_present || overtime_present,
         effective_rate_cents: category["effective_rate_cents"] || category[:effective_rate_cents],
         entry_ids: Array(category["entry_ids"] || category[:entry_ids])
@@ -87,21 +95,39 @@ module TimeTracking
     def split_categories(categories, regular_hours:, overtime_hours:, total_hours:)
       return [] if categories.blank?
 
-      if categories.any? { |category| category[:split_provided] }
-        return categories.map { |category| category_payload(category, category[:regular_hours].to_f, category[:overtime_hours].to_f) }
-      end
-
       remaining_regular = regular_hours.to_f
       remaining_overtime = overtime_hours.to_f
-      categories.map do |category|
-        hours = category[:total_hours].to_f
-        regular = [ remaining_regular, hours ].min
-        overtime = [ hours - regular, 0.0 ].max
-        overtime = [ overtime, remaining_overtime ].min
-        remaining_regular -= regular
-        remaining_overtime -= overtime
-        category_payload(category, regular, overtime)
+
+      if categories.any? { |category| category[:split_provided] }
+        categories.each do |category|
+          next unless category[:split_provided]
+
+          remaining_regular -= category[:regular_hours].to_f
+          remaining_overtime -= category[:overtime_hours].to_f
+        end
       end
+
+      remaining_regular = [ remaining_regular, 0.0 ].max
+      remaining_overtime = [ remaining_overtime, 0.0 ].max
+
+      categories.map do |category|
+        if category[:split_provided]
+          category_payload(category, category[:regular_hours].to_f, category[:overtime_hours].to_f)
+        else
+          regular, overtime = split_category_from_remaining(category, remaining_regular, remaining_overtime)
+          remaining_regular -= regular
+          remaining_overtime -= overtime
+          category_payload(category, regular, overtime)
+        end
+      end
+    end
+
+    def split_category_from_remaining(category, remaining_regular, remaining_overtime)
+      hours = category[:total_hours].to_f
+      regular = [ remaining_regular, hours ].min
+      overtime = [ hours - regular, 0.0 ].max
+      overtime = [ overtime, remaining_overtime ].min
+      [ regular, overtime ]
     end
 
     def category_payload(category, regular_hours, overtime_hours)

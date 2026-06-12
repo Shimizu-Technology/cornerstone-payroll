@@ -112,6 +112,69 @@ RSpec.describe TimeTracking::ApplyImportService do
       )
     end
 
+    it "applies user-supplied wage-rate mappings when the stored preview has unmapped wage-rate warnings" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department, email: "cfi@example.com")
+      flight_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      raw_payload = {
+        "source" => "aire_services",
+        "employees" => [
+          {
+            "source_user_id" => "source-1",
+            "email" => "cfi@example.com",
+            "display_name" => "CFI One",
+            "days" => [
+              {
+                "work_date" => pay_period.start_date.iso8601,
+                "hours" => 8.0,
+                "categories" => [
+                  { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0 }
+                ]
+              }
+            ],
+            "issues" => {}
+          }
+        ]
+      }
+      allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(raw_payload)
+      import = TimeTracking::ImportPreviewService.new(pay_period: pay_period, source: source).call
+
+      expect(import.processed_payload.dig("rows", 0, "warnings")).to include(
+        include("code" => "unmapped_wage_rate", "source_category_key" => "simulator")
+      )
+
+      results = described_class.new(
+        import: import,
+        mappings: [
+          {
+            source_user_id: "source-1",
+            employee_id: employee.id,
+            include: true,
+            wage_rate_mappings: [
+              { source_category_id: "sim", source_category_key: "simulator", source_category_name: "Simulator", employee_wage_rate_id: flight_rate.id }
+            ]
+          }
+        ],
+        applied_by: create(:user, company: company)
+      ).call
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.wage_rate_hours).to include(
+        include("employee_wage_rate_id" => flight_rate.id, "regular_hours" => 8.0, "overtime_hours" => 0.0)
+      )
+    end
+
     it "requires source categories to be mapped for multi-rate employees" do
       company = create(:company)
       department = create(:department, company: company)
