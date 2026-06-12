@@ -227,8 +227,27 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(company.reload.next_check_number).to eq(1250)
     end
 
-    it "rejects a starting check number that moves the sequence backward" do
+    it "allows an unused starting check number that is lower than the current sequence" do
       company.update!(next_check_number: 1000)
+
+      expect {
+        post "/api/v1/admin/pay_periods", params: {
+          pay_period: {
+            start_date: Date.today,
+            end_date: Date.today + 14.days,
+            pay_date: Date.today + 17.days,
+            starting_check_number: "999"
+          }
+        }
+      }.to change(PayPeriod, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(company.reload.next_check_number).to eq(999)
+    end
+
+    it "rejects a starting check number that has already been used" do
+      company.update!(next_check_number: 1000)
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee, check_number: "999")
 
       expect {
         post "/api/v1/admin/pay_periods", params: {
@@ -242,7 +261,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       }.not_to change(PayPeriod, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(JSON.parse(response.body)["error"]).to match(/cannot move backward/i)
+      expect(JSON.parse(response.body)["error"]).to match(/already used/i)
     end
 
     it "returns company validation errors when starting check number save fails" do
@@ -889,6 +908,38 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event).to be_present
       expect(assigned_event.check_number).to eq(item.reload.check_number)
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
+    end
+
+    it "skips previously issued intermediate check numbers when committing from a lower sequence" do
+      company.update!(next_check_number: 999)
+      prior_period = PayPeriod.create!(
+        company: company,
+        start_date: pay_period.start_date - 14.days,
+        end_date: pay_period.end_date - 14.days,
+        pay_date: pay_period.pay_date - 14.days,
+        status: "committed",
+        committed_at: Time.current
+      )
+      create(:payroll_item, :with_check,
+        pay_period: prior_period,
+        employee: employee,
+        check_number: "1000")
+      second_employee = create(:employee, company: company, department: department)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: second_employee,
+        gross_pay: 1000.00,
+        net_pay: 840.00,
+        withholding_tax: 80.00,
+        social_security_tax: 62.00,
+        medicare_tax: 14.50)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      assigned_numbers = pay_period.payroll_items.not_voided.pluck(:check_number).sort_by(&:to_i)
+      expect(assigned_numbers).to eq(%w[999 1001])
+      expect(company.reload.next_check_number).to eq(1002)
     end
 
     it "does not enqueue tax sync when the CST ingest integration is not configured" do

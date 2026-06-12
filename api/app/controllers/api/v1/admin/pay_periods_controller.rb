@@ -71,10 +71,12 @@ module Api
             render json: { pay_period: pay_period_json(@pay_period) }, status: :created
           end
         rescue ActiveRecord::RecordInvalid => e
-          errors = e.record&.errors&.full_messages.presence || [e.message]
+          errors = e.record&.errors&.full_messages.presence || [ e.message ]
+          Rails.logger.warn("[PayPeriods#create] Rejected for company=#{current_company_id} user=#{current_user_id}: #{errors.join('; ')}")
           render json: { errors: errors }, status: :unprocessable_entity
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          Rails.logger.warn("[PayPeriods#create] Rejected for company=#{current_company_id} user=#{current_user_id}: #{e.message}")
+          render json: { error: e.message, errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/pay_periods/:id
@@ -930,9 +932,6 @@ module Api
 
           company = @pay_period.company || Company.find(current_company_id)
           company.lock!
-          if number < company.next_check_number.to_i
-            raise ArgumentError, "Starting check number cannot move backward. Current next check number is #{company.next_check_number}."
-          end
 
           issued = PayrollItem.where(company_id: current_company_id, check_number: new_number).exists? ||
             NonEmployeeCheck.where(company_id: current_company_id, check_number: new_number).exists?
