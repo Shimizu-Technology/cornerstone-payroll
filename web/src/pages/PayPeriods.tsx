@@ -130,6 +130,7 @@ export function PayPeriods() {
   const [editError, setEditError] = useState<string | null>(null);
   const [currentNextCheckNumber, setCurrentNextCheckNumber] = useState<number | null>(null);
   const [loadingCheckSettings, setLoadingCheckSettings] = useState(false);
+  const [checkSettingsError, setCheckSettingsError] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
   const [editingPayPeriod, setEditingPayPeriod] = useState<PayPeriod | null>(null);
   const [formData, setFormData] = useState({
@@ -353,16 +354,20 @@ export function PayPeriods() {
   const loadCurrentNextCheckNumber = async () => {
     if (!activeCompanyId) {
       setCurrentNextCheckNumber(null);
+      setCheckSettingsError(null);
       setLoadingCheckSettings(false);
       return;
     }
 
     try {
       setLoadingCheckSettings(true);
+      setCheckSettingsError(null);
       const response = await companiesApi.get(activeCompanyId);
       setCurrentNextCheckNumber(response.company.next_check_number ?? null);
-    } catch {
+    } catch (err) {
       setCurrentNextCheckNumber(null);
+      const message = err instanceof Error ? err.message : 'Unable to load current check settings.';
+      setCheckSettingsError(message);
     } finally {
       setLoadingCheckSettings(false);
     }
@@ -373,6 +378,7 @@ export function PayPeriods() {
     setCreateError(null);
     setError(null);
     setCurrentNextCheckNumber(null);
+    setCheckSettingsError(null);
     setIsCreateOpen(true);
     void loadCurrentNextCheckNumber();
   };
@@ -382,6 +388,7 @@ export function PayPeriods() {
     if (!open) {
       setCreateError(null);
       setCurrentNextCheckNumber(null);
+      setCheckSettingsError(null);
       setLoadingCheckSettings(false);
     }
   };
@@ -844,10 +851,29 @@ export function PayPeriods() {
                 <p className="text-xs text-gray-500">
                   {loadingCheckSettings
                     ? 'Checking current company check settings...'
-                    : currentNextCheckNumber != null
-                      ? `Current next check number is ${currentNextCheckNumber}. Leave blank to use that setting, or enter any unused check number if the physical stock is out of sequence.`
-                      : 'Sets the company’s next payroll check number before checks are assigned. Leave blank to use the current check settings.'}
+                    : checkSettingsError
+                      ? 'Could not load the current next check number. You can still enter an unused check number; the server will reject duplicates.'
+                      : currentNextCheckNumber != null
+                        ? `Current next check number is ${currentNextCheckNumber}. Leave blank to use that setting, or enter any unused check number if the physical stock is out of sequence.`
+                        : 'Sets the company’s next payroll check number before checks are assigned. Leave blank to use the current check settings.'}
                 </p>
+                {checkSettingsError && !loadingCheckSettings && (
+                  <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <div className="space-y-1">
+                        <p>Current check-number settings did not load: {checkSettingsError}</p>
+                        <button
+                          type="button"
+                          className="font-medium underline decoration-amber-400 underline-offset-2 hover:text-amber-900"
+                          onClick={() => void loadCurrentNextCheckNumber()}
+                        >
+                          Try loading settings again
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {formData.starting_check_number.trim() &&
                   currentNextCheckNumber != null &&
                   /^\d+$/.test(formData.starting_check_number.trim()) &&
