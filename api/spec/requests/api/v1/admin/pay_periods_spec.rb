@@ -910,6 +910,38 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
     end
 
+    it "skips previously issued intermediate check numbers when committing from a lower sequence" do
+      company.update!(next_check_number: 999)
+      prior_period = PayPeriod.create!(
+        company: company,
+        start_date: pay_period.start_date - 14.days,
+        end_date: pay_period.end_date - 14.days,
+        pay_date: pay_period.pay_date - 14.days,
+        status: "committed",
+        committed_at: Time.current
+      )
+      create(:payroll_item, :with_check,
+        pay_period: prior_period,
+        employee: employee,
+        check_number: "1000")
+      second_employee = create(:employee, company: company, department: department)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: second_employee,
+        gross_pay: 1000.00,
+        net_pay: 840.00,
+        withholding_tax: 80.00,
+        social_security_tax: 62.00,
+        medicare_tax: 14.50)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      assigned_numbers = pay_period.payroll_items.not_voided.pluck(:check_number).sort_by(&:to_i)
+      expect(assigned_numbers).to eq(%w[999 1001])
+      expect(company.reload.next_check_number).to eq(1002)
+    end
+
     it "does not enqueue tax sync when the CST ingest integration is not configured" do
       allow(PayrollTaxSyncJob).to receive(:perform_later)
 
