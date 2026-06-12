@@ -155,7 +155,14 @@ module TimeTracking
         return nil
       end
 
-      entries_or_error = build_wage_rate_entries(item, categories, active_rates, override)
+      entries_or_error = build_wage_rate_entries(
+        item,
+        categories,
+        active_rates,
+        override,
+        preserved_holiday_hours: preserved_holiday_hours,
+        preserved_pto_hours: preserved_pto_hours
+      )
       return entries_or_error if entries_or_error.is_a?(String)
 
       item.wage_rate_hours = entries_or_error
@@ -166,10 +173,16 @@ module TimeTracking
       nil
     end
 
-    def build_wage_rate_entries(item, categories, active_rates, override)
+    def build_wage_rate_entries(item, categories, active_rates, override, preserved_holiday_hours:, preserved_pto_hours:)
       override_by_category_key = wage_rate_overrides_by_category_key(override)
       existing_by_rate_id = item.wage_rate_hours.index_by { |entry| entry["employee_wage_rate_id"].presence&.to_i }
       category_hours_by_rate_id = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0 } }
+      preserved_scalar_hours = preserved_scalar_hours_by_rate_id(
+        existing_by_rate_id,
+        active_rates,
+        preserved_holiday_hours: preserved_holiday_hours,
+        preserved_pto_hours: preserved_pto_hours
+      )
 
       categories.each do |category|
         rate = wage_rate_for_category(category, active_rates, override_by_category_key)
@@ -183,17 +196,35 @@ module TimeTracking
       active_rates.map do |rate|
         existing = existing_by_rate_id[rate.id] || {}
         imported = category_hours_by_rate_id[rate.id]
+        preserved_scalar = preserved_scalar_hours[rate.id]
         {
           employee_wage_rate_id: rate.id,
           label: rate.label,
           rate: rate.rate,
           regular_hours: round_hours(imported[:regular_hours]),
           overtime_hours: round_hours(imported[:overtime_hours]),
-          holiday_hours: existing["holiday_hours"].to_f,
-          pto_hours: existing["pto_hours"].to_f,
+          holiday_hours: round_hours(existing["holiday_hours"].to_f + preserved_scalar[:holiday_hours]),
+          pto_hours: round_hours(existing["pto_hours"].to_f + preserved_scalar[:pto_hours]),
           is_primary: rate.is_primary,
           active: rate.active
         }
+      end
+    end
+
+    def preserved_scalar_hours_by_rate_id(existing_by_rate_id, active_rates, preserved_holiday_hours:, preserved_pto_hours:)
+      preservation_rate = active_rates.find(&:is_primary) || active_rates.first
+      existing_holiday_hours = existing_by_rate_id.values.sum { |entry| entry["holiday_hours"].to_f }
+      existing_pto_hours = existing_by_rate_id.values.sum { |entry| entry["pto_hours"].to_f }
+      holiday_remainder = [ preserved_holiday_hours.to_f - existing_holiday_hours, 0.0 ].max
+      pto_remainder = [ preserved_pto_hours.to_f - existing_pto_hours, 0.0 ].max
+
+      Hash.new { |hash, key| hash[key] = { holiday_hours: 0.0, pto_hours: 0.0 } }.tap do |hours_by_rate_id|
+        if preservation_rate.present?
+          hours_by_rate_id[preservation_rate.id] = {
+            holiday_hours: holiday_remainder,
+            pto_hours: pto_remainder
+          }
+        end
       end
     end
 
