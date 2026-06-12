@@ -227,8 +227,27 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(company.reload.next_check_number).to eq(1250)
     end
 
-    it "rejects a starting check number that moves the sequence backward" do
+    it "allows an unused starting check number that is lower than the current sequence" do
       company.update!(next_check_number: 1000)
+
+      expect {
+        post "/api/v1/admin/pay_periods", params: {
+          pay_period: {
+            start_date: Date.today,
+            end_date: Date.today + 14.days,
+            pay_date: Date.today + 17.days,
+            starting_check_number: "999"
+          }
+        }
+      }.to change(PayPeriod, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      expect(company.reload.next_check_number).to eq(999)
+    end
+
+    it "rejects a starting check number that has already been used" do
+      company.update!(next_check_number: 1000)
+      create(:payroll_item, company: company, pay_period: pay_period, employee: employee, check_number: "999")
 
       expect {
         post "/api/v1/admin/pay_periods", params: {
@@ -242,7 +261,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       }.not_to change(PayPeriod, :count)
 
       expect(response).to have_http_status(:unprocessable_content)
-      expect(JSON.parse(response.body)["error"]).to match(/cannot move backward/i)
+      expect(JSON.parse(response.body)["error"]).to match(/already used/i)
     end
 
     it "returns company validation errors when starting check number save fails" do

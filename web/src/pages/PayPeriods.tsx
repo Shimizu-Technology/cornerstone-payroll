@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Search } from 'lucide-react';
+import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +27,8 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
-import { payPeriodsApi } from '@/services/api';
+import { useCompany } from '@/contexts/CompanyContext';
+import { companiesApi, payPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 
 function PayPeriodMobileCard({
@@ -104,6 +105,7 @@ function PayPeriodMobileCard({
 export function PayPeriods() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { activeCompanyId } = useCompany();
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +126,10 @@ export function PayPeriods() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [currentNextCheckNumber, setCurrentNextCheckNumber] = useState<number | null>(null);
+  const [loadingCheckSettings, setLoadingCheckSettings] = useState(false);
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
   const [editingPayPeriod, setEditingPayPeriod] = useState<PayPeriod | null>(null);
   const [formData, setFormData] = useState({
@@ -179,24 +185,35 @@ export function PayPeriods() {
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const startingCheckNumber = formData.starting_check_number.trim();
+
     if (formData.end_date <= formData.start_date) {
-      setError('End date must be after start date');
+      setCreateError('End date must be after start date');
       return;
     }
     if (formData.pay_date < formData.end_date) {
-      setError('Pay date must be on or after end date');
+      setCreateError('Pay date must be on or after end date');
+      return;
+    }
+    if (startingCheckNumber && !/^\d+$/.test(startingCheckNumber)) {
+      setCreateError('Starting check number must be numeric.');
       return;
     }
 
     try {
       setIsSubmitting(true);
+      setCreateError(null);
       setError(null);
-      await payPeriodsApi.create(formData);
+      await payPeriodsApi.create({
+        ...formData,
+        starting_check_number: startingCheckNumber,
+      });
       setIsCreateOpen(false);
+      setCurrentNextCheckNumber(null);
       setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '' });
       loadPayPeriods(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create pay period');
+      setCreateError(err instanceof Error ? err.message : 'Failed to create pay period');
     } finally {
       setIsSubmitting(false);
     }
@@ -217,6 +234,8 @@ export function PayPeriods() {
 
   const openEditModal = (period: PayPeriod) => {
     setEditingPayPeriod(period);
+    setEditError(null);
+    setError(null);
     setEditFormData({
       start_date: period.start_date,
       end_date: period.end_date,
@@ -231,11 +250,11 @@ export function PayPeriods() {
     if (!editingPayPeriod) return;
 
     if (editFormData.end_date <= editFormData.start_date) {
-      setError('End date must be after start date');
+      setEditError('End date must be after start date');
       return;
     }
     if (editFormData.pay_date < editFormData.end_date) {
-      setError('Pay date must be on or after end date');
+      setEditError('Pay date must be on or after end date');
       return;
     }
 
@@ -251,13 +270,14 @@ export function PayPeriods() {
 
     try {
       setIsEditSubmitting(true);
+      setEditError(null);
       setError(null);
       await payPeriodsApi.update(editingPayPeriod.id, editFormData);
       setIsEditOpen(false);
       setEditingPayPeriod(null);
       loadPayPeriods(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update pay period');
+      setEditError(err instanceof Error ? err.message : 'Failed to update pay period');
     } finally {
       setIsEditSubmitting(false);
     }
@@ -330,6 +350,50 @@ export function PayPeriods() {
     });
   };
 
+  const loadCurrentNextCheckNumber = async () => {
+    if (!activeCompanyId) {
+      setCurrentNextCheckNumber(null);
+      setLoadingCheckSettings(false);
+      return;
+    }
+
+    try {
+      setLoadingCheckSettings(true);
+      const response = await companiesApi.get(activeCompanyId);
+      setCurrentNextCheckNumber(response.company.next_check_number ?? null);
+    } catch {
+      setCurrentNextCheckNumber(null);
+    } finally {
+      setLoadingCheckSettings(false);
+    }
+  };
+
+  const openCreateModal = () => {
+    setDefaultDates();
+    setCreateError(null);
+    setError(null);
+    setCurrentNextCheckNumber(null);
+    setIsCreateOpen(true);
+    void loadCurrentNextCheckNumber();
+  };
+
+  const handleCreateOpenChange = (open: boolean) => {
+    setIsCreateOpen(open);
+    if (!open) {
+      setCreateError(null);
+      setCurrentNextCheckNumber(null);
+      setLoadingCheckSettings(false);
+    }
+  };
+
+  const handleEditOpenChange = (open: boolean) => {
+    setIsEditOpen(open);
+    if (!open) {
+      setEditError(null);
+      setEditingPayPeriod(null);
+    }
+  };
+
   const visiblePayPeriods = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const filtered = normalizedSearch
@@ -396,7 +460,7 @@ export function PayPeriods() {
         title="Pay Periods"
         description="Manage payroll periods and processing"
         actions={
-          <Button onClick={() => { setDefaultDates(); setIsCreateOpen(true); }}>
+          <Button onClick={openCreateModal}>
             New Pay Period
           </Button>
         }
@@ -718,7 +782,7 @@ export function PayPeriods() {
       </div>
 
       {/* Create Pay Period Modal */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+      <Dialog open={isCreateOpen} onOpenChange={handleCreateOpenChange}>
         <DialogContent>
           <form onSubmit={handleCreate}>
             <DialogHeader>
@@ -727,6 +791,14 @@ export function PayPeriods() {
                 Create a new pay period. Default dates are set for a biweekly schedule.
               </DialogDescription>
             </DialogHeader>
+            {createError && (
+              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <div className="flex gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <p>{createError}</p>
+                </div>
+              </div>
+            )}
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -770,8 +842,20 @@ export function PayPeriods() {
                   placeholder="Use current check settings"
                 />
                 <p className="text-xs text-gray-500">
-                  Sets the company’s next payroll check number before checks are assigned.
+                  {loadingCheckSettings
+                    ? 'Checking current company check settings...'
+                    : currentNextCheckNumber != null
+                      ? `Current next check number is ${currentNextCheckNumber}. Leave blank to use that setting, or enter any unused check number if the physical stock is out of sequence.`
+                      : 'Sets the company’s next payroll check number before checks are assigned. Leave blank to use the current check settings.'}
                 </p>
+                {formData.starting_check_number.trim() &&
+                  currentNextCheckNumber != null &&
+                  /^\d+$/.test(formData.starting_check_number.trim()) &&
+                  Number(formData.starting_check_number.trim()) < currentNextCheckNumber && (
+                    <p className="text-xs font-medium text-amber-700">
+                      This will move the sequence to a lower check number. That is allowed, but the number must not already be used.
+                    </p>
+                  )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes (optional)</Label>
@@ -784,7 +868,7 @@ export function PayPeriods() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsCreateOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => handleCreateOpenChange(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>
@@ -796,13 +880,7 @@ export function PayPeriods() {
       </Dialog>
 
       {/* Edit Pay Period Modal */}
-      <Dialog
-        open={isEditOpen}
-        onOpenChange={(open) => {
-          setIsEditOpen(open);
-          if (!open) setEditingPayPeriod(null);
-        }}
-      >
+      <Dialog open={isEditOpen} onOpenChange={handleEditOpenChange}>
         <DialogContent>
           <form onSubmit={handleEdit}>
             <DialogHeader>
@@ -811,6 +889,14 @@ export function PayPeriods() {
                 Update pay period dates and notes before commit.
               </DialogDescription>
             </DialogHeader>
+            {editError && (
+              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                <div className="flex gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  <p>{editError}</p>
+                </div>
+              </div>
+            )}
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -864,7 +950,7 @@ export function PayPeriods() {
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsEditOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={isEditSubmitting}>
