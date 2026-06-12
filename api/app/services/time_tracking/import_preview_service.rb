@@ -176,11 +176,12 @@ module TimeTracking
 
       match[:multi_rate_employee] = true
       match[:categories] = categories.map do |category|
-        wage_rate = find_wage_rate_for_category(category, active_rates)
+        wage_rate_match = find_wage_rate_for_category(category, active_rates)
+        wage_rate = wage_rate_match[:wage_rate]
         category.merge(
           employee_wage_rate_id: wage_rate&.id,
           wage_rate_label: wage_rate&.label,
-          wage_rate_match_method: wage_rate.present? ? "label" : nil
+          wage_rate_match_method: wage_rate_match[:method]
         )
       end
       match
@@ -192,13 +193,13 @@ module TimeTracking
         rate_key = normalize_match_key(rate.label)
         normalized_candidates.any? { |candidate| candidate == rate_key || candidate.include?(rate_key) || rate_key.include?(candidate) }
       end
-      return label_match if label_match
+      return { wage_rate: label_match, method: "label" } if label_match
 
       effective_rate_cents = category[:effective_rate_cents].presence&.to_i
-      return if effective_rate_cents.blank?
+      return { wage_rate: nil, method: nil } if effective_rate_cents.blank?
 
       matches_by_rate = active_rates.select { |rate| (BigDecimal(rate.rate.to_s) * 100).round.to_i == effective_rate_cents }
-      matches_by_rate.one? ? matches_by_rate.first : nil
+      matches_by_rate.one? ? { wage_rate: matches_by_rate.first, method: "effective_rate" } : { wage_rate: nil, method: nil }
     end
 
     def warnings_for(source_employee, issues, match, split, categories, multi_rate_employee)

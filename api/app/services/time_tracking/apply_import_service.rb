@@ -16,6 +16,11 @@ module TimeTracking
 
       rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
       mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
+      employee_ids = rows.filter_map do |row|
+        source_user_id = row["source_user_id"].to_s
+        override = mapping_by_source_id[source_user_id] || {}
+        (override[:employee_id] || override["employee_id"] || row["employee_id"]).presence&.to_i
+      end.uniq
       results = { applied: [], skipped: [], errors: [] }
       seen_employee_ids = Set.new
       current_import_source = import_source_key
@@ -23,6 +28,8 @@ module TimeTracking
 
       @import.with_lock do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
+
+        employees_by_id = Employee.active.includes(:employee_wage_rates).where(id: employee_ids, company_id: @company.id).index_by(&:id)
 
         rows.each do |row|
           source_user_id = row["source_user_id"].to_s
@@ -48,7 +55,7 @@ module TimeTracking
             next
           end
 
-          employee = Employee.active.find_by(id: employee_id, company_id: @company.id)
+          employee = employees_by_id[employee_id.to_i]
           unless employee
             results[:errors] << { source_user_id: source_user_id, employee_id: employee_id, error: "Employee not found or inactive" }
             next
