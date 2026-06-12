@@ -774,6 +774,22 @@ export interface TimeTrackingWarning {
   message: string;
   source_user_id?: string;
   display_name?: string;
+  source_category_id?: string | null;
+  source_category_key?: string | null;
+  source_category_name?: string | null;
+}
+
+export interface TimeTrackingPreviewCategory {
+  source_category_id?: string | null;
+  key?: string | null;
+  name: string;
+  hours?: number;
+  total_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
+  effective_rate_cents?: number | null;
+  employee_wage_rate_id?: number | null;
+  wage_rate_label?: string | null;
 }
 
 export interface TimeTrackingPreviewRow {
@@ -787,6 +803,7 @@ export interface TimeTrackingPreviewRow {
   regular_hours: number;
   overtime_hours: number;
   total_hours: number;
+  categories?: TimeTrackingPreviewCategory[];
   issues: Record<string, unknown>;
   warnings: TimeTrackingWarning[];
   ready: boolean;
@@ -966,7 +983,7 @@ export const payPeriodsApi = {
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
   previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
-  applyTimeTrackingImport: (id: number, data: { import_id: number; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean }> }) =>
+  applyTimeTrackingImport: (id: number, data: { import_id: number; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; employee_wage_rate_id: number | null }> }> }) =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
 };
 

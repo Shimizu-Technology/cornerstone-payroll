@@ -91,11 +91,19 @@ module TimeTracking
           preserved_holiday_hours = item.holiday_hours.to_f
           preserved_pto_hours = item.pto_hours.to_f
 
-          item.clear_wage_rate_hours!
-          item.hours_worked = row["regular_hours"].to_f
-          item.overtime_hours = row["overtime_hours"].to_f
-          item.holiday_hours = preserved_holiday_hours
-          item.pto_hours = preserved_pto_hours
+          hours_error = apply_imported_hours!(
+            item,
+            employee,
+            row,
+            override,
+            preserved_holiday_hours: preserved_holiday_hours,
+            preserved_pto_hours: preserved_pto_hours
+          )
+          if hours_error.present?
+            results[:errors] << { source_user_id: source_user_id, employee_id: employee.id, error: hours_error }
+            next
+          end
+
           item.import_source = current_import_source
           item.save!
 
@@ -118,6 +126,132 @@ module TimeTracking
     end
 
     private
+
+    def apply_imported_hours!(item, employee, row, override, preserved_holiday_hours:, preserved_pto_hours:)
+      categories = Array(row["categories"] || row[:categories]).select { |category| category_total_hours(category).positive? }
+      active_rates = employee.active_wage_rates.to_a
+      uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && active_rates.length > 1 && categories.any?
+
+      unless uses_multi_rate
+        item.clear_wage_rate_hours!
+        item.hours_worked = row["regular_hours"].to_f
+        item.overtime_hours = row["overtime_hours"].to_f
+        item.holiday_hours = preserved_holiday_hours
+        item.pto_hours = preserved_pto_hours
+        return nil
+      end
+
+      entries_or_error = build_wage_rate_entries(item, categories, active_rates, override)
+      return entries_or_error if entries_or_error.is_a?(String)
+
+      item.wage_rate_hours = entries_or_error
+      item.hours_worked = entries_or_error.sum { |entry| entry[:regular_hours].to_f }
+      item.overtime_hours = entries_or_error.sum { |entry| entry[:overtime_hours].to_f }
+      item.holiday_hours = entries_or_error.sum { |entry| entry[:holiday_hours].to_f }
+      item.pto_hours = entries_or_error.sum { |entry| entry[:pto_hours].to_f }
+      nil
+    end
+
+    def build_wage_rate_entries(item, categories, active_rates, override)
+      override_by_category_key = wage_rate_overrides_by_category_key(override)
+      existing_by_rate_id = item.wage_rate_hours.index_by { |entry| entry["employee_wage_rate_id"].presence&.to_i }
+      category_hours_by_rate_id = Hash.new { |hash, key| hash[key] = { regular_hours: 0.0, overtime_hours: 0.0 } }
+
+      categories.each do |category|
+        rate = wage_rate_for_category(category, active_rates, override_by_category_key)
+        return "Map #{category_name(category)} to one of this employee's payroll earning types before importing." unless rate
+
+        bucket = category_hours_by_rate_id[rate.id]
+        bucket[:regular_hours] += category_regular_hours(category)
+        bucket[:overtime_hours] += category_overtime_hours(category)
+      end
+
+      active_rates.map do |rate|
+        existing = existing_by_rate_id[rate.id] || {}
+        imported = category_hours_by_rate_id[rate.id]
+        {
+          employee_wage_rate_id: rate.id,
+          label: rate.label,
+          rate: rate.rate,
+          regular_hours: round_hours(imported[:regular_hours]),
+          overtime_hours: round_hours(imported[:overtime_hours]),
+          holiday_hours: existing["holiday_hours"].to_f,
+          pto_hours: existing["pto_hours"].to_f,
+          is_primary: rate.is_primary,
+          active: rate.active
+        }
+      end
+    end
+
+    def wage_rate_overrides_by_category_key(override)
+      Array(override[:wage_rate_mappings] || override["wage_rate_mappings"]).each_with_object({}) do |mapping, acc|
+        mapping = mapping.to_unsafe_h if mapping.respond_to?(:to_unsafe_h)
+        mapping = mapping.to_h if mapping.respond_to?(:to_h)
+        rate_id = mapping["employee_wage_rate_id"] || mapping[:employee_wage_rate_id]
+        next if rate_id.blank?
+
+        [
+          mapping["source_category_id"] || mapping[:source_category_id],
+          mapping["source_category_key"] || mapping[:source_category_key],
+          mapping["source_category_name"] || mapping[:source_category_name]
+        ].compact_blank.each do |value|
+          acc[normalize_match_key(value)] = rate_id.to_i
+        end
+      end
+    end
+
+    def wage_rate_for_category(category, active_rates, override_by_category_key)
+      override_rate_id = category_match_keys(category).filter_map { |key| override_by_category_key[key] }.first
+      return active_rates.find { |rate| rate.id == override_rate_id } if override_rate_id.present?
+
+      preview_rate_id = category["employee_wage_rate_id"] || category[:employee_wage_rate_id]
+      matched = active_rates.find { |rate| rate.id == preview_rate_id.to_i } if preview_rate_id.present?
+      return matched if matched
+
+      label_match = active_rates.find do |rate|
+        rate_key = normalize_match_key(rate.label)
+        category_match_keys(category).any? { |key| key == rate_key || key.include?(rate_key) || rate_key.include?(key) }
+      end
+      return label_match if label_match
+
+      effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
+      return if effective_rate_cents.blank?
+
+      matches_by_rate = active_rates.select { |rate| (BigDecimal(rate.rate.to_s) * 100).round.to_i == effective_rate_cents.to_i }
+      matches_by_rate.one? ? matches_by_rate.first : nil
+    end
+
+    def category_match_keys(category)
+      [
+        category["source_category_id"] || category[:source_category_id],
+        category["key"] || category[:key],
+        category["name"] || category[:name]
+      ].compact_blank.map { |value| normalize_match_key(value) }
+    end
+
+    def category_total_hours(category)
+      (category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]).to_f
+    end
+
+    def category_regular_hours(category)
+      (category["regular_hours"] || category[:regular_hours]).to_f
+    end
+
+    def category_overtime_hours(category)
+      (category["overtime_hours"] || category[:overtime_hours]).to_f
+    end
+
+    def category_name(category)
+      category["name"] || category[:name] || "this source category"
+    end
+
+    def normalize_match_key(value)
+      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
+    end
+
+    def round_hours(value)
+      BigDecimal(value.to_s).round(2).to_f
+    end
 
     def import_source_key
       "time_tracking:#{@source.source_type}:#{@source.id}"

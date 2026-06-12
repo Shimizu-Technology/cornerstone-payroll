@@ -23,10 +23,16 @@ module TimeTracking
 
           next unless row[:date].between?(@period_start, @period_end)
 
+          regular = round(regular)
+          overtime = round(overtime)
           result[:regular_hours] += regular
           result[:overtime_hours] += overtime
           result[:total_hours] += hours
-          result[:days] << row.merge(regular_hours: round(regular), overtime_hours: round(overtime))
+          result[:days] << row.merge(
+            regular_hours: regular,
+            overtime_hours: overtime,
+            categories: split_categories(row[:categories], regular_hours: regular, overtime_hours: overtime, total_hours: hours)
+          )
         end
       end
 
@@ -48,13 +54,69 @@ module TimeTracking
 
     def normalize_days(days)
       Array(days).map do |day|
+        categories = Array(day["categories"]).map { |category| normalize_category(category) }
         {
           date: Date.parse(day["work_date"].to_s),
-          hours: day["hours"].to_f,
+          hours: day["hours"].presence&.to_f || categories.sum { |category| category[:total_hours].to_f },
           entry_ids: Array(day["entry_ids"]),
-          categories: Array(day["categories"])
+          categories: categories
         }
       end
+    end
+
+    def normalize_category(category)
+      category = category.to_h if category.respond_to?(:to_h)
+      category ||= {}
+      regular_present = category.key?("regular_hours") || category.key?(:regular_hours)
+      overtime_present = category.key?("overtime_hours") || category.key?(:overtime_hours)
+      total_hours = category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]
+
+      {
+        source_category_id: (category["source_category_id"] || category[:source_category_id]).to_s.presence,
+        key: (category["key"] || category[:key]).to_s.presence,
+        name: category["name"] || category[:name] || "Uncategorized",
+        total_hours: total_hours.to_f,
+        regular_hours: regular_present ? (category["regular_hours"] || category[:regular_hours]).to_f : nil,
+        overtime_hours: overtime_present ? (category["overtime_hours"] || category[:overtime_hours]).to_f : nil,
+        split_provided: regular_present || overtime_present,
+        effective_rate_cents: category["effective_rate_cents"] || category[:effective_rate_cents],
+        entry_ids: Array(category["entry_ids"] || category[:entry_ids])
+      }
+    end
+
+    def split_categories(categories, regular_hours:, overtime_hours:, total_hours:)
+      return [] if categories.blank?
+
+      if categories.any? { |category| category[:split_provided] }
+        return categories.map { |category| category_payload(category, category[:regular_hours].to_f, category[:overtime_hours].to_f) }
+      end
+
+      remaining_regular = regular_hours.to_f
+      remaining_overtime = overtime_hours.to_f
+      categories.map do |category|
+        hours = category[:total_hours].to_f
+        regular = [ remaining_regular, hours ].min
+        overtime = [ hours - regular, 0.0 ].max
+        overtime = [ overtime, remaining_overtime ].min
+        remaining_regular -= regular
+        remaining_overtime -= overtime
+        category_payload(category, regular, overtime)
+      end
+    end
+
+    def category_payload(category, regular_hours, overtime_hours)
+      total_hours = round(regular_hours.to_f + overtime_hours.to_f)
+      {
+        source_category_id: category[:source_category_id],
+        key: category[:key],
+        name: category[:name],
+        hours: total_hours,
+        total_hours: total_hours,
+        regular_hours: round(regular_hours),
+        overtime_hours: round(overtime_hours),
+        effective_rate_cents: category[:effective_rate_cents],
+        entry_ids: category[:entry_ids]
+      }
     end
 
     def week_start(date)

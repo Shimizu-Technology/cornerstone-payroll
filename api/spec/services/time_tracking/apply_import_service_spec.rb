@@ -59,6 +59,107 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect(item.pto_hours).to eq(4.0)
     end
 
+    it "applies source category buckets to payroll wage rate hours for multi-rate employees" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      flight_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("multi-rate-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 22.0,
+              "overtime_hours" => 3.0,
+              "categories" => [
+                { "source_category_id" => "flight", "key" => "flight_instruction", "name" => "Flight Instruction", "regular_hours" => 10.0, "overtime_hours" => 3.0, "total_hours" => 13.0, "employee_wage_rate_id" => flight_rate.id },
+                { "source_category_id" => "ground", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 12.0, "overtime_hours" => 0.0, "total_hours" => 12.0, "employee_wage_rate_id" => ground_rate.id }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.hours_worked).to eq(22.0)
+      expect(item.overtime_hours).to eq(3.0)
+      expect(item.wage_rate_hours).to contain_exactly(
+        include("employee_wage_rate_id" => flight_rate.id, "label" => "Flight Instruction", "rate" => 75.0, "regular_hours" => 10.0, "overtime_hours" => 3.0),
+        include("employee_wage_rate_id" => ground_rate.id, "label" => "Ground School", "rate" => 45.0, "regular_hours" => 12.0, "overtime_hours" => 0.0)
+      )
+    end
+
+    it "requires source categories to be mapped for multi-rate employees" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("unmapped-multi-rate-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0 }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(source_user_id: "source-1", employee_id: employee.id, error: "Map Simulator to one of this employee's payroll earning types before importing.")
+      )
+      expect(pay_period.payroll_items.find_by(employee: employee)).to be_nil
+    end
+
     it "treats an unmatched-employee warning as resolved when an employee mapping is supplied" do
       company = create(:company)
       department = create(:department, company: company)
