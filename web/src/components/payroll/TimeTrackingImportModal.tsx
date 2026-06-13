@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
-import type { TimeTrackingImportData, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
+import type { TimeTrackingImportData, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
 interface Props {
@@ -14,6 +14,20 @@ interface Props {
 
 type Step = 'select' | 'review' | 'done';
 
+type WageRateMappingState = Map<string, Record<string, number | null>>;
+
+function categoryMappingKey(category: TimeTrackingPreviewCategory) {
+  return [category.source_category_id || '', category.key || '', category.name || ''].join('|');
+}
+
+function categoryHours(category: TimeTrackingPreviewCategory) {
+  return Number(category.total_hours ?? category.hours ?? 0);
+}
+
+function normalizeMatchKey(value: string | null | undefined) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
   const [step, setStep] = useState<Step>('select');
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
@@ -22,6 +36,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const [endDate, setEndDate] = useState(payPeriod.end_date);
   const [preview, setPreview] = useState<TimeTrackingImportData | null>(null);
   const [mappings, setMappings] = useState<Map<string, number | null>>(new Map());
+  const [wageRateMappings, setWageRateMappings] = useState<WageRateMappingState>(new Map());
   const [includedRows, setIncludedRows] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
@@ -34,6 +49,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setStep('select');
     setPreview(null);
     setMappings(new Map());
+    setWageRateMappings(new Map());
     setIncludedRows(new Set());
     setError(null);
     setStartDate(payPeriod.start_date);
@@ -54,15 +70,54 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   }, [open, payPeriod.start_date, payPeriod.end_date]);
 
   const rows: TimeTrackingPreviewRow[] = useMemo(() => preview?.processed_payload?.rows || [], [preview]);
+  const employeeById = useMemo(() => new Map(employees.map((employee) => [employee.id, employee])), [employees]);
+  const activeWageRatesFor = (employeeId: number | null | undefined) => {
+    const employee = employeeId ? employeeById.get(employeeId) : null;
+    return (employee?.wage_rates || []).filter((rate) => rate.active !== false && rate.id != null);
+  };
+  const defaultWageRateMappingFor = (row: TimeTrackingPreviewRow, employeeId: number | null): Record<string, number | null> => {
+    const activeRates = activeWageRatesFor(employeeId);
+    const ratesByLabel = new Map(activeRates.map((rate) => [normalizeMatchKey(rate.label), rate.id ?? null]));
+    const onlyRateId = activeRates.length === 1 ? activeRates[0]?.id ?? null : null;
+
+    return (row.categories || []).reduce<Record<string, number | null>>((acc, category) => {
+      const backendMatch = activeRates.some((rate) => rate.id === category.employee_wage_rate_id) ? category.employee_wage_rate_id ?? null : null;
+      const labelMatch = ratesByLabel.get(normalizeMatchKey(category.name)) ?? ratesByLabel.get(normalizeMatchKey(category.key || '')) ?? null;
+      const cents = category.effective_rate_cents;
+      const rateMatches = cents == null ? [] : activeRates.filter((rate) => {
+        if (rate.rate == null) return false;
+
+        const numericRate = Number(rate.rate);
+        return Number.isFinite(numericRate) && Math.round(numericRate * 100) === cents;
+      });
+      const uniqueRateMatch = rateMatches.length === 1 ? rateMatches[0]?.id ?? null : null;
+      acc[categoryMappingKey(category)] = backendMatch ?? labelMatch ?? uniqueRateMatch ?? onlyRateId;
+      return acc;
+    }, {});
+  };
+  const rowWageRateMappingsComplete = (row: TimeTrackingPreviewRow) => {
+    const employeeId = mappings.get(row.source_user_id) || null;
+    const activeRates = activeWageRatesFor(employeeId);
+    const categories = (row.categories || []).filter((category) => categoryHours(category) > 0);
+    if (activeRates.length <= 1 || categories.length === 0) return true;
+
+    const rowMappings = wageRateMappings.get(row.source_user_id) || {};
+    return categories.every((category) => Boolean(rowMappings[categoryMappingKey(category)]));
+  };
   const effectiveWarningsFor = (row: TimeTrackingPreviewRow) => (row.warnings || []).filter((warning) => {
-    return !(warning.code === 'unmatched_employee' && mappings.get(row.source_user_id));
+    if (warning.code === 'unmatched_employee' && mappings.get(row.source_user_id)) return false;
+    if (warning.code === 'unmapped_wage_rate' && rowWageRateMappingsComplete(row)) return false;
+    return true;
   });
   const includedPreviewRows = rows.filter((row) => includedRows.has(row.source_user_id));
   const mappedIncludedRows = includedPreviewRows.filter((row) => mappings.get(row.source_user_id));
   const includedEmployeeIds = mappedIncludedRows.map((row) => mappings.get(row.source_user_id)).filter((id): id is number => Boolean(id));
   const duplicateEmployeeIds = new Set(includedEmployeeIds.filter((id, idx) => includedEmployeeIds.indexOf(id) !== idx));
-  const readyRows = mappedIncludedRows.filter((row) => effectiveWarningsFor(row).length === 0 && !duplicateEmployeeIds.has(mappings.get(row.source_user_id) as number)).length;
-  const warningCount = mappedIncludedRows.reduce((sum, row) => sum + effectiveWarningsFor(row).length, 0);
+  const rowsNeedingWageRateMapping = mappedIncludedRows.filter((row) => !rowWageRateMappingsComplete(row));
+  const rowsNeedingWageRateMappingCount = rowsNeedingWageRateMapping.length;
+  const rowsNeedingFrontendOnlyWageRateWarning = rowsNeedingWageRateMapping.filter((row) => !(row.warnings || []).some((warning) => warning.code === 'unmapped_wage_rate')).length;
+  const readyRows = mappedIncludedRows.filter((row) => effectiveWarningsFor(row).length === 0 && rowWageRateMappingsComplete(row) && !duplicateEmployeeIds.has(mappings.get(row.source_user_id) as number)).length;
+  const warningCount = mappedIncludedRows.reduce((sum, row) => sum + effectiveWarningsFor(row).length, 0) + rowsNeedingFrontendOnlyWageRateWarning;
   const duplicateMappingCount = mappedIncludedRows.filter((row) => duplicateEmployeeIds.has(mappings.get(row.source_user_id) as number)).length;
   const excludedCount = rows.length - includedPreviewRows.length;
   const mappedIncludedCount = mappedIncludedRows.length;
@@ -89,12 +144,15 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       });
       setPreview(res.import);
       const next = new Map<string, number | null>();
+      const nextWageRateMappings: WageRateMappingState = new Map();
       const included = new Set<string>();
       (res.import.processed_payload.rows || []).forEach((row) => {
         next.set(row.source_user_id, row.employee_id);
+        nextWageRateMappings.set(row.source_user_id, defaultWageRateMappingFor(row, row.employee_id));
         included.add(row.source_user_id);
       });
       setMappings(next);
+      setWageRateMappings(nextWageRateMappings);
       setIncludedRows(included);
       setStep('review');
     } catch (err) {
@@ -111,11 +169,18 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     try {
       const applyMappings = rows.map((row) => {
         const employeeId = mappings.get(row.source_user_id) || null;
+        const rowWageRateMappings = wageRateMappings.get(row.source_user_id) || {};
 
         return {
           source_user_id: row.source_user_id,
           employee_id: employeeId,
           include: includedRows.has(row.source_user_id) && Boolean(employeeId),
+          wage_rate_mappings: (row.categories || []).map((category) => ({
+            source_category_id: category.source_category_id,
+            source_category_key: category.key,
+            source_category_name: category.name,
+            employee_wage_rate_id: rowWageRateMappings[categoryMappingKey(category)] || null,
+          })),
         };
       });
 
@@ -223,6 +288,12 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 </div>
               )}
 
+              {rowsNeedingWageRateMappingCount > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {rowsNeedingWageRateMappingCount} included row{rowsNeedingWageRateMappingCount === 1 ? '' : 's'} need source categories mapped to payroll earning types before import.
+                </div>
+              )}
+
               <div className="overflow-hidden rounded-lg border">
                 <table className="min-w-full divide-y divide-gray-200 text-sm">
                   <thead className="bg-gray-50">
@@ -242,6 +313,10 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                       const mapped = Boolean(mappedEmployeeId);
                       const duplicateMapping = mappedEmployeeId != null && duplicateEmployeeIds.has(mappedEmployeeId);
                       const effectiveWarnings = effectiveWarningsFor(row);
+                      const activeWageRates = activeWageRatesFor(mappedEmployeeId);
+                      const rowCategories = (row.categories || []).filter((category) => categoryHours(category) > 0);
+                      const needsWageRateMapping = included && mapped && activeWageRates.length > 1 && rowCategories.length > 0;
+                      const rowWageRateMappings = wageRateMappings.get(row.source_user_id) || {};
 
                       return (
                       <tr key={row.source_user_id} className={!included ? 'bg-gray-50 opacity-70' : (!mapped || effectiveWarnings.length) ? 'bg-amber-50' : ''}>
@@ -269,11 +344,28 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                         <td className="px-4 py-2">
                           <div className="font-medium text-gray-900">{row.source_display_name}</div>
                           {row.source_email && <div className="text-xs text-gray-500">{row.source_email}</div>}
+                          {rowCategories.length > 0 && (
+                            <div className="mt-2 space-y-1 text-xs text-gray-500">
+                              {rowCategories.map((category) => (
+                                <div key={categoryMappingKey(category)}>
+                                  {category.name}: {Number(category.regular_hours || 0).toFixed(2)} reg / {Number(category.overtime_hours || 0).toFixed(2)} OT
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-2">
                           <select
                             value={mappings.get(row.source_user_id) ?? ''}
-                            onChange={(e) => setMappings((prev) => new Map(prev).set(row.source_user_id, e.target.value ? Number(e.target.value) : null))}
+                            onChange={(e) => {
+                              const nextEmployeeId = e.target.value ? Number(e.target.value) : null;
+                              setMappings((prev) => new Map(prev).set(row.source_user_id, nextEmployeeId));
+                              setWageRateMappings((prev) => {
+                                const next = new Map(prev);
+                                next.set(row.source_user_id, defaultWageRateMappingFor(row, nextEmployeeId));
+                                return next;
+                              });
+                            }}
                             disabled={!included}
                             className="w-full rounded border px-2 py-1 text-sm disabled:bg-gray-100 disabled:text-gray-500"
                           >
@@ -283,6 +375,33 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                             ))}
                           </select>
                           <div className="mt-1 text-xs text-gray-500">{row.match_method} · {Math.round((row.match_score || 0) * 100)}%</div>
+                          {needsWageRateMapping && (
+                            <div className="mt-3 space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                              <div className="text-xs font-medium text-amber-900">Map source categories to payroll earning types</div>
+                              {rowCategories.map((category) => (
+                                <label key={categoryMappingKey(category)} className="block text-xs text-amber-900">
+                                  <span className="mb-1 block">{category.name}</span>
+                                  <select
+                                    value={rowWageRateMappings[categoryMappingKey(category)] ?? ''}
+                                    onChange={(e) => setWageRateMappings((prev) => {
+                                      const next = new Map(prev);
+                                      next.set(row.source_user_id, {
+                                        ...(next.get(row.source_user_id) || {}),
+                                        [categoryMappingKey(category)]: e.target.value ? Number(e.target.value) : null,
+                                      });
+                                      return next;
+                                    })}
+                                    className="w-full rounded border border-amber-200 bg-white px-2 py-1 text-xs text-gray-900"
+                                  >
+                                    <option value="">-- Choose earning type --</option>
+                                    {activeWageRates.map((rate) => (
+                                      <option key={rate.id} value={rate.id}>{rate.label} (${Number(rate.rate || 0).toFixed(2)}/hr)</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-right font-mono">{Number(row.regular_hours || 0).toFixed(2)}</td>
                         <td className="px-4 py-2 text-right font-mono">{Number(row.overtime_hours || 0).toFixed(2)}</td>
@@ -293,6 +412,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Needs mapping or will be skipped</span>
                           ) : duplicateMapping ? (
                             <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">Duplicate payroll employee</span>
+                          ) : !rowWageRateMappingsComplete(row) ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Needs earning type mapping</span>
                           ) : effectiveWarnings.length ? (
                             <ul className="list-disc pl-4 text-xs text-amber-800">
                               {effectiveWarnings.map((warning, idx) => <li key={idx}>{warning.message}</li>)}

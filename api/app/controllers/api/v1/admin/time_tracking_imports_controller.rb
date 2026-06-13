@@ -47,7 +47,15 @@ module Api
         end
 
         def apply_params
-          params.permit(:import_id, mappings: [ :source_user_id, :employee_id, :include ])
+          params.permit(
+            :import_id,
+            mappings: [
+              :source_user_id,
+              :employee_id,
+              :include,
+              { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :employee_wage_rate_id ] }
+            ]
+          )
         end
 
         def import_json(import)

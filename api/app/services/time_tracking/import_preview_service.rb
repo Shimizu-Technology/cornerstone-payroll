@@ -86,8 +86,10 @@ module TimeTracking
       rows = Array(raw["employees"]).filter_map do |source_employee|
         match = matcher.match(source_employee)
         split = overtime.split_days(source_employee["days"])
+        wage_rate_match = match_wage_rate_buckets(category_buckets_for(split[:days]), match[:employee_id])
+        categories = wage_rate_match[:categories]
         issues = source_employee["issues"] || {}
-        warnings = warnings_for(source_employee, issues, match, split)
+        warnings = warnings_for(source_employee, issues, match, split, categories, wage_rate_match[:multi_rate_employee])
 
         next if split[:total_hours].to_f <= 0 && warnings.empty?
 
@@ -102,6 +104,7 @@ module TimeTracking
           regular_hours: split[:regular_hours],
           overtime_hours: split[:overtime_hours],
           total_hours: split[:total_hours],
+          categories: categories,
           days: split[:days],
           issues: issues,
           warnings: warnings,
@@ -120,7 +123,117 @@ module TimeTracking
       }
     end
 
-    def warnings_for(source_employee, issues, match, split)
+    def category_buckets_for(days)
+      buckets = {}
+      Array(days).each do |day|
+        Array(day[:categories] || day["categories"]).each do |category|
+          key = category_bucket_key(category)
+          bucket = buckets[key] ||= {
+            source_category_id: (category[:source_category_id] || category["source_category_id"]).to_s.presence,
+            key: (category[:key] || category["key"]).to_s.presence,
+            name: category[:name] || category["name"] || "Uncategorized",
+            total_hours: 0.0,
+            regular_hours: 0.0,
+            overtime_hours: 0.0,
+            effective_rate_cents: category[:effective_rate_cents] || category["effective_rate_cents"],
+            entry_ids: []
+          }
+          bucket[:total_hours] += (category[:total_hours] || category["total_hours"] || category[:hours] || category["hours"]).to_f
+          bucket[:regular_hours] += (category[:regular_hours] || category["regular_hours"]).to_f
+          bucket[:overtime_hours] += (category[:overtime_hours] || category["overtime_hours"]).to_f
+          bucket[:entry_ids].concat(Array(category[:entry_ids] || category["entry_ids"]))
+        end
+      end
+
+      buckets.values.map do |bucket|
+        bucket.merge(
+          total_hours: round_hours(bucket[:total_hours]),
+          hours: round_hours(bucket[:total_hours]),
+          regular_hours: round_hours(bucket[:regular_hours]),
+          overtime_hours: round_hours(bucket[:overtime_hours]),
+          entry_ids: bucket[:entry_ids].uniq
+        )
+      end.sort_by { |bucket| [ bucket[:name].to_s, bucket[:key].to_s, bucket[:source_category_id].to_s ] }
+    end
+
+    def category_bucket_key(category)
+      [
+        category[:source_category_id] || category["source_category_id"],
+        category[:key] || category["key"],
+        category[:name] || category["name"]
+      ].map(&:to_s).map(&:strip).join("|")
+    end
+
+    def match_wage_rate_buckets(categories, employee_id)
+      match = { categories: categories, multi_rate_employee: false }
+      return match if categories.blank? || employee_id.blank?
+
+      employee = Employee.includes(:employee_wage_rates).find_by(id: employee_id, company_id: pay_period.company_id)
+      return match unless employee&.hourly? || employee&.contractor_hourly?
+
+      active_rates = employee.active_wage_rates.to_a
+      return match if active_rates.length <= 1
+
+      match[:multi_rate_employee] = true
+      match[:categories] = categories.map do |category|
+        wage_rate_match = find_wage_rate_for_category(category, active_rates)
+        wage_rate = wage_rate_match[:wage_rate]
+        category.merge(
+          employee_wage_rate_id: wage_rate&.id,
+          wage_rate_label: wage_rate&.label,
+          wage_rate_match_method: wage_rate_match[:method]
+        )
+      end
+      match
+    end
+
+    def find_wage_rate_for_category(category, active_rates)
+      label_match = label_wage_rate_for_category(category, active_rates)
+      return { wage_rate: label_match, method: "label" } if label_match
+
+      effective_rate_cents = category[:effective_rate_cents].presence&.to_i
+      return { wage_rate: nil, method: nil } if effective_rate_cents.blank?
+
+      matches_by_rate = active_rates.select { |rate| wage_rate_cents(rate) == effective_rate_cents }
+      matches_by_rate.one? ? { wage_rate: matches_by_rate.first, method: "effective_rate" } : { wage_rate: nil, method: nil }
+    end
+
+    def wage_rate_cents(rate)
+      return if rate.rate.nil?
+
+      (BigDecimal(rate.rate.to_s) * 100).round.to_i
+    rescue ArgumentError
+      nil
+    end
+
+    def label_wage_rate_for_category(category, active_rates)
+      candidates = wage_rate_label_candidates(category)
+      matches = active_rates.select do |rate|
+        rate_key = normalize_match_key(rate.label)
+        candidates.any? { |candidate| candidate == rate_key || source_prefixed_candidate_matches_rate?(candidate, rate_key) }
+      end
+
+      matches.one? ? matches.first : nil
+    end
+
+    def wage_rate_label_candidates(category)
+      [ category[:key] || category["key"], category[:name] || category["name"] ]
+        .compact_blank
+        .map { |value| normalize_match_key(value) }
+        .reject(&:blank?)
+        .uniq
+    end
+
+    def source_prefixed_candidate_matches_rate?(candidate, rate_key)
+      candidate_tokens = candidate.split
+      rate_tokens = rate_key.split
+      return false if rate_tokens.length < 2
+      return false if candidate_tokens.length <= rate_tokens.length
+
+      candidate_tokens.last(rate_tokens.length) == rate_tokens
+    end
+
+    def warnings_for(source_employee, issues, match, split, categories, multi_rate_employee)
       warnings = []
       warnings << warning("unmatched_employee", "Map #{source_employee['display_name'].presence || 'this source user'} to a payroll employee before importing") if match[:employee_id].blank? && split[:total_hours].to_f.positive?
       warnings << warning("pending_entries", "#{issues['pending_count']} pending time entries need review") if issues["pending_count"].to_i.positive?
@@ -128,11 +241,33 @@ module TimeTracking
       warnings << warning("denied_entries", "#{issues['denied_count']} denied time entries need correction") if issues["denied_count"].to_i.positive?
       warnings << warning("denied_overtime", "#{issues['denied_overtime_count']} entries have denied overtime review") if issues["denied_overtime_count"].to_i.positive?
       warnings << warning("open_clock", "#{issues['open_clock_count']} open clock-in(s) in the fetched work weeks") if issues["open_clock_count"].to_i.positive?
+
+      Array(categories).each do |category|
+        next unless category[:total_hours].to_f.positive?
+        next if category[:employee_wage_rate_id].present?
+        next unless multi_rate_employee
+
+        warnings << warning(
+          "unmapped_wage_rate",
+          "Map #{category[:name].presence || 'this time category'} to one of this employee's payroll earning types before importing",
+          source_category_id: category[:source_category_id],
+          source_category_key: category[:key],
+          source_category_name: category[:name]
+        )
+      end
       warnings
     end
 
-    def warning(code, message)
-      { code: code, message: message }
+    def normalize_match_key(value)
+      value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
+    end
+
+    def round_hours(value)
+      BigDecimal(value.to_s).round(2).to_f
+    end
+
+    def warning(code, message, extra = {})
+      { code: code, message: message }.merge(extra)
     end
   end
 end

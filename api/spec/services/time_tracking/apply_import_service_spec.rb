@@ -59,6 +59,398 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect(item.pto_hours).to eq(4.0)
     end
 
+    it "applies source category buckets to payroll wage rate hours for multi-rate employees" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      flight_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("multi-rate-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 22.0,
+              "overtime_hours" => 3.0,
+              "categories" => [
+                { "source_category_id" => "flight", "key" => "flight_instruction", "name" => "Flight Instruction", "regular_hours" => 10.0, "overtime_hours" => 3.0, "total_hours" => 13.0, "employee_wage_rate_id" => flight_rate.id },
+                { "source_category_id" => "ground", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 12.0, "overtime_hours" => 0.0, "total_hours" => 12.0, "employee_wage_rate_id" => ground_rate.id }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.hours_worked).to eq(22.0)
+      expect(item.overtime_hours).to eq(3.0)
+      expect(item.wage_rate_hours).to contain_exactly(
+        include("employee_wage_rate_id" => flight_rate.id, "label" => "Flight Instruction", "rate" => 75.0, "regular_hours" => 10.0, "overtime_hours" => 3.0),
+        include("employee_wage_rate_id" => ground_rate.id, "label" => "Ground School", "rate" => 45.0, "regular_hours" => 12.0, "overtime_hours" => 0.0)
+      )
+    end
+
+    it "preserves existing scalar holiday and PTO hours when applying multi-rate imported hours" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      primary_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        holiday_hours: 8.0,
+        pto_hours: 4.0,
+        hours_worked: 0,
+        overtime_hours: 0,
+        custom_columns_data: {}
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("multi-rate-preserve-pto-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "ground", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0, "employee_wage_rate_id" => ground_rate.id }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.holiday_hours).to eq(8.0)
+      expect(item.pto_hours).to eq(4.0)
+      expect(item.wage_rate_hours).to include(
+        include("employee_wage_rate_id" => primary_rate.id, "holiday_hours" => 8.0, "pto_hours" => 4.0),
+        include("employee_wage_rate_id" => ground_rate.id, "regular_hours" => 10.0, "holiday_hours" => 0.0, "pto_hours" => 0.0)
+      )
+    end
+
+    it "preserves PTO and holiday hours from deactivated wage-rate buckets" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      primary_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      inactive_rate = employee.employee_wage_rates.create!(label: "Old Admin", rate: 25.0, is_primary: false, active: false)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      item = create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        holiday_hours: 8.0,
+        pto_hours: 4.0,
+        hours_worked: 0,
+        overtime_hours: 0
+      )
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: inactive_rate.id, label: "Old Admin", rate: 25.0, regular_hours: 0, overtime_hours: 0, holiday_hours: 8.0, pto_hours: 4.0, active: false }
+      ]
+      item.save!
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("inactive-rate-preserve-pto-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "ground", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0, "employee_wage_rate_id" => ground_rate.id }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      item.reload
+      expect(item.holiday_hours).to eq(8.0)
+      expect(item.pto_hours).to eq(4.0)
+      expect(item.wage_rate_hours).to include(
+        include("employee_wage_rate_id" => primary_rate.id, "holiday_hours" => 8.0, "pto_hours" => 4.0),
+        include("employee_wage_rate_id" => ground_rate.id, "regular_hours" => 10.0)
+      )
+      expect(item.wage_rate_hours).not_to include(include("employee_wage_rate_id" => inactive_rate.id))
+    end
+
+    it "applies user-supplied wage-rate mappings when the stored preview has unmapped wage-rate warnings" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department, email: "cfi@example.com")
+      flight_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      raw_payload = {
+        "source" => "aire_services",
+        "employees" => [
+          {
+            "source_user_id" => "source-1",
+            "email" => "cfi@example.com",
+            "display_name" => "CFI One",
+            "days" => [
+              {
+                "work_date" => pay_period.start_date.iso8601,
+                "hours" => 8.0,
+                "categories" => [
+                  { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0 }
+                ]
+              }
+            ],
+            "issues" => {}
+          }
+        ]
+      }
+      allow_any_instance_of(TimeTracking::Client).to receive(:time_summary).and_return(raw_payload)
+      import = TimeTracking::ImportPreviewService.new(pay_period: pay_period, source: source).call
+
+      expect(import.processed_payload.dig("rows", 0, "warnings")).to include(
+        include("code" => "unmapped_wage_rate", "source_category_key" => "simulator")
+      )
+
+      results = described_class.new(
+        import: import,
+        mappings: [
+          {
+            source_user_id: "source-1",
+            employee_id: employee.id,
+            include: true,
+            wage_rate_mappings: [
+              { source_category_id: "sim", source_category_key: "simulator", source_category_name: "Simulator", employee_wage_rate_id: flight_rate.id }
+            ]
+          }
+        ],
+        applied_by: create(:user, company: company)
+      ).call
+
+      expect(results[:errors]).to be_empty
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.wage_rate_hours).to include(
+        include("employee_wage_rate_id" => flight_rate.id, "regular_hours" => 8.0, "overtime_hours" => 0.0)
+      )
+    end
+
+    it "ignores nil wage rates when applying categories by effective rate" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      nil_rate = employee.employee_wage_rates.create!(label: "Unconfigured", rate: nil, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("nil-rate-effective-match-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "premium", "key" => "premium", "name" => "Premium", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0, "effective_rate_cents" => 45_00 }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours).to include(
+        include("employee_wage_rate_id" => nil_rate.id, "rate" => 0.0, "regular_hours" => 0.0),
+        include("employee_wage_rate_id" => ground_rate.id, "rate" => 45.0, "regular_hours" => 10.0)
+      )
+    end
+
+    it "does not auto-apply short payroll labels by substring" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      employee.employee_wage_rates.create!(label: "Ground", rate: 45.0, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("short-label-no-substring-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "ground-school", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0 }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(source_user_id: "source-1", employee_id: employee.id, error: "Map Ground School to one of this employee's payroll earning types before importing.")
+      )
+      expect(pay_period.payroll_items.find_by(employee: employee)).to be_nil
+    end
+
+    it "requires source categories to be mapped for multi-rate employees" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("unmapped-multi-rate-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0 }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to contain_exactly(
+        hash_including(source_user_id: "source-1", employee_id: employee.id, error: "Map Simulator to one of this employee's payroll earning types before importing.")
+      )
+      expect(pay_period.payroll_items.find_by(employee: employee)).to be_nil
+    end
+
     it "treats an unmatched-employee warning as resolved when an employee mapping is supplied" do
       company = create(:company)
       department = create(:department, company: company)

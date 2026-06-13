@@ -25,5 +25,79 @@ RSpec.describe TimeTracking::OvertimeCalculator do
       expect(result[:overtime_hours]).to eq(16.0)
       expect(result[:total_hours]).to eq(16.0)
     end
+
+    it "keeps unsplit category hours when another category has source-provided splits" do
+      calculator = described_class.new(
+        period_start: Date.new(2026, 5, 18),
+        period_end: Date.new(2026, 5, 31)
+      )
+
+      result = calculator.split_days([
+        {
+          "work_date" => "2026-05-18",
+          "hours" => 20,
+          "categories" => [
+            { "source_category_id" => "flight", "key" => "aire_flight", "name" => "Flight", "total_hours" => 8, "regular_hours" => 8, "overtime_hours" => 0 },
+            { "source_category_id" => "ground", "key" => "aire_ground", "name" => "Ground", "total_hours" => 12 }
+          ]
+        }
+      ])
+
+      expect(result.dig(:days, 0, :categories)).to contain_exactly(
+        include(source_category_id: "flight", regular_hours: 8.0, overtime_hours: 0.0, total_hours: 8.0),
+        include(source_category_id: "ground", regular_hours: 12.0, overtime_hours: 0.0, total_hours: 12.0)
+      )
+    end
+
+    it "does not cap unsplit category totals when source-provided splits exhaust the day pool" do
+      calculator = described_class.new(
+        period_start: Date.new(2026, 5, 18),
+        period_end: Date.new(2026, 5, 31)
+      )
+
+      result = calculator.split_days([
+        {
+          "work_date" => "2026-05-18",
+          "hours" => 20,
+          "categories" => [
+            { "source_category_id" => "flight", "key" => "aire_flight", "name" => "Flight", "total_hours" => 20, "regular_hours" => 20, "overtime_hours" => 0 },
+            { "source_category_id" => "ground", "key" => "aire_ground", "name" => "Ground", "total_hours" => 5 }
+          ]
+        }
+      ])
+
+      expect(result.dig(:days, 0, :categories)).to contain_exactly(
+        include(source_category_id: "flight", regular_hours: 20.0, overtime_hours: 0.0, total_hours: 20.0),
+        include(source_category_id: "ground", regular_hours: 0.0, overtime_hours: 5.0, total_hours: 5.0)
+      )
+    end
+
+    it "preserves source category regular and overtime splits" do
+      calculator = described_class.new(
+        period_start: Date.new(2026, 5, 18),
+        period_end: Date.new(2026, 5, 31)
+      )
+
+      result = calculator.split_days([
+        {
+          "work_date" => "2026-05-18",
+          "hours" => 20,
+          "categories" => [
+            { "source_category_id" => "flight", "key" => "aire_flight", "name" => "Flight", "regular_hours" => 12, "overtime_hours" => 3, "effective_rate_cents" => 7500 },
+            { "source_category_id" => "ground", "key" => "aire_ground", "name" => "Ground", "regular_hours" => 5, "overtime_hours" => 0, "effective_rate_cents" => 4500 }
+          ]
+        }
+      ])
+
+      expect(result[:regular_hours]).to eq(17.0)
+      expect(result[:overtime_hours]).to eq(3.0)
+      expect(result[:total_hours]).to eq(20.0)
+      expect(result.dig(:days, 0, :regular_hours)).to eq(17.0)
+      expect(result.dig(:days, 0, :overtime_hours)).to eq(3.0)
+      expect(result.dig(:days, 0, :categories)).to contain_exactly(
+        include(source_category_id: "flight", key: "aire_flight", name: "Flight", regular_hours: 12.0, overtime_hours: 3.0, total_hours: 15.0, effective_rate_cents: 7500),
+        include(source_category_id: "ground", key: "aire_ground", name: "Ground", regular_hours: 5.0, overtime_hours: 0.0, total_hours: 5.0, effective_rate_cents: 4500)
+      )
+    end
   end
 end
