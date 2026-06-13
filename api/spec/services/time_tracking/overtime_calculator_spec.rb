@@ -49,6 +49,29 @@ RSpec.describe TimeTracking::OvertimeCalculator do
       )
     end
 
+    it "does not cap unsplit category totals when source-provided splits exhaust the day pool" do
+      calculator = described_class.new(
+        period_start: Date.new(2026, 5, 18),
+        period_end: Date.new(2026, 5, 31)
+      )
+
+      result = calculator.split_days([
+        {
+          "work_date" => "2026-05-18",
+          "hours" => 20,
+          "categories" => [
+            { "source_category_id" => "flight", "key" => "aire_flight", "name" => "Flight", "total_hours" => 20, "regular_hours" => 20, "overtime_hours" => 0 },
+            { "source_category_id" => "ground", "key" => "aire_ground", "name" => "Ground", "total_hours" => 5 }
+          ]
+        }
+      ])
+
+      expect(result.dig(:days, 0, :categories)).to contain_exactly(
+        include(source_category_id: "flight", regular_hours: 20.0, overtime_hours: 0.0, total_hours: 20.0),
+        include(source_category_id: "ground", regular_hours: 0.0, overtime_hours: 5.0, total_hours: 5.0)
+      )
+    end
+
     it "preserves source category regular and overtime splits" do
       calculator = described_class.new(
         period_start: Date.new(2026, 5, 18),

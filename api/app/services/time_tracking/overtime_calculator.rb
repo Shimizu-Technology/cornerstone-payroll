@@ -114,7 +114,7 @@ module TimeTracking
         if category[:split_provided]
           category_payload(category, category[:regular_hours].to_f, category[:overtime_hours].to_f)
         else
-          regular, overtime = split_category_from_remaining(category, remaining_regular, remaining_overtime)
+          regular, overtime = split_category_from_remaining(category, remaining_regular)
           remaining_regular -= regular
           remaining_overtime -= overtime
           category_payload(category, regular, overtime)
@@ -122,11 +122,10 @@ module TimeTracking
       end
     end
 
-    def split_category_from_remaining(category, remaining_regular, remaining_overtime)
+    def split_category_from_remaining(category, remaining_regular)
       hours = category[:total_hours].to_f
       regular = [ remaining_regular, hours ].min
       overtime = [ hours - regular, 0.0 ].max
-      overtime = [ overtime, remaining_overtime ].min
       [ regular, overtime ]
     end
 
