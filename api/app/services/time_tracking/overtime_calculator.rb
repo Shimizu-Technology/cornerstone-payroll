@@ -31,7 +31,7 @@ module TimeTracking
           result[:days] << row.merge(
             regular_hours: regular,
             overtime_hours: overtime,
-            categories: split_categories(row[:categories], regular_hours: regular, overtime_hours: overtime, total_hours: hours)
+            categories: split_categories(row[:categories], regular_hours: regular)
           )
         end
       end
@@ -92,23 +92,20 @@ module TimeTracking
       }
     end
 
-    def split_categories(categories, regular_hours:, overtime_hours:, total_hours:)
+    def split_categories(categories, regular_hours:)
       return [] if categories.blank?
 
       remaining_regular = regular_hours.to_f
-      remaining_overtime = overtime_hours.to_f
 
       if categories.any? { |category| category[:split_provided] }
         categories.each do |category|
           next unless category[:split_provided]
 
           remaining_regular -= category[:regular_hours].to_f
-          remaining_overtime -= category[:overtime_hours].to_f
         end
       end
 
       remaining_regular = [ remaining_regular, 0.0 ].max
-      remaining_overtime = [ remaining_overtime, 0.0 ].max
 
       categories.map do |category|
         if category[:split_provided]
@@ -116,7 +113,6 @@ module TimeTracking
         else
           regular, overtime = split_category_from_remaining(category, remaining_regular)
           remaining_regular -= regular
-          remaining_overtime -= overtime
           category_payload(category, regular, overtime)
         end
       end
