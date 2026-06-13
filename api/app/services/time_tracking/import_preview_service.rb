@@ -194,8 +194,16 @@ module TimeTracking
       effective_rate_cents = category[:effective_rate_cents].presence&.to_i
       return { wage_rate: nil, method: nil } if effective_rate_cents.blank?
 
-      matches_by_rate = active_rates.select { |rate| (BigDecimal(rate.rate.to_s) * 100).round.to_i == effective_rate_cents }
+      matches_by_rate = active_rates.select { |rate| wage_rate_cents(rate) == effective_rate_cents }
       matches_by_rate.one? ? { wage_rate: matches_by_rate.first, method: "effective_rate" } : { wage_rate: nil, method: nil }
+    end
+
+    def wage_rate_cents(rate)
+      return if rate.rate.nil?
+
+      (BigDecimal(rate.rate.to_s) * 100).round.to_i
+    rescue ArgumentError
+      nil
     end
 
     def label_wage_rate_for_category(category, active_rates)

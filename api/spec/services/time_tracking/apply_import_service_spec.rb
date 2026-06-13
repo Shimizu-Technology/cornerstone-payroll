@@ -238,6 +238,55 @@ RSpec.describe TimeTracking::ApplyImportService do
       )
     end
 
+    it "ignores nil wage rates when applying categories by effective rate" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      nil_rate = employee.employee_wage_rates.create!(label: "Unconfigured", rate: nil, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("nil-rate-effective-match-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "premium", "key" => "premium", "name" => "Premium", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0, "effective_rate_cents" => 45_00 }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours).to include(
+        include("employee_wage_rate_id" => nil_rate.id, "rate" => 0.0, "regular_hours" => 0.0),
+        include("employee_wage_rate_id" => ground_rate.id, "rate" => 45.0, "regular_hours" => 10.0)
+      )
+    end
+
     it "does not auto-apply short payroll labels by substring" do
       company = create(:company)
       department = create(:department, company: company)

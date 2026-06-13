@@ -790,6 +790,7 @@ export interface TimeTrackingPreviewCategory {
   effective_rate_cents?: number | null;
   employee_wage_rate_id?: number | null;
   wage_rate_label?: string | null;
+  wage_rate_match_method?: string | null;
 }
 
 export interface TimeTrackingPreviewRow {

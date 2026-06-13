@@ -207,7 +207,7 @@ module TimeTracking
         {
           employee_wage_rate_id: rate.id,
           label: rate.label,
-          rate: rate.rate,
+          rate: rate.rate.to_f,
           regular_hours: round_hours(imported[:regular_hours]),
           overtime_hours: round_hours(imported[:overtime_hours]),
           holiday_hours: round_hours(existing["holiday_hours"].to_f + preserved_scalar[:holiday_hours]),
@@ -266,8 +266,16 @@ module TimeTracking
       effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
       return if effective_rate_cents.blank?
 
-      matches_by_rate = active_rates.select { |rate| (BigDecimal(rate.rate.to_s) * 100).round.to_i == effective_rate_cents.to_i }
+      matches_by_rate = active_rates.select { |rate| wage_rate_cents(rate) == effective_rate_cents.to_i }
       matches_by_rate.one? ? matches_by_rate.first : nil
+    end
+
+    def wage_rate_cents(rate)
+      return if rate.rate.nil?
+
+      (BigDecimal(rate.rate.to_s) * 100).round.to_i
+    rescue ArgumentError
+      nil
     end
 
     def category_override_keys(category)
