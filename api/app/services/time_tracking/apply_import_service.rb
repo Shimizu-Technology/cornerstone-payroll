@@ -220,8 +220,10 @@ module TimeTracking
 
     def preserved_scalar_hours_by_rate_id(existing_by_rate_id, active_rates, preserved_holiday_hours:, preserved_pto_hours:)
       preservation_rate = active_rates.find(&:is_primary) || active_rates.first
-      existing_holiday_hours = existing_by_rate_id.values.sum { |entry| entry["holiday_hours"].to_f }
-      existing_pto_hours = existing_by_rate_id.values.sum { |entry| entry["pto_hours"].to_f }
+      active_rate_ids = active_rates.map(&:id)
+      retained_existing_entries = existing_by_rate_id.slice(*active_rate_ids).values
+      existing_holiday_hours = retained_existing_entries.sum { |entry| entry["holiday_hours"].to_f }
+      existing_pto_hours = retained_existing_entries.sum { |entry| entry["pto_hours"].to_f }
       holiday_remainder = [ preserved_holiday_hours.to_f - existing_holiday_hours, 0.0 ].max
       pto_remainder = [ preserved_pto_hours.to_f - existing_pto_hours, 0.0 ].max
 

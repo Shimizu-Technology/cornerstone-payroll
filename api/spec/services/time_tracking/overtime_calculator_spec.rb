@@ -89,6 +89,11 @@ RSpec.describe TimeTracking::OvertimeCalculator do
         }
       ])
 
+      expect(result[:regular_hours]).to eq(17.0)
+      expect(result[:overtime_hours]).to eq(3.0)
+      expect(result[:total_hours]).to eq(20.0)
+      expect(result.dig(:days, 0, :regular_hours)).to eq(17.0)
+      expect(result.dig(:days, 0, :overtime_hours)).to eq(3.0)
       expect(result.dig(:days, 0, :categories)).to contain_exactly(
         include(source_category_id: "flight", key: "aire_flight", name: "Flight", regular_hours: 12.0, overtime_hours: 3.0, total_hours: 15.0, effective_rate_cents: 7500),
         include(source_category_id: "ground", key: "aire_ground", name: "Ground", regular_hours: 5.0, overtime_hours: 0.0, total_hours: 5.0, effective_rate_cents: 4500)

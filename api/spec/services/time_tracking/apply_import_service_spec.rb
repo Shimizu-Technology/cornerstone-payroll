@@ -175,6 +175,74 @@ RSpec.describe TimeTracking::ApplyImportService do
       )
     end
 
+    it "preserves PTO and holiday hours from deactivated wage-rate buckets" do
+      company = create(:company)
+      department = create(:department, company: company)
+      employee = create(:employee, company: company, department: department)
+      primary_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
+      ground_rate = employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      inactive_rate = employee.employee_wage_rates.create!(label: "Old Admin", rate: 25.0, is_primary: false, active: false)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      item = create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        holiday_hours: 8.0,
+        pto_hours: 4.0,
+        hours_worked: 0,
+        overtime_hours: 0
+      )
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: inactive_rate.id, label: "Old Admin", rate: 25.0, regular_hours: 0, overtime_hours: 0, holiday_hours: 8.0, pto_hours: 4.0, active: false }
+      ]
+      item.save!
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("inactive-rate-preserve-pto-payload"),
+        processed_payload: {
+          "rows" => [
+            {
+              "source_user_id" => "source-1",
+              "source_email" => "cfi@example.com",
+              "source_display_name" => "CFI One",
+              "employee_id" => employee.id,
+              "regular_hours" => 10.0,
+              "overtime_hours" => 0.0,
+              "categories" => [
+                { "source_category_id" => "ground", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 10.0, "overtime_hours" => 0.0, "total_hours" => 10.0, "employee_wage_rate_id" => ground_rate.id }
+              ],
+              "warnings" => []
+            }
+          ]
+        }
+      )
+
+      results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+      expect(results[:errors]).to be_empty
+      item.reload
+      expect(item.holiday_hours).to eq(8.0)
+      expect(item.pto_hours).to eq(4.0)
+      expect(item.wage_rate_hours).to include(
+        include("employee_wage_rate_id" => primary_rate.id, "holiday_hours" => 8.0, "pto_hours" => 4.0),
+        include("employee_wage_rate_id" => ground_rate.id, "regular_hours" => 10.0)
+      )
+      expect(item.wage_rate_hours).not_to include(include("employee_wage_rate_id" => inactive_rate.id))
+    end
+
     it "applies user-supplied wage-rate mappings when the stored preview has unmapped wage-rate warnings" do
       company = create(:company)
       department = create(:department, company: company)

@@ -25,13 +25,20 @@ module TimeTracking
 
           regular = round(regular)
           overtime = round(overtime)
+          category_splits = split_categories(row[:categories], regular_hours: regular)
+          regular = round(category_splits.sum { |category| category[:regular_hours].to_f }) if category_splits.present?
+          overtime = round(category_splits.sum { |category| category[:overtime_hours].to_f }) if category_splits.present?
+          total_hours = category_splits.present? ? round(category_splits.sum { |category| category[:total_hours].to_f }) : round(hours)
+
           result[:regular_hours] += regular
           result[:overtime_hours] += overtime
-          result[:total_hours] += hours
+          result[:total_hours] += total_hours
           result[:days] << row.merge(
+            hours: total_hours,
+            total_hours: total_hours,
             regular_hours: regular,
             overtime_hours: overtime,
-            categories: split_categories(row[:categories], regular_hours: regular)
+            categories: category_splits
           )
         end
       end
@@ -55,9 +62,10 @@ module TimeTracking
     def normalize_days(days)
       Array(days).map do |day|
         categories = Array(day["categories"]).map { |category| normalize_category(category) }
+        category_hours = categories.sum { |category| category[:total_hours].to_f }
         {
           date: Date.parse(day["work_date"].to_s),
-          hours: day["hours"].presence&.to_f || categories.sum { |category| category[:total_hours].to_f },
+          hours: day["hours"].presence&.to_f || category_hours,
           entry_ids: Array(day["entry_ids"]),
           categories: categories
         }
@@ -69,9 +77,10 @@ module TimeTracking
       category ||= {}
       regular_present = category.key?("regular_hours") || category.key?(:regular_hours)
       overtime_present = category.key?("overtime_hours") || category.key?(:overtime_hours)
-      total_hours = (category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]).to_f
+      explicit_total_hours = category["total_hours"] || category[:total_hours] || category["hours"] || category[:hours]
       regular_hours = regular_present ? (category["regular_hours"] || category[:regular_hours]).to_f : nil
       overtime_hours = overtime_present ? (category["overtime_hours"] || category[:overtime_hours]).to_f : nil
+      total_hours = explicit_total_hours.present? ? explicit_total_hours.to_f : regular_hours.to_f + overtime_hours.to_f
 
       if regular_present && !overtime_present
         overtime_hours = [ total_hours - regular_hours.to_f, 0.0 ].max
