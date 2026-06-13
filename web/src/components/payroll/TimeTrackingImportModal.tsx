@@ -84,7 +84,12 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       const backendMatch = activeRates.some((rate) => rate.id === category.employee_wage_rate_id) ? category.employee_wage_rate_id ?? null : null;
       const labelMatch = ratesByLabel.get(normalizeMatchKey(category.name)) ?? ratesByLabel.get(normalizeMatchKey(category.key || '')) ?? null;
       const cents = category.effective_rate_cents;
-      const rateMatches = cents == null ? [] : activeRates.filter((rate) => Math.round(Number(rate.rate || 0) * 100) === cents);
+      const rateMatches = cents == null ? [] : activeRates.filter((rate) => {
+        if (rate.rate == null) return false;
+
+        const numericRate = Number(rate.rate);
+        return Number.isFinite(numericRate) && Math.round(numericRate * 100) === cents;
+      });
       const uniqueRateMatch = rateMatches.length === 1 ? rateMatches[0]?.id ?? null : null;
       acc[categoryMappingKey(category)] = backendMatch ?? labelMatch ?? uniqueRateMatch ?? onlyRateId;
       return acc;
