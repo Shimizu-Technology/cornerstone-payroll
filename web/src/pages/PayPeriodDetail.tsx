@@ -443,7 +443,8 @@ export function PayPeriodDetail() {
   const updateTip = (employeeId: number, amount: number, pool?: string) => {
     setTipsMap((prev) => {
       const existing = prev[String(employeeId)] || { amount: 0, pool: '' };
-      return { ...prev, [String(employeeId)]: { amount: Math.max(0, amount), pool: pool ?? existing.pool } };
+      const paidOut = toNumber(tipsPaidOutMap[String(employeeId)]);
+      return { ...prev, [String(employeeId)]: { amount: Math.max(0, amount, paidOut), pool: pool ?? existing.pool } };
     });
   };
 
@@ -452,7 +453,14 @@ export function PayPeriodDetail() {
   };
 
   const updateTipsPaidOut = (employeeId: number, amount: number) => {
-    setTipsPaidOutMap((prev) => ({ ...prev, [String(employeeId)]: Math.max(0, amount) }));
+    const paidOut = Math.max(0, amount);
+    const key = String(employeeId);
+    setTipsPaidOutMap((prev) => ({ ...prev, [key]: paidOut }));
+    setTipsMap((prev) => {
+      const existing = prev[key] || { amount: 0, pool: '' };
+      if (toNumber(existing.amount) >= paidOut) return prev;
+      return { ...prev, [key]: { ...existing, amount: paidOut } };
+    });
   };
 
   const handleRunPayroll = async () => {
@@ -518,15 +526,20 @@ export function PayPeriodDetail() {
         return;
       }
 
-      // Build tips payload
+      // Build tips payload. Tips paid out are already in the employee's hands,
+      // but they are still taxable tips, so the reported-tip amount must be at
+      // least the paid-out offset.
       const tips: Record<string, { amount: number; pool: string }> = {};
-      Object.entries(tipsMap).forEach(([empId, data]) => {
-        tips[empId] = { amount: Math.max(0, toNumber(data.amount)), pool: data.pool || '' };
-      });
-
       const tips_paid_out: Record<string, number> = {};
       Object.entries(tipsPaidOutMap).forEach(([empId, amount]) => {
         tips_paid_out[empId] = Math.max(0, toNumber(amount));
+      });
+      new Set([...Object.keys(tipsMap), ...Object.keys(tips_paid_out)]).forEach((empId) => {
+        const data = tipsMap[empId];
+        const amount = Math.max(0, toNumber(data?.amount), toNumber(tips_paid_out[empId]));
+        if (amount > 0 || data) {
+          tips[empId] = { amount, pool: data?.pool || '' };
+        }
       });
 
       // Build loan deductions payload
@@ -1436,8 +1449,8 @@ export function PayPeriodDetail() {
                     <TableHead className={`w-[300px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Regular Hours</TableHead>
                     <TableHead className={`w-[300px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Overtime Hours</TableHead>
-                    {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
+                    {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
                   </TableRow>
@@ -1484,18 +1497,25 @@ export function PayPeriodDetail() {
                             const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[employee.pay_frequency] || 26;
                             const override = salaryOverrideMap[String(employee.id)] || 0;
 
-                            if (variableSalary) return override;
-                            if (perPeriodSalary) return rate;
-                            if (employee.employment_type === 'salary') return rate / periodsPerYear;
-                            if (isFlatContractor) return rate;
-                            if (usesMultipleRates) {
-                              return activeRates.reduce(
-                                (sum, row) => sum + (toNumber(row.regular_hours) * toNumber(row.rate)) + (toNumber(row.overtime_hours) * toNumber(row.rate) * 1.5),
-                                0
-                              );
-                            }
+                            const baseGross = variableSalary
+                              ? override
+                              : perPeriodSalary
+                              ? rate
+                              : employee.employment_type === 'salary'
+                              ? rate / periodsPerYear
+                              : isFlatContractor
+                              ? rate
+                              : usesMultipleRates
+                              ? activeRates.reduce(
+                                  (sum, row) => sum + (toNumber(row.regular_hours) * toNumber(row.rate)) + (toNumber(row.overtime_hours) * toNumber(row.rate) * 1.5),
+                                  0
+                                )
+                              : (toNumber(entry.regular) * rate) + (toNumber(entry.overtime) * rate * 1.5);
+                            const tipGross = employee.employment_type === 'contractor'
+                              ? 0
+                              : Math.max(toNumber(tipsMap[String(employee.id)]?.amount), toNumber(tipsPaidOutMap[String(employee.id)]));
 
-                            return (toNumber(entry.regular) * rate) + (toNumber(entry.overtime) * rate * 1.5);
+                            return baseGross + tipGross;
                           };
 
                           return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection);
@@ -1523,7 +1543,7 @@ export function PayPeriodDetail() {
                       const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
                       const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                       const rowTone = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-100';
-                      const estGross = isVariableSalary
+                      const baseEstGross = isVariableSalary
                         ? salaryOverride
                         : isPerPeriodSalary
                         ? payRate
@@ -1537,6 +1557,10 @@ export function PayPeriodDetail() {
                             0
                           )
                         : (hours.regular * payRate) + (hours.overtime * payRate * 1.5);
+                      const reportedTipGross = emp.employment_type === 'contractor'
+                        ? 0
+                        : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
+                      const estGross = baseEstGross + reportedTipGross;
                       return (
                       <Fragment key={emp.id}>
                       {showDivider && (
@@ -1828,8 +1852,8 @@ export function PayPeriodDetail() {
                         <div className="text-[10px] font-normal uppercase tracking-wide text-blue-500">{field.kind.replace(/_/g, ' ')}</div>
                       </TableHead>
                     ))}
-                    {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips</TableHead>}
-                    {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Pd Out</TableHead>}
+                    {hasTips && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
+                    {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
                     {hasLoans && <TableHead className={`min-w-[130px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>

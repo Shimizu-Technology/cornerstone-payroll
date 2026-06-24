@@ -75,6 +75,22 @@ class PayrollCalculator
     @pay_period ||= payroll_item.pay_period
   end
 
+  # Tips already paid directly to the employee still have to be included in
+  # taxable/reported tips before being offset from the paycheck. If an operator
+  # enters only "tips paid out," promote that amount into reported_tips so gross
+  # wages, FIT, FICA, W-2GU, and quarterly reports do not understate tips.
+  def normalize_tips_paid_out_into_reported_tips!
+    return if payroll_item.correction_entry?
+
+    tips_paid_out = BigDecimal(payroll_item.tips_paid_out.to_s.presence || "0")
+    reported_tips = BigDecimal(payroll_item.reported_tips.to_s.presence || "0")
+    return unless tips_paid_out.positive? && reported_tips < tips_paid_out
+
+    payroll_item.reported_tips = tips_paid_out.round(2)
+  rescue ArgumentError
+    nil
+  end
+
   def ytd_gross_before
     ytd_before_totals[:gross_pay]
   end

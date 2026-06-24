@@ -50,7 +50,8 @@ class PayrollItem < ApplicationRecord
   validates :withholding_tax_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :withholding_tax_adjustment, numericality: true, allow_nil: true
   validates :additional_withholding_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
-  validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }
+  validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }, unless: :correction_entry?
+  validates :tips_paid_out, numericality: true, if: :correction_entry?
   validate :company_matches_pay_period
   validate :custom_deductions_are_valid
   validate :payroll_adjustments_are_valid
@@ -423,6 +424,7 @@ class PayrollItem < ApplicationRecord
     self.bonus = round_currency_value(bonus)
     self.reported_tips = round_currency_value(reported_tips)
     self.tips_paid_out = round_currency_value(tips_paid_out)
+    normalize_reported_tips_for_paid_out! unless correction_entry?
     self.non_taxable_pay = round_currency_value(non_taxable_pay)
     self.custom_deductions = self.class.normalize_custom_deduction_entries(custom_deductions)
     self.payroll_adjustments = self.class.normalize_payroll_adjustments(payroll_adjustments)
@@ -446,6 +448,12 @@ class PayrollItem < ApplicationRecord
     return value if value.nil?
 
     BigDecimal(value.to_s).round(2)
+  end
+
+  def normalize_reported_tips_for_paid_out!
+    return unless tips_paid_out.to_f.positive? && reported_tips.to_f < tips_paid_out.to_f
+
+    self.reported_tips = round_currency_value(tips_paid_out)
   end
 
   def sync_company_from_pay_period

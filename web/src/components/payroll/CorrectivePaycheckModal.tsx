@@ -266,7 +266,7 @@ export function CorrectivePaycheckModal({
                 onValueChange={value => setForm(f => ({ ...f, bonus: value == null ? '' : String(value) }))}
               />
             </FieldRow>
-            <FieldRow label="Tips" original={originalItem.reported_tips} prefix="$">
+            <FieldRow label="Reported tips" original={originalItem.reported_tips} prefix="$">
               <NumericInput
                 min={0}
                 inputMode="decimal"

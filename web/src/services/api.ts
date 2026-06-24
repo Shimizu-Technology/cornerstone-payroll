@@ -921,7 +921,7 @@ export const payPeriodsApi = {
     if (excelFile) formData.append('excel_file', excelFile);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
-  applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[] }) =>
+  applyImport: (id: number, data: { import_id: number; matched?: ImportPreviewRow[]; tips_paid_out_from_tips?: boolean }) =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
 
   // CPR-71: Payroll correction workflow

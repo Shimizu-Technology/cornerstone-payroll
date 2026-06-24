@@ -80,6 +80,7 @@ class ReplaceCheckService
     overtime_hours
     pay_rate
     bonus
+    reported_tips
     tips_paid_out
     custom_deductions_total
     gross_pay

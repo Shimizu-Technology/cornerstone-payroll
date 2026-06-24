@@ -426,7 +426,9 @@ class IssueCorrectivePaycheckService
       hours_worked_delta:   (corrected_item.hours_worked.to_f - original_item.hours_worked.to_f).round(2),
       overtime_hours_delta: (corrected_item.overtime_hours.to_f - original_item.overtime_hours.to_f).round(2),
       holiday_hours_delta:  (corrected_item.holiday_hours.to_f - original_item.holiday_hours.to_f).round(2),
-      pto_hours_delta:      (corrected_item.pto_hours.to_f - original_item.pto_hours.to_f).round(2)
+      pto_hours_delta:      (corrected_item.pto_hours.to_f - original_item.pto_hours.to_f).round(2),
+      reported_tips_delta:  (corrected_item.reported_tips.to_f - original_item.reported_tips.to_f).round(2),
+      tips_paid_out_delta:  (corrected_item.tips_paid_out.to_f - original_item.tips_paid_out.to_f).round(2)
     )
   end
 
@@ -478,6 +480,13 @@ class IssueCorrectivePaycheckService
       overtime_hours:  deltas[:overtime_hours_delta],
       holiday_hours:   deltas[:holiday_hours_delta],
       pto_hours:       deltas[:pto_hours_delta],
+
+      # Tip deltas are stored too because W-2GU / 941 / SWICA reporting derives
+      # Social Security tips and YTD tip totals from these input columns, while
+      # gross/tax/net deltas below make the corrective check amount right.
+      reported_tips:                   deltas[:reported_tips_delta],
+      tips_paid_out:                   deltas[:tips_paid_out_delta],
+      tip_pool:                        corrected_item.tip_pool.presence || original_item.tip_pool,
 
       # Financial deltas: assigned directly so the standard commit
       # pipeline (YTD update / check number assignment) treats them as
