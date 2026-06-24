@@ -274,14 +274,20 @@ export function PayPeriodDetail() {
   const [hoursTableOpen, setHoursTableOpen] = useState(true);
   const [tipsMap, setTipsMap] = useState<Record<string, { amount: number; pool: string }>>({});
   const [tipsPaidOutMap, setTipsPaidOutMap] = useState<Record<string, number>>({});
+  const tipsPaidOutMapRef = useRef<Record<string, number>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
   const tipsLoansVisibilityModeRef = useRef<'auto' | 'manual'>('auto');
+
+  useEffect(() => {
+    tipsPaidOutMapRef.current = tipsPaidOutMap;
+  }, [tipsPaidOutMap]);
 
   const syncDerivedPayrollState = useCallback((items: PayrollItem[]) => {
     const derivedState = derivePayrollUiState(items);
     setSalaryOverrideMap(derivedState.salaryOverrides);
     setTipsMap(derivedState.tips);
+    tipsPaidOutMapRef.current = derivedState.tipsPaidOut;
     setTipsPaidOutMap(derivedState.tipsPaidOut);
     setLoansMap(derivedState.loans);
     setShowTipsLoans((previous) => (
@@ -443,7 +449,7 @@ export function PayPeriodDetail() {
   const updateTip = (employeeId: number, amount: number, pool?: string) => {
     setTipsMap((prev) => {
       const existing = prev[String(employeeId)] || { amount: 0, pool: '' };
-      const paidOut = toNumber(tipsPaidOutMap[String(employeeId)]);
+      const paidOut = toNumber(tipsPaidOutMapRef.current[String(employeeId)]);
       return { ...prev, [String(employeeId)]: { amount: Math.max(0, amount, paidOut), pool: pool ?? existing.pool } };
     });
   };
@@ -455,7 +461,12 @@ export function PayPeriodDetail() {
   const updateTipsPaidOut = (employeeId: number, amount: number) => {
     const paidOut = Math.max(0, amount);
     const key = String(employeeId);
-    setTipsPaidOutMap((prev) => ({ ...prev, [key]: paidOut }));
+    tipsPaidOutMapRef.current = { ...tipsPaidOutMapRef.current, [key]: paidOut };
+    setTipsPaidOutMap((prev) => {
+      const next = { ...prev, [key]: paidOut };
+      tipsPaidOutMapRef.current = next;
+      return next;
+    });
     setTipsMap((prev) => {
       const existing = prev[key] || { amount: 0, pool: '' };
       if (toNumber(existing.amount) >= paidOut) return prev;

@@ -163,6 +163,10 @@ export function PayrollItemEditModal({
   const employeeAdditionalWithholding = Number(item.additional_withholding || 0);
   const employeePaidPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment !== 'employer_contribution');
   const employerContributionPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment === 'employer_contribution');
+  const reportedTipsInput = Number(fields.reported_tips || 0);
+  const tipsPaidOutInput = Number(fields.tips_paid_out || 0);
+  const effectiveReportedTips = Math.max(reportedTipsInput, tipsPaidOutInput);
+  const tipsPaidOutExceedsReportedTips = tipsPaidOutInput > reportedTipsInput;
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -175,22 +179,10 @@ export function PayrollItemEditModal({
     field: 'hours_worked' | 'overtime_hours' | 'holiday_hours' | 'pto_hours' | 'bonus' | 'reported_tips' | 'tips_paid_out' | 'non_taxable_pay',
     value: number | null
   ) => {
-    setFields((prev) => {
-      const nextValue = value ?? 0;
-      const next = {
-        ...prev,
-        [field]: nextValue,
-      };
-
-      if (field === 'tips_paid_out' && Number(prev.reported_tips || 0) < nextValue) {
-        next.reported_tips = nextValue;
-      }
-      if (field === 'reported_tips' && nextValue < Number(prev.tips_paid_out || 0)) {
-        next.reported_tips = Number(prev.tips_paid_out || 0);
-      }
-
-      return next;
-    });
+    setFields((prev) => ({
+      ...prev,
+      [field]: value ?? 0,
+    }));
   };
 
   const handleWageRateHourChange = (
@@ -532,6 +524,11 @@ export function PayrollItemEditModal({
                   min={0}
                   fixedDecimalsOnBlur={2}
                 />
+                {tipsPaidOutExceedsReportedTips ? (
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Will save as {formatCurrency(effectiveReportedTips)} so paid-out tips stay included in taxable reported tips.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Non-Taxable Pay</label>
