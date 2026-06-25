@@ -38,6 +38,7 @@ interface CommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   mode?: CommandPaletteMode;
+  onModeChange?: (mode: CommandPaletteMode) => void;
 }
 
 type CommandKind = 'navigation' | 'company';
@@ -74,7 +75,7 @@ function scoreCommand(command: CommandItem, query: string) {
   return terms.every((term) => haystack.includes(term)) ? 25 : 0;
 }
 
-export function CommandPalette({ open, onOpenChange, mode = 'all' }: CommandPaletteProps) {
+export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAdmin, isSuperAdmin, isClient } = useAuth();
@@ -484,9 +485,9 @@ export function CommandPalette({ open, onOpenChange, mode = 'all' }: CommandPale
                   setSelectedIndex(0);
                 }}
                 onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+                  if ((event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === 'k' || event.code === 'KeyK')) {
                     event.preventDefault();
-                    onOpenChange(false);
+                    onModeChange?.(event.shiftKey ? 'companies' : 'all');
                     return;
                   }
                   if (event.key === 'Escape') {

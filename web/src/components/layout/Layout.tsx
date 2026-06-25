@@ -49,9 +49,18 @@ export function Layout() {
       }
 
       const usesCommandModifier = event.metaKey || event.ctrlKey;
-      if (!usesCommandModifier || event.altKey || isEditableShortcutTarget(event.target)) return;
+      if (!usesCommandModifier || event.altKey) return;
 
       const key = event.key.toLowerCase();
+      const isKShortcut = key === 'k' || event.code === 'KeyK';
+      if (isKShortcut) {
+        event.preventDefault();
+        openCommandPalette(event.shiftKey ? 'companies' : 'all');
+        return;
+      }
+
+      if (isEditableShortcutTarget(event.target)) return;
+
       if (key === 'b' && !event.shiftKey) {
         event.preventDefault();
         if (window.matchMedia('(min-width: 1024px)').matches) {
@@ -59,11 +68,6 @@ export function Layout() {
         } else {
           setMobileNavOpen((current) => !current);
         }
-      }
-
-      if (key === 'k') {
-        event.preventDefault();
-        openCommandPalette(event.shiftKey ? 'companies' : 'all');
       }
     };
 
@@ -177,7 +181,12 @@ export function Layout() {
         </main>
       </div>
 
-      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} mode={commandPaletteMode} />
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        mode={commandPaletteMode}
+        onModeChange={setCommandPaletteMode}
+      />
 
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true">
