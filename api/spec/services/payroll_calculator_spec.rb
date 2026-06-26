@@ -838,12 +838,15 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay).to eq(0.0)
     end
 
-    it "treats tips paid out as a deduction that reduces net pay only" do
+    it "promotes tips paid out into reported tips before calculating taxable gross" do
+      payroll_item.reported_tips = 0.0
       payroll_item.tips_paid_out = 50.0
 
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.gross_pay).to eq(1000.0)
+      expect(payroll_item.reported_tips).to eq(50.0)
+      expect(payroll_item.gross_pay).to eq(1050.0)
+      expect(payroll_item.total_additions).to eq(50.0)
       expect(payroll_item.total_deductions).to eq(
         payroll_item.withholding_tax +
         payroll_item.additional_withholding +
@@ -852,6 +855,16 @@ RSpec.describe PayrollCalculator do
         50.0
       )
       expect(payroll_item.net_pay).to eq(payroll_item.gross_pay - payroll_item.total_deductions)
+    end
+
+    it "does not double-count tips paid out when reported tips already include them" do
+      payroll_item.reported_tips = 80.0
+      payroll_item.tips_paid_out = 50.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.reported_tips).to eq(80.0)
+      expect(payroll_item.gross_pay).to eq(1080.0)
     end
 
     it "treats custom deductions as post-tax check reductions" do

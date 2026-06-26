@@ -49,6 +49,80 @@ RSpec.describe PayrollImport::ImportService do
         include("label" => "Test rent payment", "amount" => 15.0, "treatment" => "post_tax_deduction")
       )
     end
+
+    it "can import Excel tips as already-paid tip offsets for daily tip clients" do
+      employee = create(
+        :employee,
+        company: company,
+        first_name: "Tina",
+        last_name: "Tips",
+        employment_type: "hourly",
+        pay_rate: 10.0
+      )
+
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 40,
+            overtime_hours: 0,
+            total_tips: 75.0
+          }
+        ],
+        tips_paid_out_from_tips: true
+      )
+
+      expect(result[:errors]).to be_empty
+      payroll_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(payroll_item.reported_tips).to eq(75.0)
+      expect(payroll_item.tips_paid_out).to eq(75.0)
+    end
+
+    it "clears stale paid-out tip offsets when a re-import no longer marks tips as paid out" do
+      employee = create(
+        :employee,
+        company: company,
+        first_name: "Rita",
+        last_name: "Reimport",
+        employment_type: "hourly",
+        pay_rate: 10.0
+      )
+
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      first_result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 40,
+            overtime_hours: 0,
+            total_tips: 100.0
+          }
+        ],
+        tips_paid_out_from_tips: true
+      )
+      expect(first_result[:errors]).to be_empty
+
+      second_result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            regular_hours: 40,
+            overtime_hours: 0,
+            total_tips: 40.0
+          }
+        ],
+        force_overwrite: true,
+        tips_paid_out_from_tips: false
+      )
+
+      expect(second_result[:errors]).to be_empty
+      payroll_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(payroll_item.reported_tips).to eq(40.0)
+      expect(payroll_item.tips_paid_out).to eq(0.0)
+    end
   end
 
   describe "#preview" do

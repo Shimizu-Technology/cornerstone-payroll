@@ -21,9 +21,12 @@ export function platformShortcut(key: string) {
     .split(/\s+/)
     .filter(Boolean);
   const hasShift = parts.includes('SHIFT') || parts.includes('⇧');
-  const normalizedKey = parts.filter((part) => part !== 'SHIFT' && part !== '⇧').join(' ');
+  const hasOption = parts.includes('OPTION') || parts.includes('ALT') || parts.includes('⌥');
+  const normalizedKey = parts
+    .filter((part) => !['SHIFT', '⇧', 'OPTION', 'ALT', '⌥'].includes(part))
+    .join(' ');
 
   return isApplePlatform()
-    ? `${hasShift ? '⇧' : ''}⌘${normalizedKey}`
-    : `Ctrl ${hasShift ? 'Shift ' : ''}${normalizedKey}`;
+    ? `${hasShift ? '⇧' : ''}${hasOption ? '⌥' : ''}⌘${normalizedKey}`
+    : `Ctrl ${hasOption ? 'Alt ' : ''}${hasShift ? 'Shift ' : ''}${normalizedKey}`;
 }

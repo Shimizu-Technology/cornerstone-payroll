@@ -418,7 +418,7 @@ export function ReplaceCheckModal({
                     onValueChange={(value) => setForm((f) => ({ ...f, bonus: value == null ? '' : String(value) }))}
                   />
                 </FieldRow>
-                <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
+                <FieldRow label="Reported tips" original={payrollItem.reported_tips} prefix="$">
                   <NumericInput
                     min={0}
                     inputMode="decimal"
@@ -471,7 +471,7 @@ export function ReplaceCheckModal({
                     value={form.bonus === '' ? null : Number(form.bonus)}
                     onValueChange={value => setForm(f => ({ ...f, bonus: value == null ? '' : String(value) }))} />
                 </FieldRow>
-                <FieldRow label="Tips" original={payrollItem.reported_tips} prefix="$">
+                <FieldRow label="Reported tips" original={payrollItem.reported_tips} prefix="$">
                   <NumericInput min={0} inputMode="decimal"
                     value={form.reported_tips === '' ? null : Number(form.reported_tips)}
                     onValueChange={value => setForm(f => ({ ...f, reported_tips: value == null ? '' : String(value) }))} />

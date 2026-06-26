@@ -73,7 +73,8 @@ module Api
             end
 
             force_overwrite = params[:force_overwrite].to_s == "true"
-            results = service.apply!(matched: matched_data, force_overwrite: force_overwrite)
+            tips_paid_out_from_tips = ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips])
+            results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
 
             final_status = results[:errors].any? ? "partially_applied" : "applied"
             import_record.update!(
@@ -138,6 +139,7 @@ module Api
             employer_social_security_tax: item.employer_social_security_tax,
             employer_medicare_tax: item.employer_medicare_tax,
             reported_tips: item.reported_tips,
+            tips_paid_out: item.tips_paid_out,
             tips: item.tips,
             tip_pool: item.tip_pool,
             loan_deduction: item.loan_deduction,

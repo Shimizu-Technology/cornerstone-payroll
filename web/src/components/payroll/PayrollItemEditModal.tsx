@@ -163,6 +163,10 @@ export function PayrollItemEditModal({
   const employeeAdditionalWithholding = Number(item.additional_withholding || 0);
   const employeePaidPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment !== 'employer_contribution');
   const employerContributionPayrollFieldEntries = fields.payroll_field_entries.filter(entry => entry.tax_treatment === 'employer_contribution');
+  const reportedTipsInput = Number(fields.reported_tips || 0);
+  const tipsPaidOutInput = Number(fields.tips_paid_out || 0);
+  const effectiveReportedTips = Math.max(reportedTipsInput, tipsPaidOutInput);
+  const tipsPaidOutExceedsReportedTips = tipsPaidOutInput > reportedTipsInput;
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -240,14 +244,16 @@ export function PayrollItemEditModal({
     setSaving(true);
     setError(null);
     try {
+      const tipsPaidOut = parseFloat(String(fields.tips_paid_out)) || 0;
+      const reportedTips = Math.max(parseFloat(String(fields.reported_tips)) || 0, tipsPaidOut);
       const payload: Record<string, unknown> = {
         hours_worked: parseFloat(String(fields.hours_worked)) || 0,
         overtime_hours: parseFloat(String(fields.overtime_hours)) || 0,
         holiday_hours: parseFloat(String(fields.holiday_hours)) || 0,
         pto_hours: parseFloat(String(fields.pto_hours)) || 0,
         bonus: parseFloat(String(fields.bonus)) || 0,
-        reported_tips: parseFloat(String(fields.reported_tips)) || 0,
-        tips_paid_out: parseFloat(String(fields.tips_paid_out)) || 0,
+        reported_tips: reportedTips,
+        tips_paid_out: tipsPaidOut,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding_override: fields.additional_withholding_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.additional_withholding_override)) ? parseFloat(fields.additional_withholding_override) : null),
         withholding_tax_adjustment: fields.withholding_tax_adjustment.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_adjustment)) ? parseFloat(fields.withholding_tax_adjustment) : null),
@@ -518,6 +524,11 @@ export function PayrollItemEditModal({
                   min={0}
                   fixedDecimalsOnBlur={2}
                 />
+                {tipsPaidOutExceedsReportedTips ? (
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Will save as {formatCurrency(effectiveReportedTips)} so paid-out tips stay included in taxable reported tips.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Non-Taxable Pay</label>
@@ -540,7 +551,7 @@ export function PayrollItemEditModal({
                   fixedDecimalsOnBlur={2}
                 />
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Reduces this check only. Does not reduce taxable wages or reported tips.
+                  Already paid to the employee; included in reported tips/taxable gross, then offset from this check.
                 </p>
               </div>
             </div>

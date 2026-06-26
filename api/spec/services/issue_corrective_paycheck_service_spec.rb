@@ -130,6 +130,45 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(corrective.check_number).to be_present
     end
 
+    it "stores reported-tip deltas on the corrective row for W-2GU and 941 reporting" do
+      original_item.update_columns(
+        reported_tips: 0.0,
+        tips_paid_out: 50.0,
+        total_deductions: original_item.total_deductions.to_f + 50.0,
+        net_pay: original_item.net_pay.to_f - 50.0
+      )
+
+      supplemental, corrective = described_class.issue!(
+        original_pay_period: original_period,
+        employee:            employee,
+        corrected_inputs:    { tips_paid_out: 50.0 },
+        pay_date:            Date.new(2024, 1, 26),
+        reason:              "Daily paid-out tips were not included in taxable tips",
+        actor:               actor
+      )
+
+      expect(supplemental).to be_committed
+      expect(corrective.reported_tips).to eq(50.0)
+      expect(corrective.tips_paid_out).to eq(0.0)
+      expect(corrective.gross_pay).to be_within(0.01).of(50.0)
+      expect(corrective.net_pay).to be > 0
+    end
+
+    it "allows a corrective paycheck to clear the supplemental row tip pool" do
+      original_item.update_columns(tip_pool: "foh")
+
+      _, corrective = described_class.issue!(
+        original_pay_period: original_period,
+        employee:            employee,
+        corrected_inputs:    { hours_worked: 80, tip_pool: "" },
+        pay_date:            Date.new(2024, 1, 26),
+        reason:              "Corrected hours and removed tip pool assignment",
+        actor:               actor
+      )
+
+      expect(corrective.tip_pool).to be_nil
+    end
+
     it "updates Employee and Company YTD totals by the delta" do
       original_employee_ytd = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024).gross_pay
       original_company_ytd  = CompanyYtdTotal.find_by(company_id: company.id, year: 2024).gross_pay
