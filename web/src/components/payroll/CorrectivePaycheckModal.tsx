@@ -197,6 +197,8 @@ export function CorrectivePaycheckModal({
   };
 
   const deltas = preview?.deltas;
+  const reportedTipsDelta = deltas?.reported_tips_delta ?? deltas?.reported_tips ?? 0;
+  const tipsPaidOutDelta = deltas?.tips_paid_out_delta ?? deltas?.tips_paid_out ?? 0;
   const corrected = preview?.corrected;
   const original = preview?.original;
   const willGenerateCheck = preview?.meta.will_generate_check ?? false;
@@ -266,7 +268,7 @@ export function CorrectivePaycheckModal({
                 onValueChange={value => setForm(f => ({ ...f, bonus: value == null ? '' : String(value) }))}
               />
             </FieldRow>
-            <FieldRow label="Tips" original={originalItem.reported_tips} prefix="$">
+            <FieldRow label="Reported tips" original={originalItem.reported_tips} prefix="$">
               <NumericInput
                 min={0}
                 inputMode="decimal"
@@ -315,7 +317,8 @@ export function CorrectivePaycheckModal({
                 <DeltaLine label="Federal income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
                 <DeltaLine label="Social Security" original={original.social_security_tax} corrected={corrected.social_security_tax} delta={deltas.social_security_tax} />
                 <DeltaLine label="Medicare" original={original.medicare_tax} corrected={corrected.medicare_tax} delta={deltas.medicare_tax} />
-                <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} delta={deltas.tips_paid_out} />
+                <DeltaLine label="Reported tips" original={original.reported_tips} corrected={corrected.reported_tips} delta={reportedTipsDelta} />
+                <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} delta={tipsPaidOutDelta} />
                 <hr />
                 <DeltaLine label="Net pay" original={original.net_pay} corrected={corrected.net_pay} delta={deltas.net_pay} bold />
                 <div className="mt-2 rounded border-l-4 border-blue-400 bg-blue-50 p-3 text-xs text-blue-900">

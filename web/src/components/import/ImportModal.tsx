@@ -39,6 +39,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
   const [error, setError] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(null);
   const [excludedIds, setExcludedIds] = useState<Set<number>>(new Set());
+  const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
   const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
@@ -51,6 +52,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
     setError(null);
     setPreviewData(null);
     setExcludedIds(new Set());
+    setTipsPaidOutFromTips(false);
     setResults(null);
   };
 
@@ -83,6 +85,7 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
       const response = await payPeriodsApi.applyImport(payPeriodId, {
         import_id: previewData.import_id,
         matched,
+        tips_paid_out_from_tips: tipsPaidOutFromTips,
       });
       setResults({
         success: response.results.success.length,
@@ -263,7 +266,20 @@ export function ImportModal({ open, onOpenChange, payPeriodId, onImportComplete 
               </Table>
             </div>
 
-            <div className="space-y-1 text-sm text-gray-500">
+            <div className="space-y-3 text-sm text-gray-500">
+              <label className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                <input
+                  type="checkbox"
+                  checked={tipsPaidOutFromTips}
+                  onChange={(event) => setTipsPaidOutFromTips(event.target.checked)}
+                  className="mt-0.5 rounded border-amber-300"
+                  disabled={previewData.preview.excel_count === 0}
+                />
+                <span>
+                  <span className="font-medium">Tips in this Excel file were already paid out daily.</span>{' '}
+                  Import them as reported taxable tips and also offset them from employee checks.
+                </span>
+              </label>
               <p>
                 {previewData.preview.pdf_count} PDF records, {previewData.preview.excel_count} Excel records, {included.length} to import
               </p>

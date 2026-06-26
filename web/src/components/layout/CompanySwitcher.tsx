@@ -59,7 +59,7 @@ export function CompanySwitcher() {
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-400">Active Client</p>
         <span className="rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">
-          {platformShortcut('Shift K')}
+          {platformShortcut('Option K')}
         </span>
       </div>
       <button

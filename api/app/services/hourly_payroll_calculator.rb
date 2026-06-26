@@ -6,6 +6,7 @@
 #
 class HourlyPayrollCalculator < PayrollCalculator
   def calculate
+    normalize_tips_paid_out_into_reported_tips!
     calculate_base_gross_for_payroll_fields
     sync_payroll_field_entries_after_base_gross
     calculate_gross_pay
