@@ -401,6 +401,11 @@ class IssueCorrectivePaycheckService
     @corrected_inputs.key?(key) ? @corrected_inputs[key] : fallback
   end
 
+  def corrected_tip_pool
+    source = @corrected_inputs.key?(:tip_pool) ? @corrected_inputs[:tip_pool] : corrected_item.tip_pool
+    source.presence
+  end
+
   def snapshot(item)
     DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
       h[field] = item.public_send(field).to_f.round(4)
@@ -486,7 +491,7 @@ class IssueCorrectivePaycheckService
       # gross/tax/net deltas below make the corrective check amount right.
       reported_tips:                   deltas[:reported_tips_delta],
       tips_paid_out:                   deltas[:tips_paid_out_delta],
-      tip_pool:                        corrected_item.tip_pool.presence || original_item.tip_pool,
+      tip_pool:                        corrected_tip_pool,
 
       # Financial deltas: assigned directly so the standard commit
       # pipeline (YTD update / check number assignment) treats them as

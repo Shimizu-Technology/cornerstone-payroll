@@ -49,14 +49,16 @@ export function Layout() {
       }
 
       const usesCommandModifier = event.metaKey || event.ctrlKey;
-      if (!usesCommandModifier || event.altKey) return;
+      if (!usesCommandModifier) return;
 
       const key = event.key.toLowerCase();
       const isKShortcut = key === 'k' || event.code === 'KeyK';
+      if (event.altKey && !isKShortcut) return;
+
       if (isKShortcut) {
         event.preventDefault();
         event.stopPropagation();
-        openCommandPalette(event.shiftKey ? 'companies' : 'all');
+        openCommandPalette(event.altKey ? 'companies' : 'all');
         return;
       }
 

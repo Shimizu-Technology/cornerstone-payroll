@@ -487,7 +487,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
                 onKeyDown={(event) => {
                   if ((event.metaKey || event.ctrlKey) && (event.key.toLowerCase() === 'k' || event.code === 'KeyK')) {
                     event.preventDefault();
-                    onModeChange?.(event.shiftKey ? 'companies' : 'all');
+                    onModeChange?.(event.altKey ? 'companies' : 'all');
                     return;
                   }
                   if (event.key === 'Escape') {
@@ -514,7 +514,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
                 className="h-10 flex-1 bg-transparent text-base font-medium text-neutral-950 outline-none placeholder:text-neutral-400"
               />
               <div className="hidden items-center gap-1 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-500 sm:flex">
-                {platformShortcut(isCompanyMode ? 'Shift K' : 'K')}
+                {platformShortcut(isCompanyMode ? 'Option K' : 'K')}
               </div>
               <button
                 type="button"

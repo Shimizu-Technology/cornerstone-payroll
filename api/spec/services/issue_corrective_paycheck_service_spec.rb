@@ -154,6 +154,21 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(corrective.net_pay).to be > 0
     end
 
+    it "allows a corrective paycheck to clear the supplemental row tip pool" do
+      original_item.update_columns(tip_pool: "foh")
+
+      _, corrective = described_class.issue!(
+        original_pay_period: original_period,
+        employee:            employee,
+        corrected_inputs:    { hours_worked: 80, tip_pool: "" },
+        pay_date:            Date.new(2024, 1, 26),
+        reason:              "Corrected hours and removed tip pool assignment",
+        actor:               actor
+      )
+
+      expect(corrective.tip_pool).to be_nil
+    end
+
     it "updates Employee and Company YTD totals by the delta" do
       original_employee_ytd = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024).gross_pay
       original_company_ytd  = CompanyYtdTotal.find_by(company_id: company.id, year: 2024).gross_pay
