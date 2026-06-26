@@ -123,7 +123,7 @@ module PayrollImport
             # Set tips from Excel — reported_tips is the taxable tip source of truth.
             # Legacy `tips` is cleared to prevent historical double counting.
             payroll_item.reported_tips = row[:total_tips].to_f
-            payroll_item.tips_paid_out = row[:total_tips].to_f if tips_paid_out_from_tips
+            payroll_item.tips_paid_out = tips_paid_out_from_tips ? row[:total_tips].to_f : 0.0
             payroll_item.tips = 0.0  # Reset to avoid double-counting
             payroll_item.tip_pool = row[:tip_pool] if row[:tip_pool]
             payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]

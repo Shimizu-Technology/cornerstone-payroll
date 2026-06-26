@@ -55,6 +55,7 @@ export function Layout() {
       const isKShortcut = key === 'k' || event.code === 'KeyK';
       if (isKShortcut) {
         event.preventDefault();
+        event.stopPropagation();
         openCommandPalette(event.shiftKey ? 'companies' : 'all');
         return;
       }
@@ -71,8 +72,8 @@ export function Layout() {
       }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [openCommandPalette, toggleCollapse]);
 
   useEffect(() => {
