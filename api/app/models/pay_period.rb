@@ -94,8 +94,14 @@ class PayPeriod < ApplicationRecord
   scope :reportable_committed, -> { committed.where(correction_status: [ nil, "correction" ]) }
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   scope :tax_sync_pending_or_failed, -> { where(tax_sync_status: %w[pending failed]) }
+  # Dates are required for normal records; NULLS LAST is intentionally kept in
+  # both directions so any legacy/malformed rows never displace real pay periods
+  # at the top of operator-facing lists.
   scope :period_chronological, -> {
     order(Arel.sql("start_date ASC NULLS LAST, end_date ASC NULLS LAST, pay_date ASC NULLS LAST, id DESC"))
+  }
+  scope :period_reverse_chronological, -> {
+    order(Arel.sql("start_date DESC NULLS LAST, end_date DESC NULLS LAST, pay_date DESC NULLS LAST, id DESC"))
   }
   # Cycle scopes
   scope :regular_cycle, -> { where(cycle: "regular") }

@@ -26,7 +26,7 @@ module Api
           @pay_periods = PayPeriod.where(company_id: current_company_id)
                                    .includes(:payroll_items, :voided_by, :correction_events,
                                              :supplemental_pay_periods)
-                                   .period_chronological
+                                   .period_reverse_chronological
 
           # Filter by status
           @pay_periods = @pay_periods.where(status: params[:status]) if params[:status].present?
