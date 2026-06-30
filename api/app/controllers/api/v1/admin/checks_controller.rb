@@ -22,6 +22,17 @@ module Api
       #   GET    /companies/:company_id/alignment_test_pdf       → alignment_test_pdf
       #   PATCH  /companies/:company_id/next_check_number        → update_next_check_number
       class ChecksController < BaseController
+        CHECK_SETTINGS_SCALAR_PARAMS = %i[
+          check_stock_type
+          check_offset_x
+          check_offset_y
+          bank_name
+          bank_address
+          check_memo_template
+          auto_create_fit_check
+        ].freeze
+        CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
+
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
@@ -109,7 +120,7 @@ module Api
           end
           CheckEvent.insert_all!(event_records)
 
-          pay_date_token = @pay_period.pay_date&.strftime('%Y-%m-%d') || "undated"
+          pay_date_token = @pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           filename = "checks_#{pay_date_token}_batch.pdf"
           send_data combined_pdf,
             type: "application/pdf",
@@ -172,7 +183,7 @@ module Api
           if @payroll_item.pay_period.company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
               company: @payroll_item.pay_period.company,
-              payroll_items: [@payroll_item],
+              payroll_items: [ @payroll_item ],
               starting_slot: params[:starting_slot]
             )
             pdf_data = generator.generate
@@ -423,16 +434,7 @@ module Api
         # PATCH /api/v1/admin/companies/:company_id/check_settings
         # -----------------------------------------------------------------------
         def update_check_settings
-          permitted = params.permit(
-            :check_stock_type,
-            :check_offset_x,
-            :check_offset_y,
-            :bank_name,
-            :bank_address,
-            :check_memo_template,
-            :auto_create_fit_check,
-            check_layout_config: {}
-          )
+          permitted = check_settings_update_params
 
           [ :check_offset_x, :check_offset_y ].each do |key|
             next unless permitted.key?(key)
@@ -447,11 +449,7 @@ module Api
             return render json: { errors: [ "#{key} must be a number" ] }, status: :unprocessable_entity
           end
 
-          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
-          elsif permitted[:check_layout_config].is_a?(Hash)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
-          end
+          normalize_and_sanitize_layout_config!(permitted, current_stock_type: @company.check_stock_type)
           permitted[:active_printer_profile_id] = nil if printer_calibration_settings_changed?(permitted)
 
           if @company.update(permitted)
@@ -485,14 +483,14 @@ module Api
           when "payroll"
             sample_item = build_test_payroll_item(preview_company)
             if preview_company.first_hawaiian_4up_checks?
-              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [sample_item]).generate
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [ sample_item ]).generate
             else
               CheckGenerator.new(sample_item).generate
             end
           when "fit", "grt", "vendor"
             sample_check = build_test_non_employee_check(preview_company, sample_type)
             if preview_company.first_hawaiian_4up_checks?
-              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [sample_check]).generate
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [ sample_check ]).generate
             else
               NonEmployeeCheckGenerator.new(sample_check, layout_config: preview_company.check_layout_config).generate
             end
@@ -723,7 +721,7 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
-            check_layout_config: company.check_layout_config || {},
+            check_layout_config: sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {}),
             active_printer_profile_id: company.active_printer_profile_id,
             active_printer_profile_name: company.active_printer_profile&.name
           }
@@ -757,6 +755,22 @@ module Api
           end
         end
 
+        def check_settings_update_params
+          source = check_settings_update_param_source
+          source.slice(*CHECK_SETTINGS_PARAM_KEYS).permit(
+            *CHECK_SETTINGS_SCALAR_PARAMS,
+            check_layout_config: {}
+          ).to_h.with_indifferent_access
+        end
+
+        def check_settings_update_param_source
+          root_has_settings = CHECK_SETTINGS_PARAM_KEYS.any? { |key| params.key?(key) }
+          raw = root_has_settings ? params : params[:check]
+          raw = {} if raw.blank?
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+          raw
+        end
+
         def preview_check_settings_params
           raw = params[:check_settings].presence || {}
           raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
@@ -770,11 +784,7 @@ module Api
             check_layout_config: {}
           )
 
-          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
-          elsif permitted[:check_layout_config].is_a?(Hash)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
-          end
+          normalize_and_sanitize_layout_config!(permitted, current_stock_type: @company.check_stock_type)
 
           [ :check_offset_x, :check_offset_y ].each do |key|
             permitted[key] = 0 if permitted.key?(key) && permitted[key].blank?
@@ -784,20 +794,24 @@ module Api
         end
 
         def company_check_layout_json(company)
-          if company.first_hawaiian_4up_checks?
+          layout_company = company.dup
+          layout_company.id = company.id
+          layout_company.check_layout_config = sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {})
+
+          if layout_company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator
-            layout = generator.resolved_layout_for(company)
-            page = generator.page_layout_metadata(company)
+            layout = generator.resolved_layout_for(layout_company)
+            page = generator.page_layout_metadata(layout_company)
           else
             generator = CheckGenerator
-            layout = generator.resolved_layout_for(company)
-            page = generator.page_layout_metadata(company)
+            layout = generator.resolved_layout_for(layout_company)
+            page = generator.page_layout_metadata(layout_company)
           end
 
           {
-            check_stock_type: company.check_stock_type,
-            check_offset_x: company.check_offset_x,
-            check_offset_y: company.check_offset_y,
+            check_stock_type: layout_company.check_stock_type,
+            check_offset_x: layout_company.check_offset_x,
+            check_offset_y: layout_company.check_offset_y,
             default_layout_config: generator.default_layout_config,
             resolved_layout_config: layout,
             page: page
@@ -811,20 +825,21 @@ module Api
           company.dup.tap do |preview|
             preview.id = company.id
             preview.check_stock_type = requested_stock_type
+            preview.check_layout_config = sanitize_check_layout_config(requested_stock_type, company.check_layout_config || {})
           end
         end
 
-        def normalize_layout_numeric_values(value)
-          case value
-          when Hash
-            value.transform_values { |nested| normalize_layout_numeric_values(nested) }
-          when Array
-            value.map { |nested| normalize_layout_numeric_values(nested) }
-          when String
-            value.match?(/\A-?\d+(\.\d+)?\z/) ? value.to_f : value
-          else
-            value
+        def normalize_and_sanitize_layout_config!(permitted, current_stock_type:)
+          target_stock_type = permitted[:check_stock_type].presence || current_stock_type
+          if permitted.key?(:check_layout_config)
+            permitted[:check_layout_config] = sanitize_check_layout_config(target_stock_type, permitted[:check_layout_config])
+          elsif permitted.key?(:check_stock_type) && target_stock_type.to_s != current_stock_type.to_s
+            permitted[:check_layout_config] = {}
           end
+        end
+
+        def sanitize_check_layout_config(stock_type, raw_config)
+          CheckLayoutConfigSanitizer.call(stock_type: stock_type, config: raw_config)
         end
 
         # -----------------------------------------------------------------------
