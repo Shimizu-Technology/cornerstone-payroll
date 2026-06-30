@@ -839,12 +839,13 @@ export function PayPeriodDetail() {
       ].sort((left, right) => left[1].localeCompare(right[1]))
     ).entries()
   );
-  const employmentGroupKey = (employmentType: string) => employmentType === 'contractor' ? 'contractor' : 'w2';
-  const employmentGroupOrder: Record<string, number> = { w2: 0, contractor: 1 };
-  const employmentGroupLabel = (employmentType: string) => {
-    if (employmentType === 'contractor') return '1099 Contractors';
-    if (employeeTypeFilter === 'salary') return 'Salary Employees';
-    if (employeeTypeFilter === 'hourly') return 'Hourly Employees';
+  type EmploymentGroup = 'w2' | 'contractor';
+  const employmentGroupKey = (employmentType: string): EmploymentGroup => employmentType === 'contractor' ? 'contractor' : 'w2';
+  const employmentGroupOrder: Record<EmploymentGroup, number> = { w2: 0, contractor: 1 };
+  const employmentGroupLabel = (group: EmploymentGroup, activeFilter: typeof employeeTypeFilter) => {
+    if (group === 'contractor') return '1099 Contractors';
+    if (activeFilter === 'salary') return 'Salary Employees';
+    if (activeFilter === 'hourly') return 'Hourly Employees';
     return 'W-2 Employees';
   };
   const employmentGroupTone = (employmentType: string) => (
@@ -1608,7 +1609,7 @@ export function PayPeriodDetail() {
                         return (
                           <TableRow className={tone.row}>
                             <TableCell stickyLeft colSpan={draftDividerCols} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${tone.text} ${tone.row}`}>
-                              {employmentGroupLabel(emp.employment_type)}
+                              {employmentGroupLabel(currentGroup, employeeTypeFilter)}
                             </TableCell>
                           </TableRow>
                         );
@@ -1929,7 +1930,7 @@ export function PayPeriodDetail() {
                           return (
                             <TableRow className={tone.row}>
                               <TableCell stickyLeft colSpan={totalCols} className={`${tone.row} py-1.5 text-xs font-semibold ${tone.text} uppercase tracking-wider`}>
-                                {employmentGroupLabel(item.employment_type)}
+                                {employmentGroupLabel(currentGroup, employeeTypeFilter)}
                               </TableCell>
                             </TableRow>
                           );
