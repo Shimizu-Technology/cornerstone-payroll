@@ -109,7 +109,7 @@ module Api
           end
           CheckEvent.insert_all!(event_records)
 
-          pay_date_token = @pay_period.pay_date&.strftime('%Y-%m-%d') || "undated"
+          pay_date_token = @pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
           filename = "checks_#{pay_date_token}_batch.pdf"
           send_data combined_pdf,
             type: "application/pdf",
@@ -172,7 +172,7 @@ module Api
           if @payroll_item.pay_period.company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
               company: @payroll_item.pay_period.company,
-              payroll_items: [@payroll_item],
+              payroll_items: [ @payroll_item ],
               starting_slot: params[:starting_slot]
             )
             pdf_data = generator.generate
@@ -447,11 +447,7 @@ module Api
             return render json: { errors: [ "#{key} must be a number" ] }, status: :unprocessable_entity
           end
 
-          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
-          elsif permitted[:check_layout_config].is_a?(Hash)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
-          end
+          normalize_and_sanitize_layout_config!(permitted, current_stock_type: @company.check_stock_type)
           permitted[:active_printer_profile_id] = nil if printer_calibration_settings_changed?(permitted)
 
           if @company.update(permitted)
@@ -485,14 +481,14 @@ module Api
           when "payroll"
             sample_item = build_test_payroll_item(preview_company)
             if preview_company.first_hawaiian_4up_checks?
-              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [sample_item]).generate
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, payroll_items: [ sample_item ]).generate
             else
               CheckGenerator.new(sample_item).generate
             end
           when "fit", "grt", "vendor"
             sample_check = build_test_non_employee_check(preview_company, sample_type)
             if preview_company.first_hawaiian_4up_checks?
-              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [sample_check]).generate
+              FirstHawaiianFourUpCheckGenerator.new(company: preview_company, non_employee_checks: [ sample_check ]).generate
             else
               NonEmployeeCheckGenerator.new(sample_check, layout_config: preview_company.check_layout_config).generate
             end
@@ -723,7 +719,7 @@ module Api
             bank_address: company.bank_address,
             check_memo_template: company.check_memo_template,
             auto_create_fit_check: company.auto_create_fit_check,
-            check_layout_config: company.check_layout_config || {},
+            check_layout_config: sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {}),
             active_printer_profile_id: company.active_printer_profile_id,
             active_printer_profile_name: company.active_printer_profile&.name
           }
@@ -770,11 +766,7 @@ module Api
             check_layout_config: {}
           )
 
-          if permitted[:check_layout_config].is_a?(ActionController::Parameters)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config].to_h)
-          elsif permitted[:check_layout_config].is_a?(Hash)
-            permitted[:check_layout_config] = normalize_layout_numeric_values(permitted[:check_layout_config])
-          end
+          normalize_and_sanitize_layout_config!(permitted, current_stock_type: @company.check_stock_type)
 
           [ :check_offset_x, :check_offset_y ].each do |key|
             permitted[key] = 0 if permitted.key?(key) && permitted[key].blank?
@@ -784,20 +776,24 @@ module Api
         end
 
         def company_check_layout_json(company)
-          if company.first_hawaiian_4up_checks?
+          layout_company = company.dup
+          layout_company.id = company.id
+          layout_company.check_layout_config = sanitize_check_layout_config(company.check_stock_type, company.check_layout_config || {})
+
+          if layout_company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator
-            layout = generator.resolved_layout_for(company)
-            page = generator.page_layout_metadata(company)
+            layout = generator.resolved_layout_for(layout_company)
+            page = generator.page_layout_metadata(layout_company)
           else
             generator = CheckGenerator
-            layout = generator.resolved_layout_for(company)
-            page = generator.page_layout_metadata(company)
+            layout = generator.resolved_layout_for(layout_company)
+            page = generator.page_layout_metadata(layout_company)
           end
 
           {
-            check_stock_type: company.check_stock_type,
-            check_offset_x: company.check_offset_x,
-            check_offset_y: company.check_offset_y,
+            check_stock_type: layout_company.check_stock_type,
+            check_offset_x: layout_company.check_offset_x,
+            check_offset_y: layout_company.check_offset_y,
             default_layout_config: generator.default_layout_config,
             resolved_layout_config: layout,
             page: page
@@ -811,7 +807,76 @@ module Api
           company.dup.tap do |preview|
             preview.id = company.id
             preview.check_stock_type = requested_stock_type
+            preview.check_layout_config = sanitize_check_layout_config(requested_stock_type, company.check_layout_config || {})
           end
+        end
+
+        def normalize_and_sanitize_layout_config!(permitted, current_stock_type:)
+          target_stock_type = permitted[:check_stock_type].presence || current_stock_type
+          if permitted.key?(:check_layout_config)
+            raw_config = permitted[:check_layout_config]
+            raw_config = raw_config.to_h if raw_config.is_a?(ActionController::Parameters)
+            permitted[:check_layout_config] = sanitize_check_layout_config(target_stock_type, raw_config)
+          elsif permitted.key?(:check_stock_type) && target_stock_type.to_s != current_stock_type.to_s
+            permitted[:check_layout_config] = {}
+          end
+        end
+
+        def sanitize_check_layout_config(stock_type, raw_config)
+          config = normalize_layout_numeric_values(raw_config || {})
+          return {} unless config.is_a?(Hash)
+
+          stock_type.to_s == "first_hawaiian_4up" ? sanitize_first_hawaiian_layout_config(config) : sanitize_standard_check_layout_config(config)
+        end
+
+        def sanitize_first_hawaiian_layout_config(config)
+          sanitize_nested_field_layout_config(
+            config,
+            FirstHawaiianFourUpCheckGenerator.default_layout_config,
+            max_y: FirstHawaiianFourUpCheckGenerator::SLOT_HEIGHT
+          )
+        end
+
+        def sanitize_standard_check_layout_config(config)
+          defaults = CheckGenerator.default_layout_config
+          sanitized = sanitize_nested_field_layout_config(config, { "check_face" => defaults.fetch("check_face") }, max_y: CheckGenerator::SECTION_HEIGHT)
+          stub_config = config["stub"]
+          if stub_config.is_a?(Hash)
+            allowed_stub_keys = defaults.fetch("stub").keys
+            clean_stub = stub_config.slice(*allowed_stub_keys).select { |_key, value| value.is_a?(Numeric) }
+            sanitized["stub"] = clean_stub if clean_stub.present?
+          end
+          sanitized
+        end
+
+        def sanitize_nested_field_layout_config(config, defaults, max_y:)
+          allowed_keys = %w[x y width height font_size]
+          defaults.each_with_object({}) do |(section, field_defaults), sanitized|
+            section_config = config[section]
+            next unless section_config.is_a?(Hash)
+
+            field_defaults.each_key do |field|
+              field_config = section_config[field]
+              next unless field_config.is_a?(Hash)
+
+              clean_field = field_config.slice(*allowed_keys).select { |_key, value| value.is_a?(Numeric) }
+              next if clean_field.empty?
+              next if layout_field_position_out_of_bounds?(clean_field, max_y: max_y)
+
+              sanitized[section] ||= {}
+              sanitized[section][field] = clean_field
+            end
+          end
+        end
+
+        def layout_field_position_out_of_bounds?(field_config, max_y:)
+          x = field_config["x"]
+          y = field_config["y"]
+
+          return true if x.present? && (x.to_f < -36.0 || x.to_f > 612.0)
+          return true if y.present? && (y.to_f < -36.0 || y.to_f > max_y.to_f)
+
+          false
         end
 
         def normalize_layout_numeric_values(value)

@@ -598,6 +598,21 @@ export function CheckSettingsPage() {
     setError(null);
   };
 
+  const handleStockTypeChange = (nextStockType: CheckStockType) => {
+    if (nextStockType === stockType) return;
+
+    const hasFieldOverrides = parsedLayoutOverrides === null || stableLayoutJson(parsedLayoutOverrides) !== '{}';
+    setStockType(nextStockType);
+    setError(null);
+
+    if (hasFieldOverrides) {
+      setLayoutOverridesJson('{}');
+      setSuccess('Stock type changed. Field-level calibration was reset to the selected stock’s default map. Recalibrate and save when ready.');
+    } else {
+      setSuccess(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -868,7 +883,7 @@ export function CheckSettingsPage() {
               <Select
                 id="stock-type"
                 value={stockType}
-                onChange={(e) => setStockType(e.target.value as CheckStockType)}
+                onChange={(e) => handleStockTypeChange(e.target.value as CheckStockType)}
                 className="w-64"
               >
                 <option value="top_check">Top Check</option>

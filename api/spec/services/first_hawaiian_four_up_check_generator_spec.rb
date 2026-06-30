@@ -76,6 +76,34 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     expect(text).to include("FHB CHECK SLOT 4")
   end
 
+  it "uses identical relative field placement in all four slots" do
+    layout = described_class.resolved_layout_for(company)
+    page = described_class.page_layout_metadata(company)
+    fields = %w[date payee amount amount_words memo]
+
+    fields.each do |field|
+      cfg = layout.fetch("check_face").fetch(field)
+      anchors = page.fetch(:slot_count).times.map do |slot_index|
+        slot_bottom = page.fetch(:height) - ((slot_index + 1) * page.fetch(:slot_height))
+        [ cfg.fetch("x").to_f, slot_bottom + cfg.fetch("y").to_f ]
+      end
+
+      expect(anchors.map(&:first).uniq).to eq([ cfg.fetch("x").to_f ])
+      anchors.each_cons(2) do |upper_slot, lower_slot|
+        expect(upper_slot.first).to eq(lower_slot.first)
+        expect(upper_slot.last - lower_slot.last).to eq(page.fetch(:slot_height))
+      end
+    end
+  end
+
+  it "keeps default check-face fields within each 4-up slot" do
+    layout = described_class.default_layout_config.fetch("check_face")
+
+    layout.each_value do |cfg|
+      expect(cfg.fetch("y").to_f).to be_between(0, described_class::SLOT_HEIGHT).inclusive
+    end
+  end
+
   it "falls back to default layout fields when custom config is malformed" do
     company.update!(
       check_layout_config: {
@@ -88,7 +116,7 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     )
 
     item = payroll_item_for("Ana", "Taylor", "2466", 100.25)
-    pdf = described_class.new(company: company, payroll_items: [item]).generate
+    pdf = described_class.new(company: company, payroll_items: [ item ]).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
 
     expect(pdf).to start_with("%PDF")
