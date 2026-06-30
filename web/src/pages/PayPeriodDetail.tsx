@@ -839,7 +839,23 @@ export function PayPeriodDetail() {
       ].sort((left, right) => left[1].localeCompare(right[1]))
     ).entries()
   );
-  const typeOrder: Record<string, number> = { salary: 0, hourly: 1, contractor: 2 };
+  type EmploymentGroup = 'w2' | 'contractor';
+  const employmentGroupKey = (employmentType: string): EmploymentGroup => employmentType === 'contractor' ? 'contractor' : 'w2';
+  const employmentGroupOrder: Record<EmploymentGroup, number> = { w2: 0, contractor: 1 };
+  const employmentGroupLabel = (group: EmploymentGroup, activeFilter: typeof employeeTypeFilter) => {
+    if (group === 'contractor') return '1099 Contractors';
+    if (activeFilter === 'salary') return 'Salary Employees';
+    if (activeFilter === 'hourly') return 'Hourly Employees';
+    return 'W-2 Employees';
+  };
+  const employmentGroupTone = (employmentType: string) => (
+    employmentType === 'contractor'
+      ? { row: 'bg-emerald-50', text: 'text-emerald-700' }
+      : { row: 'bg-indigo-50', text: 'text-indigo-700' }
+  );
+  const employeeNameSortKey = (employee: Pick<Employee, 'first_name' | 'last_name'>) => (
+    `${employee.last_name || ''} ${employee.first_name || ''}`.trim()
+  );
   const matchesEmployeeFilters = (employmentType: string, searchableValues: string[], departmentId?: number | null) => {
     if (employeeTypeFilter !== 'all' && employmentType !== employeeTypeFilter) return false;
     if (departmentFilter !== 'all' && String(departmentId || '') !== departmentFilter) return false;
@@ -871,22 +887,24 @@ export function PayPeriodDetail() {
       item.department_id ?? employeeLookup.get(item.employee_id)?.department_id
     ))
     .sort((left, right) => {
-      const typeDiff = employeeTypeFilter === 'all'
-        ? (typeOrder[left.employment_type] ?? 9) - (typeOrder[right.employment_type] ?? 9)
+      const groupDiff = employeeTypeFilter === 'all'
+        ? (employmentGroupOrder[employmentGroupKey(left.employment_type)] ?? 9) - (employmentGroupOrder[employmentGroupKey(right.employment_type)] ?? 9)
         : 0;
-      if (typeDiff !== 0) return typeDiff;
+      if (groupDiff !== 0) return groupDiff;
+
+      const nameTieBreak = () => employeeLastNameSortKey(left).localeCompare(employeeLastNameSortKey(right));
 
       switch (resultsSortBy) {
       case 'rate':
-        return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection);
+        return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection) || nameTieBreak();
       case 'hours':
-        return compareDirectional(toNumber(left.hours_worked), toNumber(right.hours_worked), resultsSortDirection);
+        return compareDirectional(toNumber(left.hours_worked), toNumber(right.hours_worked), resultsSortDirection) || nameTieBreak();
       case 'gross':
-        return compareDirectional(toNumber(left.gross_pay), toNumber(right.gross_pay), resultsSortDirection);
+        return compareDirectional(toNumber(left.gross_pay), toNumber(right.gross_pay), resultsSortDirection) || nameTieBreak();
       case 'net':
-        return compareDirectional(toNumber(left.net_pay), toNumber(right.net_pay), resultsSortDirection);
+        return compareDirectional(toNumber(left.net_pay), toNumber(right.net_pay), resultsSortDirection) || nameTieBreak();
       case 'fit':
-        return compareDirectional(toNumber(left.withholding_tax), toNumber(right.withholding_tax), resultsSortDirection);
+        return compareDirectional(toNumber(left.withholding_tax), toNumber(right.withholding_tax), resultsSortDirection) || nameTieBreak();
       case 'name':
       default:
         return compareDirectional(
@@ -1018,6 +1036,15 @@ export function PayPeriodDetail() {
           <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
             {error}
           </div>
+        )}
+
+        {payPeriod.notes && (
+          <Card className="border-blue-100 bg-blue-50/60">
+            <CardContent className="py-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Pay Period Notes</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-blue-950">{payPeriod.notes}</p>
+            </CardContent>
+          </Card>
         )}
 
         {/* Status Bar */}
@@ -1480,19 +1507,21 @@ export function PayPeriodDetail() {
                         emp.department_id
                       ))
                       .sort((a, b) => {
-                        const orderDiff = employeeTypeFilter === 'all'
-                          ? (typeOrder[a.employment_type] ?? 9) - (typeOrder[b.employment_type] ?? 9)
+                        const groupDiff = employeeTypeFilter === 'all'
+                          ? (employmentGroupOrder[employmentGroupKey(a.employment_type)] ?? 9) - (employmentGroupOrder[employmentGroupKey(b.employment_type)] ?? 9)
                           : 0;
-                        if (orderDiff !== 0) return orderDiff;
+                        if (groupDiff !== 0) return groupDiff;
+
+                        const nameTieBreak = () => employeeNameSortKey(a).localeCompare(employeeNameSortKey(b));
 
                         if (hoursSortBy === 'rate') {
-                          return compareDirectional(toNumber(a.pay_rate), toNumber(b.pay_rate), hoursSortDirection);
+                          return compareDirectional(toNumber(a.pay_rate), toNumber(b.pay_rate), hoursSortDirection) || nameTieBreak();
                         }
 
                         if (hoursSortBy === 'hours') {
                           const aHours = toNumber(hoursMap[String(a.id)]?.regular) + toNumber(hoursMap[String(a.id)]?.overtime);
                           const bHours = toNumber(hoursMap[String(b.id)]?.regular) + toNumber(hoursMap[String(b.id)]?.overtime);
-                          return compareDirectional(aHours, bHours, hoursSortDirection);
+                          return compareDirectional(aHours, bHours, hoursSortDirection) || nameTieBreak();
                         }
 
                         if (hoursSortBy === 'gross') {
@@ -1529,19 +1558,20 @@ export function PayPeriodDetail() {
                             return baseGross + tipGross;
                           };
 
-                          return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection);
+                          return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection) || nameTieBreak();
                         }
 
                         return compareDirectional(
-                          `${a.last_name} ${a.first_name}`,
-                          `${b.last_name} ${b.first_name}`,
+                          employeeNameSortKey(a),
+                          employeeNameSortKey(b),
                           hoursSortDirection
                         );
                       });
-                    let prevType: string | null = null;
+                    let prevGroup: string | null = null;
                     return displayEmployees.map((emp, rowIndex) => {
-                      const showDivider = emp.employment_type !== prevType;
-                      prevType = emp.employment_type;
+                      const currentGroup = employmentGroupKey(emp.employment_type);
+                      const showDivider = currentGroup !== prevGroup;
+                      prevGroup = currentGroup;
                       const hours = hoursMap[String(emp.id)] || { regular: 0, overtime: 0 };
                       const payRate = toNumber(emp.pay_rate);
                       const isContractorHourly = emp.employment_type === 'contractor' && emp.contractor_pay_type === 'hourly';
@@ -1574,15 +1604,16 @@ export function PayPeriodDetail() {
                       const estGross = baseEstGross + reportedTipGross;
                       return (
                       <Fragment key={emp.id}>
-                      {showDivider && (
-                        <TableRow className={emp.employment_type === 'contractor' ? 'bg-emerald-50' : emp.employment_type === 'hourly' ? 'bg-gray-100' : 'bg-indigo-50'}>
-                          <TableCell stickyLeft colSpan={draftDividerCols} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${
-                            emp.employment_type === 'contractor' ? 'text-emerald-700' : emp.employment_type === 'hourly' ? 'text-gray-600' : 'text-indigo-700'
-                          } ${emp.employment_type === 'contractor' ? 'bg-emerald-50' : emp.employment_type === 'hourly' ? 'bg-gray-100' : 'bg-indigo-50'}`}>
-                            {emp.employment_type === 'contractor' ? '1099 Contractors' : emp.employment_type === 'hourly' ? 'Hourly Employees' : 'Salary Employees'}
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      {showDivider && (() => {
+                        const tone = employmentGroupTone(emp.employment_type);
+                        return (
+                          <TableRow className={tone.row}>
+                            <TableCell stickyLeft colSpan={draftDividerCols} className={`py-1.5 text-xs font-semibold uppercase tracking-wider ${tone.text} ${tone.row}`}>
+                              {employmentGroupLabel(currentGroup, employeeTypeFilter)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })()}
                       <TableRow className={rowTone}>
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                           <div>
@@ -1785,7 +1816,7 @@ export function PayPeriodDetail() {
                 <div className="min-w-0">
                   <h3 className="font-semibold text-gray-900">Employee Payroll</h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    Salary employees listed first, then hourly alphabetically.
+                    W-2 employees are listed alphabetically, with 1099 contractors grouped separately.
                   </p>
                 </div>
                 <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:shrink-0 lg:grid-cols-none lg:flex lg:flex-wrap lg:items-center">
@@ -1887,35 +1918,23 @@ export function PayPeriodDetail() {
                     const isContractorFlat = isContractor && empRecord?.contractor_pay_type !== 'hourly';
                     const itemWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
                     const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && itemWageRates.length > 1;
-                    const prevType = idx > 0 ? displayItems[idx - 1]?.employment_type : null;
-                    const showSalaryDivider = isSalary && idx === 0;
-                    const showHourlyDivider = item.employment_type === 'hourly' && prevType !== 'hourly';
-                    const showContractorDivider = isContractor && prevType !== 'contractor';
+                    const prevGroup = idx > 0 ? employmentGroupKey(displayItems[idx - 1]?.employment_type || '') : null;
+                    const currentGroup = employmentGroupKey(item.employment_type);
+                    const showGroupDivider = currentGroup !== prevGroup;
                     const rowTone = idx % 2 === 0 ? 'bg-white' : 'bg-slate-100';
 
                     return (
                       <Fragment key={item.id}>
-                        {showSalaryDivider && (
-                          <TableRow className="bg-indigo-50">
-                            <TableCell stickyLeft colSpan={totalCols} className="bg-indigo-50 py-1.5 text-xs font-semibold text-indigo-700 uppercase tracking-wider">
-                              Salary Employees
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        {showHourlyDivider && (
-                          <TableRow className="bg-gray-100">
-                            <TableCell stickyLeft colSpan={totalCols} className="bg-gray-100 py-1.5 text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                              Hourly Employees
-                            </TableCell>
-                          </TableRow>
-                        )}
-                        {showContractorDivider && (
-                          <TableRow className="bg-emerald-50">
-                            <TableCell stickyLeft colSpan={totalCols} className="bg-emerald-50 py-1.5 text-xs font-semibold text-emerald-700 uppercase tracking-wider">
-                              1099 Contractors
-                            </TableCell>
-                          </TableRow>
-                        )}
+                        {showGroupDivider && (() => {
+                          const tone = employmentGroupTone(item.employment_type);
+                          return (
+                            <TableRow className={tone.row}>
+                              <TableCell stickyLeft colSpan={totalCols} className={`${tone.row} py-1.5 text-xs font-semibold ${tone.text} uppercase tracking-wider`}>
+                                {employmentGroupLabel(currentGroup, employeeTypeFilter)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })()}
                         <TableRow key={item.id} className={rowTone}>
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                             <div className="flex items-center gap-2">
@@ -2503,14 +2522,6 @@ export function PayPeriodDetail() {
           </Card>
         )}
 
-        {payPeriod.notes && (
-          <Card>
-            <div className="p-4 border-b">
-              <h3 className="font-semibold text-gray-900">Notes</h3>
-            </div>
-            <div className="p-4 text-gray-600">{payPeriod.notes}</div>
-          </Card>
-        )}
       </div>
 
       {/* Import Modal */}

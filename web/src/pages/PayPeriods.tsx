@@ -119,7 +119,7 @@ export function PayPeriods() {
   const [sortBy, setSortBy] = useState<
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status'
   >('pay_period');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -547,8 +547,8 @@ export function PayPeriods() {
               onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
               className="w-full sm:w-32"
             >
-              <option value="asc">Oldest / Low</option>
               <option value="desc">Newest / High</option>
+              <option value="asc">Oldest / Low</option>
             </Select>
           </div>
         </div>
