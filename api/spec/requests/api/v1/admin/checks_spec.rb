@@ -780,6 +780,29 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
     end
 
+    it "accepts wrapped visual-editor params without converting the wrapper to a hash" do
+      visual_editor_payload = {
+        check_stock_type: "first_hawaiian_4up",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        bank_name: nil,
+        bank_address: nil,
+        check_memo_template: nil,
+        auto_create_fit_check: true,
+        check_layout_config: {
+          check_face: {
+            memo: { x: 281.6, y: 58 }
+          }
+        }
+      }
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: visual_editor_payload.merge(check: visual_editor_payload)
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(281.6)
+    end
+
     it "saves First Hawaiian lower-slot drift correction" do
       patch "/api/v1/admin/companies/check_settings",
         params: {

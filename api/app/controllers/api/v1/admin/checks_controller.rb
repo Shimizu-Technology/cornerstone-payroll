@@ -22,6 +22,17 @@ module Api
       #   GET    /companies/:company_id/alignment_test_pdf       → alignment_test_pdf
       #   PATCH  /companies/:company_id/next_check_number        → update_next_check_number
       class ChecksController < BaseController
+        CHECK_SETTINGS_SCALAR_PARAMS = %i[
+          check_stock_type
+          check_offset_x
+          check_offset_y
+          bank_name
+          bank_address
+          check_memo_template
+          auto_create_fit_check
+        ].freeze
+        CHECK_SETTINGS_PARAM_KEYS = (CHECK_SETTINGS_SCALAR_PARAMS + [ :check_layout_config ]).freeze
+
         before_action :set_pay_period,    only: [ :index, :batch_pdf, :mark_all_printed ]
         before_action :set_payroll_item,  only: [ :show, :mark_printed, :void, :reprint, :update_check_number, :replace_preview, :replace_check ]
         before_action :set_company,       only: [ :check_settings, :update_check_settings, :check_layout, :test_check_pdf, :alignment_test_pdf, :update_next_check_number ]
@@ -423,16 +434,7 @@ module Api
         # PATCH /api/v1/admin/companies/:company_id/check_settings
         # -----------------------------------------------------------------------
         def update_check_settings
-          permitted = params.permit(
-            :check_stock_type,
-            :check_offset_x,
-            :check_offset_y,
-            :bank_name,
-            :bank_address,
-            :check_memo_template,
-            :auto_create_fit_check,
-            check_layout_config: {}
-          )
+          permitted = check_settings_update_params
 
           [ :check_offset_x, :check_offset_y ].each do |key|
             next unless permitted.key?(key)
@@ -751,6 +753,22 @@ module Api
             preview.check_memo_template = permitted[:check_memo_template] if permitted.key?(:check_memo_template)
             preview.check_layout_config = permitted[:check_layout_config] if permitted.key?(:check_layout_config)
           end
+        end
+
+        def check_settings_update_params
+          source = check_settings_update_param_source
+          source.slice(*CHECK_SETTINGS_PARAM_KEYS).permit(
+            *CHECK_SETTINGS_SCALAR_PARAMS,
+            check_layout_config: {}
+          ).to_h.with_indifferent_access
+        end
+
+        def check_settings_update_param_source
+          root_has_settings = CHECK_SETTINGS_PARAM_KEYS.any? { |key| params.key?(key) }
+          raw = root_has_settings ? params : params[:check]
+          raw = {} if raw.blank?
+          raw = ActionController::Parameters.new(raw) unless raw.is_a?(ActionController::Parameters)
+          raw
         end
 
         def preview_check_settings_params
