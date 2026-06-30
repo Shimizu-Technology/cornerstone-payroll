@@ -114,7 +114,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_periods"][0]["status"]).to eq("draft")
     end
 
-    it "orders by pay period chronology instead of pay date chronology" do
+    it "orders newest pay periods first by period chronology instead of pay date chronology" do
       pay_period.destroy!
 
       mar_1_original = PayPeriod.create!(
@@ -149,7 +149,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       get "/api/v1/admin/pay_periods"
 
       ids = response.parsed_body.fetch("pay_periods").map { |period| period.fetch("id") }
-      expect(ids).to eq([ mar_1_correction.id, mar_1_original.id, mar_16.id, apr_1.id ])
+      expect(ids).to eq([ apr_1.id, mar_16.id, mar_1_correction.id, mar_1_original.id ])
     end
   end
 
