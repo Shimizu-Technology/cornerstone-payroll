@@ -14,7 +14,7 @@ module Api
           confirmation_number line_items
         ].freeze
 
-        before_action :set_check, only: [:show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :voucher_pdf, :history]
+        before_action :set_check, only: [ :show, :update, :destroy, :mark_printed, :void_check, :check_pdf, :voucher_pdf, :history ]
 
         # GET /api/v1/admin/non_employee_checks
         def index
@@ -210,12 +210,67 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        # POST /api/v1/admin/non_employee_checks/batch_pdf
+        # Builds one PDF for multiple non-employee checks. On First Hawaiian
+        # 4-up stock this packs checks into consecutive slots, starting at the
+        # operator-selected slot, so pay-period tax/vendor checks do not waste a
+        # full four-check sheet per payment.
+        def batch_pdf
+          checks = printable_batch_checks
+          return if performed?
+
+          if checks.empty?
+            return render json: { error: "No printable non-employee checks found" }, status: :unprocessable_entity
+          end
+
+          pdf_data = if checks.first.company.first_hawaiian_4up_checks?
+            FirstHawaiianFourUpCheckGenerator.new(
+              company: checks.first.company,
+              non_employee_checks: checks,
+              starting_slot: params[:starting_slot]
+            ).generate
+          else
+            combine_pdfs(checks.map { |check| NonEmployeeCheckGenerator.new(check).generate })
+          end
+
+          send_data pdf_data,
+            type: "application/pdf",
+            disposition: "attachment",
+            filename: non_employee_batch_filename(checks)
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue LoadError
+          render json: {
+            error: "Batch PDF requires the combine_pdf gem. Please install it or contact your administrator."
+          }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/non_employee_checks/mark_all_printed
+        def mark_all_printed
+          checks = printable_batch_checks(include_printed: false)
+          return if performed?
+
+          marked_count = 0
+          NonEmployeeCheck.transaction do
+            checks.each do |check|
+              check.mark_printed!
+              marked_count += 1
+            end
+          end
+
+          render json: { marked_printed: marked_count }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        end
+
         # GET /api/v1/admin/non_employee_checks/:id/check_pdf
         def check_pdf
           if @check.company.first_hawaiian_4up_checks?
             generator = FirstHawaiianFourUpCheckGenerator.new(
               company: @check.company,
-              non_employee_checks: [@check],
+              non_employee_checks: [ @check ],
               starting_slot: params[:starting_slot]
             )
             pdf_data = generator.generate
@@ -242,6 +297,57 @@ module Api
         end
 
         private
+
+        def printable_batch_checks(include_printed: true)
+          scope = NonEmployeeCheck
+            .where(company_id: current_company_id)
+            .active
+            .where.not(check_number: [ nil, "" ])
+            .includes(:company, :pay_period, :line_items)
+
+          scope = scope.where(printed_at: nil) unless include_printed
+
+          if params.key?(:ids)
+            ids = Array(params[:ids]).map { |id| Integer(id) }
+            scope = ids.empty? ? scope.none : scope.where(id: ids)
+          elsif params[:pay_period_id].present?
+            pay_period = resolve_pay_period(params[:pay_period_id])
+            return [] if performed?
+
+            scope = scope.where(pay_period_id: pay_period.id)
+          else
+            raise ArgumentError, "pay_period_id or ids is required"
+          end
+
+          order_checks_for_print(scope).to_a
+        end
+
+        def order_checks_for_print(scope)
+          scope.order(Arel.sql(
+            "CASE WHEN non_employee_checks.check_number ~ '^[0-9]+$' THEN 0 ELSE 1 END ASC, " \
+            "CASE WHEN non_employee_checks.check_number ~ '^[0-9]+$' THEN CAST(non_employee_checks.check_number AS integer) ELSE NULL END ASC, " \
+            "non_employee_checks.check_number ASC, non_employee_checks.id ASC"
+          ))
+        end
+
+        def non_employee_batch_filename(checks)
+          pay_period = checks.find(&:pay_period)&.pay_period
+          date_token = pay_period&.pay_date&.strftime("%Y-%m-%d") || Date.current.strftime("%Y-%m-%d")
+          "non_employee_checks_#{date_token}.pdf"
+        end
+
+        def combine_pdfs(pdf_binaries)
+          return pdf_binaries.first if pdf_binaries.size == 1
+
+          require "combine_pdf"
+          combined = CombinePDF.new
+          pdf_binaries.each { |data| combined << CombinePDF.parse(data) }
+          combined.to_pdf
+        rescue LoadError
+          raise
+        rescue StandardError => e
+          raise ArgumentError, "Failed to merge non-employee check PDFs: #{e.message}"
+        end
 
         def set_check
           # Preload :edits so check_payload's `edit_count: check.edits.size`

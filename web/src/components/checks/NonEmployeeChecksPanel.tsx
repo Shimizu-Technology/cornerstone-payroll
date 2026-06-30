@@ -102,6 +102,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchAction, setBatchAction] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
@@ -176,6 +178,8 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   }, [companyId]);
 
   const isFirstHawaiian4Up = company?.check_stock_type === 'first_hawaiian_4up';
+  const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
+  const unprintedPrintableCount = printableChecks.filter(check => !check.printed_at).length;
 
   const handleCreate = async () => {
     setFormError(null);
@@ -287,6 +291,19 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
+  const openBlobForPrint = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const revokeTimer = window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+    const printWindow = window.open(url);
+    if (printWindow) {
+      printWindow.addEventListener('load', () => { printWindow.print(); }, { once: true });
+    } else {
+      window.clearTimeout(revokeTimer);
+      URL.revokeObjectURL(url);
+      alert('Pop-up blocked. Please allow pop-ups to print checks.');
+    }
+  };
+
   const handlePrintSingle = async (check: NonEmployeeCheck) => {
     setPdfLoading(check.id);
     try {
@@ -294,21 +311,82 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         check.id,
         isFirstHawaiian4Up ? { startingSlot } : undefined
       );
-      const url = URL.createObjectURL(blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups to print checks.');
-      }
+      openBlobForPrint(blob);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
       setPdfLoading(null);
+    }
+  };
+
+  const handleBatchDownload = async () => {
+    if (printableChecks.length === 0) {
+      alert('No printable non-employee checks with check numbers were found.');
+      return;
+    }
+
+    setBatchLoading(true);
+    setBatchAction('Generating non-employee checks...');
+    try {
+      const result = await nonEmployeeChecksApi.batchPdf({
+        payPeriodId,
+        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
+      });
+      setBatchAction('Downloading...');
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename || `non_employee_checks_${payDate ?? payPeriodId}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to download non-employee checks');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
+    }
+  };
+
+  const handlePrintAll = async () => {
+    if (printableChecks.length === 0) {
+      alert('No printable non-employee checks with check numbers were found.');
+      return;
+    }
+
+    setBatchLoading(true);
+    setBatchAction('Generating non-employee checks...');
+    try {
+      const result = await nonEmployeeChecksApi.batchPdf({
+        payPeriodId,
+        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
+      });
+      setBatchAction('Opening print dialog...');
+      openBlobForPrint(result.blob);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to print non-employee checks');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
+    }
+  };
+
+  const handleMarkAllPrinted = async () => {
+    if (unprintedPrintableCount === 0) return;
+    if (!window.confirm(`Mark ${unprintedPrintableCount} non-employee check${unprintedPrintableCount === 1 ? '' : 's'} as printed?`)) return;
+
+    setBatchLoading(true);
+    setBatchAction('Marking as printed...');
+    try {
+      const result = await nonEmployeeChecksApi.markAllPrinted({ payPeriodId });
+      await loadChecks();
+      if (result.marked_printed > 0) {
+        alert(`${result.marked_printed} non-employee check${result.marked_printed === 1 ? '' : 's'} marked as printed.`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to mark non-employee checks as printed');
+    } finally {
+      setBatchLoading(false);
+      setBatchAction(null);
     }
   };
 
@@ -397,7 +475,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   className="rounded border border-blue-200 bg-white px-2 py-1 text-sm text-gray-900"
                   value={startingSlot}
                   onChange={(e) => setStartingSlot(Number(e.target.value))}
-                  disabled={pdfLoading !== null}
+                  disabled={pdfLoading !== null || batchLoading}
                 >
                   <option value={1}>1</option>
                   <option value={2}>2</option>
@@ -406,18 +484,47 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 </select>
               </label>
             )}
+            {batchAction && (
+              <span className="text-sm text-blue-700 animate-pulse">{batchAction}</span>
+            )}
+            {unprintedPrintableCount > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleMarkAllPrinted}
+                disabled={batchLoading}
+              >
+                Mark All Printed
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrintAll}
+              disabled={batchLoading || printableChecks.length === 0}
+            >
+              Print All Checks
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBatchDownload}
+              disabled={batchLoading || printableChecks.length === 0}
+            >
+              Download Checks PDF
+            </Button>
             {showGenerateFit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit}
+                disabled={generatingFit || batchLoading}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit ? 'Generating...' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={batchLoading}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>
@@ -556,6 +663,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
               ) : null;
             })()}
           </div>
+        </div>
+      )}
+
+      {isFirstHawaiian4Up && printableChecks.length > 0 && (
+        <div className="mx-4 mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          Batch printing packs non-employee checks together in check-number order, starting at the selected slot, so multiple pay-period payments can share one First Hawaiian 4-Up sheet.
         </div>
       )}
 
