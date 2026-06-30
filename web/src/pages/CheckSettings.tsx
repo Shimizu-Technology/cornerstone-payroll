@@ -607,7 +607,7 @@ export function CheckSettingsPage() {
 
     if (hasFieldOverrides) {
       setLayoutOverridesJson('{}');
-      setSuccess('Stock type changed. Field-level calibration was reset to the selected stock’s default map. Recalibrate and save when ready.');
+      setSuccess("Stock type changed. Field-level calibration was reset to the selected stock's default map. Recalibrate and save when ready.");
     } else {
       setSuccess(null);
     }

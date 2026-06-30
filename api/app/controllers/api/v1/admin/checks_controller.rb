@@ -814,82 +814,14 @@ module Api
         def normalize_and_sanitize_layout_config!(permitted, current_stock_type:)
           target_stock_type = permitted[:check_stock_type].presence || current_stock_type
           if permitted.key?(:check_layout_config)
-            raw_config = permitted[:check_layout_config]
-            raw_config = raw_config.to_h if raw_config.is_a?(ActionController::Parameters)
-            permitted[:check_layout_config] = sanitize_check_layout_config(target_stock_type, raw_config)
+            permitted[:check_layout_config] = sanitize_check_layout_config(target_stock_type, permitted[:check_layout_config])
           elsif permitted.key?(:check_stock_type) && target_stock_type.to_s != current_stock_type.to_s
             permitted[:check_layout_config] = {}
           end
         end
 
         def sanitize_check_layout_config(stock_type, raw_config)
-          config = normalize_layout_numeric_values(raw_config || {})
-          return {} unless config.is_a?(Hash)
-
-          stock_type.to_s == "first_hawaiian_4up" ? sanitize_first_hawaiian_layout_config(config) : sanitize_standard_check_layout_config(config)
-        end
-
-        def sanitize_first_hawaiian_layout_config(config)
-          sanitize_nested_field_layout_config(
-            config,
-            FirstHawaiianFourUpCheckGenerator.default_layout_config,
-            max_y: FirstHawaiianFourUpCheckGenerator::SLOT_HEIGHT
-          )
-        end
-
-        def sanitize_standard_check_layout_config(config)
-          defaults = CheckGenerator.default_layout_config
-          sanitized = sanitize_nested_field_layout_config(config, { "check_face" => defaults.fetch("check_face") }, max_y: CheckGenerator::SECTION_HEIGHT)
-          stub_config = config["stub"]
-          if stub_config.is_a?(Hash)
-            allowed_stub_keys = defaults.fetch("stub").keys
-            clean_stub = stub_config.slice(*allowed_stub_keys).select { |_key, value| value.is_a?(Numeric) }
-            sanitized["stub"] = clean_stub if clean_stub.present?
-          end
-          sanitized
-        end
-
-        def sanitize_nested_field_layout_config(config, defaults, max_y:)
-          allowed_keys = %w[x y width height font_size]
-          defaults.each_with_object({}) do |(section, field_defaults), sanitized|
-            section_config = config[section]
-            next unless section_config.is_a?(Hash)
-
-            field_defaults.each_key do |field|
-              field_config = section_config[field]
-              next unless field_config.is_a?(Hash)
-
-              clean_field = field_config.slice(*allowed_keys).select { |_key, value| value.is_a?(Numeric) }
-              next if clean_field.empty?
-              next if layout_field_position_out_of_bounds?(clean_field, max_y: max_y)
-
-              sanitized[section] ||= {}
-              sanitized[section][field] = clean_field
-            end
-          end
-        end
-
-        def layout_field_position_out_of_bounds?(field_config, max_y:)
-          x = field_config["x"]
-          y = field_config["y"]
-
-          return true if x.present? && (x.to_f < -36.0 || x.to_f > 612.0)
-          return true if y.present? && (y.to_f < -36.0 || y.to_f > max_y.to_f)
-
-          false
-        end
-
-        def normalize_layout_numeric_values(value)
-          case value
-          when Hash
-            value.transform_values { |nested| normalize_layout_numeric_values(nested) }
-          when Array
-            value.map { |nested| normalize_layout_numeric_values(nested) }
-          when String
-            value.match?(/\A-?\d+(\.\d+)?\z/) ? value.to_f : value
-          else
-            value
-          end
+          CheckLayoutConfigSanitizer.call(stock_type: stock_type, config: raw_config)
         end
 
         # -----------------------------------------------------------------------

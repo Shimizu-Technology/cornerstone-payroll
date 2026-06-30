@@ -77,7 +77,12 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
 
       patch "/api/v1/admin/companies/#{client_company.id}", params: {
         company: {
-          check_stock_type: "first_hawaiian_4up"
+          check_stock_type: "first_hawaiian_4up",
+          check_layout_config: {
+            check_face: {
+              date: { x: 474, y: 245 }
+            }
+          }
         }
       }
 

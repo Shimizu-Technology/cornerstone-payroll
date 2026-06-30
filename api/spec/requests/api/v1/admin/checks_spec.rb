@@ -756,6 +756,25 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body["check_settings"]).to be_present
     end
 
+    it "accepts JSON layout payloads from the visual check editor" do
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_stock_type: "first_hawaiian_4up",
+          check_offset_x: 0,
+          check_offset_y: 0,
+          auto_create_fit_check: true,
+          check_layout_config: {
+            check_face: {
+              memo: { x: 295.8, y: 58 }
+            }
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(295.8)
+    end
+
     it "sanitizes stale top-check overrides when saving First Hawaiian 4-up settings" do
       patch "/api/v1/admin/companies/check_settings",
         params: {

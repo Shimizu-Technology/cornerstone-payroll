@@ -96,12 +96,8 @@ module Api
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
-          stock_type_changed_without_layout = update_params.key?(:check_stock_type) &&
-            update_params[:check_stock_type].to_s != company.check_stock_type.to_s &&
-            !update_params.key?(:check_layout_config)
-
+          normalize_company_check_layout_config!(update_params, company)
           company.assign_attributes(update_params)
-          company.check_layout_config = {} if stock_type_changed_without_layout
           clear_active_printer_profile_if_calibration_changed(company)
 
           if company.save
@@ -129,6 +125,20 @@ module Api
 
         def staff_company_params
           params.require(:company).permit(*STAFF_EDITABLE_COMPANY_FIELDS)
+        end
+
+        def normalize_company_check_layout_config!(update_params, company)
+          target_stock_type = update_params[:check_stock_type].presence || company.check_stock_type
+          stock_type_changed = update_params.key?(:check_stock_type) && target_stock_type.to_s != company.check_stock_type.to_s
+
+          if update_params.key?(:check_layout_config)
+            update_params[:check_layout_config] = CheckLayoutConfigSanitizer.call(
+              stock_type: target_stock_type,
+              config: update_params[:check_layout_config]
+            )
+          elsif stock_type_changed
+            update_params[:check_layout_config] = {}
+          end
         end
 
         def clear_active_printer_profile_if_calibration_changed(company)
