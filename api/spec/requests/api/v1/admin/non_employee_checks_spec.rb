@@ -1,4 +1,5 @@
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
   let!(:company) { create(:company) }
@@ -501,6 +502,95 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       }.not_to change(NonEmployeeCheckEdit, :count)
 
       expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
+  describe "POST /api/v1/admin/non_employee_checks/batch_pdf" do
+    it "packs pay-period First Hawaiian non-employee checks into one PDF" do
+      company.update!(check_stock_type: "first_hawaiian_4up")
+      create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        check_number: "7002",
+        payable_to: "Treasurer of Guam",
+        amount: 128.54,
+        check_type: "tax_deposit")
+      create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        check_number: "7001",
+        payable_to: "Happy Island Tour II",
+        amount: 35.00,
+        check_type: "other")
+      create(:non_employee_check,
+        company: other_company,
+        pay_period: other_pay_period,
+        check_number: "7003",
+        payable_to: "Other Company Vendor",
+        amount: 99.00,
+        check_type: "vendor")
+
+      post "/api/v1/admin/non_employee_checks/batch_pdf",
+        params: { pay_period_id: pay_period.id, starting_slot: 1 },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      reader = PDF::Reader.new(StringIO.new(response.body))
+      text = reader.pages.map(&:text).join("\n")
+      expect(reader.page_count).to eq(1)
+      expect(text).to include("Happy Island Tour II")
+      expect(text).to include("Treasurer of Guam")
+      expect(text).not_to include("Other Company Vendor")
+    end
+
+    it "honors the selected First Hawaiian starting slot for a batch" do
+      company.update!(check_stock_type: "first_hawaiian_4up")
+      create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7001", payable_to: "Vendor One", amount: 35.00)
+      create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7002", payable_to: "Vendor Two", amount: 45.00)
+
+      post "/api/v1/admin/non_employee_checks/batch_pdf",
+        params: { pay_period_id: pay_period.id, starting_slot: 4 },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(PDF::Reader.new(StringIO.new(response.body)).page_count).to eq(2)
+    end
+
+    it "returns a clear error when no printable checks exist" do
+      create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        check_number: nil,
+        payable_to: "No Number Vendor",
+        amount: 35.00)
+
+      post "/api/v1/admin/non_employee_checks/batch_pdf",
+        params: { pay_period_id: pay_period.id },
+        as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("No printable")
+    end
+  end
+
+  describe "POST /api/v1/admin/non_employee_checks/mark_all_printed" do
+    it "marks all unprinted pay-period non-employee checks as printed" do
+      check_one = create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7001", payable_to: "Vendor One", amount: 35.00)
+      check_two = create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7002", payable_to: "Vendor Two", amount: 45.00)
+      printed_check = create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7003", payable_to: "Already Printed", amount: 55.00, printed_at: Time.current, print_count: 1)
+      voided_check = create(:non_employee_check, company: company, pay_period: pay_period, check_number: "7004", payable_to: "Voided", amount: 65.00, voided: true)
+
+      post "/api/v1/admin/non_employee_checks/mark_all_printed",
+        params: { pay_period_id: pay_period.id },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["marked_printed"]).to eq(2)
+      expect(check_one.reload.printed_at).to be_present
+      expect(check_two.reload.printed_at).to be_present
+      expect(printed_check.reload.print_count).to eq(1)
+      expect(voided_check.reload.printed_at).to be_nil
     end
   end
 

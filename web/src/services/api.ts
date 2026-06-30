@@ -2903,6 +2903,17 @@ export const nonEmployeeChecksApi = {
     api.getBlob(`/admin/non_employee_checks/${id}/check_pdf`, {
       starting_slot: options?.startingSlot,
     }),
+  batchPdf: (options: { payPeriodId?: number; ids?: number[]; startingSlot?: number }) =>
+    api.postBlob('/admin/non_employee_checks/batch_pdf', {
+      pay_period_id: options.payPeriodId,
+      ids: options.ids,
+      starting_slot: options.startingSlot,
+    }),
+  markAllPrinted: (options: { payPeriodId?: number; ids?: number[] }) =>
+    api.post<{ marked_printed: number }>('/admin/non_employee_checks/mark_all_printed', {
+      pay_period_id: options.payPeriodId,
+      ids: options.ids,
+    }),
   voucherPdf: (id: number) =>
     api.getBlob(`/admin/non_employee_checks/${id}/voucher_pdf`),
 };

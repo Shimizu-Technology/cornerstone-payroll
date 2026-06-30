@@ -263,7 +263,11 @@ Rails.application.routes.draw do
         end
 
         # Non-Employee Checks
-        resources :non_employee_checks, except: [:new, :edit] do
+        resources :non_employee_checks, except: [ :new, :edit ] do
+          collection do
+            post :batch_pdf
+            post :mark_all_printed
+          end
           member do
             post :mark_printed
             post :void_check
