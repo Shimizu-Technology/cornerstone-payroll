@@ -242,7 +242,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       json = JSON.parse(response.body)
-      expect((json["errors"] || [json["error"]]).join(", ")).to match(/check number/i)
+      expect((json["errors"] || [ json["error"] ]).join(", ")).to match(/check number/i)
     end
 
     # Regression test: editing two unrelated checks without a check number
@@ -557,6 +557,31 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(PDF::Reader.new(StringIO.new(response.body)).page_count).to eq(2)
     end
 
+    it "filters requested ids to the current company" do
+      company.update!(check_stock_type: "first_hawaiian_4up")
+      own_check = create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        check_number: "7001",
+        payable_to: "Current Company Vendor",
+        amount: 35.00)
+      foreign_check = create(:non_employee_check,
+        company: other_company,
+        pay_period: other_pay_period,
+        check_number: "7002",
+        payable_to: "Foreign Company Vendor",
+        amount: 45.00)
+
+      post "/api/v1/admin/non_employee_checks/batch_pdf",
+        params: { ids: [ own_check.id, foreign_check.id ], starting_slot: 1 },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
+      expect(text).to include("Current Company Vendor")
+      expect(text).not_to include("Foreign Company Vendor")
+    end
+
     it "returns a clear error when no printable checks exist" do
       create(:non_employee_check,
         company: company,
@@ -592,6 +617,30 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(printed_check.reload.print_count).to eq(1)
       expect(voided_check.reload.printed_at).to be_nil
     end
+
+    it "filters requested ids to the current company before marking printed" do
+      own_check = create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        check_number: "7001",
+        payable_to: "Current Company Vendor",
+        amount: 35.00)
+      foreign_check = create(:non_employee_check,
+        company: other_company,
+        pay_period: other_pay_period,
+        check_number: "7002",
+        payable_to: "Foreign Company Vendor",
+        amount: 45.00)
+
+      post "/api/v1/admin/non_employee_checks/mark_all_printed",
+        params: { ids: [ own_check.id, foreign_check.id ] },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["marked_printed"]).to eq(1)
+      expect(own_check.reload.printed_at).to be_present
+      expect(foreign_check.reload.printed_at).to be_nil
+    end
   end
 
   describe "DELETE /api/v1/admin/non_employee_checks/:id" do
@@ -614,7 +663,7 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
         edited_by: admin_user,
         before: { "amount" => "125.5" },
         after: { "amount" => "150.0" },
-        changed_fields: ["amount"]
+        changed_fields: [ "amount" ]
       )
 
       expect {
@@ -667,14 +716,14 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
         edited_by: admin_user,
         before: { "amount" => "125.5" },
         after: { "amount" => "150.0" },
-        changed_fields: ["amount"],
+        changed_fields: [ "amount" ],
         reason: "Older edit"
       )
       check.edits.create!(
         edited_by: admin_user,
         before: { "amount" => "150.0" },
         after: { "amount" => "175.0" },
-        changed_fields: ["amount"],
+        changed_fields: [ "amount" ],
         reason: "Newer edit"
       )
 

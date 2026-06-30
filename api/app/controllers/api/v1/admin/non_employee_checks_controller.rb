@@ -230,12 +230,7 @@ module Api
               starting_slot: params[:starting_slot]
             ).generate
           else
-            combine_pdfs(
-              checks.map do |check|
-                generator = NonEmployeeCheckGenerator.new(check)
-                check.voided? ? generator.generate_voided : generator.generate
-              end
-            )
+            combine_pdfs(checks.map { |check| NonEmployeeCheckGenerator.new(check).generate })
           end
 
           send_data pdf_data,
@@ -266,6 +261,8 @@ module Api
           render json: { marked_printed: marked_count }
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/non_employee_checks/:id/check_pdf
@@ -310,9 +307,9 @@ module Api
 
           scope = scope.where(printed_at: nil) unless include_printed
 
-          if params[:ids].present?
+          if params.key?(:ids)
             ids = Array(params[:ids]).map { |id| Integer(id) }
-            scope = scope.where(id: ids)
+            scope = ids.empty? ? scope.none : scope.where(id: ids)
           elsif params[:pay_period_id].present?
             pay_period = resolve_pay_period(params[:pay_period_id])
             return [] if performed?

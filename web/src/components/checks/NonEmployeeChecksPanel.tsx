@@ -291,6 +291,19 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
+  const openBlobForPrint = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const revokeTimer = window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+    const printWindow = window.open(url);
+    if (printWindow) {
+      printWindow.addEventListener('load', () => { printWindow.print(); }, { once: true });
+    } else {
+      window.clearTimeout(revokeTimer);
+      URL.revokeObjectURL(url);
+      alert('Pop-up blocked. Please allow pop-ups to print checks.');
+    }
+  };
+
   const handlePrintSingle = async (check: NonEmployeeCheck) => {
     setPdfLoading(check.id);
     try {
@@ -298,17 +311,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         check.id,
         isFirstHawaiian4Up ? { startingSlot } : undefined
       );
-      const url = URL.createObjectURL(blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups to print checks.');
-      }
+      openBlobForPrint(blob);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to generate PDF');
     } finally {
@@ -358,17 +361,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
         startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
       });
       setBatchAction('Opening print dialog...');
-      const url = URL.createObjectURL(result.blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups to print checks.');
-      }
+      openBlobForPrint(result.blob);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to print non-employee checks');
     } finally {
