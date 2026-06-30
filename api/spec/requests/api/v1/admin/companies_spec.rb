@@ -91,6 +91,26 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(client_company.check_layout_config).to eq({})
     end
 
+    it "preserves valid First Hawaiian drift calibration from client management" do
+      client_company.update!(check_stock_type: "first_hawaiian_4up")
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          check_layout_config: {
+            calibration: { slot_pitch_adjustment: 7.2 },
+            check_face: {
+              memo: { x: 285.6, y: 58 }
+            }
+          }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      client_company.reload
+      expect(client_company.check_layout_config.dig("calibration", "slot_pitch_adjustment")).to eq(7.2)
+      expect(client_company.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
+    end
+
     it "clears the active printer profile when calibration settings change" do
       profile = PrinterProfile.create!(
         organization: organization,

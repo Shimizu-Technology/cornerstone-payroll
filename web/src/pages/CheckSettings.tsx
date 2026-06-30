@@ -65,6 +65,42 @@ function stableLayoutJson(value: unknown): string {
   return JSON.stringify(normalize(value));
 }
 
+const POINTS_PER_INCH = 72;
+const FHB_CALIBRATION_KEY = 'calibration';
+const FHB_SLOT_PITCH_ADJUSTMENT_KEY = 'slot_pitch_adjustment';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getFhbSlotPitchAdjustmentPoints(config: Record<string, unknown> | null): number {
+  if (!config) return 0;
+  const calibration = config[FHB_CALIBRATION_KEY];
+  if (!isRecord(calibration)) return 0;
+  const value = Number(calibration[FHB_SLOT_PITCH_ADJUSTMENT_KEY]);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentPoints: number): Record<string, unknown> {
+  const nextConfig: Record<string, unknown> = { ...config };
+  const existingCalibration = isRecord(config[FHB_CALIBRATION_KEY]) ? config[FHB_CALIBRATION_KEY] : {};
+  const nextCalibration = { ...existingCalibration };
+
+  if (Math.abs(adjustmentPoints) < 0.001) {
+    delete nextCalibration[FHB_SLOT_PITCH_ADJUSTMENT_KEY];
+  } else {
+    nextCalibration[FHB_SLOT_PITCH_ADJUSTMENT_KEY] = Number(adjustmentPoints.toFixed(1));
+  }
+
+  if (Object.keys(nextCalibration).length === 0) {
+    delete nextConfig[FHB_CALIBRATION_KEY];
+  } else {
+    nextConfig[FHB_CALIBRATION_KEY] = nextCalibration;
+  }
+
+  return nextConfig;
+}
+
 export function CheckSettingsPage() {
   const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -276,6 +312,20 @@ export function CheckSettingsPage() {
       return null;
     }
   }, [layoutOverridesJson]);
+
+  const fhbSlotPitchAdjustmentInches = useMemo(() => (
+    getFhbSlotPitchAdjustmentPoints(parsedLayoutOverrides) / POINTS_PER_INCH
+  ), [parsedLayoutOverrides]);
+
+  const handleFhbSlotPitchAdjustmentChange = useCallback((value: number | null) => {
+    if (!parsedLayoutOverrides) return;
+    const inches = value ?? 0;
+    const clampedInches = Math.max(-0.5, Math.min(0.5, inches));
+    const nextConfig = withFhbSlotPitchAdjustment(parsedLayoutOverrides, clampedInches * POINTS_PER_INCH);
+    setLayoutOverridesJson(JSON.stringify(nextConfig, null, 2));
+    setError(null);
+    setSuccess(null);
+  }, [parsedLayoutOverrides]);
 
   const handleVisualLayoutChange = useCallback((config: Record<string, unknown>) => {
     setLayoutOverridesJson(JSON.stringify(config, null, 2));
@@ -920,6 +970,33 @@ export function CheckSettingsPage() {
               )}
             </div>
 
+            {stockType === 'first_hawaiian_4up' && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="grid gap-3 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-start">
+                  <div className="space-y-1">
+                    <Label htmlFor="fhb-slot-drift">Lower-check drift correction</Label>
+                    <NumericInput
+                      id="fhb-slot-drift"
+                      value={fhbSlotPitchAdjustmentInches}
+                      onValueChange={handleFhbSlotPitchAdjustmentChange}
+                      min={-0.5}
+                      max={0.5}
+                      fixedDecimalsOnBlur={3}
+                      disabled={!parsedLayoutOverrides}
+                      className="w-32 bg-white font-mono"
+                    />
+                    <p className="text-xs text-amber-800">Inches per lower row</p>
+                  </div>
+                  <div className="text-sm text-amber-900">
+                    <p className="font-medium">Use this only when Check 1 is aligned but Checks 2-4 drift progressively.</p>
+                    <p className="mt-1 text-xs leading-relaxed">
+                      Positive values move each lower quadrant farther down than the one above it. If the amount/date fields climb higher on each lower check, enter a positive correction such as 0.030, print an alignment test, then adjust in small steps.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="offset-x">X Offset (inches)</Label>
@@ -1064,7 +1141,8 @@ export function CheckSettingsPage() {
                     <span className="font-mono"> check_face.payee.y</span>,
                     <span className="font-mono"> stub.row1_y</span>,
                     <span className="font-mono"> stub.summary_y_offset</span>,
-                    <span className="font-mono"> stub.table_padding_x</span>.
+                    <span className="font-mono"> stub.table_padding_x</span>,
+                    <span className="font-mono"> calibration.slot_pitch_adjustment</span>.
                   </p>
                 </div>
               </div>

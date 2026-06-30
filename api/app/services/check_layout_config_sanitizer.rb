@@ -5,6 +5,7 @@
 # only fields known to the target generator and numeric layout keys are kept.
 class CheckLayoutConfigSanitizer
   ALLOWED_FIELD_KEYS = %w[x y width height font_size].freeze
+  SLOT_PITCH_ADJUSTMENT_KEY = "slot_pitch_adjustment"
 
   def self.call(stock_type:, config:)
     new(stock_type: stock_type, config: config).call
@@ -30,11 +31,30 @@ class CheckLayoutConfigSanitizer
   end
 
   def sanitize_first_hawaiian_layout_config
-    sanitize_nested_field_layout_config(
+    sanitized = sanitize_nested_field_layout_config(
       config,
       FirstHawaiianFourUpCheckGenerator.default_layout_config,
       max_y: FirstHawaiianFourUpCheckGenerator::SLOT_HEIGHT
     )
+
+    calibration = sanitize_first_hawaiian_calibration
+    sanitized["calibration"] = calibration if calibration.present?
+
+    sanitized
+  end
+
+  def sanitize_first_hawaiian_calibration
+    calibration_config = config["calibration"]
+    return {} unless calibration_config.is_a?(Hash)
+
+    slot_pitch_adjustment = calibration_config[SLOT_PITCH_ADJUSTMENT_KEY]
+    return {} unless slot_pitch_adjustment.is_a?(Numeric)
+    return {} unless slot_pitch_adjustment.to_f.between?(
+      FirstHawaiianFourUpCheckGenerator::MIN_SLOT_PITCH_ADJUSTMENT,
+      FirstHawaiianFourUpCheckGenerator::MAX_SLOT_PITCH_ADJUSTMENT
+    )
+
+    { SLOT_PITCH_ADJUSTMENT_KEY => slot_pitch_adjustment.to_f }
   end
 
   def sanitize_standard_check_layout_config

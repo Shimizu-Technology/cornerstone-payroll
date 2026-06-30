@@ -757,22 +757,42 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
 
     it "accepts JSON layout payloads from the visual check editor" do
+      visual_editor_payload = {
+        check_stock_type: "first_hawaiian_4up",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        bank_name: nil,
+        bank_address: nil,
+        check_memo_template: nil,
+        auto_create_fit_check: true,
+        check_layout_config: {
+          check_face: {
+            memo: { x: 285.6, y: 58 }
+          }
+        }
+      }
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: visual_editor_payload.merge(check: visual_editor_payload),
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
+    end
+
+    it "saves First Hawaiian lower-slot drift correction" do
       patch "/api/v1/admin/companies/check_settings",
         params: {
           check_stock_type: "first_hawaiian_4up",
-          check_offset_x: 0,
-          check_offset_y: 0,
-          auto_create_fit_check: true,
           check_layout_config: {
-            check_face: {
-              memo: { x: 295.8, y: 58 }
-            }
+            calibration: { slot_pitch_adjustment: 7.2 }
           }
         },
         as: :json
 
       expect(response).to have_http_status(:ok)
-      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(295.8)
+      expect(company.reload.check_layout_config.dig("calibration", "slot_pitch_adjustment")).to eq(7.2)
+      expect(response.parsed_body.dig("check_settings", "check_layout_config", "calibration", "slot_pitch_adjustment")).to eq(7.2)
     end
 
     it "sanitizes stale top-check overrides when saving First Hawaiian 4-up settings" do

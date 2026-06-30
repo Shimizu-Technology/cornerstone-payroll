@@ -96,6 +96,23 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     end
   end
 
+  it "can add progressive slot pitch correction without moving the first slot" do
+    company.update!(
+      check_layout_config: {
+        "calibration" => { "slot_pitch_adjustment" => 7.2 }
+      }
+    )
+
+    generator = described_class.new(company: company)
+    metadata = described_class.page_layout_metadata(company)
+
+    expect(metadata.fetch(:slot_pitch_adjustment)).to eq(7.2)
+    expect(metadata.fetch(:slot_pitch)).to eq(described_class::SLOT_HEIGHT + 7.2)
+    expect(generator.send(:slot_bottom_for, 0)).to eq(described_class::PAGE_HEIGHT - described_class::SLOT_HEIGHT)
+    expect(generator.send(:slot_bottom_for, 1)).to be_within(0.001).of((described_class::PAGE_HEIGHT - described_class::SLOT_HEIGHT) - metadata.fetch(:slot_pitch))
+    expect(generator.send(:slot_bottom_for, 3)).to be_within(0.001).of((described_class::PAGE_HEIGHT - described_class::SLOT_HEIGHT) - (3 * metadata.fetch(:slot_pitch)))
+  end
+
   it "keeps default check-face fields within each 4-up slot" do
     layout = described_class.default_layout_config.fetch("check_face")
 
