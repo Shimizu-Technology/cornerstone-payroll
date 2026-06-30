@@ -14,6 +14,8 @@ class FirstHawaiianFourUpCheckGenerator
   PAGE_HEIGHT = 792.0
   SLOT_COUNT = 4
   SLOT_HEIGHT = PAGE_HEIGHT / SLOT_COUNT
+  MAX_SLOT_PITCH_ADJUSTMENT = 36.0
+  MIN_SLOT_PITCH_ADJUSTMENT = -36.0
   MARGIN = 0.0
 
   DEFAULT_LAYOUT = {
@@ -53,15 +55,31 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def self.page_layout_metadata(company)
+    slot_pitch_adjustment = slot_pitch_adjustment_for(company)
     {
       width: PAGE_WIDTH,
       height: PAGE_HEIGHT,
       slot_count: SLOT_COUNT,
       slot_height: SLOT_HEIGHT,
+      slot_pitch: SLOT_HEIGHT + slot_pitch_adjustment,
+      slot_pitch_adjustment: slot_pitch_adjustment,
       preview_slot_bottom: PAGE_HEIGHT - SLOT_HEIGHT,
       offset_x_points: (company.check_offset_x.to_f * 72).round(1),
       offset_y_points: (company.check_offset_y.to_f * 72).round(1)
     }
+  end
+
+  def self.slot_pitch_adjustment_for(company)
+    config = stringify_layout(company.check_layout_config || {})
+    raw_value = config.dig("calibration", "slot_pitch_adjustment")
+    numeric_value = if raw_value.is_a?(Numeric)
+      raw_value.to_f
+    elsif raw_value.is_a?(String) && raw_value.match?(/\A-?\d+(\.\d+)?\z/)
+      raw_value.to_f
+    end
+    return 0.0 unless numeric_value
+
+    numeric_value.clamp(MIN_SLOT_PITCH_ADJUSTMENT, MAX_SLOT_PITCH_ADJUSTMENT)
   end
 
   def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1)
@@ -74,13 +92,13 @@ class FirstHawaiianFourUpCheckGenerator
   def generate
     raise ArgumentError, "No check entries to render" if entries.empty?
 
-    Prawn::Document.new(page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN) do |pdf|
+    Prawn::Document.new(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       draw_entries(pdf)
     end.render
   end
 
   def alignment_test
-    Prawn::Document.new(page_size: [PAGE_WIDTH, PAGE_HEIGHT], page_layout: :portrait, margin: MARGIN) do |pdf|
+    Prawn::Document.new(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|
       SLOT_COUNT.times do |slot_index|
         slot_bottom = slot_bottom_for(slot_index)
         draw_slot_outline(pdf, slot_bottom, "FHB CHECK SLOT #{slot_index + 1}")
@@ -93,7 +111,7 @@ class FirstHawaiianFourUpCheckGenerator
           draw_marker(pdf, cfg["x"].to_f + ox, slot_bottom + cfg["y"].to_f + oy, "register.#{field}")
         end
       end
-      pdf.bounding_box([0, PAGE_HEIGHT - 4], width: PAGE_WIDTH) do
+      pdf.bounding_box([ 0, PAGE_HEIGHT - 4 ], width: PAGE_WIDTH) do
         pdf.font_size(7) { pdf.text "FIRST HAWAIIAN 4-UP ALIGNMENT TEST - Print on plain paper.", align: :center, color: "CC0000" }
       end
     end.render
@@ -148,7 +166,7 @@ class FirstHawaiianFourUpCheckGenerator
   def draw_text_field(pdf, section, field, slot_bottom, text, align: :left)
     cfg = layout_field(section, field)
     pdf.bounding_box(
-      [cfg["x"].to_f + ox, slot_bottom + cfg["y"].to_f + oy],
+      [ cfg["x"].to_f + ox, slot_bottom + cfg["y"].to_f + oy ],
       width: cfg["width"].to_f,
       height: cfg.fetch("height", 14).to_f
     ) do
@@ -159,7 +177,15 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def slot_bottom_for(slot_index)
-    PAGE_HEIGHT - ((slot_index + 1) * SLOT_HEIGHT)
+    (PAGE_HEIGHT - SLOT_HEIGHT) - (slot_index * slot_pitch)
+  end
+
+  def slot_pitch
+    SLOT_HEIGHT + slot_pitch_adjustment
+  end
+
+  def slot_pitch_adjustment
+    @slot_pitch_adjustment ||= self.class.slot_pitch_adjustment_for(company)
   end
 
   def entry_from_payroll_item(item)
@@ -248,8 +274,8 @@ class FirstHawaiianFourUpCheckGenerator
   def draw_slot_outline(pdf, slot_bottom, label)
     pdf.stroke_color "0000AA"
     pdf.line_width 0.5
-    pdf.stroke_rectangle [12 + ox, slot_bottom + SLOT_HEIGHT - 6 + oy], PAGE_WIDTH - 24, SLOT_HEIGHT - 12
-    pdf.font_size(8) { pdf.draw_text label, at: [PAGE_WIDTH / 2 - 42, slot_bottom + SLOT_HEIGHT - 18 + oy], style: :bold }
+    pdf.stroke_rectangle [ 12 + ox, slot_bottom + SLOT_HEIGHT - 6 + oy ], PAGE_WIDTH - 24, SLOT_HEIGHT - 12
+    pdf.font_size(8) { pdf.draw_text label, at: [ PAGE_WIDTH / 2 - 42, slot_bottom + SLOT_HEIGHT - 18 + oy ], style: :bold }
     pdf.stroke_color "000000"
   end
 
@@ -258,9 +284,9 @@ class FirstHawaiianFourUpCheckGenerator
       pdf.stroke_color "CC0000"
       pdf.fill_color "CC0000"
       pdf.line_width 0.4
-      pdf.stroke_line [x - 5, y], [x + 5, y]
-      pdf.stroke_line [x, y - 5], [x, y + 5]
-      pdf.font_size(5.5) { pdf.draw_text label, at: [x + 7, y + 2] }
+      pdf.stroke_line [ x - 5, y ], [ x + 5, y ]
+      pdf.stroke_line [ x, y - 5 ], [ x, y + 5 ]
+      pdf.font_size(5.5) { pdf.draw_text label, at: [ x + 7, y + 2 ] }
     end
   end
 
@@ -271,8 +297,8 @@ class FirstHawaiianFourUpCheckGenerator
       pdf.fill_color "FFCCCC"
       pdf.transparent(0.25) do
         pdf.font_size(58) do
-          pdf.rotate(20, origin: [cx, cy]) do
-            pdf.draw_text "VOID", at: [cx - 78, cy - 20], style: :bold
+          pdf.rotate(20, origin: [ cx, cy ]) do
+            pdf.draw_text "VOID", at: [ cx - 78, cy - 20 ], style: :bold
           end
         end
       end

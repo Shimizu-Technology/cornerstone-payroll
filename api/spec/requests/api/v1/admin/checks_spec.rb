@@ -755,6 +755,121 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["check_settings"]).to be_present
     end
+
+    it "accepts JSON layout payloads from the visual check editor" do
+      visual_editor_payload = {
+        check_stock_type: "first_hawaiian_4up",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        bank_name: nil,
+        bank_address: nil,
+        check_memo_template: nil,
+        auto_create_fit_check: true,
+        check_layout_config: {
+          check_face: {
+            memo: { x: 285.6, y: 58 }
+          }
+        }
+      }
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: visual_editor_payload.merge(check: visual_editor_payload),
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
+    end
+
+    it "accepts wrapped visual-editor params without converting the wrapper to a hash" do
+      visual_editor_payload = {
+        check_stock_type: "first_hawaiian_4up",
+        check_offset_x: 0,
+        check_offset_y: 0,
+        bank_name: nil,
+        bank_address: nil,
+        check_memo_template: nil,
+        auto_create_fit_check: true,
+        check_layout_config: {
+          check_face: {
+            memo: { x: 281.6, y: 58 }
+          }
+        }
+      }
+
+      patch "/api/v1/admin/companies/check_settings",
+        params: visual_editor_payload.merge(check: visual_editor_payload)
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("check_face", "memo", "x")).to eq(281.6)
+    end
+
+    it "saves First Hawaiian lower-slot drift correction" do
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_stock_type: "first_hawaiian_4up",
+          check_layout_config: {
+            calibration: { slot_pitch_adjustment: 7.2 }
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.check_layout_config.dig("calibration", "slot_pitch_adjustment")).to eq(7.2)
+      expect(response.parsed_body.dig("check_settings", "check_layout_config", "calibration", "slot_pitch_adjustment")).to eq(7.2)
+    end
+
+    it "sanitizes stale top-check overrides when saving First Hawaiian 4-up settings" do
+      patch "/api/v1/admin/companies/check_settings",
+        params: {
+          check_stock_type: "first_hawaiian_4up",
+          check_offset_x: 0,
+          check_offset_y: 0,
+          bank_name: nil,
+          bank_address: nil,
+          check_memo_template: nil,
+          auto_create_fit_check: true,
+          check_layout_config: {
+            check_face: {
+              date: { x: 474, y: 245 },
+              memo: { x: 205.4, y: 56.1 },
+              payee: { x: 202.6, y: 135.2 },
+              amount: { x: 494, y: 134.4 },
+              amount_words: { x: 204.4, y: 96.7 },
+              payee_address: { x: 64, y: 130 }
+            },
+            register: {
+              date: { x: 64, y: 170 }
+            }
+          }
+        }
+
+      expect(response).to have_http_status(:ok)
+      company.reload
+      expect(company.check_stock_type).to eq("first_hawaiian_4up")
+      expect(company.check_layout_config.dig("check_face", "payee", "x")).to eq(202.6)
+      expect(company.check_layout_config.dig("check_face", "date")).to be_nil
+      expect(company.check_layout_config.dig("check_face", "payee_address")).to be_nil
+      expect(response.parsed_body.dig("check_settings", "check_layout_config", "check_face", "date")).to be_nil
+    end
+
+    it "returns a visible First Hawaiian date anchor when stale top-check date overrides exist" do
+      company.update!(
+        check_stock_type: "first_hawaiian_4up",
+        check_layout_config: {
+          "check_face" => {
+            "date" => { "x" => 474, "y" => 245 },
+            "payee" => { "x" => 202.6, "y" => 135.2 }
+          }
+        }
+      )
+
+      get "/api/v1/admin/companies/check_layout"
+
+      expect(response).to have_http_status(:ok)
+      layout = response.parsed_body.fetch("check_layout")
+      expect(layout.dig("resolved_layout_config", "check_face", "date", "y")).to eq(FirstHawaiianFourUpCheckGenerator.default_layout_config.dig("check_face", "date", "y"))
+      expect(layout.dig("resolved_layout_config", "check_face", "payee", "x")).to eq(202.6)
+    end
   end
 
   describe "PATCH /api/v1/admin/companies/next_check_number" do

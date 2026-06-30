@@ -847,6 +847,8 @@ export interface CheckLayoutPageMetadata {
   stub2_section_bottom?: number;
   slot_count?: number;
   slot_height?: number;
+  slot_pitch?: number;
+  slot_pitch_adjustment?: number;
   preview_slot_bottom?: number;
   offset_x_points: number;
   offset_y_points: number;

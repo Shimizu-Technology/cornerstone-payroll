@@ -96,7 +96,11 @@ module Api
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
-          if company.update(update_params)
+          normalize_company_check_layout_config!(update_params, company)
+          company.assign_attributes(update_params)
+          clear_active_printer_profile_if_calibration_changed(company)
+
+          if company.save
             render json: { company: company_payload(company, detailed: true) }
           else
             render json: { errors: company.errors.full_messages }, status: :unprocessable_entity
@@ -121,6 +125,29 @@ module Api
 
         def staff_company_params
           params.require(:company).permit(*STAFF_EDITABLE_COMPANY_FIELDS)
+        end
+
+        def normalize_company_check_layout_config!(update_params, company)
+          target_stock_type = update_params[:check_stock_type].presence || company.check_stock_type
+          stock_type_changed = update_params.key?(:check_stock_type) && target_stock_type.to_s != company.check_stock_type.to_s
+
+          if update_params.key?(:check_layout_config)
+            update_params[:check_layout_config] = CheckLayoutConfigSanitizer.call(
+              stock_type: target_stock_type,
+              config: update_params[:check_layout_config]
+            )
+          elsif stock_type_changed
+            update_params[:check_layout_config] = {}
+          end
+        end
+
+        def clear_active_printer_profile_if_calibration_changed(company)
+          return unless company.will_save_change_to_check_stock_type? ||
+            company.will_save_change_to_check_offset_x? ||
+            company.will_save_change_to_check_offset_y? ||
+            company.will_save_change_to_check_layout_config?
+
+          company.active_printer_profile = nil
         end
 
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)

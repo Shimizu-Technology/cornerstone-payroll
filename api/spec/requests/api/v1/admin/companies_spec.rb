@@ -64,6 +64,75 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     end
   end
 
+  describe "PATCH /api/v1/admin/companies/:id" do
+    it "resets field-level check layout overrides when stock type changes from client management" do
+      client_company.update!(
+        check_stock_type: "top_check",
+        check_layout_config: {
+          "check_face" => {
+            "payee" => { "x" => 72.0, "y" => 205.0 }
+          }
+        }
+      )
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          check_stock_type: "first_hawaiian_4up",
+          check_layout_config: {
+            check_face: {
+              date: { x: 474, y: 245 }
+            }
+          }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.check_stock_type).to eq("first_hawaiian_4up")
+      expect(client_company.check_layout_config).to eq({})
+    end
+
+    it "preserves valid First Hawaiian drift calibration from client management" do
+      client_company.update!(check_stock_type: "first_hawaiian_4up")
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          check_layout_config: {
+            calibration: { slot_pitch_adjustment: 7.2 },
+            check_face: {
+              memo: { x: 285.6, y: 58 }
+            }
+          }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      client_company.reload
+      expect(client_company.check_layout_config.dig("calibration", "slot_pitch_adjustment")).to eq(7.2)
+      expect(client_company.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
+    end
+
+    it "clears the active printer profile when calibration settings change" do
+      profile = PrinterProfile.create!(
+        organization: organization,
+        name: "Office Printer",
+        check_stock_type: client_company.check_stock_type,
+        check_offset_x: client_company.check_offset_x,
+        check_offset_y: client_company.check_offset_y,
+        check_layout_config: client_company.check_layout_config
+      )
+      client_company.update!(active_printer_profile: profile)
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          check_offset_x: 0.125
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.active_printer_profile_id).to be_nil
+    end
+  end
+
   describe "POST /api/v1/admin/companies" do
     it "blocks client creation when the organization client limit is reached" do
       organization.update!(client_limit: 3)
