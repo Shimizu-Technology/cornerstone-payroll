@@ -7,9 +7,19 @@ class AddPayrollIntakeSourceTypesToCompanies < ActiveRecord::Migration[8.1]
     execute <<~SQL.squish
       UPDATE companies
       SET payroll_intake_source_types = '["spike_email"]'::jsonb
-      WHERE lower(name) LIKE '%spike%'
-         OR lower(name) LIKE '%coffee slut%'
-         OR lower(name) IN ('scr', 'spr')
+      WHERE lower(trim(regexp_replace(name, '[^a-zA-Z0-9]+', ' ', 'g'))) IN (
+        'spike',
+        'spike coffee',
+        'spike coffee roasters',
+        'spike coffee roasters llc',
+        'spike coffee roasters inc',
+        'spike coffee roasters corporation',
+        'spike coffee roasters guam',
+        'coffee slut',
+        'coffee slut scr',
+        'scr',
+        'spr'
+      )
     SQL
   end
 
