@@ -91,6 +91,23 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(alice_item.gross_pay.to_f).to be > 126.0
     end
 
+    it "blocks duplicate employee mappings within the same intake session" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+
+      post apply_path(import.fetch("id")), params: {
+        acknowledge_warnings: true,
+        rows: import.fetch("rows").map { |row| { id: row.fetch("id"), include: true, employee_id: alice.id } }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json = JSON.parse(response.body)
+      errors = json.dig("results", "errors")
+      expect(errors.length).to eq(2)
+      expect(errors.map { |error| error.fetch("error") }).to all(include("Multiple included intake rows map"))
+      expect(pay_period.payroll_items.reload).to be_empty
+    end
+
     it "blocks overwriting manual payroll items unless force_overwrite is supplied" do
       create(:payroll_item, pay_period: pay_period, company: company, employee: alice, import_source: nil, hours_worked: 1)
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
@@ -105,6 +122,53 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       json = JSON.parse(response.body)
       expect(json.dig("results", "errors").first.fetch("error")).to include("already exists")
       expect(pay_period.payroll_items.find_by!(employee_id: alice.id).import_source).to be_nil
+    end
+
+    it "clears stale manual fields when force overwriting an existing payroll item" do
+      create(
+        :payroll_item,
+        pay_period: pay_period,
+        company: company,
+        employee: alice,
+        import_source: nil,
+        hours_worked: 1,
+        holiday_hours: 8,
+        pto_hours: 4,
+        bonus: 100,
+        non_taxable_pay: 50,
+        loan_deduction: 99,
+        custom_earnings: [ { "label" => "Stale earning", "amount" => 25 } ],
+        custom_deductions: [ { "label" => "Stale deduction", "amount" => 10 } ],
+        payroll_adjustments: [ { "label" => "Stale adjustment", "amount" => 15, "treatment" => "post_tax_deduction", "active" => true } ]
+      )
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+
+      post apply_path(import.fetch("id")), params: {
+        acknowledge_warnings: true,
+        force_overwrite: true,
+        rows: import.fetch("rows").map do |row|
+          {
+            id: row.fetch("id"),
+            include: row.fetch("source_employee_name") == "Alice Barista",
+            employee_id: row.fetch("employee_id")
+          }
+        end
+      }
+
+      expect(response).to have_http_status(:ok)
+      item = pay_period.payroll_items.find_by!(employee_id: alice.id)
+      expect(item.import_source).to eq("spike_email")
+      expect(item.hours_worked.to_f).to eq(78.0)
+      expect(item.overtime_hours.to_f).to eq(2.0)
+      expect(item.holiday_hours.to_f).to eq(0.0)
+      expect(item.pto_hours.to_f).to eq(0.0)
+      expect(item.bonus.to_f).to eq(0.0)
+      expect(item.non_taxable_pay.to_f).to eq(0.0)
+      expect(item.loan_deduction.to_f).to eq(0.0)
+      expect(item.custom_earnings).to eq([])
+      expect(item.custom_deductions).to eq([])
+      expect(item.payroll_adjustments).to eq([])
     end
   end
 

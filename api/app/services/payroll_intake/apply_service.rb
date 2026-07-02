@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "set"
+
 module PayrollIntake
   class ApplyService
     def initialize(session:, row_overrides: [], actor: nil, force_overwrite: false, acknowledge_warnings: false)
@@ -22,7 +24,10 @@ module PayrollIntake
 
       ActiveRecord::Base.transaction do
         session.with_lock do
-          session.rows.includes(:employee).each do |row|
+          rows = session.rows.includes(:employee).to_a
+          duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
+
+          rows.each do |row|
             override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
             include_row = include_row?(override)
             unless include_row
@@ -45,6 +50,11 @@ module PayrollIntake
             if excluded_employee_ids.include?(employee.id)
               row.update!(status: "skipped", excluded: true, employee: employee)
               results[:skipped] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, reason: "Excluded from this pay period" }
+              next
+            end
+
+            if duplicate_employee_ids.include?(employee.id)
+              results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Multiple included intake rows map to #{employee.full_name}. Exclude or remap duplicates before applying." }
               next
             end
 
@@ -89,21 +99,10 @@ module PayrollIntake
 
           raise ActiveRecord::Rollback if results[:errors].any?
 
+          update_pay_period_after_apply! if results[:applied].any?
           session.mark_reviewed!(actor: actor) if session.status == "previewed"
           session.mark_applied!(actor: actor)
         end
-      end
-
-      if results[:errors].empty? && results[:applied].any?
-        pay_period.update!(
-          status: "calculated",
-          calculated_at: Time.current,
-          calculated_by_id: actor&.id,
-          approved_at: nil,
-          approved_by_id: nil,
-          unapproved_at: nil,
-          unapproved_by_id: nil
-        )
       end
 
       results
@@ -141,6 +140,20 @@ module PayrollIntake
       Employee.active.find_by(id: employee_id, company_id: company.id)
     end
 
+    def duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
+      mapped_employee_ids = rows.filter_map do |row|
+        override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
+        next unless include_row?(override)
+
+        employee = employee_for(row, override)
+        next if employee.blank? || excluded_employee_ids.include?(employee.id)
+
+        employee.id
+      end
+
+      mapped_employee_ids.tally.select { |_employee_id, count| count > 1 }.keys.to_set
+    end
+
     def values_for(row, override)
       {
         regular_hours: decimal_override(override, :regular_hours, row.regular_hours),
@@ -170,16 +183,22 @@ module PayrollIntake
       "Payroll item already exists from another source or manual entry. Use force overwrite only after review."
     end
 
-    def apply_values!(payroll_item, employee, values)
-      if payroll_item.new_record?
-        payroll_item.company_id = company.id
-        payroll_item.employment_type = employee.employment_type
-        payroll_item.additional_withholding = employee.additional_withholding.to_f
-      end
+    def update_pay_period_after_apply!
+      pay_period.update!(
+        status: "calculated",
+        calculated_at: Time.current,
+        calculated_by_id: actor&.id,
+        approved_at: nil,
+        approved_by_id: nil,
+        unapproved_at: nil,
+        unapproved_by_id: nil
+      )
+    end
 
-      payroll_item.clear_wage_rate_hours!
-      payroll_item.employment_type = employee.employment_type
-      payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+    def apply_values!(payroll_item, employee, values)
+      replacing_existing = payroll_item.persisted? && payroll_item.import_source != session.source_type
+      prepare_payroll_item_for_intake!(payroll_item, employee, replacing_existing: replacing_existing)
+
       payroll_item.hours_worked = values[:regular_hours]
       payroll_item.overtime_hours = values[:overtime_hours]
       payroll_item.reported_tips = values[:reported_tips]
@@ -189,6 +208,41 @@ module PayrollIntake
       payroll_item.import_source = session.source_type
       payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
       payroll_item.calculate!
+    end
+
+    def prepare_payroll_item_for_intake!(payroll_item, employee, replacing_existing:)
+      if payroll_item.new_record?
+        payroll_item.company_id = company.id
+        payroll_item.additional_withholding = employee.additional_withholding.to_f
+      elsif replacing_existing
+        reset_stale_replaced_item_fields!(payroll_item)
+      end
+
+      payroll_item.clear_wage_rate_hours!
+      payroll_item.employment_type = employee.employment_type
+      payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
+    end
+
+    def reset_stale_replaced_item_fields!(payroll_item)
+      payroll_item.holiday_hours = 0
+      payroll_item.pto_hours = 0
+      payroll_item.bonus = 0
+      payroll_item.non_taxable_pay = 0
+      payroll_item.custom_earnings = []
+      payroll_item.custom_deductions = []
+      payroll_item.payroll_adjustments = []
+      payroll_item.payroll_item_field_entries.destroy_all
+      payroll_item.custom_columns_data = reset_intake_custom_columns(payroll_item.custom_columns_data)
+    end
+
+    def reset_intake_custom_columns(custom_columns_data)
+      data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+      data.except(
+        "wage_rate_hours",
+        :wage_rate_hours,
+        "payroll_adjustments_overridden",
+        :payroll_adjustments_overridden
+      )
     end
   end
 end
