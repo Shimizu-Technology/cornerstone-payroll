@@ -162,7 +162,10 @@ export function PayrollIntakeImportModal({
   const normalizeRow = (row: EditableRow): EditableRow => {
     const paidOut = Math.max(0, toNumber(row.tips_paid_out));
     const reportedTips = Math.max(0, toNumber(row.reported_tips), paidOut);
-    return { ...row, tips_paid_out: paidOut, reported_tips: reportedTips };
+    const errors = row.employee_id
+      ? (row.errors || []).filter((warning) => warning.code !== 'unmatched_employee')
+      : row.errors;
+    return { ...row, tips_paid_out: paidOut, reported_tips: reportedTips, errors };
   };
 
   const buildApplyRows = (): PayrollIntakeApplyRowPayload[] => rows.map((row) => ({

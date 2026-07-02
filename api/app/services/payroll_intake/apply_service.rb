@@ -20,90 +20,95 @@ module PayrollIntake
 
       results = { applied: [], skipped: [], errors: [] }
       overrides_by_key = build_overrides_by_key
-      excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
       ActiveRecord::Base.transaction do
-        session.with_lock do
-          raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+        pay_period.with_lock do
+          raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
 
-          rows = session.rows.includes(:employee).to_a
-          duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
+          excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-          rows.each do |row|
-            override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
-            include_row = include_row?(override)
-            unless include_row
-              row.update!(status: "skipped", excluded: true)
-              results[:skipped] << { row_id: row.id, source_employee_name: row.source_employee_name, reason: "excluded" }
-              next
+          session.with_lock do
+            raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+
+            rows = session.rows.includes(:employee).to_a
+            duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
+
+            rows.each do |row|
+              override = overrides_by_key[row.id.to_s] || overrides_by_key[row.position.to_s] || {}
+              include_row = include_row?(override)
+              unless include_row
+                row.update!(status: "skipped", excluded: true)
+                results[:skipped] << { row_id: row.id, source_employee_name: row.source_employee_name, reason: "excluded" }
+                next
+              end
+
+              if row.warnings_payload.any? && !acknowledged?(override)
+                results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: "Review or acknowledge row warnings before applying." }
+                next
+              end
+
+              employee = employee_for(row, override)
+              unless employee
+                results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: "Employee mapping required" }
+                next
+              end
+
+              if excluded_employee_ids.include?(employee.id)
+                row.update!(status: "skipped", excluded: true, employee: employee)
+                results[:skipped] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, reason: "Excluded from this pay period" }
+                next
+              end
+
+              if duplicate_employee_ids.include?(employee.id)
+                results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Multiple included intake rows map to #{employee.full_name}. Exclude or remap duplicates before applying." }
+                next
+              end
+
+              values = values_for(row, override)
+              if values[:tips_paid_out].positive? && values[:reported_tips] < values[:tips_paid_out]
+                values[:reported_tips] = values[:tips_paid_out]
+              end
+
+              payroll_item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
+              overwrite_error = overwrite_error_for(payroll_item)
+              if overwrite_error
+                results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: overwrite_error }
+                next
+              end
+
+              if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
+                results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Enter this employee's variable salary amount before applying payroll intake." }
+                next
+              end
+
+              apply_values!(payroll_item, employee, values)
+              row.update!(
+                employee: employee,
+                applied_payroll_item: payroll_item,
+                status: "applied",
+                excluded: false,
+                staff_overrides: override
+              )
+
+              results[:applied] << {
+                row_id: row.id,
+                employee_id: employee.id,
+                employee_name: employee.full_name,
+                regular_hours: payroll_item.hours_worked.to_f,
+                overtime_hours: payroll_item.overtime_hours.to_f,
+                reported_tips: payroll_item.reported_tips.to_f,
+                tips_paid_out: payroll_item.tips_paid_out.to_f
+              }
+            rescue ActiveRecord::RecordInvalid => e
+              results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: e.message }
             end
 
-            if row.warnings_payload.any? && !acknowledged?(override)
-              results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: "Review or acknowledge row warnings before applying." }
-              next
-            end
+            raise ActiveRecord::Rollback if results[:errors].any?
 
-            employee = employee_for(row, override)
-            unless employee
-              results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: "Employee mapping required" }
-              next
-            end
-
-            if excluded_employee_ids.include?(employee.id)
-              row.update!(status: "skipped", excluded: true, employee: employee)
-              results[:skipped] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, reason: "Excluded from this pay period" }
-              next
-            end
-
-            if duplicate_employee_ids.include?(employee.id)
-              results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Multiple included intake rows map to #{employee.full_name}. Exclude or remap duplicates before applying." }
-              next
-            end
-
-            values = values_for(row, override)
-            if values[:tips_paid_out].positive? && values[:reported_tips] < values[:tips_paid_out]
-              values[:reported_tips] = values[:tips_paid_out]
-            end
-
-            payroll_item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
-            overwrite_error = overwrite_error_for(payroll_item)
-            if overwrite_error
-              results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: overwrite_error }
-              next
-            end
-
-            if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
-              results[:errors] << { row_id: row.id, employee_id: employee.id, source_employee_name: row.source_employee_name, error: "Enter this employee's variable salary amount before applying payroll intake." }
-              next
-            end
-
-            apply_values!(payroll_item, employee, values)
-            row.update!(
-              employee: employee,
-              applied_payroll_item: payroll_item,
-              status: "applied",
-              excluded: false,
-              staff_overrides: override
-            )
-
-            results[:applied] << {
-              row_id: row.id,
-              employee_id: employee.id,
-              employee_name: employee.full_name,
-              regular_hours: payroll_item.hours_worked.to_f,
-              overtime_hours: payroll_item.overtime_hours.to_f,
-              reported_tips: payroll_item.reported_tips.to_f,
-              tips_paid_out: payroll_item.tips_paid_out.to_f
-            }
-          rescue ActiveRecord::RecordInvalid => e
-            results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: e.message }
+            update_pay_period_after_apply! if results[:applied].any?
+            session.mark_reviewed!(actor: actor) if session.status == "previewed"
+            session.mark_applied!(actor: actor)
           end
-
-          raise ActiveRecord::Rollback if results[:errors].any?
-
-          update_pay_period_after_apply! if results[:applied].any?
-          session.mark_reviewed!(actor: actor) if session.status == "previewed"
-          session.mark_applied!(actor: actor)
         end
       end
 

@@ -267,6 +267,23 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect { service.call }.to raise_error(ArgumentError, /Only previewed payroll intake sessions can be applied/)
       expect(pay_period.payroll_items.reload).to be_empty
     end
+
+    it "rechecks pay period editability after acquiring the lock" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+      stale_session = PayrollIntakeSession.find(import.fetch("id"))
+      stale_session.pay_period.status
+      service = PayrollIntake::ApplyService.new(
+        session: stale_session,
+        row_overrides: import.fetch("rows").map { |row| { id: row.fetch("id"), include: true, employee_id: row.fetch("employee_id") } },
+        actor: admin_user,
+        acknowledge_warnings: true
+      )
+      PayPeriod.where(id: pay_period.id).update_all(status: "committed", committed_at: Time.current)
+
+      expect { service.call }.to raise_error(ArgumentError, /Cannot apply to a non-editable pay period/)
+      expect(pay_period.payroll_items.reload).to be_empty
+    end
   end
 
   def preview_path
