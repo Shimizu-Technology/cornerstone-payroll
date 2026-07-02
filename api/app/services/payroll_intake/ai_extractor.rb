@@ -13,8 +13,9 @@ module PayrollIntake
     MAX_FILE_BYTES = Integer(ENV.fetch("PAYROLL_INTAKE_ATTACHMENT_MAX_BYTES", (8 * 1024 * 1024).to_s))
     PDF_RENDER_LIMIT = Integer(ENV.fetch("PAYROLL_INTAKE_PDF_RENDER_LIMIT", "4"))
 
-    def initialize(source_type:, text: nil, files: [])
+    def initialize(source_type:, adapter:, text: nil, files: [])
       @source_type = source_type
+      @adapter = adapter
       @text = text.to_s
       @files = Array(files).compact
     end
@@ -34,7 +35,7 @@ module PayrollIntake
 
     private
 
-    attr_reader :source_type, :text, :files
+    attr_reader :source_type, :adapter, :text, :files
 
     def call_openrouter
       response = HTTParty.post(
@@ -67,32 +68,12 @@ module PayrollIntake
     def system_prompt
       <<~PROMPT
         You extract payroll intake data for an accounting firm. Return ONLY valid JSON.
-        Do not calculate payroll taxes. Do not invent employees, hours, or tips.
+        Do not calculate payroll taxes. Do not invent employees, hours, tips, deductions, or dates.
+        Use numeric values only; omit currency symbols.
 
-        For Spike Coffee Roasters, credit card/cash tips are paid out daily. Extract the source tips; the application will map them to reported_tips and tips_paid_out during normalization.
+        #{adapter.ai_extraction_instructions}
 
-        Required JSON shape:
-        {
-          "detected_period": { "start_date": "YYYY-MM-DD" or null, "end_date": "YYYY-MM-DD" or null },
-          "rows": [
-            {
-              "employee_name": string,
-              "week1_hours": number or null,
-              "week2_hours": number or null,
-              "regular_hours": number or null,
-              "overtime_hours": number or null,
-              "total_hours": number or null,
-              "week1_tips": number or null,
-              "week2_tips": number or null,
-              "total_tips": number or null,
-              "loan_deduction": number or null,
-              "confidence": number between 0 and 1
-            }
-          ],
-          "warnings": [string]
-        }
-
-        If a screenshot has two weekly sections, keep week 1 and week 2 separate. If only a biweekly total is visible, use total_hours and explain the uncertainty in warnings. Use numeric values only; omit currency symbols.
+        #{adapter.ai_extraction_schema}
       PROMPT
     end
 
@@ -128,7 +109,7 @@ module PayrollIntake
     def read_limited_file(file)
       io = file.tempfile || file
       io.rewind if io.respond_to?(:rewind)
-      data = io.read(MAX_FILE_BYTES + 1)
+      data = io.read(MAX_FILE_BYTES + 1) || ""
       raise HTTParty::Error, "Attachment exceeds #{MAX_FILE_BYTES} bytes" if data.bytesize > MAX_FILE_BYTES
 
       data

@@ -8,6 +8,45 @@ module PayrollIntake
       SOURCE_LABEL = "Spike Coffee Roasters email"
       HOURS_PER_WEEK_BEFORE_OT = 40.0
 
+      def self.text_parser_class
+        PayrollIntake::SpikeEmailTextParser
+      end
+
+      def self.ai_extraction_instructions
+        <<~PROMPT
+          Source-specific instructions for Spike Coffee Roasters:
+          - Credit card/cash tips are paid out daily. Extract source tips exactly as shown; the adapter will map them to reported_tips and tips_paid_out during normalization.
+          - If the screenshot has two weekly sections, keep week 1 and week 2 separate.
+          - If only a biweekly total is visible, use total_hours and explain the uncertainty in warnings.
+          - Do not infer overtime from a biweekly total unless weekly hours or explicit overtime are visible.
+        PROMPT
+      end
+
+      def self.ai_extraction_schema
+        <<~PROMPT
+          Required JSON shape:
+          {
+            "detected_period": { "start_date": "YYYY-MM-DD" or null, "end_date": "YYYY-MM-DD" or null },
+            "rows": [
+              {
+                "employee_name": string,
+                "week1_hours": number or null,
+                "week2_hours": number or null,
+                "regular_hours": number or null,
+                "overtime_hours": number or null,
+                "total_hours": number or null,
+                "week1_tips": number or null,
+                "week2_tips": number or null,
+                "total_tips": number or null,
+                "loan_deduction": number or null,
+                "confidence": number between 0 and 1
+              }
+            ],
+            "warnings": [string]
+          }
+        PROMPT
+      end
+
       def initialize(pay_period:, company:)
         @pay_period = pay_period
         @company = company

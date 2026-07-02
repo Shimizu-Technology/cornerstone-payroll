@@ -24,6 +24,7 @@ module PayrollIntake
     def call
       raise ArgumentError, "Cannot import into a committed pay period" unless pay_period.can_edit?
       raise ArgumentError, "Unsupported payroll intake source" unless adapter_class
+      raise ArgumentError, "Payroll intake adapter is missing AI extraction configuration" unless adapter_class.respond_to?(:ai_extraction_instructions) && adapter_class.respond_to?(:ai_extraction_schema)
       raise ArgumentError, "Payroll intake source is not enabled for this company" unless company.payroll_intake_source_enabled?(source_type)
       raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty?
 
@@ -150,15 +151,31 @@ module PayrollIntake
     end
 
     def extract_rows
-      text_extraction = pasted_text.present? ? PayrollIntake::SpikeEmailTextParser.new(pasted_text).call : { rows: [], warnings: [], detected_period: nil }
+      text_extraction = extract_rows_from_text
       return text_extraction if text_extraction[:rows].present?
 
-      ai_extraction = PayrollIntake::AiExtractor.new(source_type: source_type, text: pasted_text, files: files).call
+      ai_extraction = PayrollIntake::AiExtractor.new(
+        source_type: source_type,
+        adapter: adapter_class,
+        text: pasted_text,
+        files: files
+      ).call
       {
         rows: ai_extraction[:rows],
         detected_period: ai_extraction[:detected_period] || text_extraction[:detected_period],
         warnings: Array(text_extraction[:warnings]) + Array(ai_extraction[:warnings])
       }
+    end
+
+    def extract_rows_from_text
+      parser_class = adapter_class.respond_to?(:text_parser_class) ? adapter_class.text_parser_class : nil
+      return empty_extraction unless pasted_text.present? && parser_class
+
+      parser_class.new(pasted_text).call
+    end
+
+    def empty_extraction
+      { rows: [], warnings: [], detected_period: nil }
     end
 
     def storage_service
