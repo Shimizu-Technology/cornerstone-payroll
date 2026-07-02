@@ -206,6 +206,8 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         salary_override: 1234,
         non_taxable_pay: 50,
         loan_deduction: 99,
+        loan_payment: 12,
+        insurance_payment: 34,
         additional_withholding: 99,
         additional_withholding_override: 88,
         withholding_tax_adjustment: 77,
@@ -240,6 +242,8 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(item.salary_override).to be_nil
       expect(item.non_taxable_pay.to_f).to eq(0.0)
       expect(item.loan_deduction.to_f).to eq(0.0)
+      expect(item.loan_payment.to_f).to eq(0.0)
+      expect(item.insurance_payment.to_f).to eq(0.0)
       expect(item.additional_withholding.to_f).to eq(7.0)
       expect(item.additional_withholding_override).to be_nil
       expect(item.withholding_tax_adjustment).to be_nil

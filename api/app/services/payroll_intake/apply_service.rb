@@ -241,6 +241,8 @@ module PayrollIntake
       payroll_item.pto_hours = 0
       payroll_item.bonus = 0
       payroll_item.non_taxable_pay = 0
+      payroll_item.loan_payment = 0
+      payroll_item.insurance_payment = 0
       payroll_item.custom_earnings = []
       payroll_item.custom_deductions = []
       payroll_item.payroll_adjustments = []
