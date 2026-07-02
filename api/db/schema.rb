@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_02_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -485,7 +485,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["company_id"], name: "index_general_transmittals_on_company_id"
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying]::text[])", name: "general_transmittals_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
   end
 
   create_table "invoice_billing_profiles", force: :cascade do |t|
@@ -522,7 +522,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.datetime "updated_at", null: false
     t.index ["invoice_chat_session_id", "created_at"], name: "idx_invoice_chat_messages_on_session_created"
     t.index ["invoice_chat_session_id"], name: "index_invoice_chat_messages_on_invoice_chat_session_id"
-    t.check_constraint "role::text = ANY (ARRAY['user'::character varying, 'assistant'::character varying]::text[])", name: "check_invoice_chat_messages_role"
+    t.check_constraint "role::text = ANY (ARRAY['user'::character varying::text, 'assistant'::character varying::text])", name: "check_invoice_chat_messages_role"
   end
 
   create_table "invoice_chat_sessions", force: :cascade do |t|
@@ -544,7 +544,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["invoice_id"], name: "index_invoice_chat_sessions_on_invoice_id"
     t.index ["invoice_recipient_id"], name: "index_invoice_chat_sessions_on_invoice_recipient_id"
     t.index ["updated_by_id"], name: "index_invoice_chat_sessions_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['active'::character varying, 'invoice_created'::character varying, 'archived'::character varying]::text[])", name: "check_invoice_chat_sessions_status"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'invoice_created'::character varying::text, 'archived'::character varying::text])", name: "check_invoice_chat_sessions_status"
   end
 
   create_table "invoice_line_items", force: :cascade do |t|
@@ -618,7 +618,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'generated'::character varying, 'sent'::character varying, 'paid'::character varying, 'voided'::character varying, 'archived'::character varying]::text[])", name: "check_invoices_status"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text, 'sent'::character varying::text, 'paid'::character varying::text, 'voided'::character varying::text, 'archived'::character varying::text])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -703,7 +703,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["created_by_id"], name: "index_non_employee_checks_on_created_by_id"
     t.index ["pay_period_id", "company_id", "auto_generated_type"], name: "idx_unique_non_voided_auto_generated_per_period", unique: true, where: "((auto_generated_type IS NOT NULL) AND (voided = false))"
     t.index ["pay_period_id"], name: "index_non_employee_checks_on_pay_period_id"
-    t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying, 'pay_period'::character varying, 'month'::character varying, 'quarter'::character varying, 'year'::character varying]::text[])", name: "non_employee_checks_payment_period_type_check"
+    t.check_constraint "payment_period_type::text = ANY (ARRAY['none'::character varying::text, 'pay_period'::character varying::text, 'month'::character varying::text, 'quarter'::character varying::text, 'year'::character varying::text])", name: "non_employee_checks_payment_period_type_check"
     t.check_constraint "tax_month IS NULL OR tax_month >= 1 AND tax_month <= 12", name: "non_employee_checks_tax_month_check"
     t.check_constraint "tax_quarter IS NULL OR tax_quarter >= 1 AND tax_quarter <= 4", name: "non_employee_checks_tax_quarter_check"
   end
@@ -802,7 +802,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["tax_sync_status"], name: "index_pay_periods_on_tax_sync_status"
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
-    t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying, 'supplemental'::character varying]::text[])", name: "pay_periods_cycle_check"
+    t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -842,6 +842,84 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.jsonb "validation_errors", default: []
     t.index ["pay_period_id", "status"], name: "index_payroll_imports_on_pay_period_id_and_status"
     t.index ["pay_period_id"], name: "index_payroll_imports_on_pay_period_id"
+  end
+
+  create_table "payroll_intake_documents", force: :cascade do |t|
+    t.string "content_type"
+    t.datetime "created_at", null: false
+    t.string "document_type", null: false
+    t.text "extracted_text"
+    t.string "filename"
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "payroll_intake_session_id", null: false
+    t.jsonb "raw_response", default: {}, null: false
+    t.text "storage_reference"
+    t.text "text_content"
+    t.datetime "updated_at", null: false
+    t.index ["payroll_intake_session_id", "document_type"], name: "idx_payroll_intake_documents_session_type"
+    t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_documents_session"
+  end
+
+  create_table "payroll_intake_rows", force: :cascade do |t|
+    t.bigint "applied_payroll_item_id"
+    t.decimal "confidence", precision: 5, scale: 4
+    t.datetime "created_at", null: false
+    t.bigint "employee_id"
+    t.boolean "excluded", default: false, null: false
+    t.decimal "loan_deduction", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "match_confidence", precision: 5, scale: 4
+    t.string "match_method"
+    t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.bigint "payroll_intake_session_id", null: false
+    t.integer "position", default: 0, null: false
+    t.decimal "regular_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0", null: false
+    t.string "source_employee_name", null: false
+    t.jsonb "source_payload", default: {}, null: false
+    t.jsonb "staff_overrides", default: {}, null: false
+    t.string "status", default: "pending", null: false
+    t.decimal "tips_paid_out", precision: 10, scale: 2, default: "0.0", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "validation_errors", default: [], null: false
+    t.jsonb "warnings", default: [], null: false
+    t.decimal "week1_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "week1_tips", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "week2_hours", precision: 8, scale: 2, default: "0.0", null: false
+    t.decimal "week2_tips", precision: 10, scale: 2, default: "0.0", null: false
+    t.index ["applied_payroll_item_id"], name: "index_payroll_intake_rows_on_applied_payroll_item_id"
+    t.index ["employee_id"], name: "index_payroll_intake_rows_on_employee_id"
+    t.index ["payroll_intake_session_id", "employee_id"], name: "idx_payroll_intake_rows_session_employee"
+    t.index ["payroll_intake_session_id", "position"], name: "idx_payroll_intake_rows_session_position"
+    t.index ["payroll_intake_session_id"], name: "idx_payroll_intake_rows_session"
+    t.index ["status", "excluded"], name: "idx_payroll_intake_rows_status_excluded"
+  end
+
+  create_table "payroll_intake_sessions", force: :cascade do |t|
+    t.datetime "applied_at"
+    t.bigint "applied_by_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.text "error_message"
+    t.string "import_hash", null: false
+    t.string "parser_version", null: false
+    t.bigint "pay_period_id", null: false
+    t.datetime "reviewed_at"
+    t.bigint "reviewed_by_id"
+    t.string "source_label"
+    t.string "source_type", null: false
+    t.string "status", default: "draft", null: false
+    t.jsonb "totals", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "warnings", default: [], null: false
+    t.index ["applied_by_id"], name: "index_payroll_intake_sessions_on_applied_by_id"
+    t.index ["company_id", "pay_period_id", "status"], name: "idx_payroll_intake_sessions_company_period_status"
+    t.index ["company_id"], name: "index_payroll_intake_sessions_on_company_id"
+    t.index ["created_by_id"], name: "index_payroll_intake_sessions_on_created_by_id"
+    t.index ["pay_period_id", "source_type", "import_hash"], name: "idx_payroll_intake_sessions_idempotency", unique: true
+    t.index ["pay_period_id"], name: "index_payroll_intake_sessions_on_pay_period_id"
+    t.index ["reviewed_by_id"], name: "index_payroll_intake_sessions_on_reviewed_by_id"
+    t.index ["source_type", "status"], name: "idx_payroll_intake_sessions_source_status"
   end
 
   create_table "payroll_item_deductions", force: :cascade do |t|
@@ -1082,6 +1160,127 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
     t.index ["quarterly_compliance_packet_id", "task_type"], name: "idx_qc_tasks_packet_type", unique: true
     t.index ["quarterly_compliance_packet_id"], name: "idx_qc_tasks_packet"
     t.index ["reviewed_by_id"], name: "index_quarterly_compliance_tasks_on_reviewed_by_id"
+  end
+
+  create_table "solid_queue_blocked_executions", force: :cascade do |t|
+    t.string "concurrency_key", null: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.index ["concurrency_key", "priority", "job_id"], name: "index_solid_queue_blocked_executions_for_release"
+    t.index ["expires_at", "concurrency_key"], name: "index_solid_queue_blocked_executions_for_maintenance"
+    t.index ["job_id"], name: "index_solid_queue_blocked_executions_on_job_id", unique: true
+  end
+
+  create_table "solid_queue_claimed_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.bigint "process_id"
+    t.index ["job_id"], name: "index_solid_queue_claimed_executions_on_job_id", unique: true
+    t.index ["process_id", "job_id"], name: "index_solid_queue_claimed_executions_on_process_id_and_job_id"
+  end
+
+  create_table "solid_queue_failed_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.bigint "job_id", null: false
+    t.index ["job_id"], name: "index_solid_queue_failed_executions_on_job_id", unique: true
+  end
+
+  create_table "solid_queue_jobs", force: :cascade do |t|
+    t.string "active_job_id"
+    t.text "arguments"
+    t.string "class_name", null: false
+    t.string "concurrency_key"
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.datetime "scheduled_at"
+    t.datetime "updated_at", null: false
+    t.index ["active_job_id"], name: "index_solid_queue_jobs_on_active_job_id"
+    t.index ["class_name"], name: "index_solid_queue_jobs_on_class_name"
+    t.index ["finished_at"], name: "index_solid_queue_jobs_on_finished_at"
+    t.index ["queue_name", "finished_at"], name: "index_solid_queue_jobs_for_filtering"
+    t.index ["scheduled_at", "finished_at"], name: "index_solid_queue_jobs_for_alerting"
+  end
+
+  create_table "solid_queue_pauses", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "queue_name", null: false
+    t.index ["queue_name"], name: "index_solid_queue_pauses_on_queue_name", unique: true
+  end
+
+  create_table "solid_queue_processes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "hostname"
+    t.string "kind", null: false
+    t.datetime "last_heartbeat_at", null: false
+    t.text "metadata"
+    t.string "name", null: false
+    t.integer "pid", null: false
+    t.bigint "supervisor_id"
+    t.index ["last_heartbeat_at"], name: "index_solid_queue_processes_on_last_heartbeat_at"
+    t.index ["name", "supervisor_id"], name: "index_solid_queue_processes_on_name_and_supervisor_id", unique: true
+    t.index ["supervisor_id"], name: "index_solid_queue_processes_on_supervisor_id"
+  end
+
+  create_table "solid_queue_ready_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.index ["job_id"], name: "index_solid_queue_ready_executions_on_job_id", unique: true
+    t.index ["priority", "job_id"], name: "index_solid_queue_poll_all"
+    t.index ["queue_name", "priority", "job_id"], name: "index_solid_queue_poll_by_queue"
+  end
+
+  create_table "solid_queue_recurring_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.datetime "run_at", null: false
+    t.string "task_key", null: false
+    t.index ["job_id"], name: "index_solid_queue_recurring_executions_on_job_id", unique: true
+    t.index ["task_key", "run_at"], name: "index_solid_queue_recurring_executions_on_task_key_and_run_at", unique: true
+  end
+
+  create_table "solid_queue_recurring_tasks", force: :cascade do |t|
+    t.text "arguments"
+    t.string "class_name"
+    t.string "command", limit: 2048
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "key", null: false
+    t.integer "priority", default: 0
+    t.string "queue_name"
+    t.string "schedule", null: false
+    t.boolean "static", default: true, null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_solid_queue_recurring_tasks_on_key", unique: true
+    t.index ["static"], name: "index_solid_queue_recurring_tasks_on_static"
+  end
+
+  create_table "solid_queue_scheduled_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.datetime "scheduled_at", null: false
+    t.index ["job_id"], name: "index_solid_queue_scheduled_executions_on_job_id", unique: true
+    t.index ["scheduled_at", "priority", "job_id"], name: "index_solid_queue_dispatch_all"
+  end
+
+  create_table "solid_queue_semaphores", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.integer "value", default: 1, null: false
+    t.index ["expires_at"], name: "index_solid_queue_semaphores_on_expires_at"
+    t.index ["key", "value"], name: "index_solid_queue_semaphores_on_key_and_value"
+    t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
   create_table "tax_brackets", force: :cascade do |t|
@@ -1395,6 +1594,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
   add_foreign_key "pay_periods", "users", column: "voided_by_id", on_delete: :nullify
   add_foreign_key "payroll_field_definitions", "companies"
   add_foreign_key "payroll_imports", "pay_periods"
+  add_foreign_key "payroll_intake_documents", "payroll_intake_sessions"
+  add_foreign_key "payroll_intake_rows", "employees"
+  add_foreign_key "payroll_intake_rows", "payroll_intake_sessions"
+  add_foreign_key "payroll_intake_rows", "payroll_items", column: "applied_payroll_item_id", on_delete: :nullify
+  add_foreign_key "payroll_intake_sessions", "companies"
+  add_foreign_key "payroll_intake_sessions", "pay_periods"
+  add_foreign_key "payroll_intake_sessions", "users", column: "applied_by_id", on_delete: :nullify
+  add_foreign_key "payroll_intake_sessions", "users", column: "created_by_id", on_delete: :nullify
+  add_foreign_key "payroll_intake_sessions", "users", column: "reviewed_by_id", on_delete: :nullify
   add_foreign_key "payroll_item_deductions", "deduction_types"
   add_foreign_key "payroll_item_deductions", "payroll_items"
   add_foreign_key "payroll_item_earnings", "payroll_items"
@@ -1416,6 +1624,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_091000) do
   add_foreign_key "quarterly_compliance_tasks", "quarterly_compliance_packets"
   add_foreign_key "quarterly_compliance_tasks", "users", column: "assigned_to_id"
   add_foreign_key "quarterly_compliance_tasks", "users", column: "reviewed_by_id"
+  add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_failed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "tax_brackets", "filing_status_configs"
   add_foreign_key "tax_config_audit_logs", "annual_tax_configs"
   add_foreign_key "time_tracking_employee_mappings", "companies"

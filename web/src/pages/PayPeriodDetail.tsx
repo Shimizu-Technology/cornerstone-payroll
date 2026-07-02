@@ -29,6 +29,7 @@ import {
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi, payrollFieldsApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
+import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
@@ -250,6 +251,7 @@ export function PayPeriodDetail() {
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
@@ -997,6 +999,9 @@ export function PayPeriodDetail() {
                     Import (MoSa)
                   </Button>
                 )}
+                <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
+                  Import Spike Email
+                </Button>
                 {canImportTimeTracking && (
                   <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
                     Import Time Tracking
@@ -2529,6 +2534,14 @@ export function PayPeriodDetail() {
         open={importModalOpen}
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
+        onImportComplete={handleImportComplete}
+      />
+
+      <PayrollIntakeImportModal
+        open={payrollIntakeImportOpen}
+        onOpenChange={setPayrollIntakeImportOpen}
+        payPeriodId={payPeriod.id}
+        employees={employees}
         onImportComplete={handleImportComplete}
       />
 
