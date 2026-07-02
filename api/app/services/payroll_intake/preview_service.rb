@@ -32,6 +32,10 @@ module PayrollIntake
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
 
+      extraction = extract_rows
+      normalized = normalize_extraction(extraction)
+      document_attributes = build_document_attributes
+
       session = nil
       ActiveRecord::Base.transaction do
         session = PayrollIntakeSession.create!(
@@ -45,27 +49,21 @@ module PayrollIntake
           created_by: actor
         )
 
-        persist_documents!(session)
-
-        extraction = extract_rows
-        normalized = adapter_class.new(pay_period: pay_period, company: company).normalize(
-          extracted_rows: extraction[:rows],
-          detected_period: extraction[:detected_period]
-        )
-        warnings = Array(extraction[:warnings]) + normalized[:warnings]
+        persist_documents!(session, document_attributes)
 
         normalized[:rows].each do |row_attrs|
           session.rows.create!(row_attrs)
         end
 
-        if normalized[:rows].empty?
-          warnings << { code: "no_rows_detected", message: "No payroll rows were detected. Paste a clearer table or upload a clearer screenshot.", severity: "warning" }
-        end
-
-        session.mark_previewed!(warnings: warnings, totals: normalized[:totals])
+        session.mark_previewed!(warnings: normalized[:warnings], totals: normalized[:totals])
       end
 
       { session: session.reload, duplicate: false }
+    rescue ActiveRecord::RecordNotUnique
+      duplicate = existing_duplicate_session
+      return duplicate_session_result(duplicate) if duplicate
+
+      raise
     rescue StandardError => e
       session&.mark_failed!(e.message) if session&.persisted?
       raise
@@ -127,26 +125,51 @@ module PayrollIntake
       { session: session.reload, duplicate: true }
     end
 
-    def persist_documents!(session)
+    def normalize_extraction(extraction)
+      normalized = adapter_class.new(pay_period: pay_period, company: company).normalize(
+        extracted_rows: extraction[:rows],
+        detected_period: extraction[:detected_period]
+      )
+      warnings = Array(extraction[:warnings]) + Array(normalized[:warnings])
+
+      if normalized[:rows].empty?
+        warnings << { code: "no_rows_detected", message: "No payroll rows were detected. Paste a clearer table or upload a clearer screenshot.", severity: "warning" }
+      end
+
+      normalized.merge(warnings: warnings)
+    end
+
+    def build_document_attributes
+      attributes = []
       if pasted_text.present?
-        session.documents.create!(
+        attributes << {
           document_type: "pasted_text",
           text_content: pasted_text,
           metadata: { character_count: pasted_text.length }
-        )
+        }
       end
 
+      attributes.concat(uploaded_document_attributes)
+    end
+
+    def uploaded_document_attributes
       document_uuid = SecureRandom.uuid
-      file_snapshots.each_with_index do |snapshot, index|
+      file_snapshots.map.with_index do |snapshot, index|
         key = "payroll-intake/#{company.id}/#{pay_period.id}/#{document_uuid}/#{index}-#{snapshot[:filename]}"
         uploaded_url = storage_service.upload(key, snapshot[:data], content_type: snapshot[:content_type])
-        session.documents.create!(
+        {
           document_type: document_type_for(snapshot),
           filename: snapshot[:filename],
           content_type: snapshot[:content_type],
           storage_reference: key,
           metadata: { bytes: snapshot[:data].bytesize, uploaded_url: uploaded_url }
-        )
+        }
+      end
+    end
+
+    def persist_documents!(session, document_attributes)
+      document_attributes.each do |attributes|
+        session.documents.create!(attributes)
       end
     end
 

@@ -24,6 +24,8 @@ module PayrollIntake
 
       ActiveRecord::Base.transaction do
         session.with_lock do
+          raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+
           rows = session.rows.includes(:employee).to_a
           duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
 
@@ -223,11 +225,13 @@ module PayrollIntake
     end
 
     def reset_stale_intake_item_fields!(payroll_item, employee)
+      salary_override = salary_override_to_preserve(payroll_item, employee)
+
       payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.additional_withholding_override = nil
       payroll_item.withholding_tax_adjustment = nil
       payroll_item.withholding_tax_override = nil
-      payroll_item.salary_override = nil
+      payroll_item.salary_override = salary_override
       payroll_item.holiday_hours = 0
       payroll_item.pto_hours = 0
       payroll_item.bonus = 0
@@ -237,6 +241,12 @@ module PayrollIntake
       payroll_item.payroll_adjustments = []
       payroll_item.payroll_item_field_entries.destroy_all
       payroll_item.custom_columns_data = reset_intake_custom_columns(payroll_item.custom_columns_data)
+    end
+
+    def salary_override_to_preserve(payroll_item, employee)
+      return payroll_item.salary_override if employee.variable_salary?
+
+      nil
     end
 
     def reset_intake_custom_columns(custom_columns_data)

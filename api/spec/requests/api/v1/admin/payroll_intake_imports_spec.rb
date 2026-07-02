@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "tempfile"
 
 RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
   let!(:organization) { create(:organization) }
@@ -63,6 +64,39 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("import", "id")).to eq(first_id)
       expect(json["duplicate"]).to eq(true)
       expect(json.dig("import", "warnings").map { |warning| warning["code"] }).to include("duplicate_source")
+    end
+
+    it "uploads source files outside the database transaction" do
+      baseline_transactions = ActiveRecord::Base.connection.open_transactions
+      upload_transactions = []
+      storage = Class.new do
+        define_method(:initialize) { |transactions| @transactions = transactions }
+
+        def upload(_key, _data, content_type:)
+          @transactions << ActiveRecord::Base.connection.open_transactions
+          "https://storage.example/#{content_type}"
+        end
+      end.new(upload_transactions)
+
+      tempfile = Tempfile.new([ "spike-intake", ".png" ])
+      tempfile.binmode
+      tempfile.write("image-bytes")
+      tempfile.rewind
+      upload = double("upload", tempfile: tempfile, original_filename: "spike.png", content_type: "image/png")
+
+      result = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "spike_email",
+        pasted_text: spike_text,
+        files: [ upload ],
+        actor: admin_user,
+        storage: storage
+      ).call
+
+      expect(upload_transactions).to eq([ baseline_transactions ])
+      expect(result[:session].documents.where(document_type: "image").count).to eq(1)
+    ensure
+      tempfile&.close!
     end
   end
 
@@ -180,6 +214,58 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(item.custom_earnings).to eq([])
       expect(item.custom_deductions).to eq([])
       expect(item.payroll_adjustments).to eq([])
+    end
+
+    it "preserves required variable salary overrides when force overwriting" do
+      alice.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
+      create(
+        :payroll_item,
+        :salary,
+        pay_period: pay_period,
+        company: company,
+        employee: alice,
+        import_source: nil,
+        salary_override: 1_234,
+        hours_worked: 0,
+        overtime_hours: 0
+      )
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+
+      post apply_path(import.fetch("id")), params: {
+        acknowledge_warnings: true,
+        force_overwrite: true,
+        rows: import.fetch("rows").map do |row|
+          {
+            id: row.fetch("id"),
+            include: row.fetch("source_employee_name") == "Alice Barista",
+            employee_id: row.fetch("employee_id")
+          }
+        end
+      }
+
+      expect(response).to have_http_status(:ok)
+      item = pay_period.payroll_items.find_by!(employee_id: alice.id)
+      expect(item.salary_override.to_f).to eq(1_234.0)
+      expect(item.gross_pay.to_f).to eq(1_360.0)
+    end
+
+    it "rechecks session applicability after acquiring the lock" do
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+      stale_session = PayrollIntakeSession.find(import.fetch("id"))
+      stale_session.update_columns(status: "previewed")
+      PayrollIntakeSession.where(id: stale_session.id).update_all(status: "applied", applied_at: Time.current)
+
+      service = PayrollIntake::ApplyService.new(
+        session: stale_session,
+        row_overrides: import.fetch("rows").map { |row| { id: row.fetch("id"), include: true, employee_id: row.fetch("employee_id") } },
+        actor: admin_user,
+        acknowledge_warnings: true
+      )
+
+      expect { service.call }.to raise_error(ArgumentError, /Only previewed payroll intake sessions can be applied/)
+      expect(pay_period.payroll_items.reload).to be_empty
     end
   end
 
