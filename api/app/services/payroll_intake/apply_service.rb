@@ -196,8 +196,7 @@ module PayrollIntake
     end
 
     def apply_values!(payroll_item, employee, values)
-      replacing_existing = payroll_item.persisted? && payroll_item.import_source != session.source_type
-      prepare_payroll_item_for_intake!(payroll_item, employee, replacing_existing: replacing_existing)
+      prepare_payroll_item_for_intake!(payroll_item, employee)
 
       payroll_item.hours_worked = values[:regular_hours]
       payroll_item.overtime_hours = values[:overtime_hours]
@@ -210,11 +209,11 @@ module PayrollIntake
       payroll_item.calculate!
     end
 
-    def prepare_payroll_item_for_intake!(payroll_item, employee, replacing_existing:)
+    def prepare_payroll_item_for_intake!(payroll_item, employee)
       if payroll_item.new_record?
         payroll_item.company_id = company.id
-      elsif replacing_existing
-        reset_stale_replaced_item_fields!(payroll_item, employee)
+      else
+        reset_stale_intake_item_fields!(payroll_item, employee)
       end
 
       payroll_item.additional_withholding = employee.additional_withholding.to_f
@@ -223,11 +222,12 @@ module PayrollIntake
       payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
     end
 
-    def reset_stale_replaced_item_fields!(payroll_item, employee)
+    def reset_stale_intake_item_fields!(payroll_item, employee)
       payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.additional_withholding_override = nil
       payroll_item.withholding_tax_adjustment = nil
       payroll_item.withholding_tax_override = nil
+      payroll_item.salary_override = nil
       payroll_item.holiday_hours = 0
       payroll_item.pto_hours = 0
       payroll_item.bonus = 0

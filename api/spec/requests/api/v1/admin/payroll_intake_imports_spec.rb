@@ -136,6 +136,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         holiday_hours: 8,
         pto_hours: 4,
         bonus: 100,
+        salary_override: 1234,
         non_taxable_pay: 50,
         loan_deduction: 99,
         additional_withholding: 99,
@@ -169,6 +170,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(item.holiday_hours.to_f).to eq(0.0)
       expect(item.pto_hours.to_f).to eq(0.0)
       expect(item.bonus.to_f).to eq(0.0)
+      expect(item.salary_override).to be_nil
       expect(item.non_taxable_pay.to_f).to eq(0.0)
       expect(item.loan_deduction.to_f).to eq(0.0)
       expect(item.additional_withholding.to_f).to eq(7.0)
