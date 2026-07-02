@@ -99,6 +99,8 @@ module PayrollIntake
         digest = Digest::SHA256.new
         digest << source_type
         digest << "\n"
+        digest << adapter_class::PARSER_VERSION
+        digest << "\n"
         digest << pasted_text.strip
         file_snapshots.each do |snapshot|
           digest << "\n--file--\n"

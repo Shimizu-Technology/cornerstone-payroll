@@ -16,13 +16,13 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { employeesApi, payrollIntakeImportsApi } from '@/services/api';
+import { employeeWageRatesApi, employeesApi, payrollIntakeImportsApi } from '@/services/api';
 import type {
   PayrollIntakeApplyRowPayload,
   PayrollIntakeImportData,
   PayrollIntakeRowData,
 } from '@/services/api';
-import type { Employee, EmployeeFormData, PayPeriod, PayrollItem } from '@/types';
+import type { ContractorPayType, ContractorType, Employee, EmployeeFormData, EmploymentType, PayFrequency, PayPeriod, PayrollItem } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 
 interface PayrollIntakeImportModalProps {
@@ -36,7 +36,19 @@ interface PayrollIntakeImportModalProps {
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableRow = PayrollIntakeRowData & { include: boolean };
-type NewEmployeeForm = { first_name: string; last_name: string; pay_rate: string; hire_date: string };
+type NewEmployeeWageRateForm = { label: string; rate: string; is_primary: boolean };
+type NewEmployeeForm = {
+  first_name: string;
+  last_name: string;
+  employment_type: EmploymentType;
+  salary_type: 'annual' | 'per_period' | 'variable';
+  contractor_type: ContractorType;
+  contractor_pay_type: ContractorPayType;
+  pay_frequency: PayFrequency;
+  pay_rate: string;
+  hire_date: string;
+  wage_rates: NewEmployeeWageRateForm[];
+};
 
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -46,10 +58,27 @@ const toNumber = (value: unknown): number => {
 const fullName = (employee: Employee) => `${employee.first_name} ${employee.last_name}`.trim();
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-const namePartsFromSource = (sourceName: string): Pick<NewEmployeeForm, 'first_name' | 'last_name'> => {
+const defaultWageRates = (): NewEmployeeWageRateForm[] => [
+  { label: 'Primary', rate: '', is_primary: true },
+];
+
+const defaultNewEmployeeForm = (sourceName = ''): NewEmployeeForm => {
   const parts = sourceName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return { first_name: sourceName.trim(), last_name: '' };
-  return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+  const firstName = parts.length <= 1 ? sourceName.trim() : parts[0];
+  const lastName = parts.length <= 1 ? '' : parts.slice(1).join(' ');
+
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    employment_type: 'hourly',
+    salary_type: 'annual',
+    contractor_type: 'individual',
+    contractor_pay_type: 'hourly',
+    pay_frequency: 'biweekly',
+    pay_rate: '',
+    hire_date: todayIso(),
+    wage_rates: defaultWageRates(),
+  };
 };
 
 function severityVariant(severity?: string) {
@@ -85,7 +114,7 @@ export function PayrollIntakeImportModal({
   const [doneSummary, setDoneSummary] = useState<{ applied: number; skipped: number; errors: string[] } | null>(null);
   const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees);
   const [createEmployeeRow, setCreateEmployeeRow] = useState<EditableRow | null>(null);
-  const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>({ first_name: '', last_name: '', pay_rate: '', hire_date: todayIso() });
+  const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>(() => defaultNewEmployeeForm());
   const [creatingEmployee, setCreatingEmployee] = useState(false);
   const [createEmployeeError, setCreateEmployeeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -207,22 +236,73 @@ export function PayrollIntakeImportModal({
   };
 
   const openCreateEmployee = (row: EditableRow) => {
-    const parsedName = namePartsFromSource(row.source_employee_name);
     setCreateEmployeeRow(row);
-    setNewEmployeeForm({ ...parsedName, pay_rate: '', hire_date: todayIso() });
+    setNewEmployeeForm(defaultNewEmployeeForm(row.source_employee_name));
     setCreateEmployeeError(null);
+  };
+
+  const hourlyRateMode = newEmployeeForm.employment_type === 'hourly' ||
+    (newEmployeeForm.employment_type === 'contractor' && newEmployeeForm.contractor_pay_type === 'hourly');
+
+  const updateWageRate = (index: number, patch: Partial<NewEmployeeWageRateForm>) => {
+    setNewEmployeeForm((current) => {
+      const wageRates = current.wage_rates.map((rate, candidateIndex) => {
+        if (candidateIndex !== index) return rate;
+        return { ...rate, ...patch };
+      });
+
+      if (patch.is_primary) {
+        wageRates.forEach((rate, candidateIndex) => {
+          rate.is_primary = candidateIndex === index;
+        });
+      }
+
+      return { ...current, wage_rates: wageRates };
+    });
+  };
+
+  const addWageRate = () => {
+    setNewEmployeeForm((current) => ({
+      ...current,
+      wage_rates: [
+        ...current.wage_rates,
+        { label: `Rate ${current.wage_rates.length + 1}`, rate: '', is_primary: current.wage_rates.length === 0 },
+      ],
+    }));
+  };
+
+  const removeWageRate = (index: number) => {
+    setNewEmployeeForm((current) => {
+      const wageRates = current.wage_rates.filter((_, candidateIndex) => candidateIndex !== index);
+      if (wageRates.length === 0) wageRates.push({ label: 'Primary', rate: '', is_primary: true });
+      if (!wageRates.some((rate) => rate.is_primary)) wageRates[0].is_primary = true;
+      return { ...current, wage_rates: wageRates };
+    });
   };
 
   const handleCreateEmployee = async () => {
     if (!importData || !createEmployeeRow) return;
 
-    const payRate = Number(newEmployeeForm.pay_rate);
+    const cleanedWageRates = newEmployeeForm.wage_rates
+      .map((rate) => ({ ...rate, label: rate.label.trim(), numericRate: Number(rate.rate) }))
+      .filter((rate) => rate.label || rate.rate.trim());
+    const primaryRate = hourlyRateMode ? cleanedWageRates.find((rate) => rate.is_primary) || cleanedWageRates[0] : null;
+    const payRate = hourlyRateMode ? Number(primaryRate?.numericRate) : Number(newEmployeeForm.pay_rate);
+
     if (!newEmployeeForm.first_name.trim() || !newEmployeeForm.last_name.trim()) {
       setCreateEmployeeError('First and last name are required.');
       return;
     }
-    if (!Number.isFinite(payRate) || payRate < 0) {
-      setCreateEmployeeError('Enter a valid hourly rate.');
+    if (hourlyRateMode && cleanedWageRates.length === 0) {
+      setCreateEmployeeError('Add at least one wage rate.');
+      return;
+    }
+    if (hourlyRateMode && cleanedWageRates.some((rate) => !rate.label || !Number.isFinite(rate.numericRate) || rate.numericRate < 0)) {
+      setCreateEmployeeError('Each wage rate needs a label and a valid rate.');
+      return;
+    }
+    if (!hourlyRateMode && (!Number.isFinite(payRate) || payRate < 0)) {
+      setCreateEmployeeError('Enter a valid pay amount.');
       return;
     }
     if (!newEmployeeForm.hire_date) {
@@ -235,10 +315,12 @@ export function PayrollIntakeImportModal({
       first_name: newEmployeeForm.first_name.trim(),
       last_name: newEmployeeForm.last_name.trim(),
       hire_date: newEmployeeForm.hire_date,
-      employment_type: 'hourly',
-      salary_type: 'annual',
-      pay_rate: payRate,
-      pay_frequency: 'biweekly',
+      employment_type: newEmployeeForm.employment_type,
+      salary_type: newEmployeeForm.employment_type === 'salary' ? newEmployeeForm.salary_type : 'annual',
+      contractor_type: newEmployeeForm.contractor_type,
+      contractor_pay_type: newEmployeeForm.contractor_pay_type,
+      pay_rate: Number.isFinite(payRate) ? payRate : 0,
+      pay_frequency: newEmployeeForm.pay_frequency,
       filing_status: 'single',
       allowances: 0,
       additional_withholding: 0,
@@ -254,7 +336,19 @@ export function PayrollIntakeImportModal({
       setCreatingEmployee(true);
       setCreateEmployeeError(null);
       const response = await employeesApi.create(payload);
-      const employee = response.data;
+      const createdRates = hourlyRateMode
+        ? await Promise.all(cleanedWageRates.map((rate) => employeeWageRatesApi.create({
+            employee_id: response.data.id,
+            label: rate.label,
+            rate: rate.numericRate,
+            is_primary: rate.is_primary,
+            active: true,
+          })))
+        : [];
+      const employee = {
+        ...response.data,
+        wage_rates: createdRates.map((result) => result.wage_rate),
+      };
       setLocalEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee]);
       onEmployeeCreated?.(employee);
       updateRow(createEmployeeRow.id, { employee_id: employee.id });
@@ -559,7 +653,7 @@ export function PayrollIntakeImportModal({
       </Dialog>
 
       <Dialog open={Boolean(createEmployeeRow)} onOpenChange={(nextOpen) => !nextOpen && setCreateEmployeeRow(null)}>
-        <DialogContent className="max-w-lg rounded-3xl">
+        <DialogContent className="max-w-2xl rounded-3xl">
           <DialogHeader>
             <DialogTitle>Create employee</DialogTitle>
             <DialogDescription>
@@ -584,25 +678,146 @@ export function PayrollIntakeImportModal({
               value={newEmployeeForm.last_name}
               onChange={(event) => setNewEmployeeForm((current) => ({ ...current, last_name: event.target.value }))}
             />
-            <Input
-              label="Hourly rate"
-              type="number"
-              min="0"
-              step="0.01"
-              value={newEmployeeForm.pay_rate}
-              onChange={(event) => setNewEmployeeForm((current) => ({ ...current, pay_rate: event.target.value }))}
-              helperText="Used immediately if you apply this intake."
-            />
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-neutral-700">Worker type</label>
+              <Select
+                value={newEmployeeForm.employment_type}
+                onChange={(event) => setNewEmployeeForm((current) => ({
+                  ...current,
+                  employment_type: event.target.value as EmploymentType,
+                  wage_rates: event.target.value === 'salary' ? current.wage_rates : (current.wage_rates.length ? current.wage_rates : defaultWageRates()),
+                }))}
+              >
+                <option value="hourly">W-2 hourly</option>
+                <option value="salary">W-2 salary</option>
+                <option value="contractor">Contractor</option>
+              </Select>
+            </div>
             <Input
               label="Hire date"
               type="date"
               value={newEmployeeForm.hire_date}
               onChange={(event) => setNewEmployeeForm((current) => ({ ...current, hire_date: event.target.value }))}
             />
+
+            {newEmployeeForm.employment_type === 'salary' && (
+              <>
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-medium text-neutral-700">Salary type</label>
+                  <Select
+                    value={newEmployeeForm.salary_type}
+                    onChange={(event) => setNewEmployeeForm((current) => ({ ...current, salary_type: event.target.value as NewEmployeeForm['salary_type'] }))}
+                  >
+                    <option value="annual">Annual salary</option>
+                    <option value="per_period">Per-period salary</option>
+                    <option value="variable">Variable each pay period</option>
+                  </Select>
+                </div>
+                <Input
+                  label={newEmployeeForm.salary_type === 'annual' ? 'Annual salary' : 'Period pay amount'}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={newEmployeeForm.pay_rate}
+                  onChange={(event) => setNewEmployeeForm((current) => ({ ...current, pay_rate: event.target.value }))}
+                />
+              </>
+            )}
+
+            {newEmployeeForm.employment_type === 'contractor' && (
+              <>
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-medium text-neutral-700">Contractor type</label>
+                  <Select
+                    value={newEmployeeForm.contractor_type}
+                    onChange={(event) => setNewEmployeeForm((current) => ({ ...current, contractor_type: event.target.value as ContractorType }))}
+                  >
+                    <option value="individual">Individual</option>
+                    <option value="business">Business</option>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="block text-sm font-medium text-neutral-700">Contractor pay type</label>
+                  <Select
+                    value={newEmployeeForm.contractor_pay_type}
+                    onChange={(event) => setNewEmployeeForm((current) => ({ ...current, contractor_pay_type: event.target.value as ContractorPayType }))}
+                  >
+                    <option value="hourly">Hourly</option>
+                    <option value="flat_fee">Flat fee</option>
+                  </Select>
+                </div>
+              </>
+            )}
+
+            {newEmployeeForm.employment_type !== 'contractor' && (
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-neutral-700">Pay frequency</label>
+                <Select
+                  value={newEmployeeForm.pay_frequency}
+                  onChange={(event) => setNewEmployeeForm((current) => ({ ...current, pay_frequency: event.target.value as PayFrequency }))}
+                >
+                  <option value="weekly">Weekly</option>
+                  <option value="biweekly">Biweekly</option>
+                  <option value="semimonthly">Semi-monthly</option>
+                  <option value="monthly">Monthly</option>
+                </Select>
+              </div>
+            )}
+
+            {newEmployeeForm.employment_type === 'contractor' && newEmployeeForm.contractor_pay_type === 'flat_fee' && (
+              <Input
+                label="Default flat fee"
+                type="number"
+                min="0"
+                step="0.01"
+                value={newEmployeeForm.pay_rate}
+                onChange={(event) => setNewEmployeeForm((current) => ({ ...current, pay_rate: event.target.value }))}
+              />
+            )}
           </div>
 
+          {hourlyRateMode && (
+            <div className="space-y-3 rounded-3xl border border-neutral-200 bg-neutral-50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-neutral-950">Wage rates</p>
+                  <p className="text-xs text-neutral-500">The primary rate is used for this import unless you later split hours by rate.</p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addWageRate}>Add rate</Button>
+              </div>
+              {newEmployeeForm.wage_rates.map((rate, index) => (
+                <div key={index} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_130px_80px_72px] sm:items-end">
+                  <Input
+                    label={index === 0 ? 'Label' : undefined}
+                    value={rate.label}
+                    onChange={(event) => updateWageRate(index, { label: event.target.value })}
+                  />
+                  <Input
+                    label={index === 0 ? 'Rate' : undefined}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={rate.rate}
+                    onChange={(event) => updateWageRate(index, { rate: event.target.value })}
+                  />
+                  <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm text-neutral-700">
+                    <input
+                      type="radio"
+                      checked={rate.is_primary}
+                      onChange={() => updateWageRate(index, { is_primary: true })}
+                    />
+                    Primary
+                  </label>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => removeWageRate(index)} disabled={newEmployeeForm.wage_rates.length === 1}>
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm leading-6 text-warning-900">
-            New employees are created as active hourly W-2 employees with biweekly pay and single/0 withholding defaults. Finish their profile later if they need different tax settings.
+            New records are created with single/0 withholding defaults and no address. Finish the full employee profile later before final payroll approval.
           </div>
 
           <DialogFooter>

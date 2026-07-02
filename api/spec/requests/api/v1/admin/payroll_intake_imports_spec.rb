@@ -86,7 +86,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(JSON.parse(response.body).fetch("error")).to include("not enabled")
     end
 
-    it "returns the existing session for duplicate source content" do
+    it "returns the existing session for duplicate source content with the same parser version" do
       post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
       first_id = JSON.parse(response.body).dig("import", "id")
 
@@ -97,6 +97,21 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("import", "id")).to eq(first_id)
       expect(json["duplicate"]).to eq(true)
       expect(json.dig("import", "warnings").map { |warning| warning["code"] }).to include("duplicate_source")
+    end
+
+    it "does not reuse a stale duplicate preview after the parser version changes" do
+      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v1")
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      first_id = JSON.parse(response.body).dig("import", "id")
+
+      stub_const("PayrollIntake::Adapters::SpikeEmail::PARSER_VERSION", "spike_email:test-v2")
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+
+      expect(response).to have_http_status(:ok)
+      json = JSON.parse(response.body)
+      expect(json.dig("import", "id")).not_to eq(first_id)
+      expect(json["duplicate"]).to eq(false)
+      expect(json.dig("import", "parser_version")).to eq("spike_email:test-v2")
     end
 
     it "uploads source files outside the database transaction" do

@@ -3,7 +3,7 @@
 module PayrollIntake
   module Adapters
     class SpikeEmail
-      PARSER_VERSION = "spike_email:v1"
+      PARSER_VERSION = "spike_email:v2"
       SOURCE_TYPE = "spike_email"
       SOURCE_LABEL = "Spike Coffee Roasters email"
       HOURS_PER_WEEK_BEFORE_OT = 40.0
