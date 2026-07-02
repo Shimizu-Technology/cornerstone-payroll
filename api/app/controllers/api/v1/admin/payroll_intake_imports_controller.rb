@@ -68,7 +68,7 @@ module Api
           @pay_period = PayPeriod.includes(:payroll_items).find(params[:pay_period_id])
           return if @pay_period.company_id == current_company_id
 
-          render json: { error: "Pay period not found" }, status: :not_found
+          render json: { error: "Pay period not found" }, status: :not_found and return
         end
 
         def set_session
@@ -163,6 +163,7 @@ module Api
             pay_date: pay_period.pay_date,
             status: pay_period.status,
             period_description: pay_period.period_description,
+            payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             employee_count: pay_period.payroll_items.count,
             total_gross: pay_period.payroll_items.not_voided.sum(:gross_pay),
             total_net: pay_period.payroll_items.not_voided.sum(:net_pay),

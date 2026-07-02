@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
   let!(:organization) { create(:organization) }
-  let!(:company) { create(:company, organization: organization) }
+  let!(:company) { create(:company, organization: organization, payroll_intake_source_types: [ "spike_email" ]) }
   let!(:admin_user) { create(:user, company: company, role: "admin") }
   let!(:tax_table) { create(:tax_table, tax_year: 2026, filing_status: "single", pay_frequency: "biweekly") }
   let!(:pay_period) do
@@ -41,6 +41,15 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(alice_row["reported_tips"]).to eq(126.0)
       expect(alice_row["tips_paid_out"]).to eq(126.0)
       expect(json.dig("import", "totals", "total_tips_paid_out")).to eq(151.0)
+    end
+
+    it "rejects a source type that is not enabled for the company" do
+      company.update!(payroll_intake_source_types: [])
+
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body).fetch("error")).to include("not enabled")
     end
 
     it "returns the existing session for duplicate source content" do

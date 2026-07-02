@@ -165,7 +165,7 @@ module PayrollIntake
     def overwrite_error_for(payroll_item)
       return nil unless payroll_item.persisted?
       return nil if force_overwrite
-      return nil if payroll_item.import_source == "spike_email"
+      return nil if payroll_item.import_source == session.source_type
 
       "Payroll item already exists from another source or manual entry. Use force overwrite only after review."
     end
@@ -186,7 +186,7 @@ module PayrollIntake
       payroll_item.tips_paid_out = values[:tips_paid_out]
       payroll_item.tips = 0.0 if payroll_item.respond_to?(:tips=)
       payroll_item.loan_deduction = values[:loan_deduction]
-      payroll_item.import_source = "spike_email"
+      payroll_item.import_source = session.source_type
       payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
       payroll_item.calculate!
     end

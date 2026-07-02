@@ -8,6 +8,7 @@ module PayrollIntake
     SOURCE_ADAPTERS = {
       "spike_email" => PayrollIntake::Adapters::SpikeEmail
     }.freeze
+    MAX_FILE_BYTES = PayrollIntake::AiExtractor::MAX_FILE_BYTES
 
     def initialize(pay_period:, source_type:, pasted_text: nil, files: [], actor: nil, storage: nil)
       @pay_period = pay_period
@@ -23,6 +24,7 @@ module PayrollIntake
     def call
       raise ArgumentError, "Cannot import into a committed pay period" unless pay_period.can_edit?
       raise ArgumentError, "Unsupported payroll intake source" unless adapter_class
+      raise ArgumentError, "Payroll intake source is not enabled for this company" unless company.payroll_intake_source_enabled?(source_type)
       raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty?
 
       snapshot_files!
@@ -80,7 +82,9 @@ module PayrollIntake
       @file_snapshots = files.map do |file|
         io = file.tempfile || file
         io.rewind if io.respond_to?(:rewind)
-        data = io.read
+        data = io.read(MAX_FILE_BYTES + 1) || ""
+        raise ArgumentError, "Attachment exceeds #{MAX_FILE_BYTES} bytes" if data.bytesize > MAX_FILE_BYTES
+
         io.rewind if io.respond_to?(:rewind)
         {
           file: file,

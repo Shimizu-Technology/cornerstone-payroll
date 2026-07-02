@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_02_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_02_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -174,6 +174,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_120000) do
     t.integer "next_check_number", default: 1001, null: false
     t.bigint "organization_id", null: false
     t.string "pay_frequency", default: "biweekly"
+    t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
     t.string "state"
     t.datetime "updated_at", null: false

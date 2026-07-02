@@ -754,6 +754,7 @@ export function PayPeriodDetail() {
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
   const canEditPayPeriod = !isCommitted && !isVoided;
   const canImportMosa = isDraft && canEditPayPeriod;
+  const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const canImportTimeTracking = isDraft && canEditPayPeriod;
 
   // Summaries
@@ -999,9 +1000,11 @@ export function PayPeriodDetail() {
                     Import (MoSa)
                   </Button>
                 )}
-                <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
-                  Import Spike Email
-                </Button>
+                {canImportSpikeIntake && (
+                  <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
+                    Import Spike Email
+                  </Button>
+                )}
                 {canImportTimeTracking && (
                   <Button variant="outline" onClick={() => setTimeTrackingImportOpen(true)}>
                     Import Time Tracking
