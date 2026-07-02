@@ -4,6 +4,7 @@ require "set"
 
 class Company < ApplicationRecord
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
+  PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email].freeze
 
   belongs_to :organization
   belongs_to :active_printer_profile, class_name: "PrinterProfile", optional: true
@@ -41,6 +42,7 @@ class Company < ApplicationRecord
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validate :check_layout_config_must_be_hash
+  validate :payroll_intake_source_types_are_supported
 
   scope :active, -> { where(active: true) }
 
@@ -146,16 +148,28 @@ class Company < ApplicationRecord
     check_stock_type == "first_hawaiian_4up"
   end
 
+  def payroll_intake_source_enabled?(source_type)
+    payroll_intake_source_types.include?(source_type.to_s)
+  end
+
   private
 
   def normalize_blanks
     self.ein = nil if ein.blank?
+    self.payroll_intake_source_types = Array(payroll_intake_source_types).compact_blank.map(&:to_s).uniq
   end
 
   def check_layout_config_must_be_hash
     return if check_layout_config.is_a?(Hash)
 
     errors.add(:check_layout_config, "must be a JSON object")
+  end
+
+  def payroll_intake_source_types_are_supported
+    unsupported = Array(payroll_intake_source_types) - PAYROLL_INTAKE_SOURCE_TYPES
+    return if unsupported.empty?
+
+    errors.add(:payroll_intake_source_types, "contains unsupported source type(s): #{unsupported.join(', ')}")
   end
 
   def issued_check_numbers_in_range(start_number, end_number)
