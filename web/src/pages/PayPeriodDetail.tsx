@@ -2545,6 +2545,7 @@ export function PayPeriodDetail() {
         onOpenChange={setPayrollIntakeImportOpen}
         payPeriodId={payPeriod.id}
         employees={employees}
+        onEmployeeCreated={(employee) => setEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee])}
         onImportComplete={handleImportComplete}
       />
 

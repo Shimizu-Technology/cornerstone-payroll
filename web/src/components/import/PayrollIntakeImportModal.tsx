@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardList, FileText, UploadCloud } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
+import { AlertTriangle, CheckCircle2, ClipboardList, FileText, UploadCloud, UserPlus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -11,17 +11,18 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { payrollIntakeImportsApi } from '@/services/api';
+import { employeesApi, payrollIntakeImportsApi } from '@/services/api';
 import type {
   PayrollIntakeApplyRowPayload,
   PayrollIntakeImportData,
   PayrollIntakeRowData,
 } from '@/services/api';
-import type { Employee, PayPeriod, PayrollItem } from '@/types';
+import type { Employee, EmployeeFormData, PayPeriod, PayrollItem } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 
 interface PayrollIntakeImportModalProps {
@@ -29,11 +30,13 @@ interface PayrollIntakeImportModalProps {
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
   employees: Employee[];
+  onEmployeeCreated?: (employee: Employee) => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
 }
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableRow = PayrollIntakeRowData & { include: boolean };
+type NewEmployeeForm = { first_name: string; last_name: string; pay_rate: string; hire_date: string };
 
 const toNumber = (value: unknown): number => {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -41,6 +44,13 @@ const toNumber = (value: unknown): number => {
 };
 
 const fullName = (employee: Employee) => `${employee.first_name} ${employee.last_name}`.trim();
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const namePartsFromSource = (sourceName: string): Pick<NewEmployeeForm, 'first_name' | 'last_name'> => {
+  const parts = sourceName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return { first_name: sourceName.trim(), last_name: '' };
+  return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+};
 
 function severityVariant(severity?: string) {
   if (severity === 'error') return 'danger' as const;
@@ -60,6 +70,7 @@ export function PayrollIntakeImportModal({
   onOpenChange,
   payPeriodId,
   employees,
+  onEmployeeCreated,
   onImportComplete,
 }: PayrollIntakeImportModalProps) {
   const [step, setStep] = useState<Step>('upload');
@@ -72,13 +83,22 @@ export function PayrollIntakeImportModal({
   const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false);
   const [forceOverwrite, setForceOverwrite] = useState(false);
   const [doneSummary, setDoneSummary] = useState<{ applied: number; skipped: number; errors: string[] } | null>(null);
+  const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees);
+  const [createEmployeeRow, setCreateEmployeeRow] = useState<EditableRow | null>(null);
+  const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>({ first_name: '', last_name: '', pay_rate: '', hire_date: todayIso() });
+  const [creatingEmployee, setCreatingEmployee] = useState(false);
+  const [createEmployeeError, setCreateEmployeeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    setLocalEmployees(employees);
+  }, [employees]);
+
   const employeeOptions = useMemo(() => (
-    [...employees]
+    [...localEmployees]
       .sort((a, b) => fullName(a).localeCompare(fullName(b)))
       .map((employee) => ({ value: String(employee.id), label: fullName(employee) }))
-  ), [employees]);
+  ), [localEmployees]);
 
   const totals = useMemo(() => rows.reduce((acc, row) => {
     if (!row.include) return acc;
@@ -113,6 +133,9 @@ export function PayrollIntakeImportModal({
     setAcknowledgeWarnings(false);
     setForceOverwrite(false);
     setDoneSummary(null);
+    setCreateEmployeeRow(null);
+    setCreateEmployeeError(null);
+    setCreatingEmployee(false);
   };
 
   const handleClose = () => {
@@ -159,6 +182,21 @@ export function PayrollIntakeImportModal({
     setRows((current) => current.map((row) => (row.id === rowId ? normalizeRow({ ...row, ...patch }) : row)));
   };
 
+  const updateWeekTips = (rowId: number, key: 'week1_tips' | 'week2_tips', value: number) => {
+    setRows((current) => current.map((row) => {
+      if (row.id !== rowId) return row;
+
+      const next = { ...row, [key]: Math.max(0, value) };
+      const totalTips = toNumber(next.week1_tips) + toNumber(next.week2_tips);
+      return normalizeRow({ ...next, reported_tips: totalTips, tips_paid_out: totalTips });
+    }));
+  };
+
+  const updatePaidOutTips = (rowId: number, value: number) => {
+    const totalTips = Math.max(0, value);
+    updateRow(rowId, { reported_tips: totalTips, tips_paid_out: totalTips });
+  };
+
   const normalizeRow = (row: EditableRow): EditableRow => {
     const paidOut = Math.max(0, toNumber(row.tips_paid_out));
     const reportedTips = Math.max(0, toNumber(row.reported_tips), paidOut);
@@ -166,6 +204,66 @@ export function PayrollIntakeImportModal({
       ? (row.errors || []).filter((warning) => warning.code !== 'unmatched_employee')
       : row.errors;
     return { ...row, tips_paid_out: paidOut, reported_tips: reportedTips, errors };
+  };
+
+  const openCreateEmployee = (row: EditableRow) => {
+    const parsedName = namePartsFromSource(row.source_employee_name);
+    setCreateEmployeeRow(row);
+    setNewEmployeeForm({ ...parsedName, pay_rate: '', hire_date: todayIso() });
+    setCreateEmployeeError(null);
+  };
+
+  const handleCreateEmployee = async () => {
+    if (!importData || !createEmployeeRow) return;
+
+    const payRate = Number(newEmployeeForm.pay_rate);
+    if (!newEmployeeForm.first_name.trim() || !newEmployeeForm.last_name.trim()) {
+      setCreateEmployeeError('First and last name are required.');
+      return;
+    }
+    if (!Number.isFinite(payRate) || payRate < 0) {
+      setCreateEmployeeError('Enter a valid hourly rate.');
+      return;
+    }
+    if (!newEmployeeForm.hire_date) {
+      setCreateEmployeeError('Hire date is required.');
+      return;
+    }
+
+    const payload: EmployeeFormData & { company_id: number } = {
+      company_id: importData.company_id,
+      first_name: newEmployeeForm.first_name.trim(),
+      last_name: newEmployeeForm.last_name.trim(),
+      hire_date: newEmployeeForm.hire_date,
+      employment_type: 'hourly',
+      salary_type: 'annual',
+      pay_rate: payRate,
+      pay_frequency: 'biweekly',
+      filing_status: 'single',
+      allowances: 0,
+      additional_withholding: 0,
+      w4_dependent_credit: 0,
+      w4_step2_multiple_jobs: false,
+      w4_step4a_other_income: 0,
+      w4_step4b_deductions: 0,
+      retirement_rate: 0,
+      roth_retirement_rate: 0,
+    };
+
+    try {
+      setCreatingEmployee(true);
+      setCreateEmployeeError(null);
+      const response = await employeesApi.create(payload);
+      const employee = response.data;
+      setLocalEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee]);
+      onEmployeeCreated?.(employee);
+      updateRow(createEmployeeRow.id, { employee_id: employee.id });
+      setCreateEmployeeRow(null);
+    } catch (err) {
+      setCreateEmployeeError(err instanceof Error ? err.message : 'Failed to create employee');
+    } finally {
+      setCreatingEmployee(false);
+    }
   };
 
   const buildApplyRows = (): PayrollIntakeApplyRowPayload[] => rows.map((row) => ({
@@ -210,7 +308,8 @@ export function PayrollIntakeImportModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}>
+    <>
+      <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? onOpenChange(true) : handleClose())}>
       <DialogContent className="dialog-top dialog-wide max-w-7xl max-h-[calc(100vh-5rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Spike Payroll Intake</DialogTitle>
@@ -324,15 +423,12 @@ export function PayrollIntakeImportModal({
                   <TableRow>
                     <TableHead className="w-10">Use</TableHead>
                     <TableHead className="min-w-[220px]">Source / Employee</TableHead>
-                    <TableHead className="text-right">W1 Hrs</TableHead>
-                    <TableHead className="text-right">W2 Hrs</TableHead>
-                    <TableHead className="text-right">Regular</TableHead>
-                    <TableHead className="text-right">OT</TableHead>
-                    <TableHead className="text-right">W1 Tips</TableHead>
-                    <TableHead className="text-right">W2 Tips</TableHead>
-                    <TableHead className="text-right">Reported Tips</TableHead>
-                    <TableHead className="text-right">Tips Paid Out</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead className="min-w-[130px] text-right">Hours</TableHead>
+                    <TableHead className="min-w-[120px] text-right">OT</TableHead>
+                    <TableHead className="min-w-[130px] text-right">W1 Tips</TableHead>
+                    <TableHead className="min-w-[130px] text-right">W2 Tips</TableHead>
+                    <TableHead className="min-w-[150px] text-right">Paid-Out Tips</TableHead>
+                    <TableHead className="min-w-[100px]">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -354,14 +450,20 @@ export function PayrollIntakeImportModal({
                               <p className="text-xs text-neutral-500">Match confidence {Math.round(row.match_confidence * 100)}%</p>
                             )}
                           </div>
-                          <Select
-                            value={row.employee_id ? String(row.employee_id) : ''}
-                            onChange={(event) => updateRow(row.id, { employee_id: event.target.value ? Number(event.target.value) : null })}
-                            className="min-w-[210px]"
-                          >
-                            <option value="">Select employee</option>
-                            {employeeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                          </Select>
+                          <div className="flex min-w-[320px] items-center gap-2">
+                            <Select
+                              value={row.employee_id ? String(row.employee_id) : ''}
+                              onChange={(event) => updateRow(row.id, { employee_id: event.target.value ? Number(event.target.value) : null })}
+                              className="min-w-[230px] flex-1"
+                            >
+                              <option value="">Select employee</option>
+                              {employeeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </Select>
+                            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => openCreateEmployee(row)}>
+                              <UserPlus className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                              New
+                            </Button>
+                          </div>
                           {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => (
                             <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} className="mr-1 whitespace-normal text-left">
                               {warning.message}
@@ -369,14 +471,11 @@ export function PayrollIntakeImportModal({
                           ))}
                         </div>
                       </TableCell>
-                      <NumericCell value={row.week1_hours} onChange={(value) => updateRow(row.id, { week1_hours: value ?? 0 })} />
-                      <NumericCell value={row.week2_hours} onChange={(value) => updateRow(row.id, { week2_hours: value ?? 0 })} />
                       <NumericCell value={row.regular_hours} onChange={(value) => updateRow(row.id, { regular_hours: value ?? 0 })} />
                       <NumericCell value={row.overtime_hours} onChange={(value) => updateRow(row.id, { overtime_hours: value ?? 0 })} />
-                      <NumericCell value={row.week1_tips} onChange={(value) => updateRow(row.id, { week1_tips: value ?? 0 })} money />
-                      <NumericCell value={row.week2_tips} onChange={(value) => updateRow(row.id, { week2_tips: value ?? 0 })} money />
-                      <NumericCell value={row.reported_tips} onChange={(value) => updateRow(row.id, { reported_tips: value ?? 0 })} money />
-                      <NumericCell value={row.tips_paid_out} onChange={(value) => updateRow(row.id, { tips_paid_out: value ?? 0 })} money />
+                      <NumericCell value={row.week1_tips} onChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} money />
+                      <NumericCell value={row.week2_tips} onChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} money />
+                      <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
                       <TableCell>{readinessBadge(row)}</TableCell>
                     </TableRow>
                   ))}
@@ -457,7 +556,64 @@ export function PayrollIntakeImportModal({
           {step === 'done' && <Button onClick={handleClose}>Close</Button>}
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+
+      <Dialog open={Boolean(createEmployeeRow)} onOpenChange={(nextOpen) => !nextOpen && setCreateEmployeeRow(null)}>
+        <DialogContent className="max-w-lg rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Create employee</DialogTitle>
+            <DialogDescription>
+              Add this Spike employee to Cornerstone, then the intake row will be mapped automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          {createEmployeeError && (
+            <div className="rounded-2xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">
+              {createEmployeeError}
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input
+              label="First name"
+              value={newEmployeeForm.first_name}
+              onChange={(event) => setNewEmployeeForm((current) => ({ ...current, first_name: event.target.value }))}
+            />
+            <Input
+              label="Last name"
+              value={newEmployeeForm.last_name}
+              onChange={(event) => setNewEmployeeForm((current) => ({ ...current, last_name: event.target.value }))}
+            />
+            <Input
+              label="Hourly rate"
+              type="number"
+              min="0"
+              step="0.01"
+              value={newEmployeeForm.pay_rate}
+              onChange={(event) => setNewEmployeeForm((current) => ({ ...current, pay_rate: event.target.value }))}
+              helperText="Used immediately if you apply this intake."
+            />
+            <Input
+              label="Hire date"
+              type="date"
+              value={newEmployeeForm.hire_date}
+              onChange={(event) => setNewEmployeeForm((current) => ({ ...current, hire_date: event.target.value }))}
+            />
+          </div>
+
+          <div className="rounded-2xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm leading-6 text-warning-900">
+            New employees are created as active hourly W-2 employees with biweekly pay and single/0 withholding defaults. Finish their profile later if they need different tax settings.
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCreateEmployeeRow(null)} disabled={creatingEmployee}>Cancel</Button>
+            <Button type="button" onClick={handleCreateEmployee} disabled={creatingEmployee}>
+              {creatingEmployee ? 'Creating...' : 'Create and map employee'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -472,13 +628,13 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 
 function NumericCell({ value, onChange, money = false }: { value: number; onChange: (value: number | null) => void; money?: boolean }) {
   return (
-    <TableCell className="min-w-[96px] text-right">
+    <TableCell className="min-w-[124px] text-right">
       <NumericInput
         value={value}
         onValueChange={onChange}
         min={0}
         fixedDecimalsOnBlur={money ? 2 : 2}
-        className="h-9 min-h-0 rounded-xl px-2 py-1 text-right text-xs"
+        className="h-11 min-h-0 rounded-2xl px-3 py-2 text-right text-sm tabular-nums"
       />
     </TableCell>
   );

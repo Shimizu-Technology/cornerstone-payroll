@@ -44,6 +44,39 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(json.dig("import", "totals", "total_tips_paid_out")).to eq(151.0)
     end
 
+    it "previews the real Spike email body format with total hours and weekly tips" do
+      pay_period.update!(start_date: Date.new(2026, 6, 14), end_date: Date.new(2026, 6, 27), pay_date: Date.new(2026, 7, 3))
+      haane = create(:employee, company: company, first_name: "Ha'ane", last_name: "Akima", pay_rate: 15.00)
+      create(:employee, company: company, first_name: "Mia", last_name: "Lahnee Aquino", pay_rate: 15.00)
+      create(:employee, company: company, first_name: "Jacqueline", last_name: "Martinez", pay_rate: 15.00)
+
+      post preview_path, params: { source_type: "spike_email", pasted_text: real_spike_email_text }
+
+      expect(response).to have_http_status(:ok)
+      json = JSON.parse(response.body)
+      rows = json.dig("import", "rows")
+
+      expect(rows.map { |row| row["source_employee_name"] }).to eq([ "Ha’ane Akima", "Mia Lahnee Aquino", "Jacqueline Martinez" ])
+      expect(json.dig("import", "warnings")).to be_empty
+
+      haane_row = rows.first
+      expect(haane_row["employee_id"]).to eq(haane.id)
+      expect(haane_row["week1_hours"]).to eq(0.0)
+      expect(haane_row["week2_hours"]).to eq(0.0)
+      expect(haane_row["regular_hours"]).to eq(45.25)
+      expect(haane_row["overtime_hours"]).to eq(0.0)
+      expect(haane_row["week1_tips"]).to eq(133.0)
+      expect(haane_row["week2_tips"]).to eq(57.0)
+      expect(haane_row["reported_tips"]).to eq(190.0)
+      expect(haane_row["tips_paid_out"]).to eq(190.0)
+      expect(haane_row["warnings"]).to be_empty
+
+      jacqueline_row = rows.third
+      expect(jacqueline_row["week1_tips"]).to eq(124.0)
+      expect(jacqueline_row["week2_tips"]).to eq(0.0)
+      expect(jacqueline_row["reported_tips"]).to eq(124.0)
+    end
+
     it "rejects a source type that is not enabled for the company" do
       company.update!(payroll_intake_source_types: [])
 
@@ -301,6 +334,28 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       Employee,Week 1 Hours,Week 2 Hours,Week 1 Tips,Week 2 Tips
       Alice Barista,38,42,$50.25,$75.75
       Bob Roaster,20,21,$10.00,$15.00
+    TEXT
+  end
+
+  def real_spike_email_text
+    <<~TEXT
+      Spike Coffee Roasters payroll 6/14/26-6/27/26
+
+      Hafa Adai,
+
+      Here are the hours and tips accumulated for the pay period 6/14/26-6/27/26.
+
+      Ha’ane Akima 45.25 hours
+      6/14-6/20 $133
+      6/21-6/27 $57
+
+      Mia Lahnee Aquino 10.48 hours
+      6/14-6/20 $30
+      6/21-6/27 $12
+
+      Jacqueline Martinez 15.72 hours
+      6/14-6/20 $124
+      6/21-6/27 no tips accumulated
     TEXT
   end
 end

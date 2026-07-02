@@ -15,6 +15,7 @@ module PayrollIntake
 
     def call
       rows = parse_table_rows
+      rows = parse_email_blocks if rows.empty?
       rows = parse_loose_rows if rows.empty?
 
       {
@@ -43,11 +44,13 @@ module PayrollIntake
     end
 
     def parse_date(value)
-      Date.strptime(value, "%m/%d/%Y")
+      cleaned = value.to_s.strip
+      year_token = cleaned.split(/[\/-]/).last.to_s
+      format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
+
+      Date.strptime(cleaned, format)
     rescue Date::Error
-      Date.strptime(value, "%m/%d/%y")
-    rescue Date::Error
-      Date.parse(value)
+      Date.parse(cleaned)
     rescue Date::Error
       nil
     end
@@ -128,6 +131,66 @@ module PayrollIntake
         row[key] = numeric(mapped[key]) if mapped.key?(key)
       end
       row
+    end
+
+    def parse_email_blocks
+      rows = []
+      current = nil
+
+      lines.each do |line|
+        employee_match = employee_hours_match(line)
+        if employee_match
+          rows << finalize_email_block(current) if current
+          current = {
+            employee_name: employee_match[:name].to_s.strip,
+            total_hours: numeric(employee_match[:hours]),
+            week1_tips: 0.0,
+            week2_tips: 0.0,
+            confidence: 0.90,
+            source: "spike_email_block",
+            tips_seen: 0
+          }
+          next
+        end
+
+        next unless current
+
+        tip_value = weekly_tip_value(line)
+        next if tip_value.nil?
+
+        current[current[:tips_seen].zero? ? :week1_tips : :week2_tips] = tip_value
+        current[:tips_seen] += 1
+      end
+
+      rows << finalize_email_block(current) if current
+      rows.compact
+    end
+
+    def employee_hours_match(line)
+      match = line.match(/\A\s*(?<name>[^$\d].*?)\s+[-–—:]?\s*(?<hours>\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b/i)
+      return nil unless match
+
+      name = match[:name].to_s.gsub(/^[•\-*\s]+/, "").strip
+      return nil if name.blank? || name.match?(/\b(here|pay period|total|subtotal|grand total)\b/i)
+
+      { name: name, hours: match[:hours] }
+    end
+
+    def weekly_tip_value(line)
+      match = line.match(%r{\A\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s*(?:-|to|through|–|—)\s*\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\s+(?<tips>.+)\z}i)
+      return nil unless match
+
+      value = match[:tips].to_s.strip
+      return 0.0 if value.match?(/\Ano\s+tips?(?:\s+accumulated)?\z/i)
+      return numeric(value) if value.match?(/\$/)
+
+      nil
+    end
+
+    def finalize_email_block(row)
+      return nil unless row
+
+      row.except(:tips_seen)
     end
 
     def parse_loose_rows

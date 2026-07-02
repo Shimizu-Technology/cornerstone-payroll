@@ -157,7 +157,6 @@ module PayrollIntake
         end
 
         if total_hours.positive?
-          warnings << warning("biweekly_hours_without_week_split", "Only total hours were detected, so overtime cannot be verified. Split by week before applying if overtime is possible.", "warning")
           return [ total_hours, 0.0, warnings ]
         end
 
@@ -185,7 +184,13 @@ module PayrollIntake
         return value if value.is_a?(Date)
         return nil if value.blank?
 
-        Date.parse(value.to_s)
+        cleaned = value.to_s.strip
+        year_token = cleaned.split(/[\/-]/).last.to_s
+        format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
+
+        Date.strptime(cleaned, format)
+      rescue Date::Error
+        Date.parse(cleaned)
       rescue Date::Error
         nil
       end
