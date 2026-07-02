@@ -15,10 +15,11 @@ class AddPayrollIntakeSourceTypesToCompanies < ActiveRecord::Migration[8.1]
         'spike coffee roasters inc',
         'spike coffee roasters corporation',
         'spike coffee roasters guam',
+        'spike coffee roasters coffee slut',
+        'spike coffee roasters llc coffee slut',
+        'spike coffee roasters inc coffee slut',
         'coffee slut',
-        'coffee slut scr',
-        'scr',
-        'spr'
+        'coffee slut scr'
       )
     SQL
   end
