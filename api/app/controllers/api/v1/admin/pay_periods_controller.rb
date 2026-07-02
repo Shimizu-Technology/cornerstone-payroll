@@ -953,6 +953,7 @@ module Api
             status: pay_period.status,
             notes: pay_period.notes,
             period_description: pay_period.period_description,
+            payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             employee_count: agg[:count],
             total_gross: agg[:gross],
             total_net: agg[:net],

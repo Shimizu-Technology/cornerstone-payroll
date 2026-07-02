@@ -29,6 +29,7 @@ import {
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
 import { payPeriodsApi, employeesApi, payrollFieldsApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
+import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
 import { CorrectionPanel } from '@/components/payroll/CorrectionPanel';
 import { PayrollItemEditModal } from '@/components/payroll/PayrollItemEditModal';
@@ -250,6 +251,7 @@ export function PayPeriodDetail() {
   const [processing, setProcessing] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
@@ -752,6 +754,7 @@ export function PayPeriodDetail() {
   const canRetrySyncTax = isCommitted && (syncStatus === 'failed' || syncStatus === 'pending');
   const canEditPayPeriod = !isCommitted && !isVoided;
   const canImportMosa = isDraft && canEditPayPeriod;
+  const canImportSpikeIntake = isDraft && canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
   const canImportTimeTracking = isDraft && canEditPayPeriod;
 
   // Summaries
@@ -995,6 +998,11 @@ export function PayPeriodDetail() {
                 {canImportMosa && (
                   <Button variant="outline" onClick={() => setImportModalOpen(true)}>
                     Import (MoSa)
+                  </Button>
+                )}
+                {canImportSpikeIntake && (
+                  <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>
+                    Import Spike Email
                   </Button>
                 )}
                 {canImportTimeTracking && (
@@ -2529,6 +2537,15 @@ export function PayPeriodDetail() {
         open={importModalOpen}
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
+        onImportComplete={handleImportComplete}
+      />
+
+      <PayrollIntakeImportModal
+        open={payrollIntakeImportOpen}
+        onOpenChange={setPayrollIntakeImportOpen}
+        payPeriodId={payPeriod.id}
+        employees={employees}
+        onEmployeeCreated={(employee) => setEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee])}
         onImportComplete={handleImportComplete}
       />
 

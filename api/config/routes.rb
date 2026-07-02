@@ -164,6 +164,15 @@ Rails.application.routes.draw do
             post :apply_time_tracking_import, to: "time_tracking_imports#apply"
           end
 
+          resources :payroll_intake_imports, only: [ :index, :show ] do
+            collection do
+              post :preview
+            end
+            member do
+              post :apply
+            end
+          end
+
           resources :payroll_items, only: [ :index, :show, :create, :update, :destroy ] do
             member do
               post :recalculate

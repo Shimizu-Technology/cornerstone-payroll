@@ -304,6 +304,7 @@ export interface PayPeriod {
   excluded_employee_ids?: number[];
   notes?: string;
   period_description?: string;
+  payroll_intake_source_types?: string[];
   created_by_id?: number;
   approved_by_id?: number;
   calculated_at?: string | null;

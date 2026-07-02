@@ -1142,6 +1142,114 @@ export const timecardsApi = {
     }),
 };
 
+export interface PayrollIntakeWarning {
+  code: string;
+  message: string;
+  severity: 'info' | 'warning' | 'error' | string;
+}
+
+export interface PayrollIntakeDocumentData {
+  id: number;
+  document_type: 'pasted_text' | 'image' | 'pdf' | 'other';
+  filename?: string | null;
+  content_type?: string | null;
+  metadata?: Record<string, unknown>;
+  text_preview?: string | null;
+}
+
+export interface PayrollIntakeRowData {
+  id: number;
+  position: number;
+  status: 'pending' | 'ready' | 'needs_review' | 'applied' | 'skipped' | 'failed';
+  excluded: boolean;
+  source_employee_name: string;
+  employee_id: number | null;
+  employee_name?: string | null;
+  match_method?: string | null;
+  match_confidence?: number | null;
+  confidence?: number | null;
+  week1_hours: number;
+  week2_hours: number;
+  regular_hours: number;
+  overtime_hours: number;
+  week1_tips: number;
+  week2_tips: number;
+  reported_tips: number;
+  tips_paid_out: number;
+  loan_deduction: number;
+  warnings: PayrollIntakeWarning[];
+  errors: PayrollIntakeWarning[];
+  source_payload?: Record<string, unknown>;
+  staff_overrides?: Record<string, unknown>;
+  applied_payroll_item_id?: number | null;
+}
+
+export interface PayrollIntakeImportData {
+  id: number;
+  company_id: number;
+  pay_period_id: number;
+  source_type: 'spike_email' | string;
+  source_label?: string | null;
+  status: 'draft' | 'previewed' | 'reviewed' | 'applied' | 'failed';
+  import_hash: string;
+  parser_version: string;
+  warnings: PayrollIntakeWarning[];
+  totals: Record<string, number>;
+  error_message?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  applied_at?: string | null;
+  documents: PayrollIntakeDocumentData[];
+  rows: PayrollIntakeRowData[];
+}
+
+export interface PayrollIntakePreviewResponse {
+  import: PayrollIntakeImportData;
+  duplicate: boolean;
+}
+
+export interface PayrollIntakeApplyRowPayload {
+  id: number;
+  include: boolean;
+  employee_id: number | null;
+  week1_hours?: number;
+  week2_hours?: number;
+  regular_hours: number;
+  overtime_hours: number;
+  week1_tips?: number;
+  week2_tips?: number;
+  reported_tips: number;
+  tips_paid_out: number;
+  loan_deduction?: number;
+  acknowledge_warnings?: boolean;
+}
+
+export interface PayrollIntakeApplyResponse {
+  results: {
+    applied: Array<{ row_id: number; employee_id: number; employee_name: string; regular_hours: number; overtime_hours: number; reported_tips: number; tips_paid_out: number }>;
+    skipped: Array<{ row_id: number; source_employee_name?: string; reason: string }>;
+    errors: Array<{ row_id?: number; employee_id?: number; source_employee_name?: string; error: string }>;
+  };
+  import: PayrollIntakeImportData;
+  pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
+}
+
+export const payrollIntakeImportsApi = {
+  preview: async (payPeriodId: number, data: { source_type?: string; pasted_text?: string; files?: File[] }) => {
+    const formData = new FormData();
+    formData.append('source_type', data.source_type || 'spike_email');
+    if (data.pasted_text) formData.append('pasted_text', data.pasted_text);
+    (data.files || []).forEach((file) => formData.append('files[]', file));
+    return api.postForm<PayrollIntakePreviewResponse>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/preview`, formData);
+  },
+  apply: (payPeriodId: number, importId: number, data: { rows: PayrollIntakeApplyRowPayload[]; force_overwrite?: boolean; acknowledge_warnings?: boolean }) =>
+    api.post<PayrollIntakeApplyResponse>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/apply`, data),
+  list: (payPeriodId: number) =>
+    api.get<{ imports: PayrollIntakeImportData[] }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports`),
+  show: (payPeriodId: number, importId: number) =>
+    api.get<{ import: PayrollIntakeImportData }>(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}`),
+};
+
 export const punchEntriesApi = {
   create: (timecardId: number, data: Partial<PunchEntryData>) =>
     api.post<PunchEntryData>(`/admin/punch_entries`, { timecard_id: timecardId, punch_entry: data }),
