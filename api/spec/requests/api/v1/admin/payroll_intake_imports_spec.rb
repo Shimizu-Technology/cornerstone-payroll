@@ -125,6 +125,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
     end
 
     it "clears stale manual fields when force overwriting an existing payroll item" do
+      alice.update!(additional_withholding: 7)
       create(
         :payroll_item,
         pay_period: pay_period,
@@ -137,6 +138,10 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
         bonus: 100,
         non_taxable_pay: 50,
         loan_deduction: 99,
+        additional_withholding: 99,
+        additional_withholding_override: 88,
+        withholding_tax_adjustment: 77,
+        withholding_tax_override: 66,
         custom_earnings: [ { "label" => "Stale earning", "amount" => 25 } ],
         custom_deductions: [ { "label" => "Stale deduction", "amount" => 10 } ],
         payroll_adjustments: [ { "label" => "Stale adjustment", "amount" => 15, "treatment" => "post_tax_deduction", "active" => true } ]
@@ -166,6 +171,10 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(item.bonus.to_f).to eq(0.0)
       expect(item.non_taxable_pay.to_f).to eq(0.0)
       expect(item.loan_deduction.to_f).to eq(0.0)
+      expect(item.additional_withholding.to_f).to eq(7.0)
+      expect(item.additional_withholding_override).to be_nil
+      expect(item.withholding_tax_adjustment).to be_nil
+      expect(item.withholding_tax_override).to be_nil
       expect(item.custom_earnings).to eq([])
       expect(item.custom_deductions).to eq([])
       expect(item.payroll_adjustments).to eq([])

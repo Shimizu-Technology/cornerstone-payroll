@@ -89,9 +89,18 @@ export function PayrollIntakeImportModal({
   }, { regular: 0, overtime: 0, tips: 0 }), [rows]);
 
   const includedRows = rows.filter((row) => row.include);
+  const duplicateEmployeeIds = useMemo(() => {
+    const counts = new Map<number, number>();
+    rows.forEach((row) => {
+      if (!row.include || !row.employee_id) return;
+      counts.set(row.employee_id, (counts.get(row.employee_id) || 0) + 1);
+    });
+    return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([employeeId]) => employeeId));
+  }, [rows]);
   const hasWarnings = includedRows.some((row) => (row.warnings || []).length > 0 || (row.errors || []).length > 0) || (importData?.warnings || []).length > 0;
   const hasBlockingMissingMatches = includedRows.some((row) => !row.employee_id);
-  const canApply = includedRows.length > 0 && !hasBlockingMissingMatches && (!hasWarnings || acknowledgeWarnings);
+  const hasDuplicateEmployeeMappings = duplicateEmployeeIds.size > 0;
+  const canApply = includedRows.length > 0 && !hasBlockingMissingMatches && !hasDuplicateEmployeeMappings && (!hasWarnings || acknowledgeWarnings);
 
   const reset = () => {
     setStep('upload');
@@ -433,9 +442,10 @@ export function PayrollIntakeImportModal({
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>Back</Button>
-              {!canApply && hasBlockingMissingMatches && (
+              {!canApply && (hasBlockingMissingMatches || hasDuplicateEmployeeMappings) && (
                 <span className="mr-auto flex items-center gap-2 text-sm text-danger-600">
-                  <AlertTriangle className="h-4 w-4" aria-hidden="true" /> Match all included rows.
+                  <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                  {hasBlockingMissingMatches ? 'Match all included rows.' : 'Each included row must map to a different employee.'}
                 </span>
               )}
               <Button onClick={handleApply} disabled={!canApply}>Apply Reviewed Rows</Button>

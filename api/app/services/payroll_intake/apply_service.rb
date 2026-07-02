@@ -213,17 +213,21 @@ module PayrollIntake
     def prepare_payroll_item_for_intake!(payroll_item, employee, replacing_existing:)
       if payroll_item.new_record?
         payroll_item.company_id = company.id
-        payroll_item.additional_withholding = employee.additional_withholding.to_f
       elsif replacing_existing
-        reset_stale_replaced_item_fields!(payroll_item)
+        reset_stale_replaced_item_fields!(payroll_item, employee)
       end
 
+      payroll_item.additional_withholding = employee.additional_withholding.to_f
       payroll_item.clear_wage_rate_hours!
       payroll_item.employment_type = employee.employment_type
       payroll_item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
     end
 
-    def reset_stale_replaced_item_fields!(payroll_item)
+    def reset_stale_replaced_item_fields!(payroll_item, employee)
+      payroll_item.additional_withholding = employee.additional_withholding.to_f
+      payroll_item.additional_withholding_override = nil
+      payroll_item.withholding_tax_adjustment = nil
+      payroll_item.withholding_tax_override = nil
       payroll_item.holiday_hours = 0
       payroll_item.pto_hours = 0
       payroll_item.bonus = 0
