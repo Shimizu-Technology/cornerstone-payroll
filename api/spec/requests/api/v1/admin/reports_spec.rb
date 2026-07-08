@@ -1684,6 +1684,44 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(salary_row[7].to_f).to eq(2000.00)
       expect(total_row[21].to_f).to eq(3056.65)
     end
+
+    it "keeps hourly pay aligned with the simple formula and flags holiday or PTO complexity" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: hourly_employee)
+      item.update!(holiday_hours: 8, gross_pay: 2_060.00)
+      item.payroll_item_earnings.create!(category: "holiday", label: "Holiday Pay", hours: 8, rate: 20.00, amount: 160.00)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      workbook = workbook_from_response
+      register_rows = (1..workbook.sheet("Payroll Register").last_row).map { |row_number| workbook.sheet("Payroll Register").row(row_number) }
+      review_rows = (1..workbook.sheet("Register Review").last_row).map { |row_number| workbook.sheet("Register Review").row(row_number) }
+      hourly_row = register_rows.find { |row| row[1] == hourly_employee.full_name }
+
+      expect(hourly_row[6].to_f).to eq(1_750.00)
+      expect(review_rows).to include(include("Review", hourly_employee.full_name, "Holiday/PTO hours present"))
+      expect(review_rows).to include(include("Review", hourly_employee.full_name, "Gross pay includes components outside hourly/salary/tips columns"))
+    end
+
+    it "shows platform super-admin lifecycle names even when they belong to another company" do
+      other_organization = create(:organization, name: "Platform Firm")
+      other_company = create(:company, organization: other_organization)
+      platform_admin = User.create!(
+        company: other_company,
+        email: "platform-admin-#{company.id}@example.com",
+        name: "Platform Owner",
+        role: "super_admin",
+        active: true
+      )
+      pay_period.update!(committed_by_id: platform_admin.id)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      sheet = workbook_from_response.sheet("Payroll Register")
+      rows = (1..sheet.last_row).map { |row_number| sheet.row(row_number) }
+      committed_by_row = rows.find { |row| row[0] == "Committed By" }
+
+      expect(committed_by_row[1]).to include("Platform Owner")
+    end
   end
 
   # ─── CPR-70: Payroll Register PDF Export ────────────────────────────────────

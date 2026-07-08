@@ -1960,7 +1960,12 @@ module Api
             scope = scope.where("users.company_id = :company_id OR company_assignments.company_id = :company_id", company_id: current_company_id)
           end
 
-          scope.distinct.pluck("users.id", "users.name").to_h
+          names_by_id = scope.distinct.pluck("users.id", "users.name").to_h
+          missing_ids = user_ids - names_by_id.keys
+          if missing_ids.any?
+            names_by_id.merge!(User.super_admin.where(id: missing_ids).pluck("users.id", "users.name").to_h)
+          end
+          names_by_id
         end
 
         PAYROLL_REGISTER_HEADERS = [
@@ -1991,10 +1996,12 @@ module Api
         CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12, 16, 14, 12 ].freeze
 
         def payroll_register_sheets(report)
-          employee_rows = Array(report[:employees]).map { |emp| payroll_export_row(emp) }
+          employees = Array(report[:employees])
+          ceo_rows = ceo_payroll_register_rows(employees)
+          employee_rows = employees.map { |emp| payroll_export_row(emp) }
           contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
           sheets = [
-            cornerstone_payroll_register_sheet(report),
+            cornerstone_payroll_register_sheet(report, ceo_rows),
             { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
           ]
           sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
@@ -2002,13 +2009,12 @@ module Api
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
-          sheets << payroll_register_review_sheet(report)
+          sheets << payroll_register_review_sheet(report, ceo_rows)
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
         end
 
-        def cornerstone_payroll_register_sheet(report)
-          employees = Array(report[:employees])
+        def cornerstone_payroll_register_sheet(report, ceo_rows)
           rows = [
             [ CEO_PAYROLL_REGISTER_NOTE ],
             [],
@@ -2017,11 +2023,15 @@ module Api
             [],
             CEO_PAYROLL_REGISTER_HINTS,
             CEO_PAYROLL_REGISTER_HEADERS,
-            *employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) },
-            ceo_payroll_register_total_row(employees)
+            *ceo_rows,
+            ceo_payroll_register_total_row(ceo_rows)
           ]
 
           { name: "Payroll Register", rows: rows, column_widths: CEO_PAYROLL_REGISTER_WIDTHS }
+        end
+
+        def ceo_payroll_register_rows(employees)
+          employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) }
         end
 
         def payroll_register_information_rows(report)
@@ -2094,8 +2104,7 @@ module Api
           ]
         end
 
-        def ceo_payroll_register_total_row(employees)
-          rows = employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) }
+        def ceo_payroll_register_total_row(rows)
           [
             nil, "TOTAL", nil, nil,
             sum_column(rows, 4),
@@ -2142,7 +2151,7 @@ module Api
           return 0.0 unless emp[:employment_type].to_s == "hourly"
 
           wage_earnings = Array(emp[:earnings_breakdown]).select do |earning|
-            earning[:category].to_s.in?(%w[regular overtime holiday pto])
+            earning[:category].to_s.in?(%w[regular overtime])
           end
           amount = wage_earnings.sum { |earning| earning[:amount].to_f }
           return money(amount) if amount.positive?
@@ -2181,20 +2190,20 @@ module Api
           money(emp[:loan_deduction])
         end
 
-        def payroll_register_review_sheet(report)
-          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + payroll_register_review_rows(report)
+        def payroll_register_review_sheet(report, ceo_rows)
+          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + payroll_register_review_rows(report, ceo_rows)
           rows << [ "OK", nil, "No simple-register exceptions detected", nil ] if rows.length == 1
           { name: "Register Review", rows: rows }
         end
 
-        def payroll_register_review_rows(report)
+        def payroll_register_review_rows(report, ceo_rows)
           rows = []
           Array(report[:contractors]).each do |contractor|
             rows << [ "Info", contractor[:employee_name], "Contractor omitted from simple register", "Contractors remain available on the Contractors/detail sheets." ]
           end
 
-          Array(report[:employees]).each do |emp|
-            row = ceo_payroll_register_row(emp, 0)
+          Array(report[:employees]).each_with_index do |emp, index|
+            row = ceo_rows[index]
             displayed_gross = row[8].to_f + row[11].to_f
             gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
             if gross_diff.abs > 0.01
