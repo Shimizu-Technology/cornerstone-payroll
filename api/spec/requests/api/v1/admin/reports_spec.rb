@@ -1722,6 +1722,22 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(committed_by_row[1]).to include("Platform Owner")
     end
+
+    it "does not absorb salary-labeled bonus earnings into the Salary column" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: salary_employee)
+      item.update!(gross_pay: 2_200.00, bonus: 200.00)
+      item.payroll_item_earnings.create!(category: "other", label: "Salary Bonus", amount: 200.00)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      workbook = workbook_from_response
+      register_rows = (1..workbook.sheet("Payroll Register").last_row).map { |row_number| workbook.sheet("Payroll Register").row(row_number) }
+      review_rows = (1..workbook.sheet("Register Review").last_row).map { |row_number| workbook.sheet("Register Review").row(row_number) }
+      salary_row = register_rows.find { |row| row[1] == salary_employee.full_name }
+
+      expect(salary_row[7].to_f).to eq(2_000.00)
+      expect(review_rows).to include(include("Review", salary_employee.full_name, "Gross pay includes components outside hourly/salary/tips columns"))
+    end
   end
 
   # ─── CPR-70: Payroll Register PDF Export ────────────────────────────────────

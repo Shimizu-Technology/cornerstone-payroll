@@ -2164,7 +2164,7 @@ module Api
           return 0.0 unless emp[:employment_type].to_s == "salary"
 
           salary_earnings = Array(emp[:earnings_breakdown]).select do |earning|
-            earning[:category].to_s == "salary" || earning[:label].to_s.match?(/salary/i)
+            earning[:category].to_s == "salary"
           end
           amount = salary_earnings.sum { |earning| earning[:amount].to_f }
           return money(amount) if amount.positive?
