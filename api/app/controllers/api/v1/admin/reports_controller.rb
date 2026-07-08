@@ -1100,6 +1100,7 @@ module Api
           contractor_items = items.select { |i| i.employment_type == "contractor" }
 
           company = pay_period.company
+          lifecycle = pay_period_lifecycle_report(pay_period)
           report_data = {
             type: "payroll_register",
             meta: report_meta(company, :payroll_register),
@@ -1110,6 +1111,7 @@ module Api
               pay_date: pay_period.pay_date,
               status: pay_period.status
             },
+            lifecycle: lifecycle,
             summary: {
               employee_count: w2_items.size,
               contractor_count: contractor_items.size,
@@ -1539,6 +1541,7 @@ module Api
             net_pay: item.net_pay,
             check_number: item.check_number,
             check_date: item.check_date,
+            tip_components: tip_component_rows(item),
             earnings_breakdown: item.payroll_item_earnings.map { |earning| earning_row(earning) },
             deductions_breakdown: deductions_breakdown(item),
             employer_contributions_breakdown: employer_contributions_breakdown(item)
@@ -1716,6 +1719,19 @@ module Api
 
         def active_payroll_field_entries(item)
           item.payroll_item_field_entries.select(&:active?)
+        end
+
+        def tip_component_rows(item)
+          data = item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data : {}
+          components = data["tip_components"] || data[:tip_components]
+          Array(components).filter_map do |component|
+            row = component.respond_to?(:to_h) ? component.to_h.with_indifferent_access : {}
+            label = row[:label].to_s.strip.presence || "Tips"
+            amount = money(row[:amount])
+            next unless amount.positive?
+
+            { label: label, amount: amount }
+          end
         end
 
         def payroll_field_entry_rows(item)
@@ -1907,6 +1923,46 @@ module Api
           PayrollReportingGroups.label(group) || group.to_s.presence
         end
 
+        def pay_period_lifecycle_report(pay_period)
+          user_ids = [ pay_period.calculated_by_id, pay_period.approved_by_id, pay_period.committed_by_id ].compact.uniq
+          names_by_id = visible_user_names_for_report(user_ids)
+
+          {
+            calculated: lifecycle_report_event(timestamp: pay_period.calculated_at, user_id: pay_period.calculated_by_id, names_by_id: names_by_id),
+            approved: lifecycle_report_event(timestamp: pay_period.approved_at, user_id: pay_period.approved_by_id, names_by_id: names_by_id),
+            committed: lifecycle_report_event(timestamp: pay_period.committed_at, user_id: pay_period.committed_by_id, names_by_id: names_by_id)
+          }
+        end
+
+        def lifecycle_report_event(timestamp:, user_id:, names_by_id:)
+          {
+            timestamp: timestamp,
+            actor_name: user_id.present? ? names_by_id[user_id] : nil
+          }
+        end
+
+        def visible_user_names_for_report(user_ids)
+          user_ids = Array(user_ids).compact.uniq
+          return {} if user_ids.empty?
+
+          scope = User.left_outer_joins(:company_assignments).where(id: user_ids)
+          admin_roles = User.roles.values_at("admin", "org_admin", "super_admin").compact
+          organization_id = current_user&.organization_id
+
+          if organization_id.present? && admin_roles.any?
+            scope = scope.where(
+              "(users.organization_id = :organization_id AND users.role IN (:admin_roles)) OR users.company_id = :company_id OR company_assignments.company_id = :company_id",
+              company_id: current_company_id,
+              organization_id: organization_id,
+              admin_roles: admin_roles
+            )
+          else
+            scope = scope.where("users.company_id = :company_id OR company_assignments.company_id = :company_id", company_id: current_company_id)
+          end
+
+          scope.distinct.pluck("users.id", "users.name").to_h
+        end
+
         PAYROLL_REGISTER_HEADERS = [
           "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
           "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
@@ -1917,10 +1973,28 @@ module Api
           "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date"
         ].freeze
 
+        CEO_PAYROLL_REGISTER_NOTE = "Note: this simple payroll register format applies to SCR and AIRE. MHI has more complex payroll components and should be reviewed separately.".freeze
+        CEO_PAYROLL_REGISTER_HINTS = [
+          "", "", "", "Hourly rate", "", "",
+          "For hourly employees only: Rate × Regular Hours + Rate × OT Hours × 1.5",
+          "For salary employees only", "Hourly Pay + Salary", "", "", "Tips 1 + Tips 2",
+          "Total hourly/salary pay + total tips", "Tips paid out daily", "Stored calculated FIT", "Stored additional withholding",
+          "Stored calculated Social Security", "Stored calculated Medicare", "Employee retirement", "Loan deduction",
+          "Stored total deductions", "Stored net pay", ""
+        ].freeze
+        CEO_PAYROLL_REGISTER_HEADERS = [
+          "#", "Employee", "Type", "Rate", "Regular Hours", "OT Hours", "Hourly Pay", "Salary",
+          "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Gross Pay", "Tips Out",
+          "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (401k)",
+          "Loan", "Total Deductions", "Net Pay", "Check #"
+        ].freeze
+        CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12, 16, 14, 12 ].freeze
+
         def payroll_register_sheets(report)
           employee_rows = Array(report[:employees]).map { |emp| payroll_export_row(emp) }
           contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
           sheets = [
+            cornerstone_payroll_register_sheet(report),
             { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
           ]
           sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
@@ -1928,8 +2002,230 @@ module Api
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
+          sheets << payroll_register_review_sheet(report)
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
+        end
+
+        def cornerstone_payroll_register_sheet(report)
+          employees = Array(report[:employees])
+          rows = [
+            [ CEO_PAYROLL_REGISTER_NOTE ],
+            [],
+            [ "Pay Period Information" ],
+            *payroll_register_information_rows(report),
+            [],
+            CEO_PAYROLL_REGISTER_HINTS,
+            CEO_PAYROLL_REGISTER_HEADERS,
+            *employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) },
+            ceo_payroll_register_total_row(employees)
+          ]
+
+          { name: "Payroll Register", rows: rows, column_widths: CEO_PAYROLL_REGISTER_WIDTHS }
+        end
+
+        def payroll_register_information_rows(report)
+          pp = report[:pay_period] || {}
+          meta = report[:meta] || {}
+          lifecycle = report[:lifecycle] || {}
+          [
+            [ "Client", meta[:company_name] ],
+            [ "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
+            [ "Pay Date", pp[:pay_date] ],
+            [ "Status", pp[:status].to_s.titleize ],
+            [ "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
+            [ "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
+            [ "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
+          ]
+        end
+
+        def format_lifecycle_event_for_register(event)
+          event ||= {}
+          actor = event[:actor_name].presence || "Not recorded"
+          timestamp = format_report_timestamp(event[:timestamp])
+          timestamp.present? ? "#{actor} — #{timestamp}" : actor
+        end
+
+        def format_report_timestamp(timestamp)
+          return nil if timestamp.blank?
+
+          time = if timestamp.respond_to?(:in_time_zone)
+            timestamp
+          else
+            Time.zone.parse(timestamp.to_s)
+          end
+          time.in_time_zone("Pacific/Guam").strftime("%Y-%m-%d %I:%M %p ChST")
+        rescue ArgumentError, TypeError
+          timestamp.to_s
+        end
+
+        def ceo_payroll_register_row(emp, count)
+          hourly_pay = ceo_hourly_pay(emp)
+          salary_pay = ceo_salary_pay(emp)
+          tips_1, tips_2 = ceo_tip_columns(emp)
+          total_tips = money(tips_1.to_f + tips_2.to_f)
+          retirement = money(emp[:total_retirement_payment].presence || emp[:retirement_payment].to_f + emp[:roth_retirement_payment].to_f)
+          loan = ceo_loan_amount(emp)
+
+          [
+            count,
+            emp[:employee_name],
+            ceo_employment_type(emp),
+            emp[:employment_type].to_s == "hourly" ? money(emp[:pay_rate]) : nil,
+            ceo_regular_hours(emp),
+            emp[:overtime_hours].to_f,
+            hourly_pay,
+            salary_pay,
+            money(hourly_pay + salary_pay),
+            tips_1,
+            tips_2,
+            total_tips,
+            money(emp[:gross_pay]),
+            money(emp[:tips_paid_out]),
+            money(emp[:withholding_tax]),
+            money(emp[:additional_withholding]),
+            money(emp[:social_security_tax]),
+            money(emp[:medicare_tax]),
+            retirement,
+            loan,
+            money(emp[:total_deductions]),
+            money(emp[:net_pay]),
+            emp[:check_number]
+          ]
+        end
+
+        def ceo_payroll_register_total_row(employees)
+          rows = employees.each_with_index.map { |emp, index| ceo_payroll_register_row(emp, index + 1) }
+          [
+            nil, "TOTAL", nil, nil,
+            sum_column(rows, 4),
+            sum_column(rows, 5),
+            sum_column(rows, 6),
+            sum_column(rows, 7),
+            sum_column(rows, 8),
+            sum_column(rows, 9),
+            sum_column(rows, 10),
+            sum_column(rows, 11),
+            sum_column(rows, 12),
+            sum_column(rows, 13),
+            sum_column(rows, 14),
+            sum_column(rows, 15),
+            sum_column(rows, 16),
+            sum_column(rows, 17),
+            sum_column(rows, 18),
+            sum_column(rows, 19),
+            sum_column(rows, 20),
+            sum_column(rows, 21),
+            nil
+          ]
+        end
+
+        def sum_column(rows, index)
+          money(rows.sum { |row| row[index].to_f })
+        end
+
+        def money(value)
+          BigDecimal(value.to_s.presence || "0").round(2).to_f
+        rescue ArgumentError, TypeError
+          0.0
+        end
+
+        def ceo_employment_type(emp)
+          emp[:employment_type].to_s == "salary" ? "Salary" : "Hourly"
+        end
+
+        def ceo_regular_hours(emp)
+          emp[:employment_type].to_s == "salary" ? 80.0 : emp[:hours_worked].to_f
+        end
+
+        def ceo_hourly_pay(emp)
+          return 0.0 unless emp[:employment_type].to_s == "hourly"
+
+          wage_earnings = Array(emp[:earnings_breakdown]).select do |earning|
+            earning[:category].to_s.in?(%w[regular overtime holiday pto])
+          end
+          amount = wage_earnings.sum { |earning| earning[:amount].to_f }
+          return money(amount) if amount.positive?
+
+          rate = emp[:pay_rate].to_f
+          money((emp[:hours_worked].to_f * rate) + (emp[:overtime_hours].to_f * rate * 1.5))
+        end
+
+        def ceo_salary_pay(emp)
+          return 0.0 unless emp[:employment_type].to_s == "salary"
+
+          salary_earnings = Array(emp[:earnings_breakdown]).select do |earning|
+            earning[:category].to_s == "salary" || earning[:label].to_s.match?(/salary/i)
+          end
+          amount = salary_earnings.sum { |earning| earning[:amount].to_f }
+          return money(amount) if amount.positive?
+
+          taxable_additions = emp[:bonus].to_f + emp[:reported_tips].to_f + emp[:custom_earnings_total].to_f + emp[:payroll_field_taxable_additions_total].to_f
+          money([ emp[:gross_pay].to_f - taxable_additions, 0.0 ].max)
+        end
+
+        def ceo_tip_columns(emp)
+          components = Array(emp[:tip_components]).filter_map do |component|
+            amount = component[:amount].to_f
+            amount.positive? ? amount : nil
+          end
+          return [ money(emp[:reported_tips]), 0.0 ] if components.empty?
+
+          [ money(components.first), money(components.drop(1).sum) ]
+        end
+
+        def ceo_loan_amount(emp)
+          loan_payment = emp[:loan_payment].to_f
+          return money(loan_payment) if loan_payment.positive?
+
+          money(emp[:loan_deduction])
+        end
+
+        def payroll_register_review_sheet(report)
+          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + payroll_register_review_rows(report)
+          rows << [ "OK", nil, "No simple-register exceptions detected", nil ] if rows.length == 1
+          { name: "Register Review", rows: rows }
+        end
+
+        def payroll_register_review_rows(report)
+          rows = []
+          Array(report[:contractors]).each do |contractor|
+            rows << [ "Info", contractor[:employee_name], "Contractor omitted from simple register", "Contractors remain available on the Contractors/detail sheets." ]
+          end
+
+          Array(report[:employees]).each do |emp|
+            row = ceo_payroll_register_row(emp, 0)
+            displayed_gross = row[8].to_f + row[11].to_f
+            gross_diff = money(emp[:gross_pay].to_f - displayed_gross)
+            if gross_diff.abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Gross pay includes components outside hourly/salary/tips columns", "Difference: #{format('$%.2f', gross_diff)}. Review bonus, custom earnings, payroll fields, or non-taxable pay on detail sheets." ]
+            end
+
+            displayed_deductions = simple_register_deductions_total(emp)
+            deduction_diff = money(emp[:total_deductions].to_f - displayed_deductions)
+            if deduction_diff.abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Total deductions include components outside the simple columns", "Difference: #{format('$%.2f', deduction_diff)}. Review insurance, custom deductions, payroll fields, Roth, garnishments, or other deductions on detail sheets." ]
+            end
+
+            tip_components_total = Array(emp[:tip_components]).sum { |component| component[:amount].to_f }
+            if tip_components_total.positive? && money(tip_components_total - emp[:reported_tips].to_f).abs > 0.01
+              rows << [ "Review", emp[:employee_name], "Tip components do not tie to reported tips", "Components: #{format('$%.2f', tip_components_total)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}." ]
+            end
+
+            rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "Simple register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
+            rows << [ "Review", emp[:employee_name], "Roth retirement present", "Retirement column includes Roth and traditional employee retirement." ] if emp[:roth_retirement_payment].to_f.positive?
+            rows << [ "Review", emp[:employee_name], "Payroll fields present", "Review Payroll Fields Detail for itemized field treatment." ] if Array(emp[:payroll_field_entries]).any? { |entry| entry[:amount].to_f.positive? }
+          end
+
+          rows
+        end
+
+        def simple_register_deductions_total(emp)
+          money(
+            emp[:tips_paid_out].to_f + emp[:withholding_tax].to_f + emp[:additional_withholding].to_f +
+              emp[:social_security_tax].to_f + emp[:medicare_tax].to_f +
+              emp[:total_retirement_payment].to_f + ceo_loan_amount(emp).to_f
+          )
         end
 
         PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS = [

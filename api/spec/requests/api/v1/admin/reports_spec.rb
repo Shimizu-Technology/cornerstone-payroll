@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "roo"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
   let!(:company) { create(:company) }
@@ -1468,7 +1469,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         tax_treatment: "employer_contribution",
         category: "insurance"
       )
-      [45.0, 60.0].each_with_index do |amount, index|
+      [ 45.0, 60.0 ].each_with_index do |amount, index|
         item.payroll_item_field_entries.create!(
           payroll_field_definition: index.zero? ? field : nil,
           label: "Employer Health",
@@ -1569,6 +1570,119 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: 999_999 }
 
       expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "GET /api/v1/admin/reports/payroll_register_xlsx" do
+    let!(:processor) do
+      User.create!(company: company, email: "processor-#{company.id}@example.com", name: "Payroll Processor", role: "manager", active: true)
+    end
+    let!(:reviewer) do
+      User.create!(company: company, email: "reviewer-#{company.id}@example.com", name: "Payroll Reviewer", role: "admin", active: true)
+    end
+    let!(:pay_period) do
+      create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 7, 1),
+        end_date: Date.new(2026, 7, 14),
+        pay_date: Date.new(2026, 7, 16),
+        calculated_at: Time.zone.parse("2026-07-15 09:00:00"),
+        calculated_by_id: processor.id,
+        approved_at: Time.zone.parse("2026-07-15 10:00:00"),
+        approved_by_id: reviewer.id,
+        committed_at: Time.zone.parse("2026-07-15 11:00:00"),
+        committed_by_id: admin_user.id)
+    end
+    let!(:hourly_employee) { create(:employee, company: company, department: department, first_name: "Ana", last_name: "Alpha", employment_type: "hourly", pay_rate: 20.00) }
+    let!(:salary_employee) { create(:employee, :salary, company: company, department: department, first_name: "Ben", last_name: "Zulu") }
+
+    before do
+      hourly_item = create(:payroll_item,
+        pay_period: pay_period,
+        employee: hourly_employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 80,
+        overtime_hours: 5,
+        reported_tips: 150.00,
+        tips_paid_out: 150.00,
+        custom_columns_data: {
+          "tip_components" => [
+            { "label" => "Tips 1", "amount" => 100.00 },
+            { "label" => "Tips 2", "amount" => 50.00 }
+          ]
+        },
+        gross_pay: 1900.00,
+        withholding_tax: 120.00,
+        additional_withholding: 10.00,
+        social_security_tax: 117.80,
+        medicare_tax: 27.55,
+        retirement_payment: 40.00,
+        loan_payment: 25.00,
+        total_deductions: 490.35,
+        net_pay: 1409.65,
+        check_number: "1001")
+      hourly_item.payroll_item_earnings.create!(category: "regular", label: "Regular Pay", hours: 80, rate: 20.00, amount: 1600.00)
+      hourly_item.payroll_item_earnings.create!(category: "overtime", label: "Overtime Pay", hours: 5, rate: 30.00, amount: 150.00)
+      hourly_item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 150.00)
+
+      salary_item = create(:payroll_item,
+        :salary,
+        pay_period: pay_period,
+        employee: salary_employee,
+        company: company,
+        gross_pay: 2_000.00,
+        withholding_tax: 200.00,
+        social_security_tax: 124.00,
+        medicare_tax: 29.00,
+        total_deductions: 353.00,
+        net_pay: 1_647.00,
+        check_number: "1002")
+      salary_item.payroll_item_earnings.create!(category: "salary", label: "Salary", amount: 2_000.00)
+    end
+
+    def workbook_from_response
+      file = Tempfile.new([ "payroll_register", ".xlsx" ])
+      file.binmode
+      file.write(response.body)
+      file.close
+      Roo::Excelx.new(file.path)
+    end
+
+    it "puts the CEO payroll register sheet first while preserving detail sheets" do
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      workbook = workbook_from_response
+      expect(workbook.sheets.first).to eq("Payroll Register")
+      expect(workbook.sheets).to include("Employees", "Earnings Detail", "Deductions Detail", "Register Review", "Report Info")
+    end
+
+    it "includes count, lifecycle reviewer fields, split tips, salary hours, and stored payroll totals" do
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      sheet = workbook_from_response.sheet("Payroll Register")
+      rows = (1..sheet.last_row).map { |row_number| sheet.row(row_number) }
+      header = rows.find { |row| row.include?("Employee") && row.include?("Tips 1") && row.include?("Check #") }
+      hourly_row = rows.find { |row| row[1] == hourly_employee.full_name }
+      salary_row = rows.find { |row| row[1] == salary_employee.full_name }
+      total_row = rows.find { |row| row[1] == "TOTAL" }
+      processed_by_row = rows.find { |row| row[0] == "Processed By" }
+      approved_by_row = rows.find { |row| row[0] == "Approved By" }
+
+      expect(header.first).to eq("#")
+      expect(processed_by_row[1]).to include("Payroll Processor")
+      expect(approved_by_row[1]).to include("Payroll Reviewer")
+      expect(hourly_row[0].to_i).to eq(1)
+      expect(hourly_row[9].to_f).to eq(100.00)
+      expect(hourly_row[10].to_f).to eq(50.00)
+      expect(hourly_row[12].to_f).to eq(1900.00)
+      expect(hourly_row[20].to_f).to eq(490.35)
+      expect(hourly_row[21].to_f).to eq(1409.65)
+      expect(salary_row[4].to_f).to eq(80.0)
+      expect(salary_row[7].to_f).to eq(2000.00)
+      expect(total_row[21].to_f).to eq(3056.65)
     end
   end
 

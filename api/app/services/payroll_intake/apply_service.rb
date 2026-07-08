@@ -210,10 +210,27 @@ module PayrollIntake
       payroll_item.reported_tips = values[:reported_tips]
       payroll_item.tips_paid_out = values[:tips_paid_out]
       payroll_item.tips = 0.0 if payroll_item.respond_to?(:tips=)
+      persist_tip_components!(payroll_item, values)
       payroll_item.loan_deduction = values[:loan_deduction]
       payroll_item.import_source = session.source_type
       payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
       payroll_item.calculate!
+    end
+
+    def persist_tip_components!(payroll_item, values)
+      components = [
+        { "label" => "Tips 1", "amount" => values[:week1_tips].to_f.round(2) },
+        { "label" => "Tips 2", "amount" => values[:week2_tips].to_f.round(2) }
+      ].select { |component| component["amount"].positive? }
+
+      data = payroll_item.custom_columns_data.is_a?(Hash) ? payroll_item.custom_columns_data.deep_dup : {}
+      if components.any?
+        data["tip_components"] = components
+      else
+        data.delete("tip_components")
+        data.delete(:tip_components)
+      end
+      payroll_item.custom_columns_data = data
     end
 
     def prepare_payroll_item_for_intake!(payroll_item, employee)

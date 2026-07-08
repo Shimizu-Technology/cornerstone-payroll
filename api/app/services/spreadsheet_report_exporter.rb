@@ -21,6 +21,7 @@ class SpreadsheetReportExporter
         Array(sheet[:rows]).each do |row|
           worksheet.add_row(Array(row).map { |value| cell_value(value) })
         end
+        worksheet.column_widths(*Array(sheet[:column_widths])) if sheet[:column_widths].present?
       end
     end
 
