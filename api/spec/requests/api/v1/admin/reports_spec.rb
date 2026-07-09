@@ -1702,6 +1702,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(review_rows).to include(include("Review", hourly_employee.full_name, "Gross pay includes components outside hourly/salary/tips columns"))
     end
 
+    it "flags paid-out tips that are missing from reported taxable tips" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: hourly_employee)
+      item.update_columns(reported_tips: 0.00, tips_paid_out: 150.00, custom_columns_data: {})
+      item.payroll_item_earnings.where(category: "tips").delete_all
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      workbook = workbook_from_response
+      review_rows = (1..workbook.sheet("Register Review").last_row).map { |row_number| workbook.sheet("Register Review").row(row_number) }
+
+      expect(review_rows).to include(include("Review", hourly_employee.full_name, "Tips paid out exceed reported taxable tips"))
+    end
+
     it "shows platform super-admin lifecycle names even when they belong to another company" do
       other_organization = create(:organization, name: "Platform Firm")
       other_company = create(:company, organization: other_organization)

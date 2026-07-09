@@ -2221,6 +2221,10 @@ module Api
               rows << [ "Review", emp[:employee_name], "Tip components do not tie to reported tips", "Components: #{format('$%.2f', tip_components_total)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}." ]
             end
 
+            if emp[:tips_paid_out].to_f.positive? && money(emp[:reported_tips].to_f - emp[:tips_paid_out].to_f) < -0.01
+              rows << [ "Review", emp[:employee_name], "Tips paid out exceed reported taxable tips", "Tips out: #{format('$%.2f', emp[:tips_paid_out].to_f)}; reported tips: #{format('$%.2f', emp[:reported_tips].to_f)}. Confirm paid-out tips are included in taxable gross before filing." ]
+            end
+
             rows << [ "Review", emp[:employee_name], "Holiday/PTO hours present", "Simple register shows regular and OT hours; review detail sheets for holiday/PTO." ] if emp[:holiday_hours].to_f.positive? || emp[:pto_hours].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Roth retirement present", "Retirement column includes Roth and traditional employee retirement." ] if emp[:roth_retirement_payment].to_f.positive?
             rows << [ "Review", emp[:employee_name], "Payroll fields present", "Review Payroll Fields Detail for itemized field treatment." ] if Array(emp[:payroll_field_entries]).any? { |entry| entry[:amount].to_f.positive? }
