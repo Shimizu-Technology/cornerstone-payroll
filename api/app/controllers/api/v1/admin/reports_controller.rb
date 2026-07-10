@@ -1150,6 +1150,9 @@ module Api
             employees: w2_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) },
             contractors: contractor_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) }
           }
+          if report_data[:simple_payroll_register_enabled]
+            report_data[:simple_register] = simple_payroll_register_payload(report_data)
+          end
 
           [ report_data, nil ]
         end
@@ -1974,7 +1977,7 @@ module Api
           admin_roles = User.roles.values_at("admin", "org_admin", "super_admin").compact
           organization_id = current_user&.organization_id
 
-          if organization_id.present? && admin_roles.any?
+          if organization_id.present?
             scope = scope.where(
               "(users.organization_id = :organization_id AND users.role IN (:admin_roles)) OR users.company_id = :company_id OR company_assignments.company_id = :company_id",
               company_id: current_company_id,
@@ -2018,6 +2021,12 @@ module Api
           "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (401k)",
           "Loan", "Total Deductions", "Net Pay", "Check #"
         ].freeze
+        CEO_PAYROLL_REGISTER_KEYS = %i[
+          count employee type rate regular_hours overtime_hours hourly_pay salary_pay
+          total_hourly_salary tips_1 tips_2 total_tips gross_pay tips_out withholding
+          additional_withholding social_security medicare retirement loan total_deductions
+          net_pay check_number
+        ].freeze
         CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12, 16, 14, 12 ].freeze
         CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 12, 20, 21 ].freeze
 
@@ -2025,42 +2034,51 @@ module Api
           employees = Array(report[:employees])
           employee_rows = employees.map { |emp| payroll_export_row(emp) }
           contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
-          simple_register_enabled = report[:simple_payroll_register_enabled] == true
-          ceo_rows = simple_register_enabled ? ceo_payroll_register_rows(employees) : []
+          simple_register = report[:simple_register]
           sheets = []
-          sheets << cornerstone_payroll_register_sheet(report, ceo_rows) if simple_register_enabled
+          sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
           sheets << { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
           sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
-          sheets << payroll_register_review_sheet(report, ceo_rows) if simple_register_enabled
+          sheets << payroll_register_review_sheet(simple_register) if simple_register
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
         end
 
-        def cornerstone_payroll_register_sheet(report, ceo_rows)
-          rows = [
-            [ CEO_PAYROLL_REGISTER_NOTE ],
-            [],
-            [ "Pay Period Information" ],
-            *payroll_register_information_rows(report),
-            [],
-            CEO_PAYROLL_REGISTER_HINTS,
-            CEO_PAYROLL_REGISTER_HEADERS,
-            *ceo_rows,
-            ceo_payroll_register_total_row(ceo_rows)
-          ]
+        def cornerstone_payroll_register_sheet(simple_register)
+          columns = simple_register[:columns]
+          ceo_rows = simple_register[:rows].map { |row| CEO_PAYROLL_REGISTER_KEYS.map { |key| row[key] } }
+          total_row = CEO_PAYROLL_REGISTER_KEYS.map { |key| simple_register[:total][key] }
+          information_rows = simple_register[:pay_period_information].map { |row| [ nil, row[:label], row[:value] ] }
 
-          data_start_index = 13
-          total_row_index = data_start_index + ceo_rows.length
+          rows = []
+          note_row_index = rows.length
+          rows << [ simple_register[:note] ]
+          rows << []
+          information_header_index = rows.length
+          rows << [ "Pay Period Information" ]
+          information_start_index = rows.length
+          rows.concat(information_rows)
+          information_end_index = rows.length - 1
+          rows << []
+          hint_row_index = rows.length
+          rows << columns.map { |column| column[:hint] }
+          header_row_index = rows.length
+          rows << columns.map { |column| column[:label] }
+          data_start_index = rows.length
+          rows.concat(ceo_rows)
+          total_row_index = rows.length
+          rows << total_row
+
           row_style_rules = [
-            { rows: 0, style: :note },
-            { rows: 2, style: :section_header },
-            { rows: 3..9, styles: [ nil, :info_label, :info_value ] },
-            { rows: 11, styles: ceo_hint_styles },
-            { rows: 12, styles: ceo_header_styles }
+            { rows: note_row_index, style: :note },
+            { rows: information_header_index, style: :section_header },
+            { rows: information_start_index..information_end_index, styles: [ nil, :info_label, :info_value ] },
+            { rows: hint_row_index, styles: ceo_hint_styles },
+            { rows: header_row_index, styles: ceo_header_styles }
           ]
           row_style_rules << { rows: data_start_index...(total_row_index), styles: ceo_body_styles } if ceo_rows.any?
           row_style_rules << { rows: total_row_index, styles: ceo_total_styles }
@@ -2072,16 +2090,55 @@ module Api
             styles: ceo_register_style_definitions,
             row_style_rules: row_style_rules,
             row_heights: {
-              0 => 24,
-              2 => 24,
-              11 => 72,
-              12 => 42,
+              note_row_index => 24,
+              information_header_index => 24,
+              hint_row_index => 72,
+              header_row_index => 42,
               total_row_index => 24
             },
-            merged_cells: [ "A1:W1", "A3:W3" ],
+            merged_cells: [
+              "A#{note_row_index + 1}:W#{note_row_index + 1}",
+              "A#{information_header_index + 1}:W#{information_header_index + 1}"
+            ],
             show_grid_lines: false,
             zoom_scale: 80
           }
+        end
+
+        def simple_payroll_register_payload(report)
+          ceo_rows = ceo_payroll_register_rows(Array(report[:employees]))
+          total_row = ceo_payroll_register_total_row(ceo_rows)
+          review_rows = payroll_register_review_rows(report, ceo_rows)
+          review_rows << [ "OK", nil, "No simple-register exceptions detected", nil ] if review_rows.empty?
+
+          {
+            note: CEO_PAYROLL_REGISTER_NOTE,
+            columns: CEO_PAYROLL_REGISTER_KEYS.each_index.map do |index|
+              {
+                key: CEO_PAYROLL_REGISTER_KEYS[index],
+                label: CEO_PAYROLL_REGISTER_HEADERS[index],
+                hint: CEO_PAYROLL_REGISTER_HINTS[index],
+                format: ceo_payroll_register_column_format(index),
+                calculated: CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index)
+              }
+            end,
+            pay_period_information: payroll_register_information_rows(report).map do |row|
+              { label: row[1], value: row[2] }
+            end,
+            rows: ceo_rows.map { |row| CEO_PAYROLL_REGISTER_KEYS.zip(row).to_h },
+            total: CEO_PAYROLL_REGISTER_KEYS.zip(total_row).to_h,
+            review: review_rows.map do |severity, employee, issue, detail|
+              { severity: severity, employee: employee, issue: issue, detail: detail }
+            end
+          }
+        end
+
+        def ceo_payroll_register_column_format(index)
+          return :count if index.zero?
+          return :text if index.in?([ 1, 2, 22 ])
+          return :number if index.in?([ 4, 5 ])
+
+          :currency
         end
 
         def ceo_payroll_register_rows(employees)
@@ -2382,9 +2439,10 @@ module Api
           money(emp[:loan_deduction])
         end
 
-        def payroll_register_review_sheet(report, ceo_rows)
-          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + payroll_register_review_rows(report, ceo_rows)
-          rows << [ "OK", nil, "No simple-register exceptions detected", nil ] if rows.length == 1
+        def payroll_register_review_sheet(simple_register)
+          rows = [ [ "Severity", "Employee", "Issue", "Detail" ] ] + simple_register[:review].map do |row|
+            [ row[:severity], row[:employee], row[:issue], row[:detail] ]
+          end
           { name: "Register Review", rows: rows }
         end
 

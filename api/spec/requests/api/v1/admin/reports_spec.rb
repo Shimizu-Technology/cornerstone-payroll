@@ -1660,6 +1660,39 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(workbook.sheets).to include("Employees", "Earnings Detail", "Deductions Detail", "Register Review", "Report Info")
     end
 
+    it "returns the canonical simple register payload used by the browser preview and workbook" do
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+      simple_register = report.fetch("simple_register")
+      columns = simple_register.fetch("columns")
+      hourly_row = simple_register.fetch("rows").find { |row| row.fetch("employee") == hourly_employee.full_name }
+      salary_row = simple_register.fetch("rows").find { |row| row.fetch("employee") == salary_employee.full_name }
+      total = simple_register.fetch("total")
+      information = simple_register.fetch("pay_period_information").index_by { |row| row.fetch("label") }
+
+      expect(columns.map { |column| column.fetch("key") }).to include("tips_1", "tips_2", "total_tips", "net_pay")
+      expect(columns.find { |column| column.fetch("key") == "total_tips" }).to include("calculated" => true, "format" => "currency")
+      expect(hourly_row).to include("tips_1" => 100.0, "tips_2" => 50.0, "gross_pay" => 1900.0, "net_pay" => 1409.65)
+      expect(salary_row).to include("regular_hours" => 80.0, "salary_pay" => 2000.0)
+      expect(total).to include("total_tips" => 150.0, "gross_pay" => 3900.0, "net_pay" => 3056.65)
+      expect(information.fetch("Processed By").fetch("value")).to include("Payroll Processor")
+      expect(information.fetch("Approved By").fetch("value")).to include("Payroll Reviewer")
+      expect(simple_register.fetch("review")).to contain_exactly(
+        include("severity" => "OK", "issue" => "No simple-register exceptions detected")
+      )
+    end
+
+    it "does not expose the simple register preview payload when the company setting is disabled" do
+      company.update!(simple_payroll_register_enabled: false)
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("report")).not_to have_key("simple_register")
+    end
+
     it "preserves the standard detailed export for companies without the simple register enabled" do
       company.update!(simple_payroll_register_enabled: false)
 
