@@ -1415,6 +1415,12 @@ export interface DashboardResponse {
 export interface PayrollRegisterReport {
   report: {
     type: string;
+    simple_payroll_register_enabled: boolean;
+    meta: {
+      company_name?: string;
+      generated_at?: string;
+      report_description?: string;
+    };
     pay_period: {
       id: number;
       start_date: string;
@@ -1422,19 +1428,49 @@ export interface PayrollRegisterReport {
       pay_date: string;
       status: string;
     };
+    lifecycle: {
+      calculated?: { timestamp?: string | null; actor_name?: string | null };
+      approved?: { timestamp?: string | null; actor_name?: string | null };
+      committed?: { timestamp?: string | null; actor_name?: string | null };
+    };
     summary: {
       employee_count: number;
+      contractor_count?: number;
       total_gross: number;
+      total_reported_tips?: number;
+      total_tips_paid_out?: number;
       total_custom_earnings?: number;
       total_withholding: number;
+      total_additional_withholding?: number;
       total_social_security: number;
       total_medicare: number;
       total_retirement: number;
+      total_loan_payments?: number;
       total_custom_deductions?: number;
       total_deductions: number;
       total_net: number;
     };
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
+    contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
+    simple_register?: {
+      note: string;
+      columns: Array<{
+        key: string;
+        label: string;
+        hint: string;
+        format: 'count' | 'text' | 'number' | 'currency';
+        calculated: boolean;
+      }>;
+      pay_period_information: Array<{ label: string; value: string | number | null }>;
+      rows: Array<Record<string, string | number | null>>;
+      total: Record<string, string | number | null>;
+      review: Array<{
+        severity: 'OK' | 'Info' | 'Review';
+        employee: string | null;
+        issue: string;
+        detail: string | null;
+      }>;
+    };
   };
 }
 
@@ -2208,6 +2244,7 @@ export interface CompanyDetail extends CompanyListItem {
   check_offset_y?: number;
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
+  simple_payroll_register_enabled?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
 }
@@ -2229,6 +2266,7 @@ export interface CompanyFormData {
   check_stock_type?: string;
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
+  simple_payroll_register_enabled?: boolean;
 }
 
 interface CompanyListResponse {

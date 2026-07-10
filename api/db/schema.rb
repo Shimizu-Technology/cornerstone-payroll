@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_02_123000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -176,6 +176,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_123000) do
     t.string "pay_frequency", default: "biweekly"
     t.jsonb "payroll_intake_source_types", default: [], null: false
     t.string "phone"
+    t.boolean "simple_payroll_register_enabled", default: false, null: false
     t.string "state"
     t.datetime "updated_at", null: false
     t.string "zip"
