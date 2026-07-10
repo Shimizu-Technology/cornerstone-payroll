@@ -1100,9 +1100,11 @@ module Api
           contractor_items = items.select { |i| i.employment_type == "contractor" }
 
           company = pay_period.company
+          intake_tip_components = company.simple_payroll_register_enabled? ? intake_tip_components_by_item_id(items) : {}
           lifecycle = pay_period_lifecycle_report(pay_period)
           report_data = {
             type: "payroll_register",
+            simple_payroll_register_enabled: company.simple_payroll_register_enabled?,
             meta: report_meta(company, :payroll_register),
             pay_period: {
               id: pay_period.id,
@@ -1145,8 +1147,8 @@ module Api
               contractor_total_gross: contractor_items.sum(&:gross_pay),
               contractor_total_net: contractor_items.sum(&:net_pay)
             },
-            employees: w2_items.map { |item| payroll_item_detail(item) },
-            contractors: contractor_items.map { |item| payroll_item_detail(item) }
+            employees: w2_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) },
+            contractors: contractor_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) }
           }
 
           [ report_data, nil ]
@@ -1488,7 +1490,7 @@ module Api
           end
         end
 
-        def payroll_item_detail(item)
+        def payroll_item_detail(item, fallback_tip_components: nil)
           {
             employee_id: item.employee_id,
             employee_first_name: item.employee&.first_name,
@@ -1541,7 +1543,7 @@ module Api
             net_pay: item.net_pay,
             check_number: item.check_number,
             check_date: item.check_date,
-            tip_components: tip_component_rows(item),
+            tip_components: tip_component_rows(item, fallback_components: fallback_tip_components),
             earnings_breakdown: item.payroll_item_earnings.map { |earning| earning_row(earning) },
             deductions_breakdown: deductions_breakdown(item),
             employer_contributions_breakdown: employer_contributions_breakdown(item)
@@ -1721,9 +1723,13 @@ module Api
           item.payroll_item_field_entries.select(&:active?)
         end
 
-        def tip_component_rows(item)
+        def tip_component_rows(item, fallback_components: nil)
           data = item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data : {}
-          components = data["tip_components"] || data[:tip_components]
+          components = if data.key?("tip_components") || data.key?(:tip_components)
+            data["tip_components"] || data[:tip_components]
+          else
+            fallback_components
+          end
           Array(components).filter_map do |component|
             row = component.respond_to?(:to_h) ? component.to_h.with_indifferent_access : {}
             label = row[:label].to_s.strip.presence || "Tips"
@@ -1731,6 +1737,25 @@ module Api
             next unless amount.positive?
 
             { label: label, amount: amount }
+          end
+        end
+
+        def intake_tip_components_by_item_id(items)
+          item_ids = Array(items).map(&:id).compact
+          return {} if item_ids.empty?
+
+          rows = PayrollIntakeRow
+            .where(applied_payroll_item_id: item_ids, status: "applied")
+            .order(updated_at: :desc, id: :desc)
+
+          rows.each_with_object({}) do |row, components_by_item_id|
+            item_id = row.applied_payroll_item_id
+            next if components_by_item_id.key?(item_id)
+
+            components_by_item_id[item_id] = [
+              { label: "Tips 1", amount: money(row.week1_tips) },
+              { label: "Tips 2", amount: money(row.week2_tips) }
+            ].select { |component| component[:amount].positive? }
           end
         end
 
@@ -1994,22 +2019,23 @@ module Api
           "Loan", "Total Deductions", "Net Pay", "Check #"
         ].freeze
         CEO_PAYROLL_REGISTER_WIDTHS = [ 6, 28, 12, 12, 14, 12, 14, 14, 24, 12, 12, 12, 14, 12, 16, 12, 14, 12, 16, 12, 16, 14, 12 ].freeze
+        CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS = [ 6, 8, 11, 12, 20, 21 ].freeze
 
         def payroll_register_sheets(report)
           employees = Array(report[:employees])
-          ceo_rows = ceo_payroll_register_rows(employees)
           employee_rows = employees.map { |emp| payroll_export_row(emp) }
           contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
-          sheets = [
-            cornerstone_payroll_register_sheet(report, ceo_rows),
-            { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
-          ]
+          simple_register_enabled = report[:simple_payroll_register_enabled] == true
+          ceo_rows = simple_register_enabled ? ceo_payroll_register_rows(employees) : []
+          sheets = []
+          sheets << cornerstone_payroll_register_sheet(report, ceo_rows) if simple_register_enabled
+          sheets << { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
           sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
           sheets << payroll_field_totals_sheet(report)
-          sheets << payroll_register_review_sheet(report, ceo_rows)
+          sheets << payroll_register_review_sheet(report, ceo_rows) if simple_register_enabled
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
         end
@@ -2027,7 +2053,35 @@ module Api
             ceo_payroll_register_total_row(ceo_rows)
           ]
 
-          { name: "Payroll Register", rows: rows, column_widths: CEO_PAYROLL_REGISTER_WIDTHS }
+          data_start_index = 13
+          total_row_index = data_start_index + ceo_rows.length
+          row_style_rules = [
+            { rows: 0, style: :note },
+            { rows: 2, style: :section_header },
+            { rows: 3..9, styles: [ nil, :info_label, :info_value ] },
+            { rows: 11, styles: ceo_hint_styles },
+            { rows: 12, styles: ceo_header_styles }
+          ]
+          row_style_rules << { rows: data_start_index...(total_row_index), styles: ceo_body_styles } if ceo_rows.any?
+          row_style_rules << { rows: total_row_index, styles: ceo_total_styles }
+
+          {
+            name: "Payroll Register",
+            rows: rows,
+            column_widths: CEO_PAYROLL_REGISTER_WIDTHS,
+            styles: ceo_register_style_definitions,
+            row_style_rules: row_style_rules,
+            row_heights: {
+              0 => 24,
+              2 => 24,
+              11 => 72,
+              12 => 42,
+              total_row_index => 24
+            },
+            merged_cells: [ "A1:W1", "A3:W3" ],
+            show_grid_lines: false,
+            zoom_scale: 80
+          }
         end
 
         def ceo_payroll_register_rows(employees)
@@ -2039,14 +2093,131 @@ module Api
           meta = report[:meta] || {}
           lifecycle = report[:lifecycle] || {}
           [
-            [ "Client", meta[:company_name] ],
-            [ "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
-            [ "Pay Date", pp[:pay_date] ],
-            [ "Status", pp[:status].to_s.titleize ],
-            [ "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
-            [ "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
-            [ "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
+            [ nil, "Client", meta[:company_name] ],
+            [ nil, "Pay Period", [ pp[:start_date], pp[:end_date] ].compact.join(" to ") ],
+            [ nil, "Pay Date", pp[:pay_date] ],
+            [ nil, "Status", pp[:status].to_s.titleize ],
+            [ nil, "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
+            [ nil, "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
+            [ nil, "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
           ]
+        end
+
+        def ceo_register_style_definitions
+          base_font = { font_name: "Arial", sz: 10 }
+          row_border = { style: :thin, color: "D9E2F3", edges: [ :bottom ] }
+          money_format = "$#,##0.00;[Red]-$#,##0.00"
+
+          {
+            note: base_font.merge(i: true, fg_color: "44546A", alignment: { vertical: :center, wrap_text: true }),
+            section_header: base_font.merge(
+              sz: 12,
+              b: true,
+              fg_color: "FFFFFF",
+              bg_color: "1F4E78",
+              alignment: { vertical: :center }
+            ),
+            info_label: base_font.merge(b: true, fg_color: "1F4E78", alignment: { vertical: :center }),
+            info_value: base_font.merge(alignment: { vertical: :center }),
+            hint: base_font.merge(
+              sz: 9,
+              i: true,
+              fg_color: "44546A",
+              border: row_border,
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            hint_calculated: base_font.merge(
+              sz: 9,
+              i: true,
+              fg_color: "44546A",
+              bg_color: "DDEBF7",
+              border: row_border,
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            header: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              border: { style: :thin, color: "9EADBA" },
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            header_calculated: base_font.merge(
+              b: true,
+              bg_color: "BDD7EE",
+              border: { style: :thin, color: "7F9DB9" },
+              alignment: { horizontal: :center, vertical: :center, wrap_text: true }
+            ),
+            body_count: base_font.merge(border: row_border, alignment: { horizontal: :center, vertical: :center }),
+            body_text: base_font.merge(border: row_border, alignment: { vertical: :center }),
+            body_center: base_font.merge(border: row_border, alignment: { horizontal: :center, vertical: :center }),
+            body_number: base_font.merge(format_code: "0.00", border: row_border, alignment: { horizontal: :right, vertical: :center }),
+            body_currency: base_font.merge(format_code: money_format, border: row_border, alignment: { horizontal: :right, vertical: :center }),
+            body_calculated_currency: base_font.merge(
+              format_code: money_format,
+              bg_color: "F2F7FB",
+              border: row_border,
+              alignment: { horizontal: :right, vertical: :center }
+            ),
+            total: base_font.merge(b: true, bg_color: "EAF2F8", border: { style: :medium, color: "7F9DB9", edges: [ :top ] }),
+            total_text: base_font.merge(b: true, bg_color: "EAF2F8", border: { style: :medium, color: "7F9DB9", edges: [ :top ] }),
+            total_number: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              format_code: "0.00",
+              border: { style: :medium, color: "7F9DB9", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            ),
+            total_currency: base_font.merge(
+              b: true,
+              bg_color: "EAF2F8",
+              format_code: money_format,
+              border: { style: :medium, color: "7F9DB9", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            ),
+            total_calculated_currency: base_font.merge(
+              b: true,
+              bg_color: "BDD7EE",
+              format_code: money_format,
+              border: { style: :medium, color: "5B7C99", edges: [ :top ] },
+              alignment: { horizontal: :right }
+            )
+          }
+        end
+
+        def ceo_hint_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index) ? :hint_calculated : :hint
+          end
+        end
+
+        def ceo_header_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS.include?(index) ? :header_calculated : :header
+          end
+        end
+
+        def ceo_body_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            case index
+            when 0 then :body_count
+            when 1 then :body_text
+            when 2, 22 then :body_center
+            when 4, 5 then :body_number
+            when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :body_calculated_currency
+            else :body_currency
+            end
+          end
+        end
+
+        def ceo_total_styles
+          CEO_PAYROLL_REGISTER_HEADERS.each_index.map do |index|
+            case index
+            when 1 then :total_text
+            when 4, 5 then :total_number
+            when *CEO_PAYROLL_REGISTER_CALCULATED_COLUMNS then :total_calculated_currency
+            when 6..21 then :total_currency
+            else :total
+            end
+          end
         end
 
         def format_lifecycle_event_for_register(event)
@@ -2175,12 +2346,33 @@ module Api
 
         def ceo_tip_columns(emp)
           components = Array(emp[:tip_components]).filter_map do |component|
-            amount = component[:amount].to_f
-            amount.positive? ? amount : nil
+            row = component.respond_to?(:to_h) ? component.to_h.with_indifferent_access : {}
+            amount = row[:amount].to_f
+            next unless amount.positive?
+
+            { bucket: ceo_tip_bucket(row[:label]), amount: amount }
           end
           return [ money(emp[:reported_tips]), 0.0 ] if components.empty?
 
-          [ money(components.first), money(components.drop(1).sum) ]
+          if components.any? { |component| component[:bucket] }
+            tips_1 = components.select { |component| component[:bucket] == 1 }.sum { |component| component[:amount] }
+            tips_2 = components.select { |component| component[:bucket] == 2 }.sum { |component| component[:amount] }
+            unassigned = components.reject { |component| component[:bucket] }
+            unassigned.each do |component|
+              tips_1.zero? ? tips_1 += component[:amount] : tips_2 += component[:amount]
+            end
+            return [ money(tips_1), money(tips_2) ]
+          end
+
+          [ money(components.first[:amount]), money(components.drop(1).sum { |component| component[:amount] }) ]
+        end
+
+        def ceo_tip_bucket(label)
+          normalized = label.to_s.downcase.gsub(/[^a-z0-9]+/, "")
+          return 1 if normalized.in?(%w[tip1 tips1 week1 week1tip week1tips])
+          return 2 if normalized.in?(%w[tip2 tips2 week2 week2tip week2tips])
+
+          nil
         end
 
         def ceo_loan_amount(emp)

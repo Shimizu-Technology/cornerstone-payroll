@@ -1597,6 +1597,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     let!(:salary_employee) { create(:employee, :salary, company: company, department: department, first_name: "Ben", last_name: "Zulu") }
 
     before do
+      company.update!(simple_payroll_register_enabled: true)
       hourly_item = create(:payroll_item,
         pay_period: pay_period,
         employee: hourly_employee,
@@ -1659,6 +1660,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(workbook.sheets).to include("Employees", "Earnings Detail", "Deductions Detail", "Register Review", "Report Info")
     end
 
+    it "preserves the standard detailed export for companies without the simple register enabled" do
+      company.update!(simple_payroll_register_enabled: false)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      workbook = workbook_from_response
+      expect(workbook.sheets.first).to eq("Employees")
+      expect(workbook.sheets).not_to include("Payroll Register", "Register Review")
+      expect(workbook.sheets).to include("Earnings Detail", "Deductions Detail", "Report Info")
+    end
+
     it "includes count, lifecycle reviewer fields, split tips, salary hours, and stored payroll totals" do
       get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
 
@@ -1668,12 +1681,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       hourly_row = rows.find { |row| row[1] == hourly_employee.full_name }
       salary_row = rows.find { |row| row[1] == salary_employee.full_name }
       total_row = rows.find { |row| row[1] == "TOTAL" }
-      processed_by_row = rows.find { |row| row[0] == "Processed By" }
-      approved_by_row = rows.find { |row| row[0] == "Approved By" }
+      processed_by_row = rows.find { |row| row[1] == "Processed By" }
+      approved_by_row = rows.find { |row| row[1] == "Approved By" }
 
       expect(header.first).to eq("#")
-      expect(processed_by_row[1]).to include("Payroll Processor")
-      expect(approved_by_row[1]).to include("Payroll Reviewer")
+      expect(processed_by_row[2]).to include("Payroll Processor")
+      expect(approved_by_row[2]).to include("Payroll Reviewer")
       expect(hourly_row[0].to_i).to eq(1)
       expect(hourly_row[9].to_f).to eq(100.00)
       expect(hourly_row[10].to_f).to eq(50.00)
@@ -1683,6 +1696,31 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(salary_row[4].to_f).to eq(80.0)
       expect(salary_row[7].to_f).to eq(2000.00)
       expect(total_row[21].to_f).to eq(3056.65)
+    end
+
+    it "recovers split tips from an existing applied intake row when payroll metadata predates the register" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: hourly_employee)
+      item.update!(custom_columns_data: {})
+      intake_session = create(:payroll_intake_session, company: company, pay_period: pay_period, status: "applied")
+      create(:payroll_intake_row,
+        payroll_intake_session: intake_session,
+        employee: hourly_employee,
+        applied_payroll_item: item,
+        status: "applied",
+        week1_tips: 0.00,
+        week2_tips: 150.00,
+        reported_tips: 150.00,
+        tips_paid_out: 150.00)
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      sheet = workbook_from_response.sheet("Payroll Register")
+      rows = (1..sheet.last_row).map { |row_number| sheet.row(row_number) }
+      hourly_row = rows.find { |row| row[1] == hourly_employee.full_name }
+
+      expect(hourly_row[9].to_f).to eq(0.00)
+      expect(hourly_row[10].to_f).to eq(150.00)
+      expect(hourly_row[11].to_f).to eq(150.00)
     end
 
     it "keeps hourly pay aligned with the simple formula and flags holiday or PTO complexity" do
@@ -1731,9 +1769,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       sheet = workbook_from_response.sheet("Payroll Register")
       rows = (1..sheet.last_row).map { |row_number| sheet.row(row_number) }
-      committed_by_row = rows.find { |row| row[0] == "Committed By" }
+      committed_by_row = rows.find { |row| row[1] == "Committed By" }
 
-      expect(committed_by_row[1]).to include("Platform Owner")
+      expect(committed_by_row[2]).to include("Platform Owner")
     end
 
     it "does not absorb salary-labeled bonus earnings into the Salary column" do

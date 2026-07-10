@@ -2208,6 +2208,7 @@ export interface CompanyDetail extends CompanyListItem {
   check_offset_y?: number;
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
+  simple_payroll_register_enabled?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
 }
@@ -2229,6 +2230,7 @@ export interface CompanyFormData {
   check_stock_type?: string;
   check_layout_config?: Record<string, unknown>;
   next_check_number?: number;
+  simple_payroll_register_enabled?: boolean;
 }
 
 interface CompanyListResponse {
