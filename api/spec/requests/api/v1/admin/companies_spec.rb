@@ -65,6 +65,19 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
   end
 
   describe "PATCH /api/v1/admin/companies/:id" do
+    it "lets organization admins configure the simple payroll register" do
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          simple_payroll_register_enabled: true
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.simple_payroll_register_enabled).to be(true)
+      expect(response.parsed_body.dig("company", "simple_payroll_register_enabled")).to be(true)
+      expect(response.parsed_body.dig("company", "editable_fields")).to include("simple_payroll_register_enabled")
+    end
+
     it "resets field-level check layout overrides when stock type changes from client management" do
       client_company.update!(
         check_stock_type: "top_check",

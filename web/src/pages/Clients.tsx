@@ -44,6 +44,7 @@ const emptyForm: CompanyFormData = {
   bank_address: '',
   check_stock_type: 'top_check',
   next_check_number: 1001,
+  simple_payroll_register_enabled: false,
 };
 
 function formatEIN(value: string): string {
@@ -110,6 +111,7 @@ export function Clients() {
         bank_address: c.bank_address || '',
         check_stock_type: c.check_stock_type || 'bottom_check',
         next_check_number: c.next_check_number ?? 1001,
+        simple_payroll_register_enabled: c.simple_payroll_register_enabled === true,
       });
       setEditingId(id);
       setFormError(null);
@@ -328,6 +330,34 @@ export function Clients() {
                         onChange={(e) => updateField('bank_address', e.target.value)}
                         placeholder="111 Chalan Santo Papa"
                       />
+                    </div>
+                  </div>
+
+                  {/* Payroll Reporting */}
+                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
+                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={form.simple_payroll_register_enabled === true}
+                      aria-label="Use simple payroll register Excel format"
+                      onClick={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
+                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                        form.simple_payroll_register_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          form.simple_payroll_register_enabled === true ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                    <div>
+                      <p className="text-sm font-medium text-gray-800">Simple payroll register Excel format</p>
+                      <p className="mt-1 text-xs text-gray-600">
+                        Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets.
+                        Leave this off for clients that require a different register format.
+                      </p>
                     </div>
                   </div>
 

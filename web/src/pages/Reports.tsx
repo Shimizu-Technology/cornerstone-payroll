@@ -16,6 +16,8 @@ import {
 import { reportsApi, payPeriodsApi, employeesApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
+import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
+import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
 import type {
   PayPeriod,
@@ -127,6 +129,32 @@ function PayrollRegisterPanel() {
   }, []);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
+  const downloadFormats: ReportDownloadFormat[] = [
+    {
+      key: 'xlsx',
+      label: 'Excel register (.xlsx)',
+      description: 'CEO-facing register with split tips and review details.',
+      kind: 'spreadsheet',
+      loading: exportingXlsx,
+      onSelect: downloadXlsx,
+    },
+    {
+      key: 'pdf',
+      label: 'Detailed PDF (.pdf)',
+      description: 'Printable detailed payroll report.',
+      kind: 'pdf',
+      loading: exportingPdf,
+      onSelect: downloadPdf,
+    },
+    {
+      key: 'csv',
+      label: 'Data export (.csv)',
+      description: 'Raw payroll register rows for data workflows.',
+      kind: 'spreadsheet',
+      loading: exportingCsv,
+      onSelect: downloadCsv,
+    },
+  ];
 
   async function loadReport() {
     if (!selectedPeriodId) return;
@@ -225,121 +253,17 @@ function PayrollRegisterPanel() {
               )}
             </div>
             <Button onClick={loadReport} disabled={busy || !selectedPeriodId}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Report'}
             </Button>
             <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadCsv}
-                disabled={busy || !selectedPeriodId}
-                title="Download Payroll Register as CSV"
-              >
-                {exportingCsv ? 'Exporting…' : 'Download CSV'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadPdf}
-                disabled={busy || !selectedPeriodId}
-                title="Download Payroll Register as PDF"
-              >
-                {exportingPdf ? 'Exporting…' : 'Download PDF'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadXlsx}
-                disabled={busy || !selectedPeriodId}
-                title="Download Payroll Register as Excel"
-              >
-                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-              </Button>
+              <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPeriodId} buttonLabel="Download" />
             </div>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
       </Card>
 
-      {report && (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                Payroll Register — {report.pay_period.start_date} to {report.pay_period.end_date}
-              </CardTitle>
-              <CardDescription>
-                Pay Date: {report.pay_period.pay_date} &bull; {report.summary.employee_count} employee{report.summary.employee_count !== 1 ? 's' : ''}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <TotalBox label="Total Gross Pay" value={report.summary.total_gross} />
-                <TotalBox label="Custom Earnings" value={report.summary.total_custom_earnings ?? 0} />
-                <TotalBox label="Total Withholding" value={report.summary.total_withholding} />
-                <TotalBox label="Custom Deductions" value={report.summary.total_custom_deductions ?? 0} />
-                <TotalBox label="Total Deductions" value={report.summary.total_deductions} />
-                <TotalBox label="Total Net Pay" value={report.summary.total_net} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Employee Detail</CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-gray-500">
-                    <th className="pb-2 pr-4 font-medium">Employee</th>
-                    <th className="pb-2 pr-4 font-medium">Type</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Withholding</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Addtl W/H</th>
-                    <th className="pb-2 pr-4 font-medium text-right">SS Tax</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Medicare</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Retirement</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Custom Ded.</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
-                    <th className="pb-2 font-medium">Check #</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.employees.map((emp) => (
-                    <tr key={emp.employee_id} className="border-b last:border-0 hover:bg-gray-50">
-                      <td className="py-2 pr-4 font-medium">{emp.employee_name}</td>
-                      <td className="py-2 pr-4 capitalize text-gray-500">{emp.employment_type}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{emp.hours_worked ?? '—'}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.additional_withholding ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">
-                        {fmt(emp.total_retirement_payment ?? ((emp.retirement_payment ?? 0) + (emp.roth_retirement_payment ?? 0)))}
-                      </td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(emp.net_pay ?? 0)}</td>
-                      <td className="py-2 font-mono text-gray-500">{emp.check_number ?? '—'}</td>
-                    </tr>
-                  ))}
-                  {report.employees.length === 0 && (
-                    <tr>
-                      <td colSpan={13} className="py-6 text-center text-gray-400">
-                        No payroll items found for this pay period.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </CardContent>
-          </Card>
-        </>
-      )}
+      {report && <PayrollRegisterPreviewContent report={report} />}
     </div>
   );
 }

@@ -2,10 +2,12 @@ import { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
-import type { BlobDownload, TransmittalOptions, TransmittalPreview, SavedTransmittal, TransmittalCustomEntry } from '@/services/api';
-import { Loader2 } from 'lucide-react';
+import type { BlobDownload, PayrollRegisterReport, TransmittalOptions, TransmittalPreview, SavedTransmittal, TransmittalCustomEntry } from '@/services/api';
+import { Eye, Loader2 } from 'lucide-react';
 import { DRT } from '@/lib/constants';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
+import { PayrollRegisterPreviewModal } from '@/components/reports/PayrollRegisterPreview';
+import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 
 interface ReportsDownloadPanelProps {
   payPeriodId: number;
@@ -1119,6 +1121,12 @@ function PdfPreviewModal({
 export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [payrollPreviewState, setPayrollPreviewState] = useState<{
+    open: boolean;
+    loading: boolean;
+    report: PayrollRegisterReport['report'] | null;
+    error: string | null;
+  }>({ open: false, loading: false, report: null, error: null });
   const [previewState, setPreviewState] = useState<{
     open: boolean;
     key: ReportKey | null;
@@ -1166,7 +1174,33 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
     setPreviewState({ open: false, key: null, label: '', pdfUrl: null, blobData: null });
   }, [previewState.pdfUrl]);
 
+  const cleanupPayrollPreview = useCallback(() => {
+    setPayrollPreviewState({ open: false, loading: false, report: null, error: null });
+  }, []);
+
   const handlePreview = async (reportKey: ReportKey, label: string, transmittalOpts?: TransmittalOptions) => {
+    if (reportKey === 'payrollRegister') {
+      const key = loadingKey(reportKey, 'preview');
+      setLoading(prev => ({ ...prev, [key]: true }));
+      setError(null);
+      setPayrollPreviewState({ open: true, loading: true, report: null, error: null });
+
+      try {
+        const response = await reportsApi.payrollRegister(payPeriodId);
+        setPayrollPreviewState({ open: true, loading: false, report: response.report, error: null });
+      } catch (err) {
+        setPayrollPreviewState({
+          open: true,
+          loading: false,
+          report: null,
+          error: err instanceof Error ? err.message : 'Failed to load payroll register',
+        });
+      } finally {
+        setLoading(prev => ({ ...prev, [key]: false }));
+      }
+      return;
+    }
+
     if (needsTransmittalEditor(reportKey) && !transmittalOpts) {
       setTransmittalEditor({ open: true, key: reportKey, label, mode: 'preview' });
       return;
@@ -1401,6 +1435,28 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
               const downloadLoading = isReportLoading(report.key, 'download');
               const spreadsheetLoading = isReportLoading(report.key, 'spreadsheet');
               const canDownloadSpreadsheet = !['transmittalLog', 'fullPrintPackage'].includes(report.key);
+              const downloadFormats: ReportDownloadFormat[] = [
+                ...(canDownloadSpreadsheet ? [{
+                  key: 'spreadsheet',
+                  label: report.key === 'payrollRegister' ? 'Excel register (.xlsx)' : 'Excel spreadsheet (.xlsx)',
+                  description: report.key === 'payrollRegister'
+                    ? 'The CEO-facing register with split tips and review details.'
+                    : 'Editable workbook with report detail.',
+                  kind: 'spreadsheet' as const,
+                  loading: spreadsheetLoading,
+                  onSelect: () => handleSpreadsheetDownload(report.key),
+                }] : []),
+                {
+                  key: 'pdf',
+                  label: report.key === 'payrollRegister' ? 'Detailed PDF (.pdf)' : 'PDF document (.pdf)',
+                  description: report.key === 'payrollRegister'
+                    ? 'Printable detailed payroll report.'
+                    : 'Print-ready report document.',
+                  kind: 'pdf' as const,
+                  loading: downloadLoading,
+                  onSelect: () => handleDownload(report.key),
+                },
+              ];
               return (
                 <div key={report.key} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="mr-3 min-w-0">
@@ -1447,46 +1503,12 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                         </span>
                       ) : (
                         <>
-                          <svg className="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                          </svg>
+                          <Eye className="mr-1 h-3.5 w-3.5" />
                           View
                         </>
                       )}
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownload(report.key)}
-                      disabled={downloadLoading}
-                      className="text-xs"
-                      title="Download PDF"
-                    >
-                      {downloadLoading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
-                      )}
-                    </Button>
-                    {canDownloadSpreadsheet && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleSpreadsheetDownload(report.key)}
-                        disabled={spreadsheetLoading}
-                        className="text-xs"
-                        title="Download Excel"
-                      >
-                        {spreadsheetLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <span className="text-[11px] font-semibold">XLS</span>
-                        )}
-                      </Button>
-                    )}
+                    <ReportDownloadMenu formats={downloadFormats} buttonLabel="Download" />
                   </div>
                 </div>
               );
@@ -1567,6 +1589,32 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
         title={previewState.label}
         onDownload={handlePreviewDownload}
         onPrint={handlePreviewPrint}
+      />
+
+      <PayrollRegisterPreviewModal
+        open={payrollPreviewState.open}
+        loading={payrollPreviewState.loading}
+        report={payrollPreviewState.report}
+        error={payrollPreviewState.error}
+        onClose={cleanupPayrollPreview}
+        downloadFormats={[
+          {
+            key: 'spreadsheet',
+            label: 'Excel register (.xlsx)',
+            description: 'CEO-facing register with split tips and review details.',
+            kind: 'spreadsheet',
+            loading: isReportLoading('payrollRegister', 'spreadsheet'),
+            onSelect: () => handleSpreadsheetDownload('payrollRegister'),
+          },
+          {
+            key: 'pdf',
+            label: 'Detailed PDF (.pdf)',
+            description: 'Printable detailed payroll report.',
+            kind: 'pdf',
+            loading: isReportLoading('payrollRegister', 'download'),
+            onSelect: () => handleDownload('payrollRegister'),
+          },
+        ]}
       />
 
       <TransmittalEditorModal
