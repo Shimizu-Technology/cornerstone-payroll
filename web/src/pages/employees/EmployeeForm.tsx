@@ -114,6 +114,16 @@ const toNumberOrZero = (value: unknown): number => {
 
 const toBoolean = (value: unknown): boolean => value === true || value === 1 || value === '1';
 
+const normalizeFilingStatus = (value: string): FilingStatus => {
+  const aliases: Record<string, FilingStatus> = {
+    married_separate: 'single',
+    single_or_married_filing_separately: 'single',
+    married_filing_jointly: 'married',
+  };
+
+  return aliases[value] || (value as FilingStatus);
+};
+
 const initialQuickPayrollFieldDraft = (): QuickPayrollFieldDraft => ({
   name: '',
   kind: 'deduction',
@@ -240,7 +250,7 @@ export function EmployeeForm() {
         salary_type: employee.salary_type || 'annual',
         pay_rate: toNumberOrZero(employee.pay_rate),
         pay_frequency: employee.pay_frequency,
-        filing_status: employee.filing_status === 'married_separate' ? 'single' : employee.filing_status,
+        filing_status: normalizeFilingStatus(employee.filing_status),
         allowances: toNumberOrZero(employee.allowances),
         additional_withholding: toNumberOrZero(employee.additional_withholding),
         w4_dependent_credit: toNumberOrZero(employee.w4_dependent_credit),
