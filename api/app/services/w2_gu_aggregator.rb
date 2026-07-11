@@ -208,6 +208,9 @@ class W2GuAggregator
     entries << { code: "D", description: "401(k) elective deferrals", amount: retirement_total.round(2) } if retirement_total > 0
     entries << { code: "AA", description: "Roth 401(k) contributions", amount: roth_retirement_total.round(2) } if roth_retirement_total > 0
     if year >= 2026
+      # W-2 amount fields cannot report zero or negative annual values. Net-zero
+      # totals require no entry; negative corrections are blocked by the
+      # compliance issues below until the annual amount is corrected.
       entries << { code: "TP", description: "Cash tips reported to employer", amount: cash_tips_total.round(2) } if cash_tips_total.positive?
       entries << { code: "TT", description: "Qualified overtime compensation", amount: qualified_overtime_total.round(2) } if qualified_overtime_total.positive?
     end

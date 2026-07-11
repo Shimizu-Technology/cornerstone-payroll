@@ -252,6 +252,7 @@ export function PayrollItemEditModal({
     try {
       const tipsPaidOut = parseFloat(String(fields.tips_paid_out)) || 0;
       const reportedTips = Math.max(parseFloat(String(fields.reported_tips)) || 0, tipsPaidOut);
+      const qualifiedOvertime = Number(fields.qualified_overtime_compensation);
       const payload: Record<string, unknown> = {
         hours_worked: parseFloat(String(fields.hours_worked)) || 0,
         overtime_hours: parseFloat(String(fields.overtime_hours)) || 0,
@@ -261,9 +262,10 @@ export function PayrollItemEditModal({
         reported_tips: reportedTips,
         tips_paid_out: tipsPaidOut,
         service_charge_wages: parseFloat(String(fields.service_charge_wages)) || 0,
-        qualified_overtime_compensation: fields.qualified_overtime_compensation === ''
-          ? null
-          : parseFloat(fields.qualified_overtime_compensation),
+        qualified_overtime_compensation:
+          fields.qualified_overtime_compensation.trim() === '' || !Number.isFinite(qualifiedOvertime)
+            ? null
+            : qualifiedOvertime,
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding_override: fields.additional_withholding_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.additional_withholding_override)) ? parseFloat(fields.additional_withholding_override) : null),
         withholding_tax_adjustment: fields.withholding_tax_adjustment.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_adjustment)) ? parseFloat(fields.withholding_tax_adjustment) : null),
