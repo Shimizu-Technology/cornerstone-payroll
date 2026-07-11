@@ -147,6 +147,20 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "saves and recalculates mandatory service charges" do
+      create(:tax_table)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        auto_calculate: true,
+        payroll_item: { service_charge_wages: 25.00 }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.service_charge_wages).to eq(25.00)
+      expect(payroll_item.gross_pay).to eq(1225.00)
+      expect(payroll_item.payroll_item_earnings.find_by(category: "service_charge")&.amount).to eq(25.00)
+    end
+
     it "stores operator-reviewed qualified overtime separately from overtime pay" do
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
         payroll_item: {

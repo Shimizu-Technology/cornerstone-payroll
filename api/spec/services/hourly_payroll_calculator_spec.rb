@@ -178,6 +178,20 @@ RSpec.describe HourlyPayrollCalculator do
       expect(non_taxable.label).to eq("Non-Taxable Pay")
       expect(non_taxable.amount).to eq(50.00)
     end
+
+    it "persists mandatory service charges as taxable earnings" do
+      payroll_item.service_charge_wages = 25.00
+
+      payroll_item.calculate!
+
+      service_charge = payroll_item.reload.payroll_item_earnings.find_by(category: "service_charge")
+      expect(service_charge).to be_present
+      expect(service_charge.label).to eq("Service Charges")
+      expect(service_charge.amount).to eq(25.00)
+      expect(payroll_item.gross_pay).to eq(725.00)
+      expect(payroll_item.social_security_taxable_wages).to eq(525.00)
+      expect(payroll_item.social_security_taxable_tips).to eq(200.00)
+    end
   end
 
   describe "with retirement deductions" do
