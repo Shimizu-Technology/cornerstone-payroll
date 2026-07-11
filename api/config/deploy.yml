@@ -60,6 +60,10 @@ env:
     ACTIVE_STORAGE_SERVICE: r2
     REQUIRE_MFA: true
 
+    # Required by production:readiness. Set this to the exact Kamal proxy or
+    # load-balancer network; do not trust arbitrary public address ranges.
+    # TRUSTED_PROXY_CIDRS: 172.16.0.0/12
+
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3
 

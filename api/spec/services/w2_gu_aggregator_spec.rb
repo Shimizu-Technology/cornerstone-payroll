@@ -111,6 +111,35 @@ RSpec.describe W2GuAggregator do
       expect(report[:totals][:box12_code_tt_total]).to eq(50.0)
     end
 
+    it "blocks negative annual TP and TT amounts from Box 12" do
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 18))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: -100.0,
+        reported_tips: -25.0,
+        cash_tips_reported: -25.0,
+        qualified_overtime_compensation: -10.0,
+        social_security_taxable_wages: -75.0,
+        social_security_taxable_tips: 0.0,
+        medicare_taxable_wages: -100.0)
+
+      report = described_class.new(company, 2026).generate
+      row = report[:employees].sole
+
+      expect(row[:box12]).not_to include(include(code: "TP"), include(code: "TT"))
+      expect(report[:totals][:box12_code_tp_total]).to eq(0.0)
+      expect(report[:totals][:box12_code_tt_total]).to eq(0.0)
+      expect(report[:compliance_issues]).to include(
+        "1 employee(s) have negative annual cash tips; Box 12 TP is blocked pending correction review",
+        "1 employee(s) have negative annual qualified overtime; Box 12 TT is blocked pending correction review"
+      )
+    end
+
     it "uses the filing-year AnnualTaxConfig wage base before the compatibility constant" do
       create(:annual_tax_config, tax_year: 2024, ss_wage_base: 1_000.0)
       pay_period = create(:pay_period, :committed,

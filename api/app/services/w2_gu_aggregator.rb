@@ -195,6 +195,8 @@ class W2GuAggregator
       missing_committed_tax_bases: sums&.missing_tax_base_count.to_i.positive?,
       missing_tip_classification: sums&.missing_tip_classification_count.to_i.positive?,
       missing_qualified_overtime: sums&.missing_qualified_overtime_count.to_i.positive?,
+      negative_box12_tp: cash_tips_total.negative?,
+      negative_box12_tt: qualified_overtime_total.negative?,
 
       has_missing_ssn: !employee.valid_filing_ssn?,
       has_missing_address: missing_employee_address?(employee)
@@ -206,8 +208,8 @@ class W2GuAggregator
     entries << { code: "D", description: "401(k) elective deferrals", amount: retirement_total.round(2) } if retirement_total > 0
     entries << { code: "AA", description: "Roth 401(k) contributions", amount: roth_retirement_total.round(2) } if roth_retirement_total > 0
     if year >= 2026
-      entries << { code: "TP", description: "Cash tips reported to employer", amount: cash_tips_total.round(2) } if cash_tips_total.nonzero?
-      entries << { code: "TT", description: "Qualified overtime compensation", amount: qualified_overtime_total.round(2) } if qualified_overtime_total.nonzero?
+      entries << { code: "TP", description: "Cash tips reported to employer", amount: cash_tips_total.round(2) } if cash_tips_total.positive?
+      entries << { code: "TT", description: "Qualified overtime compensation", amount: qualified_overtime_total.round(2) } if qualified_overtime_total.positive?
     end
     entries
   end
@@ -243,6 +245,12 @@ class W2GuAggregator
 
       missing_qualified_overtime = rows.count { |r| r[:missing_qualified_overtime] }
       issues << "#{missing_qualified_overtime} employee(s) have overtime without stored qualified-overtime compensation" if missing_qualified_overtime.positive?
+
+      negative_tp = rows.count { |row| row[:negative_box12_tp] }
+      issues << "#{negative_tp} employee(s) have negative annual cash tips; Box 12 TP is blocked pending correction review" if negative_tp.positive?
+
+      negative_tt = rows.count { |row| row[:negative_box12_tt] }
+      issues << "#{negative_tt} employee(s) have negative annual qualified overtime; Box 12 TT is blocked pending correction review" if negative_tt.positive?
 
       missing_occupation_codes = rows.count do |row|
         row[:reported_tips_total].to_f.positive? && row[:box14b_tipped_occupation_codes].blank?

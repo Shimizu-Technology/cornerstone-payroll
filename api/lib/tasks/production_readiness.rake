@@ -12,6 +12,7 @@ namespace :production do
       "durable jobs are enabled" => ENV.fetch("USE_SOLID_QUEUE", "true") == "true",
       "durable cable is enabled" => ENV.fetch("USE_SOLID_CABLE", "true") == "true",
       "MFA policy is attested" => ENV["REQUIRE_MFA"] == "true",
+      "trusted reverse proxies are configured" => ENV["TRUSTED_PROXY_CIDRS"].present?,
       "allowed frontend origin is configured" => ENV["CORS_ORIGINS"].present?,
       "mailer URL is configured" => ENV["FRONTEND_URL"].present?,
       "Clerk keys are configured" => ENV.values_at("CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY").all?(&:present?),

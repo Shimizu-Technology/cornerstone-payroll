@@ -4,7 +4,8 @@ class AddPhaseZeroPayrollComplianceFoundations < ActiveRecord::Migration[8.1]
   def up
     add_column :employees, :w4_form_version, :integer, null: false, default: 2020
     add_column :employees, :w4_effective_on, :date
-    execute "UPDATE employees SET filing_status = 'single' WHERE filing_status = 'married_separate'"
+    # Preserve the originally entered legacy status for audit and rollback.
+    # Employee and both tax engines normalize aliases at calculation boundaries.
 
     add_reference :payroll_items,
                   :annual_tax_config,

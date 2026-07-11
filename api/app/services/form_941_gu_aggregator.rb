@@ -380,35 +380,34 @@ class Form941GuAggregator
   # SS-taxable wages already consumed before this quarter, by employee.
   # Derived from posted SS taxes to preserve historical cap behavior across prior quarters.
   def prior_ss_taxable_wages_by_employee
-    prior_items = PayrollItem.joins(:pay_period)
-                             .where(company_id: company.id)
-                             .not_voided
-                             .where.not(employment_type: "contractor")
-                             .where(pay_periods: {
-                               id: PayPeriod.reportable_committed
-                                 .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
-                                 .select(:id)
-                             })
-
     # Stored employee+employer SS taxes always reflect the total SS-taxable base
     # consumed in prior quarters, including SS-taxable tips when present. Dividing
     # that combined tax by the combined SS rate therefore reconstructs the same
     # wages+tips headroom consumption used by the current-quarter allocator.
-    prior_items.to_a.group_by(&:employee_id).transform_values do |items|
-      items.sum do |item|
-        if item.social_security_taxable_wages.present? && item.social_security_taxable_tips.present?
-          item.social_security_taxable_wages.to_d + item.social_security_taxable_tips.to_d
-        else
-          (item.social_security_tax.to_d + item.employer_social_security_tax.to_d) / ss_rate_combined.to_d
-        end
-      end.round(2)
-    end
+    rate = PayrollItem.connection.quote(ss_rate_combined.to_d)
+    aggregate = Arel.sql(<<~SQL.squish)
+      ROUND(SUM(
+        CASE
+          WHEN social_security_taxable_wages IS NOT NULL
+           AND social_security_taxable_tips IS NOT NULL
+            THEN social_security_taxable_wages + social_security_taxable_tips
+          ELSE (COALESCE(social_security_tax, 0) + COALESCE(employer_social_security_tax, 0)) / NULLIF(#{rate}, 0)
+        END
+      ), 2)
+    SQL
+
+    prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h
   end
 
   def prior_medicare_wages_by_employee
     # Prior-quarter Additional Medicare carry-forward relies on stored gross_pay.
     # For transition-year data committed before tips were embedded in gross_pay,
     # operators should verify year-to-date Medicare wages manually.
+    aggregate = Arel.sql("ROUND(SUM(COALESCE(medicare_taxable_wages, gross_pay)), 2)")
+    prior_payroll_items.group(:employee_id).pluck(:employee_id, aggregate).to_h
+  end
+
+  def prior_payroll_items
     PayrollItem.joins(:pay_period)
                .where(company_id: company.id)
                .not_voided
@@ -418,11 +417,6 @@ class Form941GuAggregator
                    .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
                    .select(:id)
                })
-               .to_a
-               .group_by(&:employee_id)
-               .transform_values do |items|
-                 items.sum { |item| (item.medicare_taxable_wages || item.gross_pay).to_d }.round(2)
-               end
   end
 
   def line1_employee_count

@@ -326,6 +326,36 @@ RSpec.describe Form941GuAggregator do
       end
     end
 
+    it "aggregates prior-quarter taxable bases in the database" do
+      prior_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 3, 1),
+        end_date: Date.new(2025, 3, 14),
+        pay_date: Date.new(2025, 3, 18))
+      create(:payroll_item,
+        pay_period: prior_period,
+        employee: employee1,
+        gross_pay: 1_200.0,
+        social_security_taxable_wages: 900.0,
+        social_security_taxable_tips: 100.0,
+        medicare_taxable_wages: 1_200.0)
+      create(:payroll_item,
+        pay_period: prior_period,
+        employee: employee2,
+        gross_pay: 1_000.0,
+        social_security_tax: 62.0,
+        employer_social_security_tax: 62.0)
+
+      expect(aggregator.send(:prior_ss_taxable_wages_by_employee)).to eq(
+        employee1.id => 1_000.0,
+        employee2.id => 1_000.0
+      )
+      expect(aggregator.send(:prior_medicare_wages_by_employee)).to eq(
+        employee1.id => 1_200.0,
+        employee2.id => 1_000.0
+      )
+    end
+
     describe "excludes non-committed pay periods" do
       let!(:draft_pp) do
         create(:pay_period,
