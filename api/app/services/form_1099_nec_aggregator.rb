@@ -5,25 +5,24 @@
 # Produces annual 1099-NEC summary data from committed payroll for contractors.
 #
 # IRS Form 1099-NEC reports nonemployee compensation paid to independent
-# contractors. A 1099-NEC must be filed for each contractor paid $600 or
-# more during the tax year.
+# contractors. Reporting thresholds are selected by payment year from the
+# versioned InformationReturnThreshold table.
 #
 # Box 1: Nonemployee compensation (total gross payments)
 # Box 4: Federal income tax withheld (typically $0 unless backup withholding)
 #
 class Form1099NecAggregator
-  FILING_THRESHOLD = 600.00
-
-  attr_reader :company, :year
+  attr_reader :company, :year, :threshold_rule
 
   def initialize(company, year)
     @company = company
     @year = year.to_i
+    @threshold_rule = InformationReturnThreshold.for!(form_type: "1099_nec", tax_year: @year)
   end
 
   def generate
     rows = contractors.map { |contractor| contractor_row(contractor) }
-    reportable = rows.select { |r| r[:total_compensation] >= FILING_THRESHOLD }
+    reportable = rows.select { |r| r[:total_compensation] >= filing_threshold }
 
     {
       meta: {
@@ -34,10 +33,12 @@ class Form1099NecAggregator
         generated_at: Time.current.iso8601,
         contractor_count: rows.length,
         reportable_count: reportable.length,
-        filing_threshold: FILING_THRESHOLD,
+        filing_threshold: filing_threshold,
+        filing_threshold_rule_id: threshold_rule.id,
+        filing_threshold_source_url: threshold_rule.source_url,
         caveats: [
           "This report is a preparation summary and should be reviewed before filing.",
-          "Only contractors with total compensation >= $#{FILING_THRESHOLD} require a 1099-NEC filing.",
+          "The configured #{year} filing threshold is $#{filing_threshold.to_f}.",
           "Verify TIN/SSN for each contractor before filing.",
           "Box 1 = Total gross payments to contractor during the tax year.",
           "Box 4 = Federal income tax withheld (typically $0 for contractors without backup withholding)."
@@ -60,6 +61,10 @@ class Form1099NecAggregator
   end
 
   private
+
+  def filing_threshold
+    threshold_rule.threshold_amount.to_d
+  end
 
   def contractors
     @contractors ||= Employee
@@ -97,7 +102,7 @@ class Form1099NecAggregator
     compliance_issues << "Missing SSN/TIN" unless contractor.valid_filing_ssn? || contractor.contractor_ein.present?
     compliance_issues << "Missing address" if contractor.address_line1.blank?
     compliance_issues << "W-9 not on file" unless contractor.w9_on_file?
-    compliance_issues << "Below filing threshold ($#{FILING_THRESHOLD})" if total_comp < FILING_THRESHOLD
+    compliance_issues << "Below filing threshold ($#{filing_threshold.to_f})" if total_comp < filing_threshold
 
     {
       employee_id: contractor.id,
@@ -114,7 +119,7 @@ class Form1099NecAggregator
       total_compensation: total_comp.round(2),
       federal_withheld: withheld.round(2),
       payment_count: sums&.payment_count.to_i,
-      requires_filing: total_comp >= FILING_THRESHOLD,
+      requires_filing: total_comp >= filing_threshold,
       w9_on_file: contractor.w9_on_file?,
       compliance_issues: compliance_issues
     }

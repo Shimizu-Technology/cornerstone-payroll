@@ -25,7 +25,7 @@ class GuamTaxCalculator
   def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0)
     @tax_table = TaxTable.find_table(
       tax_year: tax_year,
-      filing_status: filing_status,
+      filing_status: FilingStatusConfig.normalize(filing_status),
       pay_frequency: pay_frequency
     )
     @allowances = allowances
@@ -39,15 +39,73 @@ class GuamTaxCalculator
   # @param ytd_gross [Decimal] Year-to-date gross pay BEFORE this pay period
   # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
-  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil)
+  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil,
+                reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
     withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
-    employee_ss = calculate_social_security(gross_pay, ytd_gross)
+    bases = taxable_bases(
+      gross_pay: gross_pay,
+      reported_tips: reported_tips,
+      ytd_ss_taxable_wages: ytd_ss_taxable_wages.nil? ? ytd_gross : ytd_ss_taxable_wages,
+      ytd_medicare_wages: ytd_medicare_wages.nil? ? ytd_gross : ytd_medicare_wages
+    )
+    employee_ss = ((bases[:social_security_wages] + bases[:social_security_tips]) * tax_table.ss_rate).round(2)
+    base_medicare = (bases[:medicare_wages] * tax_table.medicare_rate).round(2)
+    additional_medicare = (bases[:additional_medicare_wages] * tax_table.additional_medicare_rate).round(2)
     {
       withholding: calculate_withholding(withholding_wages),
       social_security: employee_ss,
-      medicare: calculate_medicare(gross_pay, ytd_gross),
+      medicare: (base_medicare + additional_medicare).round(2),
       employer_social_security: employee_ss,
-      employer_medicare: calculate_employer_medicare(gross_pay)
+      employer_medicare: base_medicare,
+      additional_medicare: additional_medicare,
+      fit_taxable_wages: withholding_wages.round(2),
+      social_security_taxable_wages: bases[:social_security_wages],
+      social_security_taxable_tips: bases[:social_security_tips],
+      medicare_taxable_wages: bases[:medicare_wages],
+      additional_medicare_taxable_wages: bases[:additional_medicare_wages]
+    }
+  end
+
+  def rule_snapshot
+    {
+      "engine" => "legacy_tax_table",
+      "tax_table_id" => tax_table.id,
+      "tax_year" => tax_table.tax_year,
+      "tax_table_updated_at" => tax_table.updated_at&.iso8601,
+      "filing_status" => tax_table.filing_status,
+      "pay_frequency" => tax_table.pay_frequency,
+      "standard_deduction" => tax_table.standard_deduction.to_f,
+      "allowance_amount" => tax_table.allowance_amount.to_f,
+      "social_security_wage_base" => tax_table.ss_wage_base.to_f,
+      "social_security_rate" => tax_table.ss_rate.to_f,
+      "medicare_rate" => tax_table.medicare_rate.to_f,
+      "additional_medicare_rate" => tax_table.additional_medicare_rate.to_f,
+      "additional_medicare_threshold" => tax_table.additional_medicare_threshold.to_f,
+      "brackets" => tax_table.brackets.map do |bracket|
+        bracket.transform_values do |value|
+          value.is_a?(Float) && !value.finite? ? nil : value
+        end
+      end
+    }
+  end
+
+  def taxable_bases(gross_pay:, reported_tips:, ytd_ss_taxable_wages:, ytd_medicare_wages:)
+    gross = gross_pay.to_d
+    tips = [ reported_tips.to_d, 0.to_d ].max
+    wages_only = gross.negative? ? gross : [ gross - tips, 0.to_d ].max
+    remaining_ss = [ tax_table.ss_wage_base.to_d - ytd_ss_taxable_wages.to_d, 0.to_d ].max
+    ss_wages = gross.negative? ? gross : [ wages_only, remaining_ss ].min
+    remaining_after_wages = [ remaining_ss - [ ss_wages, 0.to_d ].max, 0.to_d ].max
+    ss_tips = gross.negative? ? 0.to_d : [ tips, remaining_after_wages ].min
+
+    prior_excess = [ ytd_medicare_wages.to_d - tax_table.additional_medicare_threshold.to_d, 0.to_d ].max
+    current_excess = [ ytd_medicare_wages.to_d + gross - tax_table.additional_medicare_threshold.to_d, 0.to_d ].max
+
+    {
+      social_security_wages: ss_wages.round(2),
+      social_security_tips: ss_tips.round(2),
+      medicare_wages: gross.round(2),
+      additional_medicare_wages: (current_excess - prior_excess).round(2)
     }
   end
 

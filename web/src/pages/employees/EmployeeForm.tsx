@@ -31,6 +31,8 @@ const initialFormData: EmployeeFormData = {
   w4_step2_multiple_jobs: false,
   w4_step4a_other_income: 0,
   w4_step4b_deductions: 0,
+  w4_form_version: 2020,
+  w4_effective_on: '',
   retirement_rate: 0,
   roth_retirement_rate: 0,
   department_id: undefined,
@@ -238,13 +240,15 @@ export function EmployeeForm() {
         salary_type: employee.salary_type || 'annual',
         pay_rate: toNumberOrZero(employee.pay_rate),
         pay_frequency: employee.pay_frequency,
-        filing_status: employee.filing_status,
+        filing_status: employee.filing_status === 'married_separate' ? 'single' : employee.filing_status,
         allowances: toNumberOrZero(employee.allowances),
         additional_withholding: toNumberOrZero(employee.additional_withholding),
         w4_dependent_credit: toNumberOrZero(employee.w4_dependent_credit),
         w4_step2_multiple_jobs: toBoolean(employee.w4_step2_multiple_jobs),
         w4_step4a_other_income: toNumberOrZero(employee.w4_step4a_other_income),
         w4_step4b_deductions: toNumberOrZero(employee.w4_step4b_deductions),
+        w4_form_version: toNumberOrZero(employee.w4_form_version) || 2020,
+        w4_effective_on: employee.w4_effective_on || '',
         retirement_rate: toNumberOrZero(employee.retirement_rate),
         roth_retirement_rate: toNumberOrZero(employee.roth_retirement_rate),
         department_id: employee.department_id ?? undefined,
@@ -369,7 +373,7 @@ export function EmployeeForm() {
     return `${digits.slice(0, 2)}-${digits.slice(2)}`;
   };
 
-  const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean): void => {
+  const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean | null): void => {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors((prev) => {
@@ -1509,7 +1513,7 @@ export function EmployeeForm() {
               <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-sm text-amber-800">
                   1099 contractors are not subject to income tax withholding, Social Security, or Medicare taxes.
-                  A 1099-NEC will be generated at year-end for total compensation of $600 or more.
+                  1099-NEC filing eligibility uses the configured threshold for the payment year and is reviewed at year-end.
                 </p>
               </div>
             </CardContent>
@@ -1529,7 +1533,7 @@ export function EmployeeForm() {
               {/* Step 1: Filing Status */}
               <div className="mb-4">
                 <h4 className="text-sm font-semibold text-gray-800 mb-2">Step 1: Filing Status</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Filing Status
@@ -1542,6 +1546,30 @@ export function EmployeeForm() {
                       <option value="married">Married Filing Jointly</option>
                       <option value="head_of_household">Head of Household</option>
                     </Select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Form revision year
+                    </label>
+                    <Input
+                      type="number"
+                      min="1987"
+                      max={new Date().getFullYear() + 1}
+                      value={form.w4_form_version}
+                      onChange={(e) => handleChange('w4_form_version', Number(e.target.value) || 2020)}
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Pre-2020 forms are recorded but blocked from the 2020+ calculation engine.</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Effective date
+                    </label>
+                    <Input
+                      type="date"
+                      value={form.w4_effective_on || ''}
+                      onChange={(e) => handleChange('w4_effective_on', e.target.value || null)}
+                    />
+                    <p className="mt-1 text-xs text-gray-500">Record the date this withholding election became effective.</p>
                   </div>
                 </div>
               </div>

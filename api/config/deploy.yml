@@ -40,10 +40,25 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
+    - DATABASE_URL
+    - CLERK_SECRET_KEY
+    - CLERK_PUBLISHABLE_KEY
+    - R2_ACCESS_KEY_ID
+    - R2_SECRET_ACCESS_KEY
+    - R2_ACCOUNT_ID
+    - R2_BUCKET_NAME
+    - R2_ENDPOINT
+    - RESEND_API_KEY
   clear:
     # Run the Solid Queue Supervisor inside the web server's Puma process to do jobs.
     # When you start using multiple servers, you should split out job processing to a dedicated machine.
     SOLID_QUEUE_IN_PUMA: true
+    FORCE_SSL: true
+    USE_SOLID_CACHE: true
+    USE_SOLID_QUEUE: true
+    USE_SOLID_CABLE: true
+    ACTIVE_STORAGE_SERVICE: r2
+    REQUIRE_MFA: true
 
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3

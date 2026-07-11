@@ -21,7 +21,7 @@ const runSteps = [
 
 const proofPoints = [
   { value: 'W-2GU', label: 'Guam wage reporting' },
-  { value: '941-GU', label: 'Quarterly payroll workflow' },
+  { value: 'Form 941', label: 'Federal quarterly workflow' },
   { value: 'Firm-ready', label: 'Multi-client operations' },
 ];
 
@@ -29,7 +29,7 @@ const featureBands = [
   {
     icon: <Landmark className="h-5 w-5" />,
     title: 'Guam-native compliance',
-    body: 'Built around W-2GU, 941-GU, Form 500, SWICA, and local DRT realities instead of mainland-only defaults.',
+    body: 'Built around W-2GU, Federal Form 941, Form 500, SWICA, and the distinct IRS and Guam DRT workflows employers actually use.',
   },
   {
     icon: <Users2 className="h-5 w-5" />,

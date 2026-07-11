@@ -73,7 +73,7 @@ class Form1099NecPdfGenerator
 
     data = [
       [ "Total Contractors", meta[:contractor_count].to_s ],
-      [ "Reportable (>= $#{Form1099NecAggregator::FILING_THRESHOLD})", meta[:reportable_count].to_s ],
+      [ "Reportable (>= $#{format('%.2f', meta[:filing_threshold].to_f)})", meta[:reportable_count].to_s ],
       [ "Total Compensation", fmt(totals[:total_compensation]) ],
       [ "Reportable Compensation", fmt(totals[:reportable_compensation]) ],
       [ "Federal Tax Withheld", fmt(totals[:total_federal_withheld]) ]

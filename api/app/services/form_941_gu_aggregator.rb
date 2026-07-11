@@ -30,9 +30,8 @@
 # NOTES / CAVEATS:
 # - Adjustments (lines 7-9) and credits/deposits (11-14) are marked [PLACEHOLDER]
 #   because they require data not currently stored in payroll_items.
-# - Additional Medicare Tax (line 5d) is estimated from per-employee YTD gross
-#   using the $200K threshold; this may differ from actual IRS/GRT computation
-#   if employees changed employers mid-year.
+# - Additional Medicare Tax (line 5d) uses stored Medicare taxable wage bases
+#   when available; legacy rows use a compatibility reconstruction.
 # - Tips on line 5b are sourced from `reported_tips` on payroll_items.
 # - Only "committed" pay periods are included (pay_date falls in the quarter).
 
@@ -61,7 +60,8 @@ class Form941GuAggregator
 
   # Returns the full federal Form 941 structured report hash.
   def generate
-    # Fail fast for unsupported SS wage-base years.
+    # Validate the filing-year rule set even when the quarter has no payroll.
+    # An empty report for an unknown year must not look filing-ready.
     ss_wage_base
 
     items = qualifying_payroll_items
@@ -84,12 +84,12 @@ class Form941GuAggregator
     monthly_ss_allocations = ss_taxable_allocations_by_month(records, prior_ss_taxable_wages)
     taxable_ss_wages     = monthly_ss_allocations.values.sum { |allocation| allocation[:wages] }.round(2)
     taxable_ss_tips      = monthly_ss_allocations.values.sum { |allocation| allocation[:tips] }.round(2)
-    ss_combined_total    = (taxable_ss_wages * SS_RATE_COMBINED).round(2)
-    ss_tips_combined     = (taxable_ss_tips * SS_RATE_COMBINED).round(2)
+    ss_combined_total    = (taxable_ss_wages * ss_rate_combined).round(2)
+    ss_tips_combined     = (taxable_ss_tips * ss_rate_combined).round(2)
 
     # --- Line 5c: Medicare wages and tips (base 2.9%) ---
-    taxable_medicare_wages  = total_gross.round(2)
-    medicare_combined_total = (taxable_medicare_wages * MEDICARE_RATE_COMBINED).round(2)
+    taxable_medicare_wages  = sum_taxable_base(records, :medicare_taxable_wages, fallback: :gross_pay)
+    medicare_combined_total = (taxable_medicare_wages * medicare_rate_combined).round(2)
 
     # --- Actual tax totals retained for detail / reconciliation ---
     ss_employee_total       = sum(records, :social_security_tax)
@@ -101,7 +101,7 @@ class Form941GuAggregator
     prior_medicare_wages = prior_medicare_wages_by_employee
     monthly_add_medicare_wages = additional_medicare_taxable_wages_by_month(records, prior_medicare_wages)
     add_medicare_wages   = monthly_add_medicare_wages.values.sum.round(2)
-    add_medicare_tax     = (add_medicare_wages * ADD_MEDICARE_RATE).round(2)
+    add_medicare_tax     = (add_medicare_wages * additional_medicare_rate).round(2)
 
     # --- Line 5e totals ---
     line5e = (ss_combined_total + ss_tips_combined + medicare_combined_total + add_medicare_tax).round(2)
@@ -148,6 +148,7 @@ class Form941GuAggregator
           "Guam wage withholding is tracked through Form 500/W-1 and surfaced in tax_detail.guam_withholding_for_w1.",
           "Lines 11–14 (credits/deposits/balance) are PLACEHOLDER: verify with federal deposit records.",
           "Line 5b (SS tips) is derived from reported tips remaining under the SS wage base.",
+          "Committed taxable wage bases are used when present; legacy payroll rows without stored bases use compatibility reconstruction and must be reviewed.",
           "tax_detail.ss_combined includes Social Security tax on both SS wages and SS-taxable tips; reconcile to lines 5a + 5b rather than line 5a alone.",
           "tax_detail.ss_combined is based on stored SS taxes, so it can differ from lines 5a + 5b by a few cents due to rounding.",
           "Line 5d (Additional Medicare Tax) is estimated from year-to-date Medicare wages; verify against prior-quarter history.",
@@ -200,7 +201,7 @@ class Form941GuAggregator
         medicare_combined:            medicare_combined_total.to_f,
         additional_medicare_employee: add_medicare_tax.to_f,
         guam_withholding_for_w1:      guam_withholding_total.to_f,
-        total_employee_taxes:         (ss_employee_total + medicare_employee_total + add_medicare_tax).round(2).to_f,
+        total_employee_taxes:         (ss_employee_total + medicare_employee_total).round(2).to_f,
         total_employer_taxes:         (ss_employer_total + medicare_employer_total).round(2).to_f
       },
       monthly_liability: monthly_liability
@@ -245,6 +246,13 @@ class Form941GuAggregator
     end
   end
 
+  def sum_taxable_base(items, column, fallback:)
+    items.sum do |item|
+      stored = item.public_send(column)
+      (stored.nil? ? item.public_send(fallback) : stored).to_d
+    end.round(2)
+  end
+
   def fractions_of_cents_adjustment(line6:, monthly_total_liability:)
     diff = (monthly_total_liability - line6).round(2)
     return nil if diff.zero?
@@ -271,13 +279,13 @@ class Form941GuAggregator
       month_end = month_start.end_of_month
       month_items = month_map[month_start] || []
       month_guam_withholding = sum(month_items, :withholding_tax)
-      month_gross            = sum(month_items, :gross_pay)
+      month_medicare_wages   = sum_taxable_base(month_items, :medicare_taxable_wages, fallback: :gross_pay)
       month_ss_wages         = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
       month_ss_tips          = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]
-      month_ss_combined      = (month_ss_wages * SS_RATE_COMBINED).round(2)
-      month_ss_tips_combined = (month_ss_tips * SS_RATE_COMBINED).round(2)
-      month_medicare         = (month_gross * MEDICARE_RATE_COMBINED).round(2)
-      month_add_med          = (monthly_add_medicare_wages[month_start] * ADD_MEDICARE_RATE).round(2)
+      month_ss_combined      = (month_ss_wages * ss_rate_combined).round(2)
+      month_ss_tips_combined = (month_ss_tips * ss_rate_combined).round(2)
+      month_medicare         = (month_medicare_wages * medicare_rate_combined).round(2)
+      month_add_med          = (monthly_add_medicare_wages[month_start] * additional_medicare_rate).round(2)
 
       total = (month_ss_combined + month_ss_tips_combined + month_medicare + month_add_med).round(2)
 
@@ -307,6 +315,15 @@ class Form941GuAggregator
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
         month_key = item.pay_period.pay_date.beginning_of_month.to_date
+        if item.social_security_taxable_wages.present? && item.social_security_taxable_tips.present?
+          taxable_wages = item.social_security_taxable_wages.to_d
+          taxable_tips = item.social_security_taxable_tips.to_d
+          allocations[month_key][:wages] += taxable_wages
+          allocations[month_key][:tips] += taxable_tips
+          running_taxable_wages += taxable_wages + taxable_tips
+          next
+        end
+
         if item.reported_tips.to_f > item.gross_pay.to_f
           Rails.logger.warn(
             "[Form941GuAggregator] payroll_item=#{item.id} reported_tips exceed gross_pay; " \
@@ -338,16 +355,21 @@ class Form941GuAggregator
       running_wages = prior_medicare_wages[employee_id].to_f
 
       employee_items.sort_by { |item| [ item.pay_period.pay_date, item.id ] }.each do |item|
-        # Additional Medicare threshold applies to Medicare wages, already reflected in gross_pay.
-        gross = item.gross_pay.to_f
-        prev_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
-        running_wages += gross
-        new_excess = [ running_wages - ADD_MEDICARE_THRESHOLD, 0.0 ].max
+        month_key = item.pay_period.pay_date.beginning_of_month.to_date
+        if item.additional_medicare_taxable_wages.present?
+          allocations[month_key] += item.additional_medicare_taxable_wages.to_d
+          running_wages += (item.medicare_taxable_wages || item.gross_pay).to_d
+          next
+        end
+
+        medicare_wages = (item.medicare_taxable_wages || item.gross_pay).to_d
+        prev_excess = [ running_wages - additional_medicare_threshold, 0.0 ].max
+        running_wages += medicare_wages
+        new_excess = [ running_wages - additional_medicare_threshold, 0.0 ].max
 
         delta_excess = (new_excess - prev_excess).round(2)
         next unless delta_excess.positive?
 
-        month_key = item.pay_period.pay_date.beginning_of_month.to_date
         allocations[month_key] += delta_excess
       end
     end
@@ -372,9 +394,15 @@ class Form941GuAggregator
     # consumed in prior quarters, including SS-taxable tips when present. Dividing
     # that combined tax by the combined SS rate therefore reconstructs the same
     # wages+tips headroom consumption used by the current-quarter allocator.
-    prior_items.group(:employee_id)
-               .sum("social_security_tax + employer_social_security_tax")
-               .transform_values { |combined_tax| (combined_tax.to_f / SS_RATE_COMBINED).round(2) }
+    prior_items.to_a.group_by(&:employee_id).transform_values do |items|
+      items.sum do |item|
+        if item.social_security_taxable_wages.present? && item.social_security_taxable_tips.present?
+          item.social_security_taxable_wages.to_d + item.social_security_taxable_tips.to_d
+        else
+          (item.social_security_tax.to_d + item.employer_social_security_tax.to_d) / ss_rate_combined.to_d
+        end
+      end.round(2)
+    end
   end
 
   def prior_medicare_wages_by_employee
@@ -390,9 +418,11 @@ class Form941GuAggregator
                    .where(company_id: company.id, pay_date: Date.new(year, 1, 1)...quarter_start_date)
                    .select(:id)
                })
-               .group(:employee_id)
-               .sum(:gross_pay)
-               .transform_values(&:to_f)
+               .to_a
+               .group_by(&:employee_id)
+               .transform_values do |items|
+                 items.sum { |item| (item.medicare_taxable_wages || item.gross_pay).to_d }.round(2)
+               end
   end
 
   def line1_employee_count
@@ -414,8 +444,28 @@ class Form941GuAggregator
   end
 
   def ss_wage_base
-    SS_WAGE_BASE_BY_YEAR.fetch(year) do
+    AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
       raise ArgumentError, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
     end
+  end
+
+  def annual_tax_config
+    @annual_tax_config ||= AnnualTaxConfig.for_year(year)
+  end
+
+  def ss_rate_combined
+    annual_tax_config ? annual_tax_config.ss_rate.to_f * 2 : SS_RATE_COMBINED
+  end
+
+  def medicare_rate_combined
+    annual_tax_config ? annual_tax_config.medicare_rate.to_f * 2 : MEDICARE_RATE_COMBINED
+  end
+
+  def additional_medicare_rate
+    annual_tax_config ? annual_tax_config.additional_medicare_rate.to_f : ADD_MEDICARE_RATE
+  end
+
+  def additional_medicare_threshold
+    annual_tax_config ? annual_tax_config.additional_medicare_threshold.to_f : ADD_MEDICARE_THRESHOLD
   end
 end

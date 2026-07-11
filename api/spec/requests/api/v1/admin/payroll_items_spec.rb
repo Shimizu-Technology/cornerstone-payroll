@@ -137,6 +137,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "stores operator-reviewed qualified overtime separately from overtime pay" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          overtime_hours: 10,
+          qualified_overtime_compensation: 75.00
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.qualified_overtime_compensation).to eq(75.00)
+    end
+
     it "returns a validation response when auto-calculation fails validation after update" do
       allow_any_instance_of(PayrollItem).to receive(:calculate!)
         .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))

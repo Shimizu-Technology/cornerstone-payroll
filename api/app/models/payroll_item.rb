@@ -5,6 +5,7 @@ class PayrollItem < ApplicationRecord
   belongs_to :pay_period
   belongs_to :employee
   belongs_to :company
+  belongs_to :annual_tax_config, optional: true
   belongs_to :voided_by_user, class_name: "User", optional: true, foreign_key: :voided_by_user_id
   has_many :check_events, dependent: :restrict_with_error
   has_many :payroll_item_deductions, dependent: :destroy
@@ -49,6 +50,11 @@ class PayrollItem < ApplicationRecord
   validates :company_id, presence: true
   validates :withholding_tax_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :withholding_tax_adjustment, numericality: true, allow_nil: true
+  validates :fit_taxable_wages, :social_security_taxable_wages, :social_security_taxable_tips,
+            :medicare_taxable_wages, :additional_medicare_taxable_wages,
+            :cash_tips_reported, :service_charge_wages, :qualified_overtime_compensation,
+            numericality: true,
+            allow_nil: true
   validates :additional_withholding_override, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :tips_paid_out, numericality: { greater_than_or_equal_to: 0 }, unless: :correction_entry?
   validates :tips_paid_out, numericality: true, if: :correction_entry?
@@ -247,7 +253,6 @@ class PayrollItem < ApplicationRecord
         payroll_item_field_entries.build(attributes.merge(source: "employee_default"))
       end
     end
-
   end
 
   def refresh_percentage_payroll_field_entries_after_final_gross!(source_employee = employee, assignments: nil)

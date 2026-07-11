@@ -129,6 +129,7 @@ module Api
           date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
           filing_status allowances additional_withholding
           w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
+          w4_form_version w4_effective_on
           retirement_rate roth_retirement_rate
           address_line1 address_line2 city state zip phone
           contractor_type contractor_pay_type business_name contractor_ein w9_on_file
@@ -186,6 +187,8 @@ module Api
               w4_step2_multiple_jobs: raw["w4_step2_multiple_jobs"],
               w4_step4a_other_income: raw["w4_step4a_other_income"],
               w4_step4b_deductions: raw["w4_step4b_deductions"],
+              w4_form_version: raw["w4_form_version"],
+              w4_effective_on: raw["w4_effective_on"],
               retirement_rate: raw["retirement_rate"],
               roth_retirement_rate: raw["roth_retirement_rate"],
               department: raw["department"],

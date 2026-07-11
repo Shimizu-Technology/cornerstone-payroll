@@ -12,7 +12,9 @@
     "lint": "eslint src --ext .ts,.tsx",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "gate": "./scripts/gate.sh"
+    "gate": "./scripts/gate.sh",
+    "test:e2e": "playwright test",
+    "test:e2e:staging": "E2E_BASE_URL=${E2E_BASE_URL:?Set E2E_BASE_URL} playwright test e2e/authenticated-payroll-smoke.spec.ts"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.61.1",
@@ -29,6 +31,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^24.10.10",
     "@types/react": "^19.2.5",

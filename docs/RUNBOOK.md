@@ -2,6 +2,8 @@
 
 ## Overview
 
+Production releases are governed by [PRODUCTION_READINESS_CHECKLIST.md](PRODUCTION_READINESS_CHECKLIST.md). Run its automated configuration gate and complete the manual evidence checklist before any payroll or filing workload is released.
+
 This runbook covers day-to-day operation of the MoSa payroll import pipeline for Cornerstone Tax.
 
 | Item | Value |
@@ -197,11 +199,13 @@ GOG_KEYRING_PASSWORD=clawdbot gog gmail search "test" \
 
 ---
 
-## 941-GU Quarterly Tax Report (CPR-59)
+## Federal Form 941 Quarterly Worksheet for Guam Employers (CPR-59)
 
 ### Overview
 
-The 941-GU report generates a structured JSON summary of payroll tax data for the Guam Department of Revenue and Taxation (DoRT) quarterly filing. It mirrors the federal Form 941 line structure.
+This report generates a structured preparation worksheet for the standard federal Form 941. Form 941-SS was discontinued after 2023; Guam employers now file Form 941 with the IRS and generally leave lines 2 and 3 blank unless they have employees subject to U.S. income-tax withholding. Guam wage withholding is handled separately through Form 500 and W-1 with Guam DRT.
+
+> **Legacy route note:** The API route retains `form_941_gu` for backward compatibility. It does not represent a separate current form named "941-GU."
 
 **Endpoint:**
 ```
@@ -229,8 +233,8 @@ curl -H "Authorization: Bearer <token>" \
     "employer_info": { "name": "...", "ein": "...", "address": "..." },
     "lines": {
       "line1_employee_count": 12,
-      "line2_wages_tips_other": 150000.00,
-      "line3_fit_withheld": 18500.00,
+      "line2_wages_tips_other": null,
+      "line3_fit_withheld": null,
       "line5a_ss_wages": 150000.00,
       "line5a_ss_combined_tax": 18600.00,
       "line5b_ss_tips": 0.00,
@@ -240,13 +244,13 @@ curl -H "Authorization: Bearer <token>" \
       "line5d_add_medicare_wages": 0.00,
       "line5d_add_medicare_tax": 0.00,
       "line5e_total_ss_medicare": 22950.00,
-      "line6_total_taxes_before_adj": 41450.00,
+      "line6_total_taxes_before_adj": 22950.00,
       "line7_adj_fractions_cents": null,
       "line8_adj_sick_pay": null,
       "line9_adj_tips_group_life": null,
-      "line10_total_taxes_after_adj": 41450.00,
+      "line10_total_taxes_after_adj": 22950.00,
       "line11_nonrefundable_credits": null,
-      "line12_total_after_credits": 41450.00,
+      "line12_total_after_credits": 22950.00,
       "line13_total_deposits": null,
       "line14_balance_due_or_overpayment": null
     },
@@ -261,15 +265,16 @@ curl -H "Authorization: Bearer <token>" \
 
 ### Placeholder Fields
 
-Fields returning `null` require **manual entry before filing**:
+This example represents a typical Guam employer without wages subject to U.S. income-tax withholding, so lines 2 and 3 are intentionally blank. Fields returning `null` require review and, when applicable, **manual entry before filing**:
 
 | Line | Field | Notes |
 |------|-------|-------|
-| 7 | `line7_adj_fractions_cents` | Rounding adjustment; typically small |
+| 2–3 | `line2_wages_tips_other`, `line3_fit_withheld` | Generally blank for Guam employers; complete only when employees are subject to U.S. income-tax withholding |
+| 7 | `line7_adj_fractions_cents` | Rounding adjustment; may be calculated when the available payroll detail supports it, but must be reviewed |
 | 8 | `line8_adj_sick_pay` | Sick pay from third-party payers; not tracked in payroll_items |
 | 9 | `line9_adj_tips_group_life` | Group-term life > $50K; not tracked |
 | 11 | `line11_nonrefundable_credits` | Small business payroll tax credit |
-| 13 | `line13_total_deposits` | Verify against EFTPS / DoRT deposit records |
+| 13 | `line13_total_deposits` | Verify federal deposits against EFTPS records |
 | 14 | `line14_balance_due_or_overpayment` | Derived from 12 - 13 |
 
 ### Filing Workflow
@@ -279,15 +284,15 @@ Fields returning `null` require **manual entry before filing**:
 3. **Verify pay period count** — `meta.pay_periods_included` should match expected payrolls.
 4. **Complete placeholder lines manually** — consult your accountant for lines 7–14.
 5. **Cross-reference monthly_liability** — use for Schedule B (semiweekly depositor worksheet).
-6. **File** the completed 941-GU with Guam DoRT.
+6. **File** the completed standard Form 941 with the IRS using the current official instructions. File Guam withholding through the separate Guam DRT Form 500/W-1 workflow.
 
 ### Key Caveats
 
 - **Only committed pay periods** (status = "committed") with `pay_date` in the quarter are included.
-- **SS wages (line 5a)** uses `gross_pay`; the per-item calculator enforces the SS wage base cap ($176,100 for 2025). Verify capping is active for high earners.
-- **Additional Medicare Tax (line 5d)** is estimated per-quarter per-employee against the $200K threshold. This may understate if an employee earned <$200K in this quarter but exceeded $200K YTD across quarters. A full-year YTD calculation is more accurate.
+- **SS wages and tips (lines 5a/5b)** use committed taxable bases when available. Legacy rows reconstruct from stored taxes/gross and must be reconciled before filing; verify the filing-year wage base for high earners.
+- **Additional Medicare Tax (line 5d)** uses year-to-date wages in the current implementation. Reconcile prior-quarter and imported historical wages before relying on it for a filing.
 - **Tips (line 5b)** use `reported_tips` from payroll_items. If tip pools are allocated differently, reconcile before filing.
-- **Adjustments (lines 7–9)** are always `null` from the API; these require manual computation.
+- **Adjustments (lines 7–9)** are not all derived from payroll data. Review line 7 and manually complete any applicable line 8 or 9 adjustment before filing.
 
 ### Service Location
 

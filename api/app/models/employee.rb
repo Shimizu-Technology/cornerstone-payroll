@@ -6,6 +6,7 @@ class Employee < ApplicationRecord
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
+  MIN_SUPPORTED_W4_FORM_VERSION = 2020
   YTD_AGGREGATE_SOURCE_COLUMNS = {
     gross_pay: :gross_pay,
     net_pay: :net_pay,
@@ -17,7 +18,9 @@ class Employee < ApplicationRecord
     roth_retirement: :roth_retirement_payment,
     insurance: :insurance_payment,
     loans: :loan_payment,
-    tips_paid_out: :tips_paid_out
+    tips_paid_out: :tips_paid_out,
+    social_security_taxable_total: :social_security_taxable_total,
+    medicare_taxable_wages: :medicare_taxable_wages
   }.freeze
   YTD_AGGREGATE_COLUMNS = {
     gross_pay: "COALESCE(SUM(gross_pay), 0)",
@@ -30,7 +33,9 @@ class Employee < ApplicationRecord
     roth_retirement: "COALESCE(SUM(roth_retirement_payment), 0)",
     insurance: "COALESCE(SUM(insurance_payment), 0)",
     loans: "COALESCE(SUM(loan_payment), 0)",
-    tips_paid_out: "COALESCE(SUM(tips_paid_out), 0)"
+    tips_paid_out: "COALESCE(SUM(tips_paid_out), 0)",
+    social_security_taxable_total: "COALESCE(SUM(COALESCE(social_security_taxable_wages + social_security_taxable_tips, gross_pay)), 0)",
+    medicare_taxable_wages: "COALESCE(SUM(COALESCE(medicare_taxable_wages, gross_pay)), 0)"
   }.freeze
 
   belongs_to :company
@@ -44,8 +49,10 @@ class Employee < ApplicationRecord
   has_many :employee_ytd_totals, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
   has_many :employee_wage_rates, dependent: :destroy
+  has_many :employee_tipped_occupations, dependent: :destroy
 
   before_validation :normalize_pay_rate_precision
+  before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
   before_validation :normalize_default_payroll_adjustments
 
@@ -75,6 +82,7 @@ class Employee < ApplicationRecord
     validates :w4_dependent_credit, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
+    validates :w4_form_version, numericality: { only_integer: true, greater_than_or_equal_to: 1987, less_than_or_equal_to: ->(_) { Date.current.year + 1 } }
   end
 
   scope :active, -> { where(status: "active") }
@@ -152,6 +160,14 @@ class Employee < ApplicationRecord
 
   def contractor_flat_fee?
     contractor? && contractor_pay_type == "flat_fee"
+  end
+
+  def normalized_filing_status
+    FilingStatusConfig.normalize(filing_status)
+  end
+
+  def supported_w4_form_version?
+    w4_form_version.to_i >= MIN_SUPPORTED_W4_FORM_VERSION
   end
 
   # TIN for 1099-NEC: EIN for business entities, SSN for individuals
@@ -294,6 +310,10 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def normalize_filing_status_value
+    self.filing_status = normalized_filing_status if filing_status.present?
+  end
 
   def normalize_default_payroll_adjustments
     self.default_payroll_adjustments = self.class.normalize_payroll_adjustments(default_payroll_adjustments)

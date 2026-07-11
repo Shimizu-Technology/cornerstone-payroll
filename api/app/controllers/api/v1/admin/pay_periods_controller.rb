@@ -307,6 +307,11 @@ module Api
                 payroll_item.tips_paid_out = tips_paid_out_val > 0 ? tips_paid_out_val : 0
               end
 
+              if params[:service_charge_wages] && params[:service_charge_wages][employee_id.to_s]
+                service_charge_val = params[:service_charge_wages][employee_id.to_s].to_f
+                payroll_item.service_charge_wages = service_charge_val > 0 ? service_charge_val : 0
+              end
+
               # Apply loan deductions from the Adjust Hours table
               if params[:loan_deductions] && params[:loan_deductions][employee_id.to_s]
                 loan_val = params[:loan_deductions][employee_id.to_s].to_f
@@ -1020,6 +1025,9 @@ module Api
             bonus: item.bonus,
             reported_tips: item.reported_tips,
             tips_paid_out: item.tips_paid_out,
+            cash_tips_reported: item.cash_tips_reported,
+            service_charge_wages: item.service_charge_wages,
+            qualified_overtime_compensation: item.qualified_overtime_compensation,
             additional_withholding: item.additional_withholding,
             additional_withholding_override: item.additional_withholding_override,
             withholding_tax_adjustment: item.withholding_tax_adjustment,
@@ -1028,6 +1036,14 @@ module Api
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
+            additional_medicare_tax: item.additional_medicare_tax,
+            fit_taxable_wages: item.fit_taxable_wages,
+            social_security_taxable_wages: item.social_security_taxable_wages,
+            social_security_taxable_tips: item.social_security_taxable_tips,
+            medicare_taxable_wages: item.medicare_taxable_wages,
+            additional_medicare_taxable_wages: item.additional_medicare_taxable_wages,
+            annual_tax_config_id: item.annual_tax_config_id,
+            tax_rule_snapshot: item.tax_rule_snapshot,
             state_withheld: payroll_item_state_withheld(item),
             retirement_payment: item.retirement_payment,
             roth_retirement_payment: item.roth_retirement_payment,

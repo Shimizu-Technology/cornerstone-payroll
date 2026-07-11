@@ -51,6 +51,8 @@ interface EditableFields {
   bonus: number;
   reported_tips: number;
   tips_paid_out: number;
+  service_charge_wages: number;
+  qualified_overtime_compensation: string;
   salary_override: string;
   non_taxable_pay: number;
   additional_withholding_override: string;
@@ -81,6 +83,8 @@ export function PayrollItemEditModal({
     bonus: 0,
     reported_tips: 0,
     tips_paid_out: 0,
+    service_charge_wages: 0,
+    qualified_overtime_compensation: '',
     salary_override: '',
     non_taxable_pay: 0,
     additional_withholding_override: '',
@@ -122,6 +126,8 @@ export function PayrollItemEditModal({
         bonus: item.bonus || 0,
         reported_tips: item.reported_tips || 0,
         tips_paid_out: item.tips_paid_out || 0,
+        service_charge_wages: item.service_charge_wages || 0,
+        qualified_overtime_compensation: item.qualified_overtime_compensation != null ? String(item.qualified_overtime_compensation) : '',
         salary_override: item.salary_override != null ? String(item.salary_override) : '',
         non_taxable_pay: item.non_taxable_pay || 0,
         additional_withholding_override: item.additional_withholding_override != null ? String(item.additional_withholding_override) : '',
@@ -176,7 +182,7 @@ export function PayrollItemEditModal({
   };
 
   const handleNumberFieldChange = (
-    field: 'hours_worked' | 'overtime_hours' | 'holiday_hours' | 'pto_hours' | 'bonus' | 'reported_tips' | 'tips_paid_out' | 'non_taxable_pay',
+    field: 'hours_worked' | 'overtime_hours' | 'holiday_hours' | 'pto_hours' | 'bonus' | 'reported_tips' | 'tips_paid_out' | 'service_charge_wages' | 'non_taxable_pay',
     value: number | null
   ) => {
     setFields((prev) => ({
@@ -254,6 +260,10 @@ export function PayrollItemEditModal({
         bonus: parseFloat(String(fields.bonus)) || 0,
         reported_tips: reportedTips,
         tips_paid_out: tipsPaidOut,
+        service_charge_wages: parseFloat(String(fields.service_charge_wages)) || 0,
+        qualified_overtime_compensation: fields.qualified_overtime_compensation === ''
+          ? null
+          : parseFloat(fields.qualified_overtime_compensation),
         non_taxable_pay: parseFloat(String(fields.non_taxable_pay)) || 0,
         additional_withholding_override: fields.additional_withholding_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.additional_withholding_override)) ? parseFloat(fields.additional_withholding_override) : null),
         withholding_tax_adjustment: fields.withholding_tax_adjustment.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_adjustment)) ? parseFloat(fields.withholding_tax_adjustment) : null),
@@ -378,7 +388,7 @@ export function PayrollItemEditModal({
                 </div>
               </div>
               <p className="text-xs text-amber-600 mt-2">
-                No taxes withheld — 1099-NEC issued at year-end for $600+
+                No payroll taxes withheld — year-end 1099 eligibility uses the configured payment-year threshold
               </p>
             </div>
           )}
@@ -540,6 +550,32 @@ export function PayrollItemEditModal({
                 />
                 <p className="text-xs text-gray-400 mt-0.5">
                   Reimbursements, allotments (not taxed)
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Mandatory Service Charges</label>
+                <NumericInput
+                  value={fields.service_charge_wages}
+                  onValueChange={(value) => handleNumberFieldChange('service_charge_wages', value)}
+                  min={0}
+                  fixedDecimalsOnBlur={2}
+                />
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Taxable wages distributed from mandatory charges; do not include these in reported tips.
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Qualified Overtime Premium</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={fields.qualified_overtime_compensation}
+                  onChange={(event) => handleChange('qualified_overtime_compensation', event.target.value)}
+                  placeholder="Requires review"
+                />
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Enter only the overtime premium required under FLSA section 7. Leave blank until eligibility is confirmed.
                 </p>
               </div>
               <div>

@@ -1,5 +1,7 @@
 # Cornerstone Payroll Platform Expansion And Implementation Plan
 
+> **Superseded for priority decisions (2026-07-11):** Preserve this document as platform-strategy history. The active implementation order, QuickBooks parity boundary, compliance corrections, and release gates are in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md).
+
 Date: 2026-05-13
 Status: planning / recommended next phase
 Owner: Shimizu Technology / Cornerstone Payroll

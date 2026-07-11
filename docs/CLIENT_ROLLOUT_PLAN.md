@@ -1,5 +1,7 @@
 # Cornerstone Payroll — Client-by-Client Rollout Plan (Week 1–4)
 
+> **Release-gate note (2026-07-11):** Use this plan for rollout mechanics only. A client may advance through it only after the applicable gates in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md) pass. Legacy "941-GU" references mean the standard Federal Form 941 workflow for Guam employers.
+
 **Last updated:** 2026-05-24
 **Execution start (Week 1):** TBD — set before kickoff meeting  
 **Owner:** Leon + Cornerstone Ops + Dev Team  

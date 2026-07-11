@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+require "rails_helper"
+
+RSpec.describe InformationReturnThreshold, type: :model do
+  it "selects the threshold by form and tax year" do
+    rule = create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
+
+    expect(described_class.for!(form_type: :"1099_nec", tax_year: 2026)).to eq(rule)
+  end
+
+  it "fails closed when a year has no configured threshold" do
+    expect {
+      described_class.for!(form_type: :"1099_nec", tax_year: 2099)
+    }.to raise_error(ArgumentError, /No 1099_nec reporting threshold/)
+  end
+end
