@@ -76,6 +76,8 @@ class IssueCorrectivePaycheckService
     custom_deductions
     custom_columns_data
     non_taxable_pay
+    service_charge_wages
+    qualified_overtime_compensation
   ].freeze
 
   # Fields whose deltas we transcribe onto the supplemental row. These
@@ -96,6 +98,18 @@ class IssueCorrectivePaycheckService
     total_additions
     total_deductions
     net_pay
+  ].freeze
+
+  REPORTING_DELTA_FIELDS = %i[
+    fit_taxable_wages
+    social_security_taxable_wages
+    social_security_taxable_tips
+    medicare_taxable_wages
+    additional_medicare_taxable_wages
+    additional_medicare_tax
+    cash_tips_reported
+    service_charge_wages
+    qualified_overtime_compensation
   ].freeze
 
   # @param original_pay_period [PayPeriod]  must be committed, regular, non-voided
@@ -203,7 +217,7 @@ class IssueCorrectivePaycheckService
       supplemental.reload
       corrective_item.reload
 
-      [supplemental, corrective_item]
+      [ supplemental, corrective_item ]
     end
   end
 
@@ -289,10 +303,15 @@ class IssueCorrectivePaycheckService
   # original was processed.
   # ---------------------------------------------------------------------
   def corrected_item
-    @corrected_item ||= build_and_calculate_corrected_item
+    @corrected_item ||= build_and_calculate_item(@corrected_inputs)
   end
 
-  def build_and_calculate_corrected_item
+  def recalculated_original_item
+    @recalculated_original_item ||= build_and_calculate_item({})
+  end
+
+  def build_and_calculate_item(overrides)
+    input_value = ->(key, fallback) { overrides.key?(key) ? overrides[key] : fallback }
     temp = PayrollItem.new(
       employee_id:              @employee.id,
       company_id:               @original_pay_period.company_id,
@@ -300,23 +319,28 @@ class IssueCorrectivePaycheckService
       employment_type:          original_item.employment_type,
 
       # Inputs: original values overlaid with operator-supplied corrections.
-      pay_rate:                 corrected_input(:pay_rate, original_item.pay_rate),
-      hours_worked:             corrected_input(:hours_worked, original_item.hours_worked),
-      overtime_hours:           corrected_input(:overtime_hours, original_item.overtime_hours),
-      holiday_hours:            corrected_input(:holiday_hours, original_item.holiday_hours),
-      pto_hours:                corrected_input(:pto_hours, original_item.pto_hours),
-      bonus:                    corrected_input(:bonus, original_item.bonus),
-      reported_tips:            corrected_input(:reported_tips, original_item.reported_tips),
-      tips_paid_out:            corrected_input(:tips_paid_out, original_item.tips_paid_out),
-      tip_pool:                 corrected_input(:tip_pool, original_item.tip_pool),
-      non_taxable_pay:          corrected_input(:non_taxable_pay, original_item.non_taxable_pay),
-      additional_withholding:   corrected_input(:additional_withholding, original_item.additional_withholding),
-      additional_withholding_override: corrected_input(:additional_withholding_override, original_item.additional_withholding_override),
-      withholding_tax_adjustment: corrected_input(:withholding_tax_adjustment, original_item.withholding_tax_adjustment),
+      pay_rate:                 input_value.call(:pay_rate, original_item.pay_rate),
+      hours_worked:             input_value.call(:hours_worked, original_item.hours_worked),
+      overtime_hours:           input_value.call(:overtime_hours, original_item.overtime_hours),
+      holiday_hours:            input_value.call(:holiday_hours, original_item.holiday_hours),
+      pto_hours:                input_value.call(:pto_hours, original_item.pto_hours),
+      bonus:                    input_value.call(:bonus, original_item.bonus),
+      reported_tips:            input_value.call(:reported_tips, original_item.reported_tips),
+      tips_paid_out:            input_value.call(:tips_paid_out, original_item.tips_paid_out),
+      tip_pool:                 input_value.call(:tip_pool, original_item.tip_pool),
+      non_taxable_pay:          input_value.call(:non_taxable_pay, original_item.non_taxable_pay),
+      service_charge_wages:     input_value.call(:service_charge_wages, original_item.service_charge_wages),
+      qualified_overtime_compensation: input_value.call(
+        :qualified_overtime_compensation,
+        original_item.qualified_overtime_compensation
+      ),
+      additional_withholding:   input_value.call(:additional_withholding, original_item.additional_withholding),
+      additional_withholding_override: input_value.call(:additional_withholding_override, original_item.additional_withholding_override),
+      withholding_tax_adjustment: input_value.call(:withholding_tax_adjustment, original_item.withholding_tax_adjustment),
       withholding_tax_override: original_item.withholding_tax_override, # not currently overridable
-      custom_earnings:          corrected_input(:custom_earnings, original_item.custom_earnings),
-      custom_deductions:        corrected_input(:custom_deductions, original_item.custom_deductions),
-      custom_columns_data:      corrected_input(:custom_columns_data, original_item.custom_columns_data),
+      custom_earnings:          input_value.call(:custom_earnings, original_item.custom_earnings),
+      custom_deductions:        input_value.call(:custom_deductions, original_item.custom_deductions),
+      custom_columns_data:      input_value.call(:custom_columns_data, original_item.custom_columns_data),
       loan_deduction:           original_item.loan_deduction,
       import_source:            original_item.import_source
     )
@@ -397,17 +421,13 @@ class IssueCorrectivePaycheckService
   # ---------------------------------------------------------------------
   # Inputs / deltas
   # ---------------------------------------------------------------------
-  def corrected_input(key, fallback)
-    @corrected_inputs.key?(key) ? @corrected_inputs[key] : fallback
-  end
-
   def corrected_tip_pool
     source = @corrected_inputs.key?(:tip_pool) ? @corrected_inputs[:tip_pool] : corrected_item.tip_pool
     source.presence
   end
 
   def snapshot(item)
-    DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
+    (DELTA_OUTPUT_FIELDS + REPORTING_DELTA_FIELDS).each_with_object({}) do |field, h|
       h[field] = item.public_send(field).to_f.round(4)
     end.merge(
       hours_worked:   item.hours_worked.to_f,
@@ -425,9 +445,14 @@ class IssueCorrectivePaycheckService
   end
 
   def delta_hash
-    DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
+    financial_deltas = DELTA_OUTPUT_FIELDS.each_with_object({}) do |field, h|
       h[field] = (corrected_item.public_send(field).to_f - original_item.public_send(field).to_f).round(2)
-    end.merge(
+    end
+    reporting_deltas = REPORTING_DELTA_FIELDS.each_with_object({}) do |field, deltas|
+      deltas[field] = (corrected_item.public_send(field).to_d - original_reporting_value(field)).round(2)
+    end
+
+    financial_deltas.merge(reporting_deltas).merge(
       hours_worked_delta:   (corrected_item.hours_worked.to_f - original_item.hours_worked.to_f).round(2),
       overtime_hours_delta: (corrected_item.overtime_hours.to_f - original_item.overtime_hours.to_f).round(2),
       holiday_hours_delta:  (corrected_item.holiday_hours.to_f - original_item.holiday_hours.to_f).round(2),
@@ -435,6 +460,13 @@ class IssueCorrectivePaycheckService
       reported_tips_delta:  (corrected_item.reported_tips.to_f - original_item.reported_tips.to_f).round(2),
       tips_paid_out_delta:  (corrected_item.tips_paid_out.to_f - original_item.tips_paid_out.to_f).round(2)
     )
+  end
+
+  def original_reporting_value(field)
+    stored_value = original_item.public_send(field)
+    return stored_value.to_d unless stored_value.nil?
+
+    recalculated_original_item.public_send(field).to_d
   end
 
   def net_delta
@@ -510,6 +542,17 @@ class IssueCorrectivePaycheckService
       total_additions:                 deltas[:total_additions],
       total_deductions:                deltas[:total_deductions],
       net_pay:                         deltas[:net_pay],
+      fit_taxable_wages:               deltas[:fit_taxable_wages],
+      social_security_taxable_wages:   deltas[:social_security_taxable_wages],
+      social_security_taxable_tips:    deltas[:social_security_taxable_tips],
+      medicare_taxable_wages:          deltas[:medicare_taxable_wages],
+      additional_medicare_taxable_wages: deltas[:additional_medicare_taxable_wages],
+      additional_medicare_tax:         deltas[:additional_medicare_tax],
+      cash_tips_reported:              deltas[:cash_tips_reported],
+      service_charge_wages:            deltas[:service_charge_wages],
+      qualified_overtime_compensation: deltas[:qualified_overtime_compensation],
+      annual_tax_config_id:            corrected_item.annual_tax_config_id,
+      tax_rule_snapshot:               corrected_item.tax_rule_snapshot,
 
       # No deductions on the corrective row — the original period already
       # captured the period's deductions; the corrective covers only the

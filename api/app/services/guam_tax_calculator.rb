@@ -91,12 +91,24 @@ class GuamTaxCalculator
 
   def taxable_bases(gross_pay:, reported_tips:, ytd_ss_taxable_wages:, ytd_medicare_wages:)
     gross = gross_pay.to_d
-    tips = [ reported_tips.to_d, 0.to_d ].max
-    wages_only = gross.negative? ? gross : [ gross - tips, 0.to_d ].max
-    remaining_ss = [ tax_table.ss_wage_base.to_d - ytd_ss_taxable_wages.to_d, 0.to_d ].max
-    ss_wages = gross.negative? ? gross : [ wages_only, remaining_ss ].min
-    remaining_after_wages = [ remaining_ss - [ ss_wages, 0.to_d ].max, 0.to_d ].max
-    ss_tips = gross.negative? ? 0.to_d : [ tips, remaining_after_wages ].min
+    reported_tip_amount = reported_tips.to_d
+
+    if gross.negative? || reported_tip_amount.negative?
+      # Correction rows store signed deltas. Preserve the signed wage/tip
+      # components so annual and quarterly reports reverse the same buckets
+      # as the original paycheck.
+      tips = [ reported_tip_amount, 0.to_d ].min
+      wages_only = gross - tips
+      ss_wages = wages_only
+      ss_tips = tips
+    else
+      tips = reported_tip_amount
+      wages_only = [ gross - tips, 0.to_d ].max
+      remaining_ss = [ tax_table.ss_wage_base.to_d - ytd_ss_taxable_wages.to_d, 0.to_d ].max
+      ss_wages = [ wages_only, remaining_ss ].min
+      remaining_after_wages = [ remaining_ss - ss_wages, 0.to_d ].max
+      ss_tips = [ tips, remaining_after_wages ].min
+    end
 
     prior_excess = [ ytd_medicare_wages.to_d - tax_table.additional_medicare_threshold.to_d, 0.to_d ].max
     current_excess = [ ytd_medicare_wages.to_d + gross - tax_table.additional_medicare_threshold.to_d, 0.to_d ].max

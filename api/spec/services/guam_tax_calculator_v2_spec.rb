@@ -61,6 +61,25 @@ RSpec.describe GuamTaxCalculatorV2 do
     expect(result[:additional_medicare]).to eq(18.00)
   end
 
+  it "preserves signed wage and tip buckets for correction entries" do
+    calculator = described_class.new(
+      tax_year: 2030,
+      filing_status: "single",
+      pay_frequency: "biweekly"
+    )
+
+    result = calculator.calculate(
+      gross_pay: -300,
+      reported_tips: -200,
+      ytd_ss_taxable_wages: 1_000,
+      ytd_medicare_wages: 1_000
+    )
+
+    expect(result[:social_security_taxable_wages]).to eq(-100.00)
+    expect(result[:social_security_taxable_tips]).to eq(-200.00)
+    expect(result[:social_security]).to eq(-18.60)
+  end
+
   it "blocks pre-2020 W-4 forms instead of silently applying modern rules" do
     expect {
       described_class.new(
