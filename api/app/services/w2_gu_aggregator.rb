@@ -182,7 +182,8 @@ class W2GuAggregator
 
       # Box 12: Coded amounts (D=401k, AA=Roth 401k)
       box12: box12,
-      box14b_tipped_occupation_codes: tipped_occupation_codes,
+      box14b_tipped_occupation_codes: tipped_occupation_codes.first(2),
+      excess_box14b_tipped_occupation_codes: tipped_occupation_codes.length > 2,
 
       # Box 13: Checkboxes
       box13_retirement_plan: has_retirement_plan,
@@ -225,7 +226,6 @@ class W2GuAggregator
             .map(&:occupation_code)
             .uniq
             .sort
-            .first(2)
   end
 
   def compliance_issues(rows)
@@ -259,6 +259,11 @@ class W2GuAggregator
         row[:reported_tips_total].to_f.positive? && row[:box14b_tipped_occupation_codes].blank?
       end
       issues << "#{missing_occupation_codes} tipped employee(s) missing Treasury tipped occupation code" if missing_occupation_codes.positive?
+
+      excess_occupation_codes = rows.count { |row| row[:excess_box14b_tipped_occupation_codes] }
+      if excess_occupation_codes.positive?
+        issues << "#{excess_occupation_codes} employee(s) have more than two tipped occupation codes; review Box 14b before filing"
+      end
     end
 
     issues

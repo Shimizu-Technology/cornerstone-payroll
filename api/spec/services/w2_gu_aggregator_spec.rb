@@ -140,6 +140,37 @@ RSpec.describe W2GuAggregator do
       )
     end
 
+    it "flags tipped employees whose occupation codes exceed the Box 14b export capacity" do
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 14),
+        pay_date: Date.new(2026, 3, 18))
+      %w[101 202 303].each do |occupation_code|
+        create(:employee_tipped_occupation,
+          employee: employee,
+          occupation_code: occupation_code,
+          effective_from: Date.new(2026, 1, 1))
+      end
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 500.0,
+        reported_tips: 100.0,
+        cash_tips_reported: 100.0,
+        social_security_taxable_wages: 400.0,
+        social_security_taxable_tips: 100.0,
+        medicare_taxable_wages: 500.0,
+        qualified_overtime_compensation: 0.0)
+
+      report = described_class.new(company, 2026).generate
+
+      expect(report[:employees].sole[:box14b_tipped_occupation_codes]).to eq(%w[101 202])
+      expect(report[:compliance_issues]).to include(
+        "1 employee(s) have more than two tipped occupation codes; review Box 14b before filing"
+      )
+    end
+
     it "uses the filing-year AnnualTaxConfig wage base before the compatibility constant" do
       create(:annual_tax_config, tax_year: 2024, ss_wage_base: 1_000.0)
       pay_period = create(:pay_period, :committed,
