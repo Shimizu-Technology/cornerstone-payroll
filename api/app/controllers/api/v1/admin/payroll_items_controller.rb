@@ -63,7 +63,7 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound, ArgumentError => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
@@ -85,7 +85,7 @@ module Api
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
@@ -121,7 +121,7 @@ module Api
           @payroll_item.apply_default_payroll_adjustments_if_unset!(@payroll_item.employee)
           @payroll_item.calculate!
           render json: { payroll_item: payroll_item_json(@payroll_item) }
-        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique => e
+        rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 

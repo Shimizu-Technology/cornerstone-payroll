@@ -36,7 +36,9 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
           working-directory: api
-      - run: bundle exec rails db:prepare
+      # Schema-only setup keeps deterministic test fixtures separate from
+      # operational tax-rule seeds loaded by db:prepare on a new database.
+      - run: bundle exec rails db:schema:load
       - run: bundle exec rspec
       - run: bundle exec brakeman -q
       - run: bundle exec bundler-audit check --update

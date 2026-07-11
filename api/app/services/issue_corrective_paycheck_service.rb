@@ -376,7 +376,7 @@ class IssueCorrectivePaycheckService
       .where("(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id < ?)",
              pay_date, pay_date, @original_pay_period.id)
 
-    @employee.ytd_totals_for_scope(scope)
+    @employee.ytd_totals_for_scope(scope, tax_year: year)
   end
 
   def ytd_sum_excluding_original(column)

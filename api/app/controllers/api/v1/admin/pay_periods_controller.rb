@@ -1469,35 +1469,16 @@ module Api
                                           .pluck(:id)
 
           if committed_period_ids.any?
+            aggregate_columns = Employee.ytd_aggregate_columns_for_year(year)
             rows = PayrollItem.where(employee_id: eids, pay_period_id: committed_period_ids)
                               .not_voided
                               .group(:employee_id)
                               .pluck(
                                 :employee_id,
-                                Arel.sql("COALESCE(SUM(gross_pay), 0)"),
-                                Arel.sql("COALESCE(SUM(net_pay), 0)"),
-                                Arel.sql("COALESCE(SUM(withholding_tax), 0)"),
-                                Arel.sql("COALESCE(SUM(social_security_tax), 0)"),
-                                Arel.sql("COALESCE(SUM(medicare_tax), 0)"),
-                                Arel.sql("COALESCE(SUM(additional_withholding), 0)"),
-                                Arel.sql("COALESCE(SUM(retirement_payment), 0)"),
-                                Arel.sql("COALESCE(SUM(roth_retirement_payment), 0)"),
-                                Arel.sql("COALESCE(SUM(insurance_payment), 0)"),
-                                Arel.sql("COALESCE(SUM(loan_payment), 0)")
+                                *aggregate_columns.values.map { |sql| Arel.sql(sql) }
                               )
-            ytd_map = rows.each_with_object({}) do |(eid, gross, net, fit, ss, medicare, addl_wh, retirement, roth_retirement, insurance, loans), h|
-              h[eid] = {
-                gross_pay: gross.to_f,
-                net_pay: net.to_f,
-                withholding_tax: fit.to_f,
-                social_security_tax: ss.to_f,
-                medicare_tax: medicare.to_f,
-                additional_withholding: addl_wh.to_f,
-                retirement: retirement.to_f,
-                roth_retirement: roth_retirement.to_f,
-                insurance: insurance.to_f,
-                loans: loans.to_f
-              }
+            ytd_map = rows.each_with_object({}) do |(employee_id, *values), map|
+              map[employee_id] = aggregate_columns.keys.zip(values.map(&:to_f)).to_h
             end
           else
             ytd_map = {}

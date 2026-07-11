@@ -134,6 +134,16 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body).fetch("errors").first).to include("duplicate key value")
     end
+
+    it "returns a validation response when calculation rules reject the employee W-4" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.merge(auto_calculate: true)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
+    end
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
@@ -162,6 +172,19 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+
+    it "returns a validation response when calculation rules reject an update" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        auto_calculate: true,
+        payroll_item: { hours_worked: 10 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
     end
 
     it "returns a validation response when update hits a payroll field entry uniqueness race" do
@@ -484,6 +507,15 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+    it "returns a validation response when calculation rules reject recalculation" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
     end
   end
 

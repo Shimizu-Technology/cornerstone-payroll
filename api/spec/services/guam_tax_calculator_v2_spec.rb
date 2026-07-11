@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe GuamTaxCalculatorV2 do
   let!(:annual_config) do
     create(:annual_tax_config,
-      tax_year: 2026,
+      tax_year: 2030,
       ss_wage_base: 184_500,
       ss_rate: 0.062,
       medicare_rate: 0.0145,
@@ -31,7 +31,7 @@ RSpec.describe GuamTaxCalculatorV2 do
 
   it "normalizes married filing separately to the single-or-separate configuration" do
     calculator = described_class.new(
-      tax_year: 2026,
+      tax_year: 2030,
       filing_status: "married_separate",
       pay_frequency: "biweekly"
     )
@@ -41,7 +41,7 @@ RSpec.describe GuamTaxCalculatorV2 do
 
   it "returns the committed taxable bases and separate Additional Medicare amount" do
     calculator = described_class.new(
-      tax_year: 2026,
+      tax_year: 2030,
       filing_status: "single",
       pay_frequency: "biweekly"
     )
@@ -64,7 +64,7 @@ RSpec.describe GuamTaxCalculatorV2 do
   it "blocks pre-2020 W-4 forms instead of silently applying modern rules" do
     expect {
       described_class.new(
-        tax_year: 2026,
+        tax_year: 2030,
         filing_status: "single",
         pay_frequency: "biweekly",
         w4_form_version: 2019

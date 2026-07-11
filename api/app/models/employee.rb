@@ -7,6 +7,7 @@ class Employee < ApplicationRecord
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
   MIN_SUPPORTED_W4_FORM_VERSION = 2020
+  LEGACY_SOCIAL_SECURITY_RATE = BigDecimal("0.062")
   YTD_AGGREGATE_SOURCE_COLUMNS = {
     gross_pay: :gross_pay,
     net_pay: :net_pay,
@@ -37,6 +38,28 @@ class Employee < ApplicationRecord
     social_security_taxable_total: "COALESCE(SUM(COALESCE(social_security_taxable_wages + social_security_taxable_tips, gross_pay)), 0)",
     medicare_taxable_wages: "COALESCE(SUM(COALESCE(medicare_taxable_wages, gross_pay)), 0)"
   }.freeze
+
+  def self.social_security_rate_for_year(year)
+    AnnualTaxConfig.for_year(year)&.ss_rate&.to_d ||
+      TaxTable.for_year(year).where.not(ss_rate: nil).pick(:ss_rate)&.to_d ||
+      LEGACY_SOCIAL_SECURITY_RATE
+  end
+
+  def self.ytd_aggregate_columns_for_year(year)
+    rate = connection.quote(social_security_rate_for_year(year))
+    YTD_AGGREGATE_COLUMNS.merge(
+      social_security_taxable_total: <<~SQL.squish
+        COALESCE(SUM(
+          CASE
+            WHEN social_security_taxable_wages IS NOT NULL
+             AND social_security_taxable_tips IS NOT NULL
+              THEN social_security_taxable_wages + social_security_taxable_tips
+            ELSE social_security_tax / NULLIF(#{rate}, 0)
+          END
+        ), 0)
+      SQL
+    )
+  end
 
   belongs_to :company
   belongs_to :department, optional: true
@@ -239,11 +262,12 @@ class Employee < ApplicationRecord
     )
   end
 
-  def ytd_totals_for_scope(scope)
-    select_list = YTD_AGGREGATE_COLUMNS.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
+  def ytd_totals_for_scope(scope, tax_year:)
+    columns = self.class.ytd_aggregate_columns_for_year(tax_year)
+    select_list = columns.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
     row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
 
-    YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, totals|
+    columns.keys.each_with_object({}) do |key, totals|
       totals[key] = row[key.to_s].to_f
     end
   end
@@ -356,7 +380,7 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    ytd_totals_for_scope(scope)
+    ytd_totals_for_scope(scope, tax_year: year)
   end
 
   def pay_date_range_for_year(year)

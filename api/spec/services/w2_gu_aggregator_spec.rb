@@ -110,5 +110,25 @@ RSpec.describe W2GuAggregator do
       expect(report[:totals][:box12_code_tp_total]).to eq(200.0)
       expect(report[:totals][:box12_code_tt_total]).to eq(50.0)
     end
+
+    it "uses the filing-year AnnualTaxConfig wage base before the compatibility constant" do
+      create(:annual_tax_config, tax_year: 2024, ss_wage_base: 1_000.0)
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2024, 1, 1),
+        end_date: Date.new(2024, 1, 14),
+        pay_date: Date.new(2024, 1, 18))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 1_200.0,
+        social_security_taxable_wages: 1_200.0,
+        social_security_taxable_tips: 0.0,
+        medicare_taxable_wages: 1_200.0)
+
+      row = described_class.new(company, 2024).generate[:employees].sole
+
+      expect(row[:box3_social_security_wages]).to eq(1_000.0)
+    end
   end
 end

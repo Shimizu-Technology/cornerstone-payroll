@@ -142,8 +142,8 @@ class PayrollCalculator
     payroll_item.medicare_taxable_wages = taxes[:medicare_taxable_wages]
     payroll_item.additional_medicare_taxable_wages = taxes[:additional_medicare_taxable_wages]
     payroll_item.annual_tax_config = tax_calculator.respond_to?(:annual_config) ? tax_calculator.annual_config : nil
-    payroll_item.tax_rule_snapshot = tax_calculator.rule_snapshot.merge(employee_w4_snapshot)
     sync_additional_withholding_from_employee!
+    payroll_item.tax_rule_snapshot = tax_calculator.rule_snapshot.merge(employee_w4_snapshot)
   end
 
   def capture_payroll_reporting_components!
@@ -429,7 +429,9 @@ class PayrollCalculator
         "step3_dependent_credit" => employee.w4_dependent_credit.to_f,
         "step4a_other_income" => employee.w4_step4a_other_income.to_f,
         "step4b_deductions" => employee.w4_step4b_deductions.to_f,
-        "step4c_extra_withholding" => employee.additional_withholding.to_f,
+        "step4c_extra_withholding" => payroll_item.additional_withholding.to_f,
+        "step4c_configured_extra_withholding" => employee.additional_withholding.to_f,
+        "step4c_override" => payroll_item.additional_withholding_override&.to_f,
         "legacy_allowances" => employee.allowances
       }
     }

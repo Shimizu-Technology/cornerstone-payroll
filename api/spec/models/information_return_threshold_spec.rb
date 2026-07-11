@@ -4,7 +4,8 @@ require "rails_helper"
 
 RSpec.describe InformationReturnThreshold, type: :model do
   it "selects the threshold by form and tax year" do
-    rule = create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
+    rule = described_class.find_or_initialize_by(form_type: "1099_nec", tax_year: 2026)
+    rule.update!(threshold_amount: 2_000, source_url: "https://www.irs.gov/instructions/i1099mec", effective_on: Date.new(2026, 1, 1))
 
     expect(described_class.for!(form_type: :"1099_nec", tax_year: 2026)).to eq(rule)
   end
