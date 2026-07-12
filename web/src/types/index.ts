@@ -189,6 +189,8 @@ export interface Employee {
   w4_step2_multiple_jobs: boolean;
   w4_step4a_other_income: number;
   w4_step4b_deductions: number;
+  w4_form_version: number;
+  w4_effective_on?: string | null;
   retirement_rate: number;
   roth_retirement_rate: number;
   employer_retirement_match_rate?: number;
@@ -232,6 +234,8 @@ export interface EmployeeFormData {
   w4_step2_multiple_jobs: boolean;
   w4_step4a_other_income: number;
   w4_step4b_deductions: number;
+  w4_form_version: number;
+  w4_effective_on?: string | null;
   retirement_rate: number;
   roth_retirement_rate: number;
   department_id?: number;
@@ -447,6 +451,9 @@ export interface PayrollItem {
   // Additional earnings
   reported_tips?: number;
   tips_paid_out?: number;
+  cash_tips_reported?: number | null;
+  service_charge_wages?: number | null;
+  qualified_overtime_compensation?: number | null;
   bonus?: number;
   salary_override?: number | null;
   non_taxable_pay?: number;
@@ -459,6 +466,14 @@ export interface PayrollItem {
   withholding_tax?: number; // Guam Territorial Income Tax (same as federal)
   social_security_tax?: number;
   medicare_tax?: number;
+  additional_medicare_tax?: number | null;
+  fit_taxable_wages?: number | null;
+  social_security_taxable_wages?: number | null;
+  social_security_taxable_tips?: number | null;
+  medicare_taxable_wages?: number | null;
+  additional_medicare_taxable_wages?: number | null;
+  annual_tax_config_id?: number | null;
+  tax_rule_snapshot?: Record<string, unknown>;
   state_withheld?: number | null;
   additional_withholding?: number;
   additional_withholding_override?: number | null;

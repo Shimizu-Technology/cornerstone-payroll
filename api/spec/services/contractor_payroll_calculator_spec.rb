@@ -29,6 +29,20 @@ RSpec.describe ContractorPayrollCalculator do
     )
   end
 
+  it "persists mandatory service charges without applying employee payroll taxes" do
+    payroll_item.service_charge_wages = 30.00
+
+    payroll_item.calculate!
+
+    service_charge = payroll_item.reload.payroll_item_earnings.find_by(category: "service_charge")
+    expect(service_charge).to be_present
+    expect(service_charge.amount).to eq(30.00)
+    expect(payroll_item.gross_pay).to eq(280.00)
+    expect(payroll_item.net_pay).to eq(280.00)
+    expect(payroll_item.social_security_tax).to eq(0.00)
+    expect(payroll_item.medicare_tax).to eq(0.00)
+  end
+
   it "records employer contribution payroll field entries without reducing contractor net pay" do
     contribution_field = PayrollFieldDefinition.create!(
       company: company,

@@ -70,5 +70,125 @@ RSpec.describe W2GuAggregator do
       expect(row[:reported_tips_total]).to eq(25.0)
       expect(report[:totals][:box1_wages_tips_other_comp]).to eq(950.0)
     end
+
+
+    it "uses committed 2026 tax bases and emits TP, TT, and Box 14b data" do
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 1, 1),
+        end_date: Date.new(2026, 1, 14),
+        pay_date: Date.new(2026, 1, 18))
+      create(:employee_tipped_occupation,
+        employee: employee,
+        occupation_code: "101",
+        effective_from: Date.new(2026, 1, 1))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 1_200.0,
+        reported_tips: 200.0,
+        cash_tips_reported: 200.0,
+        social_security_taxable_wages: 1_000.0,
+        social_security_taxable_tips: 200.0,
+        medicare_taxable_wages: 1_200.0,
+        qualified_overtime_compensation: 50.0,
+        withholding_tax: 100.0,
+        social_security_tax: 74.4,
+        medicare_tax: 17.4)
+
+      report = described_class.new(company, 2026).generate
+      row = report[:employees].sole
+
+      expect(row[:box3_social_security_wages]).to eq(1_000.0)
+      expect(row[:box7_social_security_tips]).to eq(200.0)
+      expect(row[:box5_medicare_wages_tips]).to eq(1_200.0)
+      expect(row[:box12]).to include(
+        include(code: "TP", amount: 200.0),
+        include(code: "TT", amount: 50.0)
+      )
+      expect(row[:box14b_tipped_occupation_codes]).to eq([ "101" ])
+      expect(report[:totals][:box12_code_tp_total]).to eq(200.0)
+      expect(report[:totals][:box12_code_tt_total]).to eq(50.0)
+    end
+
+    it "blocks negative annual TP and TT amounts from Box 12" do
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 2, 1),
+        end_date: Date.new(2026, 2, 14),
+        pay_date: Date.new(2026, 2, 18))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: -100.0,
+        reported_tips: -25.0,
+        cash_tips_reported: -25.0,
+        qualified_overtime_compensation: -10.0,
+        social_security_taxable_wages: -75.0,
+        social_security_taxable_tips: 0.0,
+        medicare_taxable_wages: -100.0)
+
+      report = described_class.new(company, 2026).generate
+      row = report[:employees].sole
+
+      expect(row[:box12]).not_to include(include(code: "TP"), include(code: "TT"))
+      expect(report[:totals][:box12_code_tp_total]).to eq(0.0)
+      expect(report[:totals][:box12_code_tt_total]).to eq(0.0)
+      expect(report[:compliance_issues]).to include(
+        "1 employee(s) have negative annual cash tips; Box 12 TP is blocked pending correction review",
+        "1 employee(s) have negative annual qualified overtime; Box 12 TT is blocked pending correction review"
+      )
+    end
+
+    it "flags tipped employees whose occupation codes exceed the Box 14b export capacity" do
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 14),
+        pay_date: Date.new(2026, 3, 18))
+      %w[101 202 303].each do |occupation_code|
+        create(:employee_tipped_occupation,
+          employee: employee,
+          occupation_code: occupation_code,
+          effective_from: Date.new(2026, 1, 1))
+      end
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 500.0,
+        reported_tips: 100.0,
+        cash_tips_reported: 100.0,
+        social_security_taxable_wages: 400.0,
+        social_security_taxable_tips: 100.0,
+        medicare_taxable_wages: 500.0,
+        qualified_overtime_compensation: 0.0)
+
+      report = described_class.new(company, 2026).generate
+
+      expect(report[:employees].sole[:box14b_tipped_occupation_codes]).to eq(%w[101 202])
+      expect(report[:compliance_issues]).to include(
+        "1 employee(s) have more than two tipped occupation codes; review Box 14b before filing"
+      )
+    end
+
+    it "uses the filing-year AnnualTaxConfig wage base before the compatibility constant" do
+      create(:annual_tax_config, tax_year: 2024, ss_wage_base: 1_000.0)
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2024, 1, 1),
+        end_date: Date.new(2024, 1, 14),
+        pay_date: Date.new(2024, 1, 18))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 1_200.0,
+        social_security_taxable_wages: 1_200.0,
+        social_security_taxable_tips: 0.0,
+        medicare_taxable_wages: 1_200.0)
+
+      row = described_class.new(company, 2024).generate[:employees].sole
+
+      expect(row[:box3_social_security_wages]).to eq(1_000.0)
+    end
   end
 end

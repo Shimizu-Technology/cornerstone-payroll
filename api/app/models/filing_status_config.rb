@@ -3,6 +3,11 @@
 # Stores standard deduction for a specific filing status within a tax year.
 class FilingStatusConfig < ApplicationRecord
   FILING_STATUSES = %w[single married head_of_household].freeze
+  ALIASES = {
+    "married_separate" => "single",
+    "single_or_married_filing_separately" => "single",
+    "married_filing_jointly" => "married"
+  }.freeze
 
   belongs_to :annual_tax_config
   has_many :tax_brackets, -> { order(:bracket_order) }, dependent: :destroy
@@ -10,6 +15,11 @@ class FilingStatusConfig < ApplicationRecord
   validates :filing_status, presence: true, inclusion: { in: FILING_STATUSES }
   validates :filing_status, uniqueness: { scope: :annual_tax_config_id }
   validates :standard_deduction, presence: true, numericality: { greater_than_or_equal_to: 0 }
+
+  def self.normalize(value)
+    normalized = value.to_s.strip
+    ALIASES.fetch(normalized, normalized)
+  end
 
   # Calculate per-period standard deduction
   def standard_deduction_per_period(periods_per_year)

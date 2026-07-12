@@ -429,6 +429,8 @@ module Api
           render json: { report: report }
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/reports/form_1099_nec_pdf
@@ -446,6 +448,8 @@ module Api
             disposition: "attachment"
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def form_1099_nec_xlsx
@@ -460,6 +464,8 @@ module Api
           )
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/reports/w2_gu_preflight

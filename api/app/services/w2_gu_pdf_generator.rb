@@ -150,7 +150,12 @@ class W2GuPdfGenerator
   def render_box12_13_block(pdf)
     totals = report[:totals] || {}
 
-    has_box12 = (totals[:box12_code_d_total].to_f > 0 || totals[:box12_code_aa_total].to_f > 0)
+    has_box12 = (
+      totals[:box12_code_d_total].to_f > 0 ||
+      totals[:box12_code_aa_total].to_f > 0 ||
+      totals[:box12_code_tp_total].to_f != 0 ||
+      totals[:box12_code_tt_total].to_f != 0
+    )
     has_box13 = totals[:retirement_plan_participants].to_i > 0
 
     return unless has_box12 || has_box13
@@ -161,6 +166,8 @@ class W2GuPdfGenerator
     rows = []
     rows << [ "Box 12 Code D \u2014 401(k) Elective Deferrals", fmt(totals[:box12_code_d_total]) ] if totals[:box12_code_d_total].to_f > 0
     rows << [ "Box 12 Code AA \u2014 Roth 401(k) Contributions", fmt(totals[:box12_code_aa_total]) ] if totals[:box12_code_aa_total].to_f > 0
+    rows << [ "Box 12 Code TP \u2014 Cash Tips Reported", fmt(totals[:box12_code_tp_total]) ] if totals[:box12_code_tp_total].to_f != 0
+    rows << [ "Box 12 Code TT \u2014 Qualified Overtime", fmt(totals[:box12_code_tt_total]) ] if totals[:box12_code_tt_total].to_f != 0
     rows << [ "Box 13 \u2014 Retirement Plan Participants", "#{totals[:retirement_plan_participants]} employee(s)" ] if has_box13
 
     table_data = rows.map { |label, val|

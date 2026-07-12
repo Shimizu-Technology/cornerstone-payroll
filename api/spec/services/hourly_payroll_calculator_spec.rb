@@ -96,7 +96,8 @@ RSpec.describe HourlyPayrollCalculator do
         employment_type: "hourly",
         pay_rate: 15.00,
         hours_worked: 40,
-        overtime_hours: 10
+        overtime_hours: 10,
+        qualified_overtime_compensation: 75.00
       )
     end
 
@@ -108,6 +109,24 @@ RSpec.describe HourlyPayrollCalculator do
       # Overtime: 10 * 15 * 1.5 = 225
       # Total: 825
       expect(payroll_item.gross_pay).to eq(825.00)
+      expect(payroll_item.qualified_overtime_compensation).to eq(75.00)
+      expect(payroll_item.fit_taxable_wages).to eq(825.00)
+      expect(payroll_item.social_security_taxable_wages).to eq(825.00)
+      expect(payroll_item.social_security_taxable_tips).to eq(0.00)
+      expect(payroll_item.medicare_taxable_wages).to eq(825.00)
+      expect(payroll_item.tax_rule_snapshot).to include(
+        "engine" => "legacy_tax_table",
+        "tax_year" => 2024,
+        "w4" => include("filing_status_normalized" => "single")
+      )
+    end
+
+    it "does not infer FLSA-qualified overtime from overtime hours alone" do
+      payroll_item.qualified_overtime_compensation = nil
+
+      described_class.new(employee, payroll_item).calculate
+
+      expect(payroll_item.qualified_overtime_compensation).to be_nil
     end
   end
 
@@ -143,6 +162,9 @@ RSpec.describe HourlyPayrollCalculator do
       # Bonus: 100
       # Total: 700
       expect(payroll_item.gross_pay).to eq(700.00)
+      expect(payroll_item.cash_tips_reported).to eq(200.00)
+      expect(payroll_item.social_security_taxable_wages).to eq(500.00)
+      expect(payroll_item.social_security_taxable_tips).to eq(200.00)
     end
 
     it "records non-taxable pay in the earnings breakdown" do
@@ -155,6 +177,20 @@ RSpec.describe HourlyPayrollCalculator do
       expect(non_taxable).to be_present
       expect(non_taxable.label).to eq("Non-Taxable Pay")
       expect(non_taxable.amount).to eq(50.00)
+    end
+
+    it "persists mandatory service charges as taxable earnings" do
+      payroll_item.service_charge_wages = 25.00
+
+      payroll_item.calculate!
+
+      service_charge = payroll_item.reload.payroll_item_earnings.find_by(category: "service_charge")
+      expect(service_charge).to be_present
+      expect(service_charge.label).to eq("Service Charges")
+      expect(service_charge.amount).to eq(25.00)
+      expect(payroll_item.gross_pay).to eq(725.00)
+      expect(payroll_item.social_security_taxable_wages).to eq(525.00)
+      expect(payroll_item.social_security_taxable_tips).to eq(200.00)
     end
   end
 

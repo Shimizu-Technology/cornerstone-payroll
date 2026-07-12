@@ -4,3 +4,5 @@ data/mosa-2025/manifest.json
 *.pdf
 !api/lib/assets/form500_template.pdf
 *.xlsx
+web/playwright-report/
+web/test-results/

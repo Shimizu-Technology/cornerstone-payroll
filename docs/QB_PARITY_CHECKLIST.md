@@ -1,5 +1,7 @@
 # QuickBooks Parity Checklist — Cornerstone Payroll
 
+> **Planning note (2026-07-11):** This checklist is a useful feature inventory, but its older "Done" labels do not mean a return is filing-ready, filed, accepted, or correctable. Current priorities and release gates are defined in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md). This checklist covers Cornerstone's payroll use of QuickBooks; it does not claim complete QuickBooks accounting parity.
+
 **Purpose:** Track feature parity vs QuickBooks (Cornerstone's current system) to drive roadmap prioritization toward full QB replacement.  
 **Context:** Cornerstone uses QB primarily for check printing, tax calculations, and payroll reports. The goal is to fully replace QB — including the check-printing workflow — so Cornerstone can process payroll for internal staff and client companies without the QB overhead or Guam address workarounds.
 
@@ -87,10 +89,10 @@
 | Employer SS match (6.2%) | ✅ | ✅ **Done** | `employer_social_security_tax` on `PayrollItem` | — |
 | Employer Medicare match (1.45%) | ✅ | ✅ **Done** | `employer_medicare_tax` on `PayrollItem` | — |
 | Tax table as database-driven data | ✅ | ✅ **Done** | `TaxBracket`, `TaxTable`, `AnnualTaxConfig`, `FilingStatusConfig` models; admin configurable | — |
-| 941-GU quarterly filing report | ✅ | ✅ **Done** | `Form941GuAggregator` — full line-by-line computation with monthly liability breakdown; Reports page UI | — |
-| W-2GU annual generation | ✅ | ✅ **Done** | `W2GuAggregator` + `W2GuPdfGenerator`; JSON, CSV, PDF export; preflight validation + filing readiness workflow | — |
+| Federal Form 941 preparation for Guam employers | ✅ | 🟡 **Partial** | `Form941GuAggregator` — territory-specific line handling and liability detail; deposits, credits, balance, evidence, and correction workflow remain | Complete lines 8–14, deposit reconciliation, signer/preparer flow, evidence, and Form 941-X support |
+| W-2GU annual preparation | ✅ | 🟡 **Partial** | `W2GuAggregator` + `W2GuPdfGenerator`; JSON, CSV, PDF export; preflight workflow; 2026 TP/TT/Box 14b data foundations | Validate 2026 source data, add W-3SS, EFW2, filing evidence, delivery, and corrections |
 | W-2GU XML/EFW2 file (electronic filing) | ✅ | ❌ **Missing** | Not implemented | Follow after W-2GU PDF; Guam DRT accepts EFW2 format |
-| 1099-NEC (contractor payments) | ✅ | ✅ **Done** | `Form1099NecAggregator` + PDF export; contractor employment type supported | — |
+| 1099-NEC preparation | ✅ | 🟡 **Partial** | `Form1099NecAggregator` + PDF export; contractor employment type and year-versioned thresholds supported | Add official/e-file workflow, 2026 component reporting, evidence, and corrections |
 | Form 500 / GuamTax resource links | N/A | ✅ **Done** | Links to DRT Form 500 plus GuamTax GRT/BPT filing help in standalone check workflows | — |
 | ACH / direct deposit file generation (NACHA) | ✅ | ❌ **Missing** | Not implemented | Phase 2; requires bank routing/account on employee |
 | Check printing (MICR / pre-printed stock) | ✅ | ✅ **Done** | Full check lifecycle: numbering, single/batch PDF, print/void/reissue, replacement check numbers, alignment test, standalone FIT/GRT/child-support/garnishment checks | — |

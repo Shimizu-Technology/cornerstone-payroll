@@ -134,9 +134,45 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body).fetch("errors").first).to include("duplicate key value")
     end
+
+    it "returns a validation response when calculation rules reject the employee W-4" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.merge(auto_calculate: true)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
+    end
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "saves and recalculates mandatory service charges" do
+      create(:tax_table)
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        auto_calculate: true,
+        payroll_item: { service_charge_wages: 25.00 }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.service_charge_wages).to eq(25.00)
+      expect(payroll_item.gross_pay).to eq(1225.00)
+      expect(payroll_item.payroll_item_earnings.find_by(category: "service_charge")&.amount).to eq(25.00)
+    end
+
+    it "stores operator-reviewed qualified overtime separately from overtime pay" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        payroll_item: {
+          overtime_hours: 10,
+          qualified_overtime_compensation: 75.00
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.qualified_overtime_compensation).to eq(75.00)
+    end
+
     it "returns a validation response when auto-calculation fails validation after update" do
       allow_any_instance_of(PayrollItem).to receive(:calculate!)
         .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))
@@ -150,6 +186,19 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+
+    it "returns a validation response when calculation rules reject an update" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}", params: {
+        auto_calculate: true,
+        payroll_item: { hours_worked: 10 }
+      }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
     end
 
     it "returns a validation response when update hits a payroll field entry uniqueness race" do
@@ -472,6 +521,15 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors").first).to be_present
+    end
+    it "returns a validation response when calculation rules reject recalculation" do
+      allow_any_instance_of(PayrollItem).to receive(:calculate!)
+        .and_raise(ArgumentError, "Pre-2020 Form W-4 calculations are not supported")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
     end
   end
 

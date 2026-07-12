@@ -21,10 +21,10 @@ class AnnualTaxConfig < ApplicationRecord
     find_by(tax_year: year)
   end
 
-  # Get the active config, or fall back to the specified year
-  # Always returns a single record or nil (never a Relation)
+  # Select rules strictly by the requested tax year. `is_active` controls the
+  # admin UI/default setup flow; it must never override a pay date's year.
   def self.current(year = Date.current.year)
-    active.first || for_year(year)
+    for_year(year)
   end
 
   # Create a new year's config by copying from a previous year
@@ -72,6 +72,6 @@ class AnnualTaxConfig < ApplicationRecord
 
   # Get filing status config
   def config_for(filing_status)
-    filing_status_configs.find_by(filing_status: filing_status)
+    filing_status_configs.find_by(filing_status: FilingStatusConfig.normalize(filing_status))
   end
 end

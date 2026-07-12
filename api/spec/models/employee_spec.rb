@@ -227,5 +227,46 @@ RSpec.describe Employee, type: :model do
         medicare_tax: 14.5
       )
     end
+
+    it "reconstructs legacy Social Security taxable carry-forward from stored tax" do
+      AnnualTaxConfig.find_or_initialize_by(tax_year: 2026).tap do |config|
+        config.assign_attributes(
+          ss_wage_base: 184_500,
+          ss_rate: 0.062,
+          medicare_rate: 0.0145,
+          additional_medicare_rate: 0.009,
+          additional_medicare_threshold: 200_000,
+          is_active: false
+        )
+        config.save!
+      end
+      prior_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 1, 1),
+        end_date: Date.new(2026, 1, 14),
+        pay_date: Date.new(2026, 1, 16))
+      current_period = create(:pay_period,
+        company: company,
+        start_date: Date.new(2026, 1, 15),
+        end_date: Date.new(2026, 1, 28),
+        pay_date: Date.new(2026, 1, 30))
+      create(:payroll_item,
+        employee: employee,
+        company: company,
+        pay_period: prior_period,
+        gross_pay: 1_200.0,
+        reported_tips: 200.0,
+        social_security_tax: 62.0,
+        social_security_taxable_wages: nil,
+        social_security_taxable_tips: nil)
+
+      totals = employee.ytd_totals_before(
+        year: 2026,
+        pay_date: current_period.pay_date,
+        pay_period_id: current_period.id
+      )
+
+      expect(totals[:social_security_taxable_total]).to eq(1_000.0)
+    end
   end
 end

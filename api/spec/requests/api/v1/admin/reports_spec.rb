@@ -2212,12 +2212,30 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
-  describe "GET /api/v1/admin/reports/form_1099_nec_xlsx" do
+  describe "GET /api/v1/admin/reports/form_1099_nec exports" do
     it "returns 422 for a non-numeric year" do
       get "/api/v1/admin/reports/form_1099_nec_xlsx", params: { year: "not-a-year" }
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to eq("year must be a valid 4-digit tax year")
+    end
+
+    %w[
+      /api/v1/admin/reports/form_1099_nec
+      /api/v1/admin/reports/form_1099_nec_pdf
+      /api/v1/admin/reports/form_1099_nec_xlsx
+    ].each do |path|
+      it "returns 422 from #{path} when the year's reporting threshold is not configured" do
+        unsupported_year = Date.current.year + 1
+        InformationReturnThreshold.where(form_type: "1099_nec", tax_year: unsupported_year).delete_all
+
+        get path, params: { year: unsupported_year }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body["error"]).to eq(
+          "No 1099_nec reporting threshold is configured for #{unsupported_year}"
+        )
+      end
     end
   end
 

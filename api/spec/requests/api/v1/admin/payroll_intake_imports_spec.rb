@@ -7,7 +7,10 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
   let!(:organization) { create(:organization) }
   let!(:company) { create(:company, organization: organization, payroll_intake_source_types: [ "spike_email" ]) }
   let!(:admin_user) { create(:user, company: company, role: "admin") }
-  let!(:tax_table) { create(:tax_table, tax_year: 2026, filing_status: "single", pay_frequency: "biweekly") }
+  let!(:tax_table) do
+    TaxTable.find_by(tax_year: 2026, filing_status: "single", pay_frequency: "biweekly") ||
+      create(:tax_table, tax_year: 2026, filing_status: "single", pay_frequency: "biweekly")
+  end
   let!(:pay_period) do
     create(
       :pay_period,

@@ -25,6 +25,19 @@ RSpec.describe GuamTaxCalculator do
       end
     end
 
+    it "preserves signed wage and tip buckets for correction entries" do
+      result = calculator.calculate(
+        gross_pay: -300,
+        reported_tips: -200,
+        ytd_ss_taxable_wages: 1_000,
+        ytd_medicare_wages: 1_000
+      )
+
+      expect(result[:social_security_taxable_wages]).to eq(-100.00)
+      expect(result[:social_security_taxable_tips]).to eq(-200.00)
+      expect(result[:social_security]).to eq(-18.60)
+    end
+
     context "with income in 10% bracket" do
       it "calculates correct withholding" do
         result = calculator.calculate(gross_pay: 800.00)

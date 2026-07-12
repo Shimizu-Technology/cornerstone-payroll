@@ -1,5 +1,7 @@
 # Quarterly Return Implementation Status
 
+> **Planning note (2026-07-11):** Current priorities, corrected Form 941 terminology, and production release gates are maintained in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md). Form 941-SS was discontinued after 2023; current Guam employers use the standard federal Form 941 with territory-specific instructions.
+
 Date: 2026-05-18
 
 ## Current filing model

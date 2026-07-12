@@ -58,7 +58,8 @@ class PayrollCalculator
           allowances: employee.allowances,
           w4_step2_multiple_jobs: employee.w4_step2_multiple_jobs,
           w4_step4a_other_income: employee.w4_step4a_other_income.to_f,
-          w4_step4b_deductions: employee.w4_step4b_deductions.to_f
+          w4_step4b_deductions: employee.w4_step4b_deductions.to_f,
+          w4_form_version: employee.w4_form_version
         )
       else
         GuamTaxCalculator.new(
@@ -99,12 +100,23 @@ class PayrollCalculator
     ytd_before_totals[:social_security_tax]
   end
 
+  def ytd_ss_taxable_wages_before
+    ytd_before_totals[:social_security_taxable_total]
+  end
+
+  def ytd_medicare_wages_before
+    ytd_before_totals[:medicare_taxable_wages]
+  end
+
   def calculate_taxes(withholding_gross: payroll_item.gross_pay)
     tax_args = {
       gross_pay: payroll_item.gross_pay,
       ytd_gross: ytd_gross_before,
       ytd_ss_tax: ytd_ss_before,
-      withholding_gross: withholding_gross
+      withholding_gross: withholding_gross,
+      reported_tips: payroll_item.cash_tips_reported.to_f,
+      ytd_ss_taxable_wages: ytd_ss_taxable_wages_before,
+      ytd_medicare_wages: ytd_medicare_wages_before
     }
     if tax_calculator.method(:calculate).parameters.any? { |type, name| [ :key, :keyreq ].include?(type) && name == :w4_dependent_credit }
       tax_args[:w4_dependent_credit] = employee.w4_dependent_credit.to_f
@@ -123,7 +135,19 @@ class PayrollCalculator
 
     payroll_item.employer_social_security_tax = taxes[:employer_social_security]
     payroll_item.employer_medicare_tax = taxes[:employer_medicare]
+    payroll_item.additional_medicare_tax = taxes[:additional_medicare]
+    payroll_item.fit_taxable_wages = taxes[:fit_taxable_wages]
+    payroll_item.social_security_taxable_wages = taxes[:social_security_taxable_wages]
+    payroll_item.social_security_taxable_tips = taxes[:social_security_taxable_tips]
+    payroll_item.medicare_taxable_wages = taxes[:medicare_taxable_wages]
+    payroll_item.additional_medicare_taxable_wages = taxes[:additional_medicare_taxable_wages]
+    payroll_item.annual_tax_config = tax_calculator.respond_to?(:annual_config) ? tax_calculator.annual_config : nil
     sync_additional_withholding_from_employee!
+    payroll_item.tax_rule_snapshot = tax_calculator.rule_snapshot.merge(employee_w4_snapshot)
+  end
+
+  def capture_payroll_reporting_components!
+    payroll_item.cash_tips_reported = payroll_item.reported_tips.to_d.round(2)
   end
 
   def calculate_retirement
@@ -306,6 +330,7 @@ class PayrollCalculator
   def calculate_totals
     payroll_item.total_additions = (
       payroll_item.reported_tips.to_f +
+      payroll_item.service_charge_wages.to_f +
       payroll_item.bonus.to_f +
       custom_earnings_total +
       non_taxable_additions_total
@@ -392,6 +417,25 @@ class PayrollCalculator
   end
 
   private
+
+  def employee_w4_snapshot
+    {
+      "w4" => {
+        "form_version" => employee.w4_form_version,
+        "effective_on" => employee.w4_effective_on&.iso8601,
+        "filing_status_entered" => employee.filing_status,
+        "filing_status_normalized" => employee.normalized_filing_status,
+        "step2_multiple_jobs" => employee.w4_step2_multiple_jobs,
+        "step3_dependent_credit" => employee.w4_dependent_credit.to_f,
+        "step4a_other_income" => employee.w4_step4a_other_income.to_f,
+        "step4b_deductions" => employee.w4_step4b_deductions.to_f,
+        "step4c_extra_withholding" => payroll_item.additional_withholding.to_f,
+        "step4c_configured_extra_withholding" => employee.additional_withholding.to_f,
+        "step4c_override" => payroll_item.additional_withholding_override&.to_f,
+        "legacy_allowances" => employee.allowances
+      }
+    }
+  end
 
   def ytd_before_totals
     @ytd_before_totals ||= employee.ytd_totals_before(

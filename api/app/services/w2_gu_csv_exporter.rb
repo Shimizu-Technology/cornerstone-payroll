@@ -23,7 +23,10 @@ class W2GuCsvExporter
     "Box 6 — Medicare Tax Withheld",
     "Box 7 — Social Security Tips",
     "Reported Tips (Uncapped)",
-    "Box 7 Capped by Wage Base?"
+    "Box 7 Capped by Wage Base?",
+    "Box 12 Code TP — Cash Tips",
+    "Box 12 Code TT — Qualified Overtime",
+    "Box 14b — Treasury Tipped Occupation Codes"
   ].freeze
 
   attr_reader :report
@@ -62,7 +65,10 @@ class W2GuCsvExporter
       format_currency(emp[:box6_medicare_tax_withheld]),
       format_currency(emp[:box7_social_security_tips]),
       format_currency(emp[:reported_tips_total]),
-      emp[:box7_limited_by_wage_base] ? "Yes" : "No"
+      emp[:box7_limited_by_wage_base] ? "Yes" : "No",
+      format_currency(box12_amount(emp, "TP")),
+      format_currency(box12_amount(emp, "TT")),
+      sanitize_csv_field(Array(emp[:box14b_tipped_occupation_codes]).join(";"))
     ]
   end
 
@@ -79,8 +85,15 @@ class W2GuCsvExporter
       format_currency(t[:box6_medicare_tax_withheld]),
       format_currency(t[:box7_social_security_tips]),
       format_currency(t[:reported_tips_total]),
+      "",
+      format_currency(t[:box12_code_tp_total]),
+      format_currency(t[:box12_code_tt_total]),
       ""
     ]
+  end
+
+  def box12_amount(employee, code)
+    Array(employee[:box12]).select { |entry| entry[:code] == code }.sum { |entry| entry[:amount].to_f }
   end
 
   def format_currency(value)

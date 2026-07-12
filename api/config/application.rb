@@ -3,6 +3,7 @@ require_relative "boot"
 # Load environment variables from .env
 require "dotenv"
 Dotenv.load
+require "ipaddr"
 
 require "rails"
 # Pick the frameworks you want:
@@ -44,6 +45,12 @@ module Api
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    trusted_proxy_cidrs = ENV.fetch("TRUSTED_PROXY_CIDRS", "")
+                               .split(",")
+                               .map(&:strip)
+                               .reject(&:empty?)
+    config.action_dispatch.trusted_proxies = trusted_proxy_cidrs.map { |cidr| IPAddr.new(cidr) } if trusted_proxy_cidrs.any?
 
     cable_origins = ENV.fetch("CORS_ORIGINS", "")
                        .split(",")

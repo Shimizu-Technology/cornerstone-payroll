@@ -328,6 +328,8 @@ export function PayrollIntakeImportModal({
       w4_step2_multiple_jobs: false,
       w4_step4a_other_income: 0,
       w4_step4b_deductions: 0,
+      w4_form_version: 2020,
+      w4_effective_on: null,
       retirement_rate: 0,
       roth_retirement_rate: 0,
     };

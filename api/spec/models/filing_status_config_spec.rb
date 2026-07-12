@@ -47,6 +47,13 @@ RSpec.describe FilingStatusConfig, type: :model do
     end
   end
 
+  describe ".normalize" do
+    it "maps married filing separately to the single-or-separate rule set" do
+      expect(described_class.normalize("married_separate")).to eq("single")
+      expect(described_class.normalize("single_or_married_filing_separately")).to eq("single")
+    end
+  end
+
   describe "#brackets_array" do
     it "returns brackets as array of hashes" do
       fsc = create(:filing_status_config)

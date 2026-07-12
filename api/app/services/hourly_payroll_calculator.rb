@@ -12,6 +12,7 @@ class HourlyPayrollCalculator < PayrollCalculator
     calculate_gross_pay
     sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
+    capture_payroll_reporting_components!
     calculate_retirement
     calculate_roth_retirement
 
@@ -42,7 +43,7 @@ class HourlyPayrollCalculator < PayrollCalculator
     @bonus_amount = BigDecimal(payroll_item.bonus.to_s)
     @custom_earnings_amount = BigDecimal(custom_earnings_total.to_s)
 
-    total = @regular_pay + @overtime_pay + @holiday_pay + @pto_pay + @tips_amount + @bonus_amount + @custom_earnings_amount
+    total = @regular_pay + @overtime_pay + @holiday_pay + @pto_pay + @tips_amount + @bonus_amount + @custom_earnings_amount + payroll_item.service_charge_wages.to_f.to_d
     payroll_item.gross_pay = total.round(2)
   end
 
@@ -69,6 +70,7 @@ class HourlyPayrollCalculator < PayrollCalculator
     end
 
     build_earning("tips", "Tips", nil, nil, @tips_amount) if @tips_amount > 0
+    build_earning("service_charge", "Service Charges", nil, nil, payroll_item.service_charge_wages) if payroll_item.service_charge_wages.to_f > 0
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
 
     Array(payroll_item.custom_earnings).each do |ce|

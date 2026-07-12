@@ -33,7 +33,7 @@ RSpec.describe IssueCorrectivePaycheckService do
                     .add_payroll_item!(item)
     CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024)
                     .add_payroll_item!(item)
-    company.assign_check_numbers!([item])
+    company.assign_check_numbers!([ item ])
     item.reload
   end
   let(:actor) do
@@ -152,6 +152,40 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(corrective.tips_paid_out).to eq(0.0)
       expect(corrective.gross_pay).to be_within(0.01).of(50.0)
       expect(corrective.net_pay).to be > 0
+    end
+
+    it "stores signed taxable-base deltas for legacy tipped-income corrections" do
+      original_item.update!(
+        hours_worked: 20,
+        reported_tips: 200.0,
+        tips_paid_out: 200.0
+      )
+      original_item.calculate!
+      original_item.update_columns(
+        fit_taxable_wages: nil,
+        social_security_taxable_wages: nil,
+        social_security_taxable_tips: nil,
+        medicare_taxable_wages: nil,
+        additional_medicare_taxable_wages: nil,
+        additional_medicare_tax: nil,
+        cash_tips_reported: nil
+      )
+
+      _, corrective = described_class.issue!(
+        original_pay_period: original_period,
+        employee: employee,
+        corrected_inputs: { reported_tips: 0.0, tips_paid_out: 0.0 },
+        pay_date: Date.new(2024, 1, 26),
+        reason: "Remove tips reported on the original paycheck",
+        actor: actor
+      )
+
+      expect(corrective.gross_pay).to eq(-200.0)
+      expect(corrective.social_security_taxable_wages).to eq(0.0)
+      expect(corrective.social_security_taxable_tips).to eq(-200.0)
+      expect(corrective.medicare_taxable_wages).to eq(-200.0)
+      expect(corrective.cash_tips_reported).to eq(-200.0)
+      expect(corrective.tax_rule_snapshot).to be_present
     end
 
     it "allows a corrective paycheck to clear the supplemental row tip pool" do

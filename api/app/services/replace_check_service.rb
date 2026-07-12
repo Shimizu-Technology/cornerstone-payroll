@@ -349,7 +349,7 @@ class ReplaceCheckService
              pay_date, pay_date, pay_period_id)
       .where.not(id: @payroll_item.id)
 
-    @payroll_item.employee.ytd_totals_for_scope(scope)
+    @payroll_item.employee.ytd_totals_for_scope(scope, tax_year: pay_date.year)
   end
 
   # ---------------------------------------------------------------------

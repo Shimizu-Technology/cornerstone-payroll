@@ -8,8 +8,8 @@ No major payroll software (Gusto, ADP, Check.com) supports Guam. QuickBooks requ
 
 ## Status
 
-**Production-capable internal payroll and firm operations app**
-- Live Guam payroll workflows: calculation, approval/commit, check printing, pay stubs, tax summaries, W-2GU/941-GU/1099 support, and MoSa import automation
+**Internal payroll and firm-operations application under controlled production-readiness hardening**
+- Live Guam payroll workflows: calculation, approval/commit, check printing, pay stubs, tax summaries, W-2GU/Federal Form 941/1099 preparation support, and MoSa import automation
 - Unified recurring/pay-period payroll adjustments with taxable, non-taxable, pre-tax, and post-tax treatment
 - Check reissue, void, print, standalone FIT/GRT/child-support payments, and audit history workflows
 - Invoice Maker and General Transmittals for Cornerstone firm operations
@@ -30,12 +30,12 @@ See [PRD.md](PRD.md) and [BUILD_PLAN.md](BUILD_PLAN.md) for details.
 | Tax | Employee Rate | Employer Rate | Wage Base |
 |-----|--------------|---------------|-----------|
 | Guam Territorial Income Tax | Federal brackets | N/A | No cap |
-| Social Security | 6.2% | 6.2% | $168,600 (2025) |
+| Social Security | 6.2% | 6.2% | $176,100 (2025); $184,500 (2026) |
 | Medicare | 1.45% (+0.9% over $200K) | 1.45% | No cap |
 
 - Guam uses Section 31 of the Organic Act: federal tax code with "Guam" substituted for "United States"
-- File with Guam Dept of Revenue & Taxation, NOT the IRS
-- W-2GU instead of W-2, 941-GU instead of 941
+- Guam income-tax withholding and W-2GU filings go to Guam DRT. Federal employment-tax Form 941 goes to the IRS.
+- W-2GU is the Guam wage statement. Form 941-SS was discontinued after 2023; Guam employers now use the standard federal Form 941 with the territory-specific instructions.
 
 ## Plane Board
 
@@ -47,3 +47,4 @@ See [PRD.md](PRD.md) and [BUILD_PLAN.md](BUILD_PLAN.md) for details.
 - [PRD](PRD.md) — Product Requirements Document
 - [Build Plan](BUILD_PLAN.md) — Tactical plan
 - [Future Improvements](FUTURE_IMPROVEMENTS.md)
+- [Payroll, QuickBooks, and Compliance Master Plan](docs/PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md)

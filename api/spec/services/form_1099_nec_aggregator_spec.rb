@@ -7,6 +7,11 @@ RSpec.describe Form1099NecAggregator, type: :service do
   let(:pay_period) { create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 5, 15)) }
   let(:voided_pay_period) { create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 5, 30)) }
   let(:contractor) { create(:employee, :contractor, company: company, first_name: "Asia", last_name: "Taylor") }
+  let!(:threshold_rule) do
+    InformationReturnThreshold.find_or_initialize_by(form_type: "1099_nec", tax_year: 2026).tap do |rule|
+      rule.update!(threshold_amount: 2_000, source_url: "https://www.irs.gov/instructions/i1099mec", effective_on: Date.new(2026, 1, 1))
+    end
+  end
 
   it "excludes voided contractor payments from 1099 compensation" do
     create(:payroll_item,
@@ -34,6 +39,28 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(asia[:total_compensation]).to eq(500.00)
     expect(asia[:payment_count]).to eq(1)
     expect(asia[:requires_filing]).to eq(false)
+    expect(report[:meta][:filing_threshold]).to eq(2_000.0)
+    expect(report[:meta][:filing_threshold_rule_id]).to eq(threshold_rule.id)
     expect(report[:totals][:total_compensation]).to eq(500.00)
+  end
+
+
+  it "uses the prior-year threshold without changing the 2026 rule" do
+    InformationReturnThreshold.find_or_initialize_by(form_type: "1099_nec", tax_year: 2025).tap do |rule|
+      rule.update!(threshold_amount: 600, source_url: "https://www.irs.gov/instructions/i1099mec", effective_on: Date.new(2025, 1, 1))
+    end
+    prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2025, 5, 15))
+    create(:payroll_item,
+      pay_period: prior_period,
+      employee: contractor,
+      company: company,
+      employment_type: "contractor",
+      gross_pay: 700.00,
+      net_pay: 700.00)
+
+    report = described_class.new(company, 2025).generate
+
+    expect(report[:meta][:filing_threshold]).to eq(600.0)
+    expect(report[:meta][:reportable_count]).to eq(1)
   end
 end

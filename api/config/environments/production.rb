@@ -18,14 +18,16 @@ Rails.application.configure do
   # Enable serving of images, stylesheets, and JavaScripts from an asset server.
   # config.asset_host = "http://assets.example.com"
 
-  # Store uploaded files on the local file system (see config/storage.yml for options).
-  config.active_storage.service = :local
+  # Payroll documents must survive application container replacement. R2 is the
+  # production default; explicitly opt into :local only for a controlled,
+  # persistent-volume deployment.
+  config.active_storage.service = ENV.fetch("ACTIVE_STORAGE_SERVICE", "r2").to_sym
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  config.assume_ssl = ENV.fetch("FORCE_SSL", "false").to_s.downcase == "true"
+  config.assume_ssl = ENV.fetch("FORCE_SSL", "true").to_s.downcase == "true"
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = ENV.fetch("FORCE_SSL", "false").to_s.downcase == "true"
+  config.force_ssl = ENV.fetch("FORCE_SSL", "true").to_s.downcase == "true"
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
@@ -43,21 +45,24 @@ Rails.application.configure do
   # Don't log any deprecations.
   config.active_support.report_deprecations = false
 
-  use_solid_cache = ENV.fetch("USE_SOLID_CACHE", "false").to_s.downcase == "true"
-  use_solid_queue = ENV.fetch("USE_SOLID_QUEUE", "false").to_s.downcase == "true"
+  use_solid_cache = ENV.fetch("USE_SOLID_CACHE", "true").to_s.downcase == "true"
+  use_solid_queue = ENV.fetch("USE_SOLID_QUEUE", "true").to_s.downcase == "true"
 
-  # Default to in-process cache and async jobs on simple hosted deployments.
-  # Solid backends can be enabled later once their DB tables/worker setup exist.
+  # Payroll exports, reminders, and document processing must not disappear when
+  # a web process restarts. In-process fallbacks require an explicit opt-out.
   config.cache_store = use_solid_cache ? :solid_cache_store : :memory_store
   config.active_job.queue_adapter = use_solid_queue ? :solid_queue : :async
   config.solid_queue.connects_to = { database: { writing: :queue } } if use_solid_queue
 
-  # Ignore bad email addresses and do not raise email delivery errors.
-  # Set this to true and configure the email server for immediate delivery to raise delivery errors.
-  # config.action_mailer.raise_delivery_errors = false
+  config.action_mailer.raise_delivery_errors = true
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  frontend_uri = URI.parse(ENV.fetch("FRONTEND_URL", "https://payroll.example.com"))
+  config.action_mailer.default_url_options = {
+    host: frontend_uri.host,
+    protocol: frontend_uri.scheme
+  }.compact
+  config.action_mailer.default_url_options[:port] = frontend_uri.port unless [ 80, 443 ].include?(frontend_uri.port)
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
   # config.action_mailer.smtp_settings = {
