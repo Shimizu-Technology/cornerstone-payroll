@@ -6,6 +6,17 @@ local:
   service: Disk
   root: <%= Rails.root.join("storage") %>
 
+# Cloudflare R2 uses the S3 API. Required production values are verified by
+# `bin/rails production:readiness`; nil values here keep development/test bootable.
+r2:
+  service: S3
+  access_key_id: <%= ENV["R2_ACCESS_KEY_ID"] %>
+  secret_access_key: <%= ENV["R2_SECRET_ACCESS_KEY"] %>
+  region: auto
+  bucket: <%= ENV["R2_BUCKET_NAME"] || ENV["R2_BUCKET"] %>
+  endpoint: <%= ENV["R2_ENDPOINT"] || ("https://#{ENV['R2_ACCOUNT_ID']}.r2.cloudflarestorage.com" if ENV["R2_ACCOUNT_ID"].present?) %>
+  force_path_style: true
+
 # Use bin/rails credentials:edit to set the AWS secrets (as aws:access_key_id|secret_access_key)
 # amazon:
 #   service: S3

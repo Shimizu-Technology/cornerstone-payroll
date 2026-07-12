@@ -1,5 +1,7 @@
 # Feature Roadmap — April 2026
 
+> **Historical roadmap:** This file records the April 2026 implementation cycle. Its "Done" labels mean the scoped feature was built; they do not establish calculation certification, filing readiness, acceptance, or correction support. Current priorities and release gates are in the [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md).
+
 Planned features for the April 2026 development cycle. Audited against codebase on 2026-04-15.
 
 ---

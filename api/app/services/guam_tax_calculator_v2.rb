@@ -24,11 +24,16 @@ class GuamTaxCalculatorV2
               :w4_step2_multiple_jobs, :w4_step4a_other_income, :w4_step4b_deductions
 
   def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0,
-                 w4_step2_multiple_jobs: false, w4_step4a_other_income: 0, w4_step4b_deductions: 0)
+                 w4_step2_multiple_jobs: false, w4_step4a_other_income: 0, w4_step4b_deductions: 0,
+                 w4_form_version: 2020)
     @annual_config = AnnualTaxConfig.current(tax_year) ||
                      raise(ArgumentError, "No tax configuration found for year #{tax_year}")
-    @filing_status_config = @annual_config.config_for(filing_status) ||
+    normalized_filing_status = FilingStatusConfig.normalize(filing_status)
+    @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
                             raise(ArgumentError, "No filing status config found for #{filing_status}")
+    if w4_form_version.to_i < Employee::MIN_SUPPORTED_W4_FORM_VERSION
+      raise ArgumentError, "Pre-2020 Form W-4 calculations are not supported by the annual tax configuration engine"
+    end
     @pay_frequency = pay_frequency
     @periods_per_year = PAY_FREQUENCIES[pay_frequency] ||
                         raise(ArgumentError, "Unknown pay frequency: #{pay_frequency}")
@@ -44,10 +49,19 @@ class GuamTaxCalculatorV2
   # @param ytd_gross [Decimal] Year-to-date gross pay BEFORE this pay period
   # @param ytd_ss_tax [Decimal] Year-to-date Social Security tax withheld (optional)
   # @return [Hash] { withholding:, social_security:, medicare: }
-  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil, w4_dependent_credit: 0)
+  def calculate(gross_pay:, ytd_gross: 0, ytd_ss_tax: 0, withholding_gross: nil, w4_dependent_credit: 0,
+                reported_tips: 0, ytd_ss_taxable_wages: nil, ytd_medicare_wages: nil)
     withholding_wages = withholding_gross.nil? ? gross_pay : withholding_gross
-    employee_ss = calculate_social_security(gross_pay, ytd_gross)
-    employee_medicare = calculate_medicare(gross_pay, ytd_gross)
+    bases = taxable_bases(
+      gross_pay: gross_pay,
+      reported_tips: reported_tips,
+      ytd_ss_taxable_wages: ytd_ss_taxable_wages.nil? ? ytd_gross : ytd_ss_taxable_wages,
+      ytd_medicare_wages: ytd_medicare_wages.nil? ? ytd_gross : ytd_medicare_wages
+    )
+    employee_ss = ((bases[:social_security_wages] + bases[:social_security_tips]) * annual_config.ss_rate).round(2)
+    base_medicare = (bases[:medicare_wages] * annual_config.medicare_rate).round(2)
+    additional_medicare = (bases[:additional_medicare_wages] * annual_config.additional_medicare_rate).round(2)
+    employee_medicare = (base_medicare + additional_medicare).round(2)
 
     {
       withholding: calculate_withholding(withholding_wages, w4_dependent_credit: w4_dependent_credit),
@@ -55,7 +69,71 @@ class GuamTaxCalculatorV2
       medicare: employee_medicare,
       # Employer match — same rates, same wage base cap for SS
       employer_social_security: employee_ss,  # Same calculation (6.2% capped)
-      employer_medicare: calculate_employer_medicare(gross_pay)  # 1.45% no cap, no Additional Medicare
+      employer_medicare: base_medicare,
+      additional_medicare: additional_medicare,
+      fit_taxable_wages: withholding_wages.round(2),
+      social_security_taxable_wages: bases[:social_security_wages],
+      social_security_taxable_tips: bases[:social_security_tips],
+      medicare_taxable_wages: bases[:medicare_wages],
+      additional_medicare_taxable_wages: bases[:additional_medicare_wages]
+    }
+  end
+
+  def rule_snapshot
+    {
+      "engine" => "annual_tax_config_v2",
+      "annual_tax_config_id" => annual_config.id,
+      "tax_year" => annual_config.tax_year,
+      "annual_tax_config_updated_at" => annual_config.updated_at&.iso8601,
+      "social_security_wage_base" => annual_config.ss_wage_base.to_f,
+      "social_security_rate" => annual_config.ss_rate.to_f,
+      "medicare_rate" => annual_config.medicare_rate.to_f,
+      "additional_medicare_rate" => annual_config.additional_medicare_rate.to_f,
+      "additional_medicare_threshold" => annual_config.additional_medicare_threshold.to_f,
+      "filing_status_config_id" => filing_status_config.id,
+      "filing_status" => filing_status_config.filing_status,
+      "standard_deduction" => filing_status_config.standard_deduction.to_f,
+      "brackets" => filing_status_config.tax_brackets.order(:bracket_order).map do |bracket|
+        {
+          "id" => bracket.id,
+          "order" => bracket.bracket_order,
+          "min_income" => bracket.min_income.to_f,
+          "max_income" => bracket.max_income&.to_f,
+          "rate" => bracket.rate.to_f
+        }
+      end
+    }
+  end
+
+  def taxable_bases(gross_pay:, reported_tips:, ytd_ss_taxable_wages:, ytd_medicare_wages:)
+    gross = gross_pay.to_d
+    reported_tip_amount = reported_tips.to_d
+
+    if gross.negative? || reported_tip_amount.negative?
+      # Correction rows store signed deltas. Preserve the signed wage/tip
+      # components so annual and quarterly reports reverse the same buckets
+      # as the original paycheck.
+      tips = [ reported_tip_amount, 0.to_d ].min
+      wages_only = gross - tips
+      ss_wages = wages_only
+      ss_tips = tips
+    else
+      tips = reported_tip_amount
+      wages_only = [ gross - tips, 0.to_d ].max
+      remaining_ss = [ annual_config.ss_wage_base.to_d - ytd_ss_taxable_wages.to_d, 0.to_d ].max
+      ss_wages = [ wages_only, remaining_ss ].min
+      remaining_after_wages = [ remaining_ss - ss_wages, 0.to_d ].max
+      ss_tips = [ tips, remaining_after_wages ].min
+    end
+
+    prior_excess = [ ytd_medicare_wages.to_d - annual_config.additional_medicare_threshold.to_d, 0.to_d ].max
+    current_excess = [ ytd_medicare_wages.to_d + gross - annual_config.additional_medicare_threshold.to_d, 0.to_d ].max
+
+    {
+      social_security_wages: ss_wages.round(2),
+      social_security_tips: ss_tips.round(2),
+      medicare_wages: gross.round(2),
+      additional_medicare_wages: (current_excess - prior_excess).round(2)
     }
   end
 

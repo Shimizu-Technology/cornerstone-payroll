@@ -359,7 +359,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         keywords: ['941', 'federal', 'tax'],
         icon: <FileSpreadsheet className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/reports?report=form_941_gu',
+        href: '/reports?report=941-gu',
       });
 
       add({

@@ -77,6 +77,21 @@ RSpec.describe AnnualTaxConfig, type: :model do
     end
   end
 
+  describe ".current" do
+    it "selects the requested year even when a different year is globally active" do
+      requested = create(:annual_tax_config, tax_year: 2398, is_active: false)
+      create(:annual_tax_config, tax_year: 2399, is_active: true)
+
+      expect(described_class.current(2398)).to eq(requested)
+    end
+
+    it "does not substitute the active year when the requested year is unsupported" do
+      create(:annual_tax_config, tax_year: 2399, is_active: true)
+
+      expect(described_class.current(2397)).to be_nil
+    end
+  end
+
   describe "#activate!" do
     it "activates the config and deactivates others" do
       old_active = create(:annual_tax_config, tax_year: 2401, is_active: true)

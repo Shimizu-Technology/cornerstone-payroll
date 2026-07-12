@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -335,6 +335,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
 
+  create_table "employee_tipped_occupations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "effective_from", null: false
+    t.date "effective_to"
+    t.bigint "employee_id", null: false
+    t.text "notes"
+    t.string "occupation_code", limit: 3, null: false
+    t.string "source"
+    t.datetime "updated_at", null: false
+    t.index ["employee_id", "occupation_code", "effective_from"], name: "idx_employee_tipped_occupations_unique_start", unique: true
+    t.index ["employee_id"], name: "index_employee_tipped_occupations_on_employee_id"
+    t.check_constraint "effective_to IS NULL OR effective_to >= effective_from", name: "employee_tipped_occupation_date_order"
+    t.check_constraint "occupation_code::text ~ '^[0-9]{3}$'::text", name: "employee_tipped_occupation_code_format"
+  end
+
   create_table "employee_wage_rates", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
@@ -408,6 +423,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.date "termination_date"
     t.datetime "updated_at", null: false
     t.decimal "w4_dependent_credit", precision: 10, scale: 2, default: "0.0", null: false
+    t.date "w4_effective_on"
+    t.integer "w4_form_version", default: 2020, null: false
     t.boolean "w4_step2_multiple_jobs", default: false, null: false
     t.decimal "w4_step4a_other_income", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "w4_step4b_deductions", precision: 10, scale: 2, default: "0.0", null: false
@@ -488,6 +505,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
+  end
+
+  create_table "information_return_thresholds", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "effective_on", null: false
+    t.string "form_type", null: false
+    t.string "source_url", null: false
+    t.integer "tax_year", null: false
+    t.decimal "threshold_amount", precision: 14, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.index ["form_type", "tax_year"], name: "idx_information_return_thresholds_form_year", unique: true
+    t.check_constraint "threshold_amount >= 0::numeric", name: "information_return_threshold_nonnegative"
   end
 
   create_table "invoice_billing_profiles", force: :cascade do |t|
@@ -977,9 +1006,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
   end
 
   create_table "payroll_items", force: :cascade do |t|
+    t.decimal "additional_medicare_tax", precision: 12, scale: 2
+    t.decimal "additional_medicare_taxable_wages", precision: 14, scale: 2
     t.decimal "additional_withholding", precision: 10, scale: 2, default: "0.0"
     t.decimal "additional_withholding_override", precision: 10, scale: 2
+    t.bigint "annual_tax_config_id"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
+    t.decimal "cash_tips_reported", precision: 14, scale: 2
     t.date "check_date"
     t.string "check_memo"
     t.string "check_number"
@@ -998,6 +1031,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.decimal "employer_roth_retirement_match", precision: 10, scale: 2, default: "0.0"
     t.decimal "employer_social_security_tax", precision: 10, scale: 2, default: "0.0", null: false
     t.string "employment_type", null: false
+    t.decimal "fit_taxable_wages", precision: 14, scale: 2
     t.decimal "gross_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "holiday_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "hours_worked", precision: 8, scale: 2, default: "0.0"
@@ -1006,6 +1040,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.decimal "loan_deduction", precision: 10, scale: 2, default: "0.0"
     t.decimal "loan_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "medicare_tax", precision: 10, scale: 2, default: "0.0"
+    t.decimal "medicare_taxable_wages", precision: 14, scale: 2
     t.decimal "net_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "non_taxable_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
@@ -1013,13 +1048,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.decimal "pay_rate", precision: 12, scale: 6, null: false
     t.jsonb "payroll_adjustments", default: [], null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
+    t.decimal "qualified_overtime_compensation", precision: 14, scale: 2
     t.string "replaced_check_number"
     t.decimal "reported_tips", precision: 10, scale: 2, default: "0.0"
     t.string "reprint_of_check_number"
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "salary_override", precision: 12, scale: 2
+    t.decimal "service_charge_wages", precision: 14, scale: 2
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
+    t.decimal "social_security_taxable_tips", precision: 14, scale: 2
+    t.decimal "social_security_taxable_wages", precision: 14, scale: 2
+    t.jsonb "tax_rule_snapshot", default: {}, null: false
     t.string "tip_pool"
     t.decimal "tips", precision: 10, scale: 2, default: "0.0"
     t.decimal "tips_paid_out", precision: 10, scale: 2, default: "0.0", null: false
@@ -1040,6 +1080,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.decimal "ytd_roth_retirement", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_social_security_tax", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_withholding_tax", precision: 14, scale: 2, default: "0.0"
+    t.index ["annual_tax_config_id"], name: "index_payroll_items_on_annual_tax_config_id"
     t.index ["check_number"], name: "index_payroll_items_on_check_number"
     t.index ["company_id", "check_number"], name: "index_payroll_items_on_company_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
     t.index ["company_id"], name: "index_payroll_items_on_company_id"
@@ -1049,6 +1090,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
     t.index ["pay_period_id"], name: "index_payroll_items_on_pay_period_id"
     t.index ["replaced_check_number"], name: "index_payroll_items_on_replaced_check_number", where: "(replaced_check_number IS NOT NULL)"
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
+    t.index ["tax_rule_snapshot"], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index ["voided"], name: "index_payroll_items_on_voided"
   end
 
@@ -1543,6 +1585,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
+  add_foreign_key "employee_tipped_occupations", "employees", on_delete: :cascade
   add_foreign_key "employee_wage_rates", "employees"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
@@ -1610,6 +1653,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_10_130000) do
   add_foreign_key "payroll_item_earnings", "payroll_items"
   add_foreign_key "payroll_item_field_entries", "payroll_field_definitions"
   add_foreign_key "payroll_item_field_entries", "payroll_items"
+  add_foreign_key "payroll_items", "annual_tax_configs", on_delete: :restrict
   add_foreign_key "payroll_items", "companies", on_delete: :restrict
   add_foreign_key "payroll_items", "employees"
   add_foreign_key "payroll_items", "pay_periods"

@@ -3,9 +3,11 @@
 **Project:** Cornerstone Payroll
 **Client:** Cornerstone Tax Services (Guam)
 **Author:** Jerry (drafted), Leon Shimizu (review)
-**Status:** Active
+**Status:** Historical product foundation; current priorities and release gates are maintained in the [Payroll, QuickBooks, and Compliance Master Plan](docs/PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md).
 **Created:** 2026-02-04
 **Updated:** 2026-02-06 (Tax Configuration Architecture, Auth + Audit)
+
+> **Planning note (2026-07-11):** This PRD explains why the product was started and records early architecture decisions. Some terminology, form assumptions, and completion claims are outdated; in particular, current Guam employers use standard Federal Form 941 rather than a current form named "941-GU." Use the master plan above for implementation order and production-readiness decisions.
 
 ---
 

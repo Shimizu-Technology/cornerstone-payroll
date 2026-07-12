@@ -64,6 +64,10 @@ module TimecardOcr
     end
 
     def pdf_page_count
+      PDF::Reader.new(@file_path).page_count
+    rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError
+      Rails.logger.warn("CardSegmentation: PDF::Reader could not count pages, falling back to ImageMagick identify")
+
       output = identify_pdf_pages_output
 
       count = output.lines.count { |line| line.include?(File.basename(@file_path)) || line.match?(/\A#{Regexp.escape(@file_path)}/) }

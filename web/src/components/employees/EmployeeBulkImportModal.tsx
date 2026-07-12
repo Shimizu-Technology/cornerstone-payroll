@@ -26,7 +26,8 @@ const EMPTY_EMPLOYEE: BulkImportEmployeeData = {
   date_of_birth: null, hire_date: null, employment_type: 'hourly', pay_rate: '',
   pay_frequency: 'biweekly', filing_status: 'single', allowances: '0',
   additional_withholding: '0', w4_dependent_credit: '0', w4_step2_multiple_jobs: 'false',
-  w4_step4a_other_income: '0', w4_step4b_deductions: '0', retirement_rate: '0',
+  w4_step4a_other_income: '0', w4_step4b_deductions: '0', w4_form_version: '2020',
+  w4_effective_on: null, retirement_rate: '0',
   roth_retirement_rate: '0', department: null, address_line1: null, address_line2: null,
   city: null, state: 'GU', zip: null, phone: null, contractor_type: null,
   contractor_pay_type: null, business_name: null, contractor_ein: null, w9_on_file: null,
@@ -210,6 +211,8 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
           attrs.w4_step2_multiple_jobs = d.w4_step2_multiple_jobs || 'false';
           attrs.w4_step4a_other_income = d.w4_step4a_other_income || '0';
           attrs.w4_step4b_deductions = d.w4_step4b_deductions || '0';
+          attrs.w4_form_version = d.w4_form_version || '2020';
+          if (d.w4_effective_on) attrs.w4_effective_on = d.w4_effective_on;
           attrs.retirement_rate = d.retirement_rate || '0';
           attrs.roth_retirement_rate = d.roth_retirement_rate || '0';
         } else {
@@ -672,6 +675,8 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
                 />
                 <Field label="Step 4a: Other Income" value={row.data.w4_step4a_other_income} onChange={v => onUpdateField('w4_step4a_other_income', v)} prefix="$" />
                 <Field label="Step 4b: Deductions" value={row.data.w4_step4b_deductions} onChange={v => onUpdateField('w4_step4b_deductions', v)} prefix="$" />
+                <Field label="W-4 Revision Year" value={row.data.w4_form_version} onChange={v => onUpdateField('w4_form_version', v)} />
+                <Field label="W-4 Effective Date" value={row.data.w4_effective_on} onChange={v => onUpdateField('w4_effective_on', v)} placeholder="YYYY-MM-DD" />
               </div>
             </FieldSection>
           )}

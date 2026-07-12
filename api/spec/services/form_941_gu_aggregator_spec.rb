@@ -239,6 +239,32 @@ RSpec.describe Form941GuAggregator do
       expect(report[:meta][:caveats].any? { |c| c.include?("Line 7 fractions-of-cents uses (monthly Schedule B total - line 6)") }).to be(true)
     end
 
+    it "uses committed taxable bases instead of reconstructing them from gross pay" do
+      baseline = described_class.new(company, 2025, 2).generate
+      stored_base_employee = create(:employee, company: company, department: department)
+      create(:payroll_item,
+        pay_period: pp_may,
+        employee: stored_base_employee,
+        gross_pay: 10_000.00,
+        reported_tips: 500.00,
+        social_security_taxable_wages: 100.00,
+        social_security_taxable_tips: 50.00,
+        medicare_taxable_wages: 200.00,
+        additional_medicare_taxable_wages: 100.00,
+        social_security_tax: 9.30,
+        employer_social_security_tax: 9.30,
+        medicare_tax: 3.80,
+        employer_medicare_tax: 2.90,
+        additional_medicare_tax: 0.90)
+
+      report = described_class.new(company, 2025, 2).generate
+
+      expect(report[:lines][:line5a_ss_wages] - baseline[:lines][:line5a_ss_wages]).to eq(100.00)
+      expect(report[:lines][:line5b_ss_tips] - baseline[:lines][:line5b_ss_tips]).to eq(50.00)
+      expect(report[:lines][:line5c_medicare_wages] - baseline[:lines][:line5c_medicare_wages]).to eq(200.00)
+      expect(report[:lines][:line5d_add_medicare_wages] - baseline[:lines][:line5d_add_medicare_wages]).to eq(100.00)
+    end
+
     describe "monthly_liability section" do
       let(:breakdown) { report[:monthly_liability] }
 
@@ -298,6 +324,36 @@ RSpec.describe Form941GuAggregator do
           expect(month[:total_liability].to_f).to eq(published_total)
         end
       end
+    end
+
+    it "aggregates prior-quarter taxable bases in the database" do
+      prior_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2025, 3, 1),
+        end_date: Date.new(2025, 3, 14),
+        pay_date: Date.new(2025, 3, 18))
+      create(:payroll_item,
+        pay_period: prior_period,
+        employee: employee1,
+        gross_pay: 1_200.0,
+        social_security_taxable_wages: 900.0,
+        social_security_taxable_tips: 100.0,
+        medicare_taxable_wages: 1_200.0)
+      create(:payroll_item,
+        pay_period: prior_period,
+        employee: employee2,
+        gross_pay: 1_000.0,
+        social_security_tax: 62.0,
+        employer_social_security_tax: 62.0)
+
+      expect(aggregator.send(:prior_ss_taxable_wages_by_employee)).to eq(
+        employee1.id => 1_000.0,
+        employee2.id => 1_000.0
+      )
+      expect(aggregator.send(:prior_medicare_wages_by_employee)).to eq(
+        employee1.id => 1_200.0,
+        employee2.id => 1_000.0
+      )
     end
 
     describe "excludes non-committed pay periods" do

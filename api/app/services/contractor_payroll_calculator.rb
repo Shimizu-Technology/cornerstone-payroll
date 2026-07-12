@@ -22,6 +22,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     calculate_gross_pay
     sync_percentage_payroll_field_entries_after_final_gross
     record_earnings_breakdown
+    capture_payroll_reporting_components!
     clear_deduction_state
     zero_out_taxes
     record_payroll_field_employee_deductions
@@ -57,7 +58,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     @bonus_amount = payroll_item.bonus.to_f
     @custom_earnings_amount = custom_earnings_total
 
-    payroll_item.gross_pay = (@base_pay + @overtime_pay + @holiday_pay + @pto_pay + @bonus_amount + @custom_earnings_amount).round(2)
+    payroll_item.gross_pay = (@base_pay + @overtime_pay + @holiday_pay + @pto_pay + @bonus_amount + @custom_earnings_amount + payroll_item.service_charge_wages.to_f).round(2)
   end
 
   def record_earnings_breakdown
@@ -85,6 +86,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     end
 
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0
+    build_earning("service_charge", "Service Charges", nil, nil, payroll_item.service_charge_wages) if payroll_item.service_charge_wages.to_f > 0
 
     Array(payroll_item.custom_earnings).each do |ce|
       amt = ce["amount"].to_f
@@ -125,6 +127,18 @@ class ContractorPayrollCalculator < PayrollCalculator
     payroll_item.additional_withholding = 0
     payroll_item.employer_social_security_tax = 0
     payroll_item.employer_medicare_tax = 0
+    payroll_item.additional_medicare_tax = 0
+    payroll_item.fit_taxable_wages = 0
+    payroll_item.social_security_taxable_wages = 0
+    payroll_item.social_security_taxable_tips = 0
+    payroll_item.medicare_taxable_wages = 0
+    payroll_item.additional_medicare_taxable_wages = 0
+    payroll_item.annual_tax_config = nil
+    payroll_item.tax_rule_snapshot = {
+      "engine" => "contractor_no_withholding",
+      "tax_year" => pay_period.pay_date.year,
+      "employment_type" => "contractor"
+    }
     payroll_item.retirement_payment = 0
     payroll_item.roth_retirement_payment = 0
     payroll_item.employer_retirement_match = 0

@@ -5,6 +5,7 @@
 
 # Load the new Tax Configuration seeds first
 load Rails.root.join("db/seeds/tax_configs.rb")
+load Rails.root.join("db/seeds/information_return_thresholds.rb")
 
 puts "\nSeeding legacy tax tables (for backward compatibility)..."
 

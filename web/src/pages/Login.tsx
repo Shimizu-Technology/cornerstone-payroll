@@ -9,7 +9,7 @@ const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const highlights = [
   {
     title: 'Guam-first payroll compliance',
-    description: 'Built for W-2GU, 941-GU, and local filing workflows.',
+    description: 'Built for W-2GU, Federal Form 941, and Guam filing workflows.',
     icon: <Landmark className="h-5 w-5" />,
   },
   {

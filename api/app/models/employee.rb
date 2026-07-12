@@ -6,6 +6,8 @@ class Employee < ApplicationRecord
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
   CONTRACTOR_PAY_TYPES = %w[hourly flat_fee].freeze
+  MIN_SUPPORTED_W4_FORM_VERSION = 2020
+  LEGACY_SOCIAL_SECURITY_RATE = BigDecimal("0.062")
   YTD_AGGREGATE_SOURCE_COLUMNS = {
     gross_pay: :gross_pay,
     net_pay: :net_pay,
@@ -17,7 +19,9 @@ class Employee < ApplicationRecord
     roth_retirement: :roth_retirement_payment,
     insurance: :insurance_payment,
     loans: :loan_payment,
-    tips_paid_out: :tips_paid_out
+    tips_paid_out: :tips_paid_out,
+    social_security_taxable_total: :social_security_taxable_total,
+    medicare_taxable_wages: :medicare_taxable_wages
   }.freeze
   YTD_AGGREGATE_COLUMNS = {
     gross_pay: "COALESCE(SUM(gross_pay), 0)",
@@ -30,8 +34,32 @@ class Employee < ApplicationRecord
     roth_retirement: "COALESCE(SUM(roth_retirement_payment), 0)",
     insurance: "COALESCE(SUM(insurance_payment), 0)",
     loans: "COALESCE(SUM(loan_payment), 0)",
-    tips_paid_out: "COALESCE(SUM(tips_paid_out), 0)"
+    tips_paid_out: "COALESCE(SUM(tips_paid_out), 0)",
+    social_security_taxable_total: "COALESCE(SUM(COALESCE(social_security_taxable_wages + social_security_taxable_tips, gross_pay)), 0)",
+    medicare_taxable_wages: "COALESCE(SUM(COALESCE(medicare_taxable_wages, gross_pay)), 0)"
   }.freeze
+
+  def self.social_security_rate_for_year(year)
+    AnnualTaxConfig.for_year(year)&.ss_rate&.to_d ||
+      TaxTable.for_year(year).where.not(ss_rate: nil).pick(:ss_rate)&.to_d ||
+      LEGACY_SOCIAL_SECURITY_RATE
+  end
+
+  def self.ytd_aggregate_columns_for_year(year)
+    rate = connection.quote(social_security_rate_for_year(year))
+    YTD_AGGREGATE_COLUMNS.merge(
+      social_security_taxable_total: <<~SQL.squish
+        COALESCE(SUM(
+          CASE
+            WHEN social_security_taxable_wages IS NOT NULL
+             AND social_security_taxable_tips IS NOT NULL
+              THEN social_security_taxable_wages + social_security_taxable_tips
+            ELSE social_security_tax / NULLIF(#{rate}, 0)
+          END
+        ), 0)
+      SQL
+    )
+  end
 
   belongs_to :company
   belongs_to :department, optional: true
@@ -44,8 +72,10 @@ class Employee < ApplicationRecord
   has_many :employee_ytd_totals, dependent: :destroy
   has_many :employee_loans, dependent: :destroy
   has_many :employee_wage_rates, dependent: :destroy
+  has_many :employee_tipped_occupations, dependent: :destroy
 
   before_validation :normalize_pay_rate_precision
+  before_validation :normalize_filing_status_value
   before_validation :normalize_w4_currency_precision
   before_validation :normalize_default_payroll_adjustments
 
@@ -75,6 +105,7 @@ class Employee < ApplicationRecord
     validates :w4_dependent_credit, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4a_other_income, numericality: { greater_than_or_equal_to: 0 }
     validates :w4_step4b_deductions, numericality: { greater_than_or_equal_to: 0 }
+    validates :w4_form_version, numericality: { only_integer: true, greater_than_or_equal_to: 1987, less_than_or_equal_to: ->(_) { Date.current.year + 1 } }
   end
 
   scope :active, -> { where(status: "active") }
@@ -154,6 +185,14 @@ class Employee < ApplicationRecord
     contractor? && contractor_pay_type == "flat_fee"
   end
 
+  def normalized_filing_status
+    FilingStatusConfig.normalize(filing_status)
+  end
+
+  def supported_w4_form_version?
+    w4_form_version.to_i >= MIN_SUPPORTED_W4_FORM_VERSION
+  end
+
   # TIN for 1099-NEC: EIN for business entities, SSN for individuals
   def tax_identification_number
     contractor? && contractor_type == "business" && contractor_ein.present? ? contractor_ein : ssn_encrypted
@@ -223,11 +262,12 @@ class Employee < ApplicationRecord
     )
   end
 
-  def ytd_totals_for_scope(scope)
-    select_list = YTD_AGGREGATE_COLUMNS.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
+  def ytd_totals_for_scope(scope, tax_year:)
+    columns = self.class.ytd_aggregate_columns_for_year(tax_year)
+    select_list = columns.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
     row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
 
-    YTD_AGGREGATE_SOURCE_COLUMNS.keys.each_with_object({}) do |key, totals|
+    columns.keys.each_with_object({}) do |key, totals|
       totals[key] = row[key.to_s].to_f
     end
   end
@@ -295,6 +335,10 @@ class Employee < ApplicationRecord
 
   private
 
+  def normalize_filing_status_value
+    self.filing_status = normalized_filing_status if filing_status.present?
+  end
+
   def normalize_default_payroll_adjustments
     self.default_payroll_adjustments = self.class.normalize_payroll_adjustments(default_payroll_adjustments)
   end
@@ -336,7 +380,7 @@ class Employee < ApplicationRecord
       pay_date, pay_date, pay_period_id
     )
 
-    ytd_totals_for_scope(scope)
+    ytd_totals_for_scope(scope, tax_year: year)
   end
 
   def pay_date_range_for_year(year)

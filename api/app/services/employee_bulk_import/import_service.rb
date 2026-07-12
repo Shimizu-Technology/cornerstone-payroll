@@ -11,6 +11,7 @@ module EmployeeBulkImport
       date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
       filing_status allowances additional_withholding
       w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
+      w4_form_version w4_effective_on
       retirement_rate roth_retirement_rate
       department
       address_line1 address_line2 city state zip phone
@@ -18,13 +19,13 @@ module EmployeeBulkImport
     ].freeze
 
     BOOLEAN_COLUMNS = %w[w4_step2_multiple_jobs w9_on_file].freeze
-    INTEGER_COLUMNS = %w[allowances].freeze
+    INTEGER_COLUMNS = %w[allowances w4_form_version].freeze
     NUMERIC_COLUMNS = %w[
       pay_rate additional_withholding
       w4_dependent_credit w4_step4a_other_income w4_step4b_deductions
       retirement_rate roth_retirement_rate
     ].freeze
-    DATE_COLUMNS = %w[date_of_birth hire_date].freeze
+    DATE_COLUMNS = %w[date_of_birth hire_date w4_effective_on].freeze
 
     attr_reader :company, :errors
 
@@ -106,6 +107,7 @@ module EmployeeBulkImport
         date_of_birth hire_date employment_type salary_type pay_rate pay_frequency
         filing_status allowances additional_withholding
         w4_dependent_credit w4_step2_multiple_jobs w4_step4a_other_income w4_step4b_deductions
+        w4_form_version w4_effective_on
         retirement_rate roth_retirement_rate
         department
         address_line1 address_line2 city state zip phone
@@ -121,7 +123,7 @@ module EmployeeBulkImport
           "John", "Doe", "", "john@example.com", "123-45-6789",
           "1990-01-15", "2024-03-01", "hourly", "", "15.00", "biweekly",
           "single", "0", "0",
-          "0", "false", "0", "0",
+          "0", "false", "0", "0", "2020", "2026-01-01",
           "0", "0",
           "Kitchen",
           "123 Main St", "", "Hagatna", "GU", "96910", "671-555-0100",
@@ -251,6 +253,13 @@ module EmployeeBulkImport
       if data["allowances"].present?
         val = Integer(data["allowances"]) rescue nil
         errors << "allowances must be a non-negative integer" if val.nil? || val.negative?
+      end
+
+      if data["w4_form_version"].present?
+        version = Integer(data["w4_form_version"]) rescue nil
+        if version.nil? || version < 1987 || version > Date.current.year + 1
+          errors << "w4_form_version must be a valid Form W-4 revision year"
+        end
       end
 
       if data["ssn"].present?
