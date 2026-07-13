@@ -247,9 +247,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     get "/api/v1/admin/invoice_receivables/statement", params: { recipient_id: recipient.id }
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("outstanding")).to eq(300.0)
-    expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to include(
-      archived.id, uncollectible.id, voided.id, draft.id
-    )
+    expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to contain_exactly(archived.id)
   end
 
   it "does not apply payments or credits after an invoice is written off as uncollectible" do

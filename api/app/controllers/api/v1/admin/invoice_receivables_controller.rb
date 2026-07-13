@@ -29,7 +29,7 @@ module Api
 
           render json: {
             recipient: { id: recipient.id, name: recipient.name, email: recipient.email, address: recipient.address },
-            invoices: scope.map { |invoice| InvoicePayloadBuilder.call(invoice) },
+            invoices: receivables.map { |invoice| InvoicePayloadBuilder.call(invoice) },
             outstanding: receivables.sum { |invoice| invoice.balance_due }.round(2).to_f
           }
         end
