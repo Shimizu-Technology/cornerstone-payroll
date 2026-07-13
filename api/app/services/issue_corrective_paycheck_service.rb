@@ -579,6 +579,11 @@ class IssueCorrectivePaycheckService
       company_ytd.add_payroll_item!(item)
     end
 
+    PayrollLiabilityPostingService.post!(
+      pay_period: supplemental,
+      actor: @actor
+    )
+
     # Only assign a check number if there's actually money to pay out.
     # Negative net (clawback) supplementals exist as accounting entries
     # but don't generate paper.
@@ -608,7 +613,7 @@ class IssueCorrectivePaycheckService
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
       .not_voided
-      .sum(:withholding_tax)
+      .sum { |item| item.total_income_tax_withheld }
 
     return if fit_total.to_f <= 0 # no positive FIT delta → no deposit needed
 

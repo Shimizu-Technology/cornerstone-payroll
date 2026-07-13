@@ -21,6 +21,7 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
       gross_pay: 2400.00,
       net_pay: 1800.00,
       withholding_tax: 300.00,
+      additional_withholding: 25.00,
       social_security_tax: 148.80,
       medicare_tax: 34.80,
       employer_social_security_tax: 148.80,
@@ -105,13 +106,13 @@ RSpec.describe PayrollTaxSyncPayloadBuilder, type: :service do
         expect(totals[:employee_count]).to eq(1)
         expect(totals[:gross_pay]).to eq(2400.0)
         expect(totals[:net_pay]).to eq(1800.0)
-        expect(totals[:withholding_tax]).to eq(300.0)
+        expect(totals[:withholding_tax]).to eq(325.0)
         expect(totals[:total_tax_liability]).to be > 0
       end
 
       it "calculates total_tax_liability correctly" do
         totals = payload[:totals]
-        expected = 300.0 + 148.8 + 34.8 + 148.8 + 34.8
+        expected = 325.0 + 148.8 + 34.8 + 148.8 + 34.8
         expect(totals[:total_tax_liability]).to eq(expected)
       end
 

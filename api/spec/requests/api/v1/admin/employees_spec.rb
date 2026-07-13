@@ -274,6 +274,21 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.state).to eq("")
         expect(employee.zip).to eq("")
       end
+
+      it "creates a salaried employee with a multi-million-dollar annual rate" do
+        salary_params = valid_params.deep_dup
+        salary_params[:employee].merge!(
+          employment_type: "salary",
+          salary_type: "annual",
+          pay_frequency: "biweekly",
+          pay_rate: 5_460_000
+        )
+
+        post "/api/v1/admin/employees", params: salary_params
+
+        expect(response).to have_http_status(:created)
+        expect(Employee.last.pay_rate).to eq(5_460_000)
+      end
     end
 
     context "with invalid params" do

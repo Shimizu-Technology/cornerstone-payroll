@@ -86,7 +86,9 @@ class Employee < ApplicationRecord
 
   validates :first_name, presence: true
   validates :last_name, presence: true
-  validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :pay_rate,
+            presence: true,
+            numericality: { greater_than_or_equal_to: 0, less_than: 1_000_000_000_000 }
   validates :employment_type, inclusion: { in: EMPLOYMENT_TYPES }
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   validates :status, inclusion: { in: %w[active inactive terminated] }

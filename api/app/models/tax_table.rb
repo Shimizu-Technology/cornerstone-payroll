@@ -28,7 +28,8 @@ class TaxTable < ApplicationRecord
   # Find the applicable bracket for a given income
   def find_bracket(income)
     brackets.find do |bracket|
-      income >= bracket[:min_income] && income <= bracket[:max_income]
+      max_income = bracket[:max_income]
+      income >= bracket[:min_income] && (max_income.nil? || income <= max_income)
     end
   end
 end

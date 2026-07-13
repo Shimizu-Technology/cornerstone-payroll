@@ -1,6 +1,6 @@
 # Cornerstone Payroll: QuickBooks, Payroll, and Compliance Master Plan
 
-> **Implementation status (2026-07-11):** A Phase 0 implementation candidate is on `codex/phase-0-payroll-foundation` and awaiting review. It adds effective-dated W-4/tax-rule evidence, stored taxable wage bases, separate tip/service-charge/qualified-overtime facts, versioned 1099 thresholds, 2026 W-2 reporting foundations, corrected Federal Form 941 terminology and tax aggregation, dependency/toolchain gates, browser smoke tests, and a production-readiness release gate. The authenticated staging smoke test and manual production evidence checklist must still pass before Phase 0 is closed. Later phases remain planned, not delivered.
+> **Implementation status (2026-07-13):** Phase 0 engineering was merged through PR #111 (`44f60f7`). Phase 1A now has an implementation candidate on `codex/phase-1-payroll-liability-foundation`; see the [Phase 1A Payroll Liability Foundation](PHASE_1A_PAYROLL_LIABILITY_FOUNDATION_2026-07-13.md). It adds effective-dated component-rule evidence, immutable commit/reversal/replacement liability postings, explicit historical backfill, and pay-period reconciliation without changing payroll calculations. Phase 0 operational evidence and Phase 1A production validation still require signoff before deployment/backfill. Later Phase 1 operational capabilities remain planned.
 
 **Status:** Active source of truth for post-July 2026 planning
 **Created:** 2026-07-11
@@ -94,7 +94,7 @@ The application already provides a substantial payroll foundation:
 - client documents, client messages, change requests, and read-only client payroll/report access;
 - audit logging and tax-configuration history.
 
-The backend also has broad automated coverage. The repository currently contains 124 backend spec files. The frontend has no application-level automated tests, which is a material gap for financial workflows.
+The backend also has broad automated coverage. Phase 0 added Playwright infrastructure and public/authenticated payroll smoke tests. The authenticated smoke remains environment-gated and does not replace broader browser coverage for calculate, review, approve, commit, correct, and filing workflows.
 
 ### 3.2 Current capability assessment
 
@@ -110,19 +110,22 @@ The backend also has broad automated coverage. The repository currently contains
 | Full QuickBooks accounting | Missing | No double-entry ledger, AP/AR, bank feeds, trial balance, or financial statements |
 | Individual/business tax returns | Missing and deferred | Separate return engine, diagnostics, signatures, MeF approval, and filing operations |
 
-### 3.3 Verification snapshot on 2026-07-11
+### 3.3 Verification snapshot after merged Phase 0 on 2026-07-12
 
-The second review ran the repository's current quality gates:
+The merged Phase 0 release candidate completed:
 
-- backend: `1360 examples, 0 failures, 30 pending`; the pending examples depend on absent real MoSa database records or payroll-PDF fixtures and therefore are not equivalent to passing fixture coverage;
+- backend: `1395 examples, 0 failures`; fixture-dependent examples remain pending where real MoSa records or source PDFs are not present;
 - frontend: TypeScript, ESLint, and production build passed;
-- frontend application tests: none are present;
+- focused Phase 0 correction/tax regression suite: `41 examples, 0 failures`;
 - Brakeman: 0 application-code warnings;
-- Bundler Audit: failed on current dependency advisories, including high-severity advisories affecting `jwt` and `puma`, plus advisories affecting `concurrent-ruby`, `crass`, `json`, `msgpack`, `net-imap`, `nokogiri`, and `websocket-driver`;
-- npm audit: 18 advisories, including 6 high-severity advisories; affected dependency paths include `js-cookie`, `protobufjs`, `react-router`, and `vite`, with additional moderate/low findings;
-- the frontend build emitted a Vite warning under the Node runtime selected during the gate, and the repository does not pin its own Node version.
+- Bundler Audit and npm audit: passed at the merged release commit;
+- migration rollback/reapply: passed;
+- official backend and frontend GitHub quality checks: passed;
+- Greptile final review: `5/5`, safe to merge, with no unresolved threads;
+- Playwright smoke infrastructure: present, including public compliance and authenticated payroll smoke paths;
+- repository Node version: pinned; local operators must actually select that version rather than an older globally installed Node runtime.
 
-These results mean the application has a meaningful regression foundation, but dependency remediation, real-fixture coverage, browser tests, and a reproducible supported toolchain remain release gates.
+The remaining Phase 0 gaps are operational evidence, broader browser coverage, production-shaped authenticated validation, real-fixture coverage, and completion of the generalized effective-dated pay-component taxability matrix.
 
 ---
 
@@ -614,6 +617,8 @@ Future individual/business return preparation may share clients, documents, secu
 
 **Goal:** Remove known correctness and trust blockers before expanding features.
 
+**Delivery status (2026-07-12):** Engineering merged in PR #111. The calculation/data/security changes are delivered. Operational release evidence remains open, and the generalized effective-dated pay-component taxability matrix continues into Phase 1.
+
 Deliverables:
 
 1. Select tax configurations strictly by pay date/effective year.
@@ -636,6 +641,19 @@ Exit gate:
 - public/operator language does not instruct staff to file the wrong form or authority;
 - critical payroll happy path has automated browser coverage;
 - production-control checklist is signed off.
+
+Current gate assessment:
+
+| Gate | Status | Evidence / remaining work |
+|---|---|---|
+| Known P0 calculation/status/year defects | Passed for merged scope | Focused and full regression suites passed; Greptile final review was 5/5 |
+| Backend/frontend dependency audits | Passed at merged commit | Enforced by GitHub quality workflow |
+| Federal Form 941 and filing-authority language | Passed for active changed surfaces | Backward-compatible route names remain where required |
+| Browser smoke infrastructure | Implemented | Public and authenticated smoke paths exist |
+| Authenticated production-shaped payroll smoke | Open | No permanent staging environment exists; use a temporary isolated Neon branch or equivalent production-shaped validation environment |
+| Production configuration/readiness command | Implemented | Must be run with actual production configuration and evidence retained |
+| Backup/restore, MFA, R2, mail, monitoring, and operational checklist | Open | Requires manual release-owner signoff in the production-readiness checklist |
+| General pay-component taxability matrix | Partial | Stored committed bases/rule snapshots are delivered; the reusable effective-dated component matrix remains Phase 1 work |
 
 ### Phase 1: payroll operational parity
 
@@ -948,27 +966,27 @@ The software must block unsupported tax years/forms rather than silently falling
 
 ## 11. First implementation backlog
 
-The recommended first tickets, in order, are:
+| Ticket | Status on 2026-07-12 | Scope |
+|---|---|---|
+| **CPR-MP-001** | Delivered in PR #111 | Correct tax-year/effective-rule selection and snapshot rule IDs on committed payroll |
+| **CPR-MP-002** | Delivered in PR #111 | Normalize filing statuses and add W-4 version/effective-date handling |
+| **CPR-MP-003** | Delivered in PR #111 | Add year-versioned information-return thresholds and 2026 1099-NEC behavior |
+| **CPR-MP-004** | Delivered in PR #111 | Rename user-facing 941-GU language and correct filing authority/documentation |
+| **CPR-MP-005** | Delivered in PR #111 | Remediate dependency advisories and add CI audit gates |
+| **CPR-MP-006** | Delivered foundation; operational smoke open | Pin supported Node, add Playwright infrastructure and authenticated payroll smoke path |
+| **CPR-MP-007** | Implementation candidate in Phase 1A | Stored FIT/SS/Medicare bases remain authoritative; effective-dated component classifications and commit-time snapshots added without changing calculation formulas |
+| **CPR-MP-008** | Delivered foundation in PR #111 | Cash-tip, service-charge, tipped-occupation, and qualified-overtime facts and 2026 reporting foundations |
+| **CPR-MP-009** | Liability posting candidate in Phase 1A; payment settlement remains | Immutable commit/reversal/replacement ledger, reconciliation API/UI, and explicit historical backfill; payment/allocation/evidence follows in the next bounded PR |
+| **CPR-MP-010** | Planned | Company compliance profile and authoritative federal deposit schedule |
+| **CPR-MP-011** | Planned | Complete Federal Form 941 lines, official overlay, signer/preparer, and readiness blockers |
+| **CPR-MP-012** | Planned | Actual compliance evidence attachments and submission statuses |
+| **CPR-MP-013** | Planned | Validate and complete SWICA/W-1 known-client workflow |
+| **CPR-MP-014** | Partial foundation only | 2026 W-2GU data/mappings foundation delivered; annual reconciliation remains |
+| **CPR-MP-015** | Planned | EFW2/W-3SS export and GuamTax validation harness |
+| **CPR-MP-016** | Planned | Versioned Guam wage-and-hour diagnostics and final-pay/workweek review blockers |
+| **CPR-MP-017** | Planned | Third-party-payer roles, Form 8655 authorization, employer disclosures, and EFTPS verification |
 
-1. **CPR-MP-001:** Correct tax-year/effective-rule selection and snapshot rule IDs on committed payroll.
-2. **CPR-MP-002:** Normalize filing statuses and add W-4 version/effective-date handling.
-3. **CPR-MP-003:** Add year-versioned information-return thresholds; fix 2026 1099-NEC behavior.
-4. **CPR-MP-004:** Rename user-facing 941-GU language and correct filing authority/documentation.
-5. **CPR-MP-005:** Remediate dependency advisories and add CI audit gates.
-6. **CPR-MP-006:** Pin and enforce a supported Node toolchain; introduce frontend E2E infrastructure and a payroll happy-path test.
-7. **CPR-MP-007:** Design effective-dated pay-component taxability rules and persist committed FIT/SS/Medicare wage bases and rule IDs.
-8. **CPR-MP-008:** Add qualified-tip, service-charge, tipped-occupation, and qualified-overtime data.
-9. **CPR-MP-009:** Design payroll liability/deposit ledger.
-10. **CPR-MP-010:** Add company compliance profile and authoritative federal deposit schedule.
-11. **CPR-MP-011:** Complete Federal Form 941 lines, official overlay, signer/preparer, and readiness blockers.
-12. **CPR-MP-012:** Add actual compliance evidence attachments and submission statuses.
-13. **CPR-MP-013:** Validate and complete SWICA/W-1 known-client workflow.
-14. **CPR-MP-014:** Build 2026 W-2GU mappings and annual reconciliation foundation.
-15. **CPR-MP-015:** Build EFW2/W-3SS export and GuamTax validation harness.
-16. **CPR-MP-016:** Add versioned Guam wage-and-hour diagnostics and final-pay/workweek review blockers.
-17. **CPR-MP-017:** Model third-party-payer roles, Form 8655 authorization, employer disclosures, and EFTPS verification.
-
-Only after these are underway should the team begin broad new accounting or tax-return features.
+The next payroll/compliance implementation batch should begin with the remaining portion of `CPR-MP-007` and `CPR-MP-009`, then continue through quarterly compliance. Broad income-tax preparation remains deferred. The bounded Invoice/AR workstream may proceed without beginning the full accounting kernel; see the [Invoice Maker plan](INVOICE_MAKER_AUDIT_AND_IMPLEMENTATION_PLAN_2026-07-12.md).
 
 ---
 
@@ -1107,6 +1125,8 @@ This document governs priority and release readiness. Use the following document
 - [Client Rollout Plan](CLIENT_ROLLOUT_PLAN.md) — parallel-run and cutover process.
 - [Rollout Runbooks](rollout/README.md) — operational templates that must be updated as this plan's corrections are implemented.
 - [Runbook](RUNBOOK.md) — operational reference; review dates and form naming before each filing cycle.
+- [Invoice Maker Audit and Implementation Plan](INVOICE_MAKER_AUDIT_AND_IMPLEMENTATION_PLAN_2026-07-12.md) — current source of truth for invoice integrity, accounts receivable, document templates, delivery, payments, and AI boundaries.
+- [Tools Expansion Plan](TOOLS_INVOICE_AND_GENERAL_TRANSMITTAL_PLAN_2026-05-02.md) — historical implementation plan for the original native Invoice Maker and General Transmittal build; the dedicated Invoice Maker plan now governs future invoice work.
 
 ---
 
@@ -1114,13 +1134,14 @@ This document governs priority and release readiness. Use the following document
 
 Do not begin with a broad accounting build or income-tax preparation.
 
-Begin with Phase 0 and the first discovery sessions in parallel:
+Phase 0 engineering is merged. The immediate program is now:
 
-1. fix known correctness and terminology issues;
-2. secure and test the current payroll workflow;
-3. collect real QuickBooks and filed-compliance artifacts;
-4. implement the liability/rules/compliance foundations;
-5. complete quarterly and annual filing readiness;
-6. then execute historical QuickBooks exit and accounting exports.
+1. close Phase 0 operational evidence with an isolated production-shaped database validation, verified backup/restore path, actual production-readiness command, and checklist signoff;
+2. complete the generalized pay-component taxability design left in `CPR-MP-007`;
+3. begin `CPR-MP-009`, the payroll liability/deposit ledger that quarterly reconciliation depends on;
+4. collect real QuickBooks and filed-compliance artifacts through the discovery sessions;
+5. continue Phase 1 daily payroll parity and Phase 2 quarterly filing readiness;
+6. implement Invoice Phase IM-0 as a bounded integrity workstream if Invoice Maker is the next selected product task;
+7. complete annual compliance, historical QuickBooks exit, and accounting exports before considering the full accounting kernel.
 
-That sequence protects current payroll clients while steadily removing the remaining reasons Cornerstone needs QuickBooks.
+That sequence acknowledges the Phase 0 progress already merged while preserving payroll/compliance as the primary product commitment.

@@ -20,10 +20,11 @@ class PayPeriodPayDateCorrectionService
     new(...).call
   end
 
-  def initialize(pay_period:, new_pay_date:, reason:)
+  def initialize(pay_period:, new_pay_date:, reason:, actor: nil)
     @pay_period = pay_period
     @new_pay_date = parse_date(new_pay_date)
     @reason = reason.to_s.strip
+    @actor = actor
   end
 
   def call
@@ -52,6 +53,14 @@ class PayPeriodPayDateCorrectionService
       locked.update!(
         pay_date: new_pay_date,
         **locked.tax_sync_refresh_attributes
+      )
+
+      PayrollLiabilityPostingService.restate_for_pay_date!(
+        pay_period: locked,
+        actor: actor,
+        reason: reason,
+        old_pay_date: old_pay_date,
+        new_pay_date: new_pay_date
       )
 
       payroll_items_updated = locked.payroll_items.where(check_date: old_pay_date).update_all(
@@ -86,7 +95,7 @@ class PayPeriodPayDateCorrectionService
 
   private
 
-  attr_reader :pay_period, :new_pay_date, :reason
+  attr_reader :pay_period, :new_pay_date, :reason, :actor
 
   def parse_date(value)
     return value if value.is_a?(Date)

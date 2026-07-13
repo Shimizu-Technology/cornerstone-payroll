@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -412,7 +412,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
     t.string "last_name", null: false
     t.string "middle_name"
     t.string "pay_frequency", default: "biweekly"
-    t.decimal "pay_rate", precision: 12, scale: 6, null: false
+    t.decimal "pay_rate", precision: 18, scale: 6, null: false
     t.string "phone"
     t.decimal "retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "roth_retirement_rate", precision: 5, scale: 4, default: "0.0"
@@ -752,6 +752,39 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
     t.index ["status"], name: "index_organizations_on_status"
   end
 
+  create_table "pay_component_tax_rules", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.string "additional_medicare_treatment", null: false
+    t.datetime "approved_at"
+    t.bigint "approved_by_id"
+    t.bigint "company_id"
+    t.string "component_key", null: false
+    t.string "component_kind", null: false
+    t.datetime "created_at", null: false
+    t.string "display_name", null: false
+    t.date "effective_from", null: false
+    t.date "effective_to"
+    t.string "fit_treatment", null: false
+    t.jsonb "form_941_mapping", default: {}, null: false
+    t.string "gl_account_code"
+    t.string "medicare_treatment", null: false
+    t.string "register_presentation", default: "separate", null: false
+    t.string "reimbursement_treatment", null: false
+    t.string "retirement_treatment", null: false
+    t.string "social_security_treatment", null: false
+    t.string "source_name", null: false
+    t.string "source_url"
+    t.string "swica_treatment", null: false
+    t.datetime "updated_at", null: false
+    t.string "version", null: false
+    t.jsonb "w2_gu_mapping", default: {}, null: false
+    t.index ["approved_by_id"], name: "index_pay_component_tax_rules_on_approved_by_id"
+    t.index ["company_id", "component_key", "effective_from"], name: "idx_component_rules_company_key_effective"
+    t.index ["company_id"], name: "index_pay_component_tax_rules_on_company_id"
+    t.index ["component_key", "effective_from"], name: "idx_component_rules_global_key_effective", where: "(company_id IS NULL)"
+    t.check_constraint "effective_to IS NULL OR effective_to >= effective_from", name: "component_rules_effective_date_range"
+  end
+
   create_table "pay_period_correction_events", force: :cascade do |t|
     t.string "action_type", null: false
     t.bigint "actor_id"
@@ -1045,7 +1078,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
     t.decimal "non_taxable_pay", precision: 12, scale: 2, default: "0.0"
     t.decimal "overtime_hours", precision: 8, scale: 2, default: "0.0"
     t.bigint "pay_period_id", null: false
-    t.decimal "pay_rate", precision: 12, scale: 6, null: false
+    t.decimal "pay_rate", precision: 18, scale: 6, null: false
     t.jsonb "payroll_adjustments", default: [], null: false
     t.decimal "pto_hours", precision: 8, scale: 2, default: "0.0"
     t.decimal "qualified_overtime_compensation", precision: 14, scale: 2
@@ -1092,6 +1125,51 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
     t.index ["tax_rule_snapshot"], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index ["voided"], name: "index_payroll_items_on_voided"
+  end
+
+  create_table "payroll_liability_entries", force: :cascade do |t|
+    t.decimal "amount", precision: 14, scale: 2, null: false
+    t.string "authority", null: false
+    t.string "category", null: false
+    t.bigint "company_id", null: false
+    t.string "component_key", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "pay_component_tax_rule_id"
+    t.bigint "payroll_item_id"
+    t.bigint "payroll_liability_posting_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "category"], name: "idx_liability_entries_company_category"
+    t.index ["company_id"], name: "index_payroll_liability_entries_on_company_id"
+    t.index ["pay_component_tax_rule_id"], name: "idx_liability_entries_component_rule"
+    t.index ["payroll_item_id"], name: "index_payroll_liability_entries_on_payroll_item_id"
+    t.index ["payroll_liability_posting_id", "payroll_item_id", "component_key"], name: "idx_liability_entries_unique_component", unique: true
+    t.index ["payroll_liability_posting_id"], name: "idx_liability_entries_posting"
+    t.check_constraint "amount <> 0::numeric", name: "liability_entries_nonzero_amount"
+  end
+
+  create_table "payroll_liability_postings", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.jsonb "component_rule_snapshot", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.string "idempotency_key", null: false
+    t.date "liability_date", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "pay_period_id", null: false
+    t.datetime "posted_at", null: false
+    t.bigint "posted_by_id"
+    t.string "posting_type", null: false
+    t.text "reason"
+    t.bigint "source_posting_id"
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "liability_date"], name: "idx_liability_postings_company_date"
+    t.index ["company_id"], name: "index_payroll_liability_postings_on_company_id"
+    t.index ["idempotency_key"], name: "idx_liability_postings_idempotency", unique: true
+    t.index ["pay_period_id", "posting_type"], name: "idx_liability_postings_period_type"
+    t.index ["pay_period_id"], name: "index_payroll_liability_postings_on_pay_period_id"
+    t.index ["posted_by_id"], name: "index_payroll_liability_postings_on_posted_by_id"
+    t.index ["source_posting_id"], name: "idx_liability_postings_one_reversal", unique: true, where: "(source_posting_id IS NOT NULL)"
+    t.index ["source_posting_id"], name: "index_payroll_liability_postings_on_source_posting_id"
   end
 
   create_table "payroll_reminder_configs", force: :cascade do |t|
@@ -1625,6 +1703,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
   add_foreign_key "non_employee_checks", "pay_periods"
   add_foreign_key "non_employee_checks", "users", column: "created_by_id"
   add_foreign_key "organizations", "companies", column: "primary_company_id"
+  add_foreign_key "pay_component_tax_rules", "companies", on_delete: :restrict
+  add_foreign_key "pay_component_tax_rules", "users", column: "approved_by_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "companies", on_delete: :restrict
   add_foreign_key "pay_period_correction_events", "pay_periods", column: "resulting_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_period_correction_events", "pay_periods", on_delete: :restrict
@@ -1659,6 +1739,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_120000) do
   add_foreign_key "payroll_items", "pay_periods"
   add_foreign_key "payroll_items", "payroll_items", column: "correction_for_payroll_item_id"
   add_foreign_key "payroll_items", "users", column: "voided_by_user_id", on_delete: :nullify
+  add_foreign_key "payroll_liability_entries", "companies", on_delete: :restrict
+  add_foreign_key "payroll_liability_entries", "pay_component_tax_rules", on_delete: :restrict
+  add_foreign_key "payroll_liability_entries", "payroll_items", on_delete: :restrict
+  add_foreign_key "payroll_liability_entries", "payroll_liability_postings", on_delete: :restrict
+  add_foreign_key "payroll_liability_postings", "companies", on_delete: :restrict
+  add_foreign_key "payroll_liability_postings", "pay_periods", on_delete: :restrict
+  add_foreign_key "payroll_liability_postings", "payroll_liability_postings", column: "source_posting_id", on_delete: :restrict
+  add_foreign_key "payroll_liability_postings", "users", column: "posted_by_id", on_delete: :nullify
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"

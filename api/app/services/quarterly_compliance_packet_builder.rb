@@ -124,7 +124,7 @@ class QuarterlyCompliancePacketBuilder
         gross_pay: money(period_items.sum(&:gross_pay)),
         net_pay: money(period_items.sum(&:net_pay)),
         deductions: money(deductions_total(period_items)),
-        guam_withholding: money(period_items.sum(&:withholding_tax)),
+        guam_withholding: money(total_income_tax_withheld(period_items)),
         social_security_tax: money(period_items.sum(&:social_security_tax)),
         medicare_tax: money(period_items.sum(&:medicare_tax)),
         employer_social_security_tax: money(period_items.sum(&:employer_social_security_tax)),
@@ -170,10 +170,10 @@ class QuarterlyCompliancePacketBuilder
 
       {
         policy: "per_pay_period",
-        total_guam_withholding: money(payroll_items.sum(&:withholding_tax)),
+        total_guam_withholding: money(total_income_tax_withheld(payroll_items)),
         total_confirmed_payments: money(deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
         unconfirmed_amount_count: deposits.count { |row| row[:payment_date].present? && row[:amount].nil? },
-        unreconciled_balance: money(payroll_items.sum(&:withholding_tax).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
+        unreconciled_balance: money(total_income_tax_withheld(payroll_items).to_f - deposits.select { |row| row[:payment_date].present? && !row[:amount].nil? }.sum { |row| row[:amount].to_f }),
         deposits: deposits
       }
     end
@@ -181,7 +181,7 @@ class QuarterlyCompliancePacketBuilder
 
   def w1_section
     @w1_section ||= begin
-      daily = liability_rows_by_pay_date(:withholding_tax)
+      daily = liability_rows_by_pay_date(:total_income_tax_withheld)
       {
         filing_channel: "GuamTax.com Quarterly -> W-1",
         quarter_ending_month: quarter_end.month,
@@ -194,7 +194,7 @@ class QuarterlyCompliancePacketBuilder
         filing_status: "not_started",
         tie_out: tie_out(
           label: "W-1 Guam withholding",
-          expected: payroll_items.sum(&:withholding_tax),
+          expected: total_income_tax_withheld(payroll_items),
           actual: daily.sum { |row| row[:amount].to_f }
         ),
         filing_steps: [
@@ -268,7 +268,7 @@ class QuarterlyCompliancePacketBuilder
   def employee_rows
     payroll_items.group_by(&:employee).filter_map do |employee, items|
       gross = items.sum(&:gross_pay)
-      next if gross.to_f.zero? && items.sum(&:withholding_tax).to_f.zero?
+      next if gross.to_f.zero? && total_income_tax_withheld(items).zero?
 
       {
         employee_id: employee.id,
@@ -282,7 +282,7 @@ class QuarterlyCompliancePacketBuilder
         swica_wages: money(gross),
         reported_tips: money(items.sum(&:reported_tips)),
         non_taxable_pay: money(items.sum(&:non_taxable_pay)),
-        guam_withholding: money(items.sum(&:withholding_tax)),
+        guam_withholding: money(total_income_tax_withheld(items)),
         social_security_tax: money(items.sum(&:social_security_tax)),
         employer_social_security_tax: money(items.sum(&:employer_social_security_tax)),
         medicare_tax: money(items.sum(&:medicare_tax)),
@@ -501,9 +501,14 @@ class QuarterlyCompliancePacketBuilder
   def deductions_total(items)
     items.sum do |item|
       gross = item.gross_pay.to_f
-      taxes = item.withholding_tax.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
+      taxes = item.total_income_tax_withheld.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
       [ gross - item.net_pay.to_f - taxes, 0 ].max
     end
+  end
+
+
+  def total_income_tax_withheld(items)
+    items.sum(&:total_income_tax_withheld).round(2)
   end
 
   def suggested_federal_deposit_schedule

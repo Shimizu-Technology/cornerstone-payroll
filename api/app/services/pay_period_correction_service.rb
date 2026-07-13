@@ -82,6 +82,13 @@ class PayPeriodCorrectionService
         co_ytd&.subtract_payroll_item!(item)
       end
 
+      PayrollLiabilityPostingService.reverse!(
+        pay_period: locked,
+        actor: actor,
+        reason: reason,
+        idempotency_key: "pay-period:#{locked.id}:void"
+      )
+
       void_time = Time.current
 
       # Mark the pay period voided

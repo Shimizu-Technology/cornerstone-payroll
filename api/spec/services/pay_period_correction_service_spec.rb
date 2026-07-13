@@ -91,6 +91,21 @@ RSpec.describe PayPeriodCorrectionService do
         expect(event.actor_name).to eq(actor.name)
       end
 
+      it "reverses the payroll liability posting in the same transaction" do
+        original = PayrollLiabilityPostingService.post!(pay_period: committed_period, actor: actor)
+
+        PayPeriodCorrectionService.void!(
+          pay_period: committed_period,
+          actor: actor,
+          reason: "Reverse payroll liabilities"
+        )
+
+        reversal = original.reload.reversal_posting
+        expect(reversal).to be_present
+        expect(reversal.entries.sum(:amount)).to eq(-original.entries.sum(:amount))
+        expect(committed_period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
+      end
+
       it "does not enqueue tax sync when the CST ingest integration is not configured" do
         allow(PayrollTaxSyncJob).to receive(:perform_later)
 

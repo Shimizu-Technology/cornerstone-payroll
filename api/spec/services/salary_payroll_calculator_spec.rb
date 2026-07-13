@@ -38,4 +38,15 @@ RSpec.describe SalaryPayrollCalculator do
     expect(payroll_item.fit_taxable_wages).to eq(2025.00)
     expect(payroll_item.medicare_taxable_wages).to eq(2025.00)
   end
+
+  it "calculates a high annual salary without overflowing the stored pay rate" do
+    employee.update!(pay_rate: 5_460_000)
+    payroll_item.update!(pay_rate: employee.pay_rate, service_charge_wages: 0)
+
+    payroll_item.calculate!
+
+    expect(payroll_item.reload.gross_pay).to eq(210_000.00)
+    expect(payroll_item.medicare_tax).to be_positive
+    expect(payroll_item.additional_medicare_tax).to be_positive
+  end
 end

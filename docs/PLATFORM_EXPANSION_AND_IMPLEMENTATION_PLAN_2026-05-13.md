@@ -297,6 +297,8 @@ The page should be professional and trust-building, not a generic SaaS splash pa
 
 ## Invoice Maker And Invoice AI Plan
 
+> **Updated direction (2026-07-12):** This section records the earlier expansion direction. The current audit, data-integrity findings, accounts-receivable scope, and phased implementation backlog are maintained in the [Invoice Maker Audit and Implementation Plan](INVOICE_MAKER_AUDIT_AND_IMPLEMENTATION_PLAN_2026-07-12.md).
+
 ### Current State
 
 The invoice maker already supports:
