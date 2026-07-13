@@ -80,8 +80,6 @@ class PayrollLiabilityPostingService
         reason: reason,
         metadata: metadata
       )
-    rescue ActiveRecord::RecordNotUnique
-      PayrollLiabilityPosting.find_by!(idempotency_key: key)
     end
   end
 
@@ -235,9 +233,6 @@ class PayrollLiabilityPostingService
     end
     PayrollLiabilityEntry.insert_all!(rows) if rows.any?
     reversal.reload
-  rescue ActiveRecord::RecordNotUnique
-    PayrollLiabilityPosting.find_by(source_posting_id: source.id) ||
-      PayrollLiabilityPosting.find_by!(idempotency_key: key)
   end
 
   def build_entries(locked, posting, snapshot_builder)
