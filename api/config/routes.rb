@@ -112,6 +112,7 @@ Rails.application.routes.draw do
         resources :user_invitations, only: [ :create ]
 
         resources :payroll_fields, except: [ :new, :edit ], controller: :payroll_fields
+        resources :pay_component_tax_rules, only: [ :index, :create, :update ]
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
@@ -137,6 +138,7 @@ Rails.application.routes.draw do
         end
 
         resources :pay_periods do
+          resources :payroll_liabilities, only: [ :index ]
           member do
             post :run_payroll
             get :comparison

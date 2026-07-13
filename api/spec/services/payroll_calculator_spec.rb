@@ -178,6 +178,32 @@ RSpec.describe PayrollCalculator do
 
       expect(payroll_item.loan_payment).to eq(200.0)
       expect(payroll_item.total_deductions.to_f).to be >= 200.0
+      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
+    end
+
+    it "uses a manual paycheck loan deduction without duplicating configured loan deductions" do
+      loan_type = DeductionType.create!(
+        company: company,
+        name: "Manual loan test",
+        category: "post_tax",
+        sub_category: "loan",
+        active: true
+      )
+      EmployeeDeduction.create!(
+        employee: employee,
+        deduction_type: loan_type,
+        amount: 40.0,
+        is_percentage: false,
+        active: true
+      )
+      payroll_item.import_source = nil
+      payroll_item.loan_deduction = 50.0
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.loan_payment).to eq(50.0)
+      expect(payroll_item.payroll_item_deductions.none? { |deduction| deduction.deduction_type&.loan? }).to be(true)
+      expect(payroll_item.total_deductions).to be >= 50.0
     end
 
     it "applies recurring payroll adjustments according to their tax treatment" do
@@ -334,7 +360,7 @@ RSpec.describe PayrollCalculator do
       expect(deductions.map(&:label)).to include("Field 401(k)", "Field Rent")
       expect(deductions.find { |deduction| deduction.label == "Field 401(k)" }.category).to eq("pre_tax")
       expect(deductions.find { |deduction| deduction.label == "Field Rent" }.category).to eq("post_tax")
-      expect(deductions.sum { |deduction| deduction.label.in?(["Field 401(k)", "Field Rent"]) ? deduction.amount.to_f : 0.0 }).to eq(65.0)
+      expect(deductions.sum { |deduction| deduction.label.in?([ "Field 401(k)", "Field Rent" ]) ? deduction.amount.to_f : 0.0 }).to eq(65.0)
     end
 
     it "recomputes default percentage payroll fields when pay changes before manual override" do

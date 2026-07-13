@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Fragment, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Info, Loader2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -148,6 +148,41 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
         </div>
       </section>
 
+      {report.contractors.length > 0 && (
+        <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+          <div className="border-b border-neutral-200 px-5 py-4">
+            <h3 className="font-bold text-neutral-950">1099 contractor detail</h3>
+            <p className="mt-0.5 text-sm text-neutral-500">
+              Informational contractor payments are shown separately and are not included in the simplified W-2 totals.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+                <tr>
+                  <th className="border-b border-r border-slate-200 px-4 py-2.5">Contractor</th>
+                  <th className="border-b border-r border-slate-200 px-4 py-2.5">Type</th>
+                  <th className="border-b border-r border-slate-200 px-4 py-2.5 text-right">Gross pay</th>
+                  <th className="border-b border-r border-slate-200 px-4 py-2.5 text-right">Net pay</th>
+                  <th className="border-b border-slate-200 px-4 py-2.5">Check #</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.contractors.map((contractor) => (
+                  <tr key={contractor.employee_id} className="hover:bg-blue-50/50">
+                    <td className="border-b border-r border-slate-100 px-4 py-2.5 font-semibold">{contractor.employee_name}</td>
+                    <td className="border-b border-r border-slate-100 px-4 py-2.5 capitalize">{contractor.employment_type}</td>
+                    <td className="border-b border-r border-slate-100 px-4 py-2.5 text-right tabular-nums">{currency(contractor.gross_pay)}</td>
+                    <td className="border-b border-r border-slate-100 px-4 py-2.5 text-right font-semibold tabular-nums">{currency(contractor.net_pay)}</td>
+                    <td className="border-b border-slate-100 px-4 py-2.5 font-mono">{contractor.check_number || ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <section className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -181,13 +216,23 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
 }
 
 function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
+  const contractorCount = report.summary.contractor_count ?? report.contractors.length;
+  const contractorGross = report.summary.contractor_total_gross
+    ?? report.contractors.reduce((total, contractor) => total + Number(contractor.gross_pay ?? 0), 0);
+  const contractorNet = report.summary.contractor_total_net
+    ?? report.contractors.reduce((total, contractor) => total + Number(contractor.net_pay ?? 0), 0);
   const summaryItems = [
-    ['Employees', report.summary.employee_count.toLocaleString()],
-    ['Gross pay', currency(report.summary.total_gross)],
+    ['Workers', (report.summary.employee_count + contractorCount).toLocaleString()],
+    ['W-2 gross', currency(report.summary.total_gross)],
+    ['1099 gross', currency(contractorGross)],
     ['Withholding', currency(report.summary.total_withholding)],
     ['Deductions', currency(report.summary.total_deductions)],
-    ['Net pay', currency(report.summary.total_net)],
+    ['Total net', currency(Number(report.summary.total_net) + Number(contractorNet))],
   ];
+  const workerSections = [
+    { label: 'W-2 employees', workers: report.employees },
+    { label: '1099 contractors', workers: report.contractors },
+  ].filter((section) => section.workers.length > 0);
 
   return (
     <div className="space-y-5">
@@ -197,7 +242,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
         <p className="mt-1 text-sm text-neutral-500">
           {report.pay_period.start_date} – {report.pay_period.end_date} · Pay date {report.pay_period.pay_date}
         </p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           {summaryItems.map(([label, value]) => (
             <div key={label} className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
@@ -209,7 +254,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
 
       <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
         <div className="border-b border-neutral-200 px-5 py-4">
-          <h3 className="font-bold text-neutral-950">Employee detail</h3>
+          <h3 className="font-bold text-neutral-950">Payroll worker detail</h3>
         </div>
         <div className="max-h-[60vh] overflow-auto">
           <table className="min-w-[1450px] text-xs">
@@ -221,23 +266,32 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
               </tr>
             </thead>
             <tbody>
-              {report.employees.map((employee) => (
-                <tr key={employee.employee_id} className="hover:bg-blue-50/50">
-                  <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold">{employee.employee_name}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 capitalize">{employee.employment_type}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(employee.hours_worked)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(employee.overtime_hours)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.gross_pay)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.reported_tips)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.tips_paid_out)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.withholding_tax)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.additional_withholding)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.social_security_tax)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.medicare_tax)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(employee.total_deductions)}</td>
-                  <td className="border-b border-r border-slate-100 px-3 py-2 text-right font-bold tabular-nums">{currency(employee.net_pay)}</td>
-                  <td className="border-b border-slate-100 px-3 py-2 font-mono">{employee.check_number || ''}</td>
-                </tr>
+              {workerSections.map((section) => (
+                <Fragment key={section.label}>
+                  <tr className="bg-slate-50">
+                    <td colSpan={14} className="border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                      {section.label} · {section.workers.length}
+                    </td>
+                  </tr>
+                  {section.workers.map((worker) => (
+                    <tr key={worker.employee_id} className="hover:bg-blue-50/50">
+                      <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold">{worker.employee_name}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 capitalize">{worker.employment_type}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.hours_worked)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.overtime_hours)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.reported_tips)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.tips_paid_out)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.withholding_tax)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.additional_withholding)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.social_security_tax)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
+                      <td className="border-b border-slate-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

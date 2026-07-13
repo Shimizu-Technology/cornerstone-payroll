@@ -116,6 +116,20 @@ RSpec.describe Employee, type: :model do
       expect(employee.pay_rate.to_f).to eq(9.99)
     end
 
+    it "supports legitimate high annual salaries" do
+      employee = build(:employee, employment_type: "salary", pay_rate: 5_460_000)
+
+      expect(employee).to be_valid
+      expect(employee.pay_rate.to_f).to eq(5_460_000.0)
+    end
+
+    it "rejects a pay rate beyond the database precision" do
+      employee = build(:employee, pay_rate: 1_000_000_000_000)
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:pay_rate]).to be_present
+    end
+
     it "rounds W-4 monetary fields to cents before validation" do
       employee = build(
         :employee,

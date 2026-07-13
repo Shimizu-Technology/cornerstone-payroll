@@ -361,6 +361,63 @@ export interface PayPeriod {
   payroll_items?: PayrollItem[];
 }
 
+export type PayrollLiabilityReconciliationStatus =
+  | 'not_applicable'
+  | 'legacy_unposted'
+  | 'posted'
+  | 'attention_required'
+  | 'reversed';
+
+export interface PayrollLiabilityEntry {
+  id: number;
+  payroll_item_id?: number | null;
+  employee_id?: number | null;
+  component_key: string;
+  category: string;
+  authority: string;
+  amount: number;
+  pay_component_tax_rule_id?: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface PayrollLiabilityPosting {
+  id: number;
+  posting_type: 'commit' | 'historical_backfill' | 'replacement' | 'reversal';
+  source_posting_id?: number | null;
+  liability_date: string;
+  posted_at: string;
+  posted_by_id?: number | null;
+  posted_by_name?: string | null;
+  reason?: string | null;
+  idempotency_key: string;
+  metadata: Record<string, unknown>;
+  net_amount: number;
+  entries: PayrollLiabilityEntry[];
+}
+
+export interface PayrollLiabilityUnclassifiedComponent {
+  payroll_item_id: number;
+  employee_id: number;
+  source: 'custom_deduction' | 'payroll_adjustment';
+  label: string;
+  amount: number;
+  reason: string;
+}
+
+export interface PayrollLiabilityReconciliation {
+  status: PayrollLiabilityReconciliationStatus;
+  pay_period_id: number;
+  company_id: number;
+  liability_date: string;
+  net_liability: number;
+  totals_by_category: Record<string, number>;
+  totals_by_authority: Record<string, number>;
+  postings: PayrollLiabilityPosting[];
+  unclassified_components: PayrollLiabilityUnclassifiedComponent[];
+  payment_tracking_status: 'not_in_this_phase';
+  historical_backfill_required: boolean;
+}
+
 export interface PayPeriodLifecycleEvent {
   timestamp?: string | null;
   actor_name?: string | null;

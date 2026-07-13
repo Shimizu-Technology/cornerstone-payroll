@@ -71,6 +71,24 @@ RSpec.describe W2GuAggregator do
       expect(report[:totals][:box1_wages_tips_other_comp]).to eq(950.0)
     end
 
+    it "includes W-4 Step 4(c) extra withholding in W-2GU Box 2" do
+      period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 3, 1),
+        end_date: Date.new(2026, 3, 14),
+        pay_date: Date.new(2026, 3, 18))
+      create(:payroll_item,
+        pay_period: period,
+        employee: employee,
+        gross_pay: 1_000,
+        withholding_tax: 100,
+        additional_withholding: 25)
+
+      row = described_class.new(company, 2026).generate[:employees].sole
+
+      expect(row[:box2_federal_income_tax_withheld]).to eq(125.0)
+    end
+
 
     it "uses committed 2026 tax bases and emits TP, TT, and Box 14b data" do
       pay_period = create(:pay_period, :committed,

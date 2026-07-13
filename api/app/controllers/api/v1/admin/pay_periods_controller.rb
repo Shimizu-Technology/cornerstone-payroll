@@ -442,6 +442,11 @@ module Api
               co_ytd.add_payroll_item!(item)
             end
 
+            PayrollLiabilityPostingService.post!(
+              pay_period: @pay_period,
+              actor: current_user
+            )
+
             # Auto-assign check numbers to payroll items with positive net pay.
             # $0 net pay items don't get checks. Uses company-level row lock to prevent collisions.
             unassigned = committed_items.select { |i| i.check_number.nil? && i.net_pay.to_d > 0 }
@@ -476,6 +481,8 @@ module Api
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodCorrectionService::CorrectionError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue PayrollLiabilityPostingService::Error => e
+          render json: { error: "Payroll liability posting failed: #{e.message}" }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         rescue ArgumentError => e
@@ -492,7 +499,8 @@ module Api
           result = PayPeriodPayDateCorrectionService.call(
             pay_period: @pay_period,
             new_pay_date: params[:pay_date],
-            reason: params[:reason]
+            reason: params[:reason],
+            actor: current_user
           )
 
           unless result.noop
@@ -529,7 +537,7 @@ module Api
               noop: result.noop
             }
           }
-        rescue PayPeriodPayDateCorrectionService::Error => e
+        rescue PayPeriodPayDateCorrectionService::Error, PayrollLiabilityPostingService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
@@ -577,7 +585,7 @@ module Api
               pay_period: pay_period_json(@pay_period),
               correction_event: correction_event_json(event)
             }
-          rescue PayPeriodCorrectionService::CorrectionError => e
+          rescue PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error => e
             render json: { error: e.message }, status: :unprocessable_entity
           rescue ActiveRecord::RecordInvalid => e
             render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
@@ -710,7 +718,7 @@ module Api
             corrective_payroll_item: payroll_item_summary_json(corrective_item),
             original_pay_period_id:  @pay_period.id
           }, status: :created
-        rescue IssueCorrectivePaycheckService::CorrectionError, ArgumentError => e
+        rescue IssueCorrectivePaycheckService::CorrectionError, PayrollLiabilityPostingService::Error, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
@@ -859,7 +867,7 @@ module Api
           )
 
           w2_items = items.select { |i| i.employment_type != "contractor" && !i.voided? }
-          total_fit = w2_items.sum { |i| i.withholding_tax.to_d }
+          total_fit = w2_items.sum(&:total_income_tax_withheld)
           return if total_fit <= 0
 
           NonEmployeeCheck.create!(

@@ -351,16 +351,16 @@ class PayrollCalculator
       end
     end
 
-    imported_loan_payment = 0.0
+    direct_loan_payment = 0.0
 
-    # MoSa imports provide the paycheck loan deduction directly. That imported
-    # amount must remain authoritative for the current payroll run even if the
+    # Imports and the Adjust Hours grid can provide the paycheck loan deduction
+    # directly. That value is authoritative for this payroll run even if the
     # employee also has itemized EmployeeLoan records configured; those records
-    # are separate loan-tracking setup and should not hide or replace the
-    # workbook's paycheck deduction.
-    if payroll_item.import_source.present? && payroll_item.loan_deduction.to_f > 0
-      imported_loan_payment = payroll_item.loan_deduction.to_f
-      payroll_item.loan_payment = imported_loan_payment
+    # are separate loan-tracking setup and must not hide or duplicate the direct
+    # paycheck deduction.
+    if payroll_item.loan_deduction.to_f > 0
+      direct_loan_payment = payroll_item.loan_deduction.to_f
+      payroll_item.loan_payment = direct_loan_payment
     end
 
     has_itemized_deductions = payroll_item.payroll_item_deductions.any?
@@ -368,8 +368,8 @@ class PayrollCalculator
     # Total deductions: taxes + pre-tax retirement + pre-tax deductions + post-tax deductions
     legacy_insurance_payment = has_itemized_deductions ? 0.0 : payroll_item.insurance_payment.to_f
 
-    post_tax_deductions = if imported_loan_payment.positive?
-      (itemized_post_tax - itemized_loan_payment) + imported_loan_payment + legacy_insurance_payment
+    post_tax_deductions = if direct_loan_payment.positive?
+      (itemized_post_tax - itemized_loan_payment) + direct_loan_payment + legacy_insurance_payment
     elsif has_itemized_deductions
       itemized_post_tax
     else
@@ -536,6 +536,7 @@ class PayrollCalculator
   end
 
   def skip_employee_deduction?(deduction_type)
+    return true if payroll_item.loan_deduction.to_f.positive? && deduction_type&.loan?
     return false unless deduction_type&.sub_category == "retirement"
     return employee.roth_retirement_rate.to_f.positive? if roth_retirement_deduction?(deduction_type)
 

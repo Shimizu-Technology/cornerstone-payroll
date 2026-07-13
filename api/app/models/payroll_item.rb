@@ -12,6 +12,7 @@ class PayrollItem < ApplicationRecord
   has_many :payroll_item_earnings, dependent: :destroy
   has_many :payroll_item_field_entries, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
+  has_many :payroll_liability_entries, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 
@@ -160,6 +161,13 @@ class PayrollItem < ApplicationRecord
     hours_worked.to_f + overtime_hours.to_f + holiday_hours.to_f + pto_hours.to_f
   end
 
+  # Total Guam income tax actually withheld from this paycheck. The calculator
+  # stores table/override withholding and W-4 Step 4(c) extra withholding in
+  # separate columns so operators can see both components.
+  def total_income_tax_withheld
+    withholding_tax.to_d + additional_withholding.to_d
+  end
+
   def custom_deductions_total
     Array(custom_deductions).sum { |deduction| deduction["amount"].to_f }
   end
@@ -262,7 +270,7 @@ class PayrollItem < ApplicationRecord
       next unless field&.active?
       next unless field.amount_type == "percentage"
       next if field.tax_treatment == "taxable_addition"
-      next if imported_mosa_loan_field_should_be_skipped?(field)
+      next if direct_loan_field_should_be_skipped?(field)
 
       entry = payroll_item_field_entries.detect { |candidate| candidate.payroll_field_definition_id == field.id }
       next unless entry&.active?
@@ -292,7 +300,7 @@ class PayrollItem < ApplicationRecord
     assignments.filter_map do |assignment|
       field = assignment.payroll_field_definition
       next unless field&.active?
-      next if imported_mosa_loan_field_should_be_skipped?(field)
+      next if direct_loan_field_should_be_skipped?(field)
 
       field.id
     end
@@ -302,7 +310,7 @@ class PayrollItem < ApplicationRecord
     payroll_item_field_entries.each do |entry|
       next if entry.payroll_field_definition_id.blank?
       next if entry.source == "import"
-      next if entry.source == "manual" && !imported_mosa_loan_entry_should_be_deactivated?(entry)
+      next if entry.source == "manual" && !direct_loan_entry_should_be_deactivated?(entry)
       next if entry.payroll_field_definition_id.in?(active_definition_ids)
 
       entry.active = false
@@ -313,12 +321,12 @@ class PayrollItem < ApplicationRecord
     payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
   end
 
-  def imported_mosa_loan_field_should_be_skipped?(field)
-    import_source.present? && loan_deduction.to_f.positive? && field.category == "loan" && field.tax_treatment == "post_tax_deduction"
+  def direct_loan_field_should_be_skipped?(field)
+    loan_deduction.to_f.positive? && field.category == "loan" && field.tax_treatment == "post_tax_deduction"
   end
 
-  def imported_mosa_loan_entry_should_be_deactivated?(entry)
-    import_source.present? && loan_deduction.to_f.positive? && entry.category == "loan" && entry.tax_treatment == "post_tax_deduction"
+  def direct_loan_entry_should_be_deactivated?(entry)
+    loan_deduction.to_f.positive? && entry.category == "loan" && entry.tax_treatment == "post_tax_deduction"
   end
 
   def self.normalize_custom_deduction_entries(entries)

@@ -40,7 +40,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
     item.save!
     EmployeeYtdTotal.find_or_create_by!(employee_id: employee.id, year: 2024).add_payroll_item!(item)
     CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(item)
-    company.assign_check_numbers!([item])
+    company.assign_check_numbers!([ item ])
     item.reload
   end
 
@@ -121,6 +121,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
       expect(json["supplemental_pay_period"]["cycle"]).to eq("supplemental")
       expect(json["supplemental_pay_period"]["corrects_pay_period_id"]).to eq(original_period.id)
       expect(json["supplemental_pay_period"]["status"]).to eq("committed")
+      supplemental = PayPeriod.find(json["supplemental_pay_period"]["id"])
+      expect(supplemental.payroll_liability_postings.find_by(posting_type: "commit")).to be_present
       expect(json["corrective_payroll_item"]["correction_reason"]).to eq("Wrong hours reported")
       expect(json["corrective_payroll_item"]["check_number"]).to be_present
     end
@@ -174,7 +176,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
         # The shape only needs to satisfy `pay_period_json` /
         # `payroll_item_summary_json` enough to render — easiest is to
         # reuse real records from the let! blocks.
-        [original_period, original_period.payroll_items.first]
+        [ original_period, original_period.payroll_items.first ]
       end
 
       post "/api/v1/admin/pay_periods/#{original_period.id}/corrective_paychecks",
