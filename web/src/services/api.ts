@@ -1456,6 +1456,8 @@ export interface PayrollRegisterReport {
       total_custom_deductions?: number;
       total_deductions: number;
       total_net: number;
+      contractor_total_gross?: number;
+      contractor_total_net?: number;
     };
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
     contractors: Array<PayrollItem & { total_retirement_payment?: number }>;

@@ -242,7 +242,7 @@ class PayrollLiabilityPostingService
       payroll_item_deductions: :deduction_type
     ).flat_map do |item|
       core = CORE_COMPONENTS.filter_map do |component_key, (field, category, authority)|
-        amount = item.public_send(field).to_d.round(2)
+        amount = core_component_amount(item, component_key, field)
         next if amount.zero?
 
         entry_row(
@@ -260,6 +260,17 @@ class PayrollLiabilityPostingService
 
       core + payroll_field_liability_rows(posting, item, now) + itemized_liability_rows(posting, item, now)
     end
+  end
+
+  # PayrollItem#medicare_tax stores the employee's regular Medicare tax plus
+  # any Additional Medicare tax. The ledger classifies those liabilities
+  # separately, so remove the additional amount from the regular Medicare
+  # entry before posting it. This preserves the stored paycheck total while
+  # preventing the additional tax from being payable twice.
+  def core_component_amount(item, component_key, field)
+    amount = item.public_send(field).to_d
+    amount -= item.additional_medicare_tax.to_d if component_key == "medicare_employee"
+    [ amount, 0.to_d ].max.round(2)
   end
 
   def payroll_field_liability_rows(posting, item, now)

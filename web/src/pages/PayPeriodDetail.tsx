@@ -1198,7 +1198,7 @@ export function PayPeriodDetail() {
             </Card>
             <Card>
               <CardContent className="pt-5 pb-4">
-                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Taxes</p>
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Deductions</p>
                 <p className="mt-1 wrap-break-word text-xl font-semibold text-red-600 sm:text-2xl">{formatCurrency(totalDeductions)}</p>
               </CardContent>
             </Card>

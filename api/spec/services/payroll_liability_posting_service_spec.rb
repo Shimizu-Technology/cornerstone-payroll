@@ -24,7 +24,9 @@ RSpec.describe PayrollLiabilityPostingService do
       additional_withholding: 25,
       social_security_tax: 124,
       employer_social_security_tax: 124,
-      medicare_tax: 29,
+      # The stored employee Medicare amount includes the $5 Additional Medicare
+      # tax, matching the calculator's persisted representation.
+      medicare_tax: 34,
       employer_medicare_tax: 29,
       additional_medicare_tax: 5,
       retirement_payment: 40,
@@ -53,6 +55,9 @@ RSpec.describe PayrollLiabilityPostingService do
       expect(posting.entries.find_by!(component_key: "guam_income_tax_withheld").amount).to eq(150.00)
       expect(posting.entries.find_by!(component_key: "guam_additional_income_tax_withheld").amount).to eq(25.00)
       expect(posting.entries.find_by!(component_key: "social_security_employer").amount).to eq(124.00)
+      expect(posting.entries.find_by!(component_key: "medicare_employee").amount).to eq(29.00)
+      expect(posting.entries.find_by!(component_key: "additional_medicare_employee").amount).to eq(5.00)
+      expect(posting.entries.where(authority: described_class::US_TREASURY).sum(:amount)).to eq(311.00)
       expect(posting.component_rule_snapshot).to include(
         "schema_version" => 1,
         "effective_on" => "2026-07-15"
