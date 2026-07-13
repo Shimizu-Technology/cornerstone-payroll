@@ -161,6 +161,7 @@ class Invoice < ApplicationRecord
     with_lock do
       raise_invalid_transition!("Draft invoices should be deleted instead of voided") if draft?
       raise_invalid_transition!("Paid invoices require payment reversal before voiding") if amount_paid.positive?
+      raise_invalid_transition!("Credits applied to this invoice must be voided before it can be voided") if credit_total.positive?
       raise_invalid_transition!("Invoice is already voided") if voided?
 
       update!(status: "voided", voided_at: Time.current, updated_by: actor)

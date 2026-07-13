@@ -98,4 +98,30 @@ RSpec.describe Invoice, type: :model do
       expect(invoice.events.where(event_type: transition.fetch(:event_type))).to be_empty
     end
   end
+
+  it "requires active credits to be voided before the invoice can be voided" do
+    actor = create(:user)
+    invoice = create(
+      :invoice,
+      :with_line_item,
+      :generated,
+      organization: actor.organization,
+      company: actor.company
+    )
+    credit = InvoiceCreditService.issue!(
+      invoice: invoice,
+      actor: actor,
+      amount: 50,
+      issue_date: Date.current,
+      reason: "Service adjustment"
+    )
+
+    expect {
+      invoice.void!(actor: actor, reason: "Duplicate")
+    }.to raise_error(ActiveRecord::RecordInvalid, /Credits applied to this invoice must be voided/)
+
+    expect(invoice.reload.status).to eq("open")
+    expect(credit.reload.status).to eq("issued")
+    expect(invoice.events.where(event_type: "voided")).to be_empty
+  end
 end
