@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class InvoiceChatSessionsController < BaseController
+        before_action :require_admin!
+
         before_action :set_session, only: [ :show, :update, :destroy, :message, :confirm, :restore, :restore_preview ]
 
         def index

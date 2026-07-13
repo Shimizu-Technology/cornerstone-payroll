@@ -40,9 +40,10 @@ Documents representing money the business owes to a vendor are bills/accounts pa
 1. The organization is the authorization boundary.
 2. The invoice billing profile is the invoice-from business identity presented to staff.
 3. Invoice recipients are organization-owned customer records.
-4. The active payroll client does not silently own, filter, or rebrand invoices.
-5. A payroll company may be linked explicitly as optional engagement context.
-6. Invoice, recipient, billing-profile, chat, artifact, event, payment, credit, and delivery lookups are scoped by organization on the backend.
+4. IM-0/IM-1 Invoice Center access is restricted to organization administrators. This is the explicit security boundary for organization-wide receivables until a dedicated organization-finance role is introduced; payroll-client-scoped managers and accountants must not mutate another business identity's invoices by changing the active client context.
+5. The active payroll client does not silently own, filter, or rebrand invoices.
+6. A payroll company may be linked explicitly as optional engagement context.
+7. Invoice, recipient, billing-profile, chat, artifact, event, payment, credit, and delivery lookups are scoped by organization on the backend.
 
 This allows Shimizu Technology and Cornerstone Tax Services to be separate invoice-from identities without conflating either identity with the currently selected payroll client.
 

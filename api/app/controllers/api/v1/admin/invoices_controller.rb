@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class InvoicesController < BaseController
+        before_action :require_admin!
         before_action :set_invoice, only: %i[
           show update destroy update_status preview_pdf generate_pdf issue download_artifact record_delivery
         ]
@@ -48,17 +49,14 @@ module Api
         end
 
         def update
-          unless @invoice.draft?
-            render json: { error: "Issued invoice financial content is immutable" }, status: :unprocessable_entity
-            return
-          end
-
-          @invoice.assign_attributes(invoice_attributes)
-          @invoice.company = optional_source_company if params.dig(:invoice, :company_id).present?
-          @invoice.updated_by = current_user
-          assign_line_items!(@invoice)
-
           Invoice.transaction do
+            @invoice.lock!
+            raise ArgumentError, "Issued invoice financial content is immutable" unless @invoice.draft?
+
+            @invoice.assign_attributes(invoice_attributes)
+            @invoice.company = optional_source_company if params.dig(:invoice, :company_id).present?
+            @invoice.updated_by = current_user
+            assign_line_items!(@invoice)
             @invoice.save!
             InvoiceEvent.record!(invoice: @invoice, event_type: "draft_updated", actor: current_user)
           end
@@ -73,14 +71,19 @@ module Api
         end
 
         def destroy
-          unless @invoice.draft?
-            render json: { error: "Issued invoices cannot be deleted" }, status: :unprocessable_entity
-            return
+          Invoice.transaction do
+            @invoice.lock!
+            raise ArgumentError, "Issued invoices cannot be deleted" unless @invoice.draft?
+
+            @invoice.update!(archived: true, archived_at: Time.current, updated_by: current_user)
+            InvoiceEvent.record!(invoice: @invoice, event_type: "draft_deleted", actor: current_user)
           end
 
-          @invoice.update!(archived: true, archived_at: Time.current, updated_by: current_user)
-          InvoiceEvent.record!(invoice: @invoice, event_type: "draft_deleted", actor: current_user)
           render json: { message: "Draft invoice removed from active view" }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def issue

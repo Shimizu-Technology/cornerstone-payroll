@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class InvoiceCreditNotesController < BaseController
+        before_action :require_admin!
         before_action :set_invoice
         before_action :set_credit_note, only: :void
 

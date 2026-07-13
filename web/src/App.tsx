@@ -290,8 +290,8 @@ function AppRoutes() {
         <Route path="payroll-fields" element={<StaffOnlyRoute><PayrollFields /></StaffOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
-        <Route path="tools/invoices" element={<StaffOnlyRoute><InvoiceCenter /></StaffOnlyRoute>} />
-        <Route path="tools/invoices/assistant" element={<StaffOnlyRoute><InvoiceMaker /></StaffOnlyRoute>} />
+        <Route path="tools/invoices" element={<AdminOnlyRoute><InvoiceCenter /></AdminOnlyRoute>} />
+        <Route path="tools/invoices/assistant" element={<AdminOnlyRoute><InvoiceMaker /></AdminOnlyRoute>} />
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/organizations" element={<SuperAdminOnlyRoute><Organizations /></SuperAdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />

@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class InvoicePaymentsController < BaseController
+        before_action :require_admin!
         before_action :set_invoice
         before_action :set_payment, only: :reverse
 

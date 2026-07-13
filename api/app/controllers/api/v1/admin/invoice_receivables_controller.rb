@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class InvoiceReceivablesController < BaseController
+        before_action :require_admin!
+
         def show
           render json: InvoiceReceivablesSummary.new(
             organization: current_organization,

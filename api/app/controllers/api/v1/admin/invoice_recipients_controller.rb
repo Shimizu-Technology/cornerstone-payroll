@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class InvoiceRecipientsController < BaseController
+        before_action :require_admin!
+
         before_action :set_recipient, only: [ :show, :update, :destroy ]
 
         def index

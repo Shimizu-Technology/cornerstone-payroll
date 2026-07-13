@@ -73,6 +73,59 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("error")).to eq("Issued invoice financial content is immutable")
   end
 
+  it "rechecks draft state after locking before applying an edit" do
+    invoice = create_draft(total: 100)
+    original_notes = invoice.notes
+
+    allow_any_instance_of(Invoice).to receive(:lock!).and_wrap_original do |method, *args|
+      Invoice.where(id: method.receiver.id).update_all(status: "open", issued_at: Time.current)
+      method.call(*args)
+    end
+
+    patch "/api/v1/admin/invoices/#{invoice.id}", params: {
+      invoice: { notes: "Concurrent financial edit" }
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Issued invoice financial content is immutable")
+    expect(invoice.reload.notes).to eq(original_notes)
+    expect(invoice.events.where(event_type: "draft_updated")).to be_empty
+  end
+
+  it "requires organization-admin authority for organization-wide invoice operations" do
+    invoice = issue_invoice(total: 150)
+    scoped_manager = create(:user, company: company, organization: company.organization, role: "manager")
+    controllers = [
+      Api::V1::Admin::InvoicesController,
+      Api::V1::Admin::InvoicePaymentsController,
+      Api::V1::Admin::InvoiceCreditNotesController
+    ]
+    controllers.each do |controller|
+      allow_any_instance_of(controller).to receive(:current_user).and_return(scoped_manager)
+    end
+
+    get "/api/v1/admin/invoices"
+    expect(response).to have_http_status(:forbidden)
+
+    expect do
+      post "/api/v1/admin/invoices/#{invoice.id}/payments", params: {
+        amount: 25,
+        received_on: "2026-06-10",
+        payment_method: "check"
+      }
+    end.not_to change(InvoicePayment, :count)
+    expect(response).to have_http_status(:forbidden)
+
+    expect do
+      post "/api/v1/admin/invoices/#{invoice.id}/credit_notes", params: {
+        amount: 25,
+        issue_date: "2026-06-10",
+        reason: "Adjustment"
+      }
+    end.not_to change(InvoiceCreditNote, :count)
+    expect(response).to have_http_status(:forbidden)
+  end
+
   it "reloads the locked draft before rendering the official artifact" do
     invoice = create_draft(total: 100)
     stale_invoice = Invoice.includes(:line_items).find(invoice.id)
