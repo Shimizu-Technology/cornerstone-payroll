@@ -266,11 +266,13 @@ class PayrollLiabilityPostingService
   # any Additional Medicare tax. The ledger classifies those liabilities
   # separately, so remove the additional amount from the regular Medicare
   # entry before posting it. This preserves the stored paycheck total while
-  # preventing the additional tax from being payable twice.
+  # preventing the additional tax from being payable twice. Keep the result
+  # signed because corrective paychecks use negative amounts to reduce an
+  # existing liability.
   def core_component_amount(item, component_key, field)
     amount = item.public_send(field).to_d
     amount -= item.additional_medicare_tax.to_d if component_key == "medicare_employee"
-    [ amount, 0.to_d ].max.round(2)
+    amount.round(2)
   end
 
   def payroll_field_liability_rows(posting, item, now)

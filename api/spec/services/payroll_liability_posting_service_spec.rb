@@ -94,6 +94,41 @@ RSpec.describe PayrollLiabilityPostingService do
       expect(posting.entries).to be_empty
     end
 
+    it "preserves signed tax credits from a corrective paycheck" do
+      original_period = create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 6, 15),
+        end_date: Date.new(2026, 6, 28),
+        pay_date: Date.new(2026, 7, 1))
+      original_item = create(:payroll_item,
+        pay_period: original_period,
+        employee: employee,
+        company: company)
+      payroll_item.update!(
+        correction_for_payroll_item: original_item,
+        withholding_tax: -150,
+        additional_withholding: -25,
+        social_security_tax: -124,
+        employer_social_security_tax: -124,
+        medicare_tax: -34,
+        employer_medicare_tax: -29,
+        additional_medicare_tax: -5,
+        retirement_payment: 0,
+        roth_retirement_payment: 0,
+        employer_retirement_match: 0,
+        employer_roth_retirement_match: 0,
+        insurance_payment: 0
+      )
+
+      posting = described_class.post!(pay_period: pay_period, actor: actor)
+
+      expect(posting.entries.find_by!(component_key: "guam_income_tax_withheld").amount).to eq(-150.00)
+      expect(posting.entries.find_by!(component_key: "guam_additional_income_tax_withheld").amount).to eq(-25.00)
+      expect(posting.entries.find_by!(component_key: "medicare_employee").amount).to eq(-29.00)
+      expect(posting.entries.find_by!(component_key: "additional_medicare_employee").amount).to eq(-5.00)
+      expect(posting.entries.where(authority: described_class::GUAM_DRT).sum(:amount)).to eq(-175.00)
+      expect(posting.entries.where(authority: described_class::US_TREASURY).sum(:amount)).to eq(-311.00)
+    end
+
     it "rejects non-committed and voided periods" do
       pay_period.update!(status: "approved")
       expect {
