@@ -910,6 +910,44 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
     end
 
+    it "atomically records immutable payroll liabilities from stored item values" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      posting = pay_period.payroll_liability_postings.find_by!(posting_type: "commit")
+      expect(posting.entries.sum(:amount)).to eq(191.80)
+      expect(posting.entries.pluck(:component_key, :amount).to_h).to include(
+        "guam_income_tax_withheld" => 100.00,
+        "social_security_employee" => 74.40,
+        "medicare_employee" => 17.40
+      )
+    end
+
+    it "includes W-4 Step 4(c) extra withholding in the automatic Guam FIT deposit check" do
+      company.update!(auto_create_fit_check: true)
+      pay_period.payroll_items.first.update!(additional_withholding: 25)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
+      expect(fit_check.amount).to eq(125.00)
+    end
+
+    it "rolls back the payroll commit when liability posting fails" do
+      allow(PayrollLiabilityPostingService).to receive(:post!)
+        .and_raise(PayrollLiabilityPostingService::InvalidStateError, "posting rejected")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to include("posting rejected")
+      expect(pay_period.reload.status).to eq("approved")
+      expect(EmployeeYtdTotal.find_by(employee: employee, year: pay_period.pay_date.year)).to be_nil
+      expect(CompanyYtdTotal.find_by(company: company, year: pay_period.pay_date.year)).to be_nil
+      expect(pay_period.payroll_liability_postings).to be_empty
+    end
+
     it "skips previously issued intermediate check numbers when committing from a lower sequence" do
       company.update!(next_check_number: 999)
       prior_period = PayPeriod.create!(

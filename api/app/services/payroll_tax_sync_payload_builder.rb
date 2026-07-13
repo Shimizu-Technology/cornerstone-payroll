@@ -77,13 +77,13 @@ class PayrollTaxSyncPayloadBuilder
       employee_count: items.size,
       gross_pay: items.sum(:gross_pay).to_f,
       net_pay: items.sum(:net_pay).to_f,
-      withholding_tax: items.sum(:withholding_tax).to_f,
+      withholding_tax: items.sum { |item| item.total_income_tax_withheld }.to_f,
       social_security_tax: items.sum(:social_security_tax).to_f,
       medicare_tax: items.sum(:medicare_tax).to_f,
       employer_social_security_tax: items.sum(:employer_social_security_tax).to_f,
       employer_medicare_tax: items.sum(:employer_medicare_tax).to_f,
       total_tax_liability: (
-        items.sum(:withholding_tax) +
+        items.sum { |item| item.total_income_tax_withheld } +
         items.sum(:social_security_tax) +
         items.sum(:medicare_tax) +
         items.sum(:employer_social_security_tax) +

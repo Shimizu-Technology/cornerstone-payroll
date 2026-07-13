@@ -38,9 +38,10 @@ import { ReplaceCheckModal } from '@/components/payroll/ReplaceCheckModal';
 import { TimecardOcrPanel } from '@/components/payroll/TimecardOcrPanel';
 import { TimecardHistoryPanel } from '@/components/payroll/TimecardHistoryPanel';
 import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImportModal';
+import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -265,6 +266,9 @@ export function PayPeriodDetail() {
   const [comparison, setComparison] = useState<PayPeriodComparisonResponse | null>(null);
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [liabilityReconciliation, setLiabilityReconciliation] = useState<PayrollLiabilityReconciliation | null>(null);
+  const [liabilityLoading, setLiabilityLoading] = useState(false);
+  const [liabilityError, setLiabilityError] = useState<string | null>(null);
   const [additionalEmployeeIds, setAdditionalEmployeeIds] = useState<Set<number>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState<'all' | 'salary' | 'hourly' | 'contractor'>('all');
@@ -322,9 +326,15 @@ export function PayPeriodDetail() {
       if (!silent) setLoading(true);
       setError(null);
 
-      const [ppResponse, empResponse] = await Promise.all([
+      setLiabilityLoading(true);
+      setLiabilityError(null);
+      const [ppResponse, empResponse, liabilityResponse] = await Promise.all([
         payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
+        payPeriodsApi.liabilities(periodId).catch((err) => {
+          setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+          return null;
+        }),
       ]);
 
       const fieldsResponse = await payrollFieldsApi.list().catch((err) => {
@@ -336,11 +346,13 @@ export function PayPeriodDetail() {
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
       setPayrollFields(fieldsResponse.payroll_fields);
+      setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
       syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load pay period');
     } finally {
+      setLiabilityLoading(false);
       if (!silent) setLoading(false);
     }
   }, [loadAllActiveEmployees, syncDerivedPayrollState]);
@@ -630,6 +642,7 @@ export function PayPeriodDetail() {
       setError(null);
       const response = await payPeriodsApi.commit(payPeriod.id);
       setPayPeriod(response.pay_period);
+      await loadPayPeriod(payPeriod.id, true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to commit');
     } finally {
@@ -769,7 +782,7 @@ export function PayPeriodDetail() {
   const totalNet = reportablePayrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
   const totalEmployerSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
   const totalEmployerMedicare = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_medicare_tax), 0);
-  const totalDRTDeposit = totalWithholding;
+  const totalDRTDeposit = totalWithholding + totalAddlWH;
 
   // Detect FIT-deposit override: if the user has edited the auto-FIT
   // non-employee check's amount, it'll no longer equal the calculated
@@ -785,8 +798,8 @@ export function PayPeriodDetail() {
   );
   const fitDepositAmount = fitDepositCheck ? Number(fitDepositCheck.amount) : null;
   const fitDivergence =
-    fitDepositAmount !== null && Math.abs(fitDepositAmount - totalWithholding) > 0.005
-      ? { calculated: totalWithholding, deposited: fitDepositAmount, delta: fitDepositAmount - totalWithholding }
+    fitDepositAmount !== null && Math.abs(fitDepositAmount - totalDRTDeposit) > 0.005
+      ? { calculated: totalDRTDeposit, deposited: fitDepositAmount, delta: fitDepositAmount - totalDRTDeposit }
       : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
   const totalCustomEarnings = reportablePayrollItems.reduce(
@@ -2299,7 +2312,7 @@ export function PayPeriodDetail() {
                     </div>
                     <div className="flex justify-between pt-2 border-t font-semibold">
                       <span>FIT Subtotal</span>
-                      <span>{formatCurrency(totalWithholding)}</span>
+                      <span>{formatCurrency(totalDRTDeposit)}</span>
                     </div>
                     {fitDivergence && (
                       <div className="mt-2 rounded-md border border-orange-300 bg-orange-50 px-2.5 py-2 text-xs text-orange-900">
@@ -2351,7 +2364,7 @@ export function PayPeriodDetail() {
               <div className="mt-6 flex flex-col gap-3 border-t-2 border-amber-300 pt-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-lg font-bold text-amber-900">Total DRT Deposit</p>
-                  <p className="text-sm text-amber-700">Guam FIT withholding only</p>
+                  <p className="text-sm text-amber-700">Base plus W-4 Step 4(c) additional withholding</p>
                 </div>
                 <p className="wrap-break-word text-2xl font-bold text-amber-900">{formatCurrency(totalDRTDeposit)}</p>
               </div>
@@ -2366,6 +2379,14 @@ export function PayPeriodDetail() {
               )}
             </div>
           </Card>
+        )}
+
+        {isCommitted && (
+          <PayrollLiabilityPanel
+            reconciliation={liabilityReconciliation}
+            loading={liabilityLoading}
+            error={liabilityError}
+          />
         )}
 
         {/* Empty state for draft */}

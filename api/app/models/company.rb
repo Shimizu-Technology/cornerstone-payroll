@@ -14,6 +14,7 @@ class Company < ApplicationRecord
   has_many :time_tracking_sources, dependent: :destroy
   has_many :pay_periods, dependent: :destroy
   has_many :payroll_items, dependent: :restrict_with_error
+  has_many :payroll_field_definitions, dependent: :destroy
   has_many :deduction_types, dependent: :destroy
   has_many :company_ytd_totals, dependent: :destroy
   has_many :users, dependent: :destroy
@@ -27,6 +28,9 @@ class Company < ApplicationRecord
   has_many :client_documents, dependent: :destroy
   has_many :employee_change_requests, dependent: :destroy
   has_many :form500_filings, dependent: :destroy
+  has_many :pay_component_tax_rules, dependent: :restrict_with_error
+  has_many :payroll_liability_postings, dependent: :restrict_with_error
+  has_many :payroll_liability_entries, dependent: :restrict_with_error
   has_many :quarterly_compliance_packets, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy

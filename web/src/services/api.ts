@@ -311,7 +311,7 @@ export const getApiBaseUrl = () => API_BASE_URL;
 // API Endpoints
 // ========================================
 
-import type { 
+import type {
   Department,
   Employee,
   EmployeeFormData,
@@ -340,6 +340,7 @@ import type {
   PayPeriodComparisonResponse,
   PayrollFieldDefinition,
   EmployeePayrollField,
+  PayrollLiabilityReconciliation,
 } from '@/types';
 
 // Employees (Admin API)
@@ -889,6 +890,10 @@ export const payPeriodsApi = {
     api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`),
   comparison: (id: number) =>
     api.get<PayPeriodComparisonResponse>(`/admin/pay_periods/${id}/comparison`),
+  liabilities: (id: number) =>
+    api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
+      `/admin/pay_periods/${id}/payroll_liabilities`
+    ),
   create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string }) =>
     api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
   update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string }) =>

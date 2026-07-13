@@ -87,5 +87,21 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(report.dig(:federal_941, :deposit_schedule, :suggested_schedule)).to eq("semiweekly")
       expect(report.dig(:federal_941, :deposit_schedule, :schedule_b_required)).to be(true)
     end
+
+    it "includes W-4 Step 4(c) extra withholding in Form 500 and W-1 reconciliation" do
+      period = create_committed_period(
+        start_date: Date.new(2026, 4, 1),
+        end_date: Date.new(2026, 4, 14),
+        pay_date: Date.new(2026, 4, 17)
+      )
+      item = create_item(pay_period: period, gross_pay: 1_000)
+      item.update!(withholding_tax: 100, additional_withholding: 25, net_pay: 850)
+
+      report = described_class.new(company, 2026, 2).generate
+
+      expect(report.dig(:form_500, :total_guam_withholding)).to eq(125.0)
+      expect(report.dig(:w1, :total_guam_withholding)).to eq(125.0)
+      expect(report.dig(:pay_periods, 0, :guam_withholding)).to eq(125.0)
+    end
   end
 end

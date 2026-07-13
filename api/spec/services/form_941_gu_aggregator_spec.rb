@@ -217,6 +217,14 @@ RSpec.describe Form941GuAggregator do
         expect(detail[:total_employee_taxes]).to eq(420.75)
       end
 
+      it "includes W-4 Step 4(c) extra withholding in the Guam W-1 detail" do
+        item_apr_e1.update!(additional_withholding: 25)
+
+        expect(report[:tax_detail][:guam_withholding_for_w1]).to eq(300.0)
+        april = report[:monthly_liability].find { |month| month[:month] == "April 2025" }
+        expect(april[:guam_withholding_for_w1]).to eq(200.0)
+      end
+
       it "totals employer-side taxes" do
         # SS er: 341 + Medicare er: 79.75 = 420.75
         expect(detail[:total_employer_taxes]).to eq(420.75)

@@ -12,6 +12,7 @@ class PayrollItem < ApplicationRecord
   has_many :payroll_item_earnings, dependent: :destroy
   has_many :payroll_item_field_entries, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
+  has_many :payroll_liability_entries, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 
@@ -158,6 +159,13 @@ class PayrollItem < ApplicationRecord
 
   def total_hours
     hours_worked.to_f + overtime_hours.to_f + holiday_hours.to_f + pto_hours.to_f
+  end
+
+  # Total Guam income tax actually withheld from this paycheck. The calculator
+  # stores table/override withholding and W-4 Step 4(c) extra withholding in
+  # separate columns so operators can see both components.
+  def total_income_tax_withheld
+    withholding_tax.to_d + additional_withholding.to_d
   end
 
   def custom_deductions_total

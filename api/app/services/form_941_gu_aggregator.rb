@@ -77,7 +77,7 @@ class Form941GuAggregator
     # the Form 500/W-1 workflow.
     line2_total_compensation = nil
     line3_fit_withheld = nil
-    guam_withholding_total = sum(records, :withholding_tax)
+    guam_withholding_total = total_income_tax_withheld(records)
 
     # --- Line 5a / 5b: split SS wages and tips using actual wage-base ordering ---
     prior_ss_taxable_wages = prior_ss_taxable_wages_by_employee
@@ -246,6 +246,10 @@ class Form941GuAggregator
     end
   end
 
+  def total_income_tax_withheld(items)
+    items.sum { |item| item.total_income_tax_withheld }.round(2)
+  end
+
   def sum_taxable_base(items, column, fallback:)
     items.sum do |item|
       stored = item.public_send(column)
@@ -278,7 +282,7 @@ class Form941GuAggregator
     months.map do |month_start|
       month_end = month_start.end_of_month
       month_items = month_map[month_start] || []
-      month_guam_withholding = sum(month_items, :withholding_tax)
+      month_guam_withholding = total_income_tax_withheld(month_items)
       month_medicare_wages   = sum_taxable_base(month_items, :medicare_taxable_wages, fallback: :gross_pay)
       month_ss_wages         = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:wages]
       month_ss_tips          = monthly_ss_allocations.fetch(month_start, { wages: 0.0, tips: 0.0 })[:tips]

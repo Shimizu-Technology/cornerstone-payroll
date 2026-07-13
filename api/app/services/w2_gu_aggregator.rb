@@ -97,6 +97,7 @@ class W2GuAggregator
         "SUM(gross_pay) AS gross_pay",
         "SUM(reported_tips) AS reported_tips",
         "SUM(withholding_tax) AS withholding_tax",
+        "SUM(COALESCE(additional_withholding, 0)) AS additional_withholding",
         "SUM(social_security_tax) AS ss_tax",
         "SUM(medicare_tax) AS medicare_tax",
         "SUM(COALESCE(retirement_payment, 0)) AS retirement_total",
@@ -127,7 +128,7 @@ class W2GuAggregator
 
     gross_pay = sums&.gross_pay.to_f
     reported_tips = sums&.reported_tips.to_f
-    withholding_tax = sums&.withholding_tax.to_f
+    withholding_tax = sums&.withholding_tax.to_f + sums&.additional_withholding.to_f
     ss_tax = sums&.ss_tax.to_f
     medicare_tax = sums&.medicare_tax.to_f
     retirement_total = sums&.retirement_total.to_f
