@@ -25,7 +25,6 @@ module Api
         def create
           recipient = InvoiceRecipient.new(recipient_attributes)
           recipient.organization_id = current_organization_id
-          recipient.company_id = current_company_id
 
           if recipient.save
             render json: { invoice_recipient: recipient_payload(recipient) }, status: :created

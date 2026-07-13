@@ -82,7 +82,9 @@ class InvoicePdfGenerator
 
     rows = [
       [ "Invoice Date", format_date(invoice_data["invoice_date"]) ],
+      [ "Due Date", format_date(invoice_data["due_date"]) ],
       [ "Service Period", service_period ],
+      [ "Customer Reference", invoice_data["customer_reference"] ],
       [ "Status", invoice_data["status"].to_s.titleize.presence || "Draft" ]
     ].reject { |_label, value| value.blank? }
 

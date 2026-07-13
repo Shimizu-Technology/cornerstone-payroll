@@ -192,11 +192,11 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       });
 
       add({
-        id: 'invoice-maker',
-        label: 'Invoice Maker',
-        description: 'Create and manage client invoices.',
+        id: 'invoice-center',
+        label: 'Invoice Center',
+        description: 'Create, import, and track customer invoices and receivables.',
         group: 'Tools',
-        keywords: ['invoice', 'billing'],
+        keywords: ['invoice', 'billing', 'receivables', 'payments'],
         icon: <ReceiptText className="h-4 w-4" />,
         kind: 'navigation',
         href: '/tools/invoices',

@@ -5,6 +5,8 @@
 **Owner:** Shimizu Technology / Cornerstone Tax Services  
 **Parent roadmap:** [Payroll, QuickBooks, and Compliance Master Plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md)
 
+> **Implementation status (2026-07-13):** IM-0 and IM-1 are being delivered together as the bounded Invoice Center + Accounts Receivable program. The implementation contract is [Invoice Center IM-0 + IM-1](INVOICE_CENTER_IM0_IM1_IMPLEMENTATION_2026-07-13.md). It also makes externally created outgoing invoices importable and trackable while keeping vendor bills/accounts payable explicitly out of scope.
+
 ---
 
 ## 1. Executive decision
@@ -695,10 +697,9 @@ Cornerstone should not call it a **complete QuickBooks accounting replacement** 
 
 ## 11. Immediate next action
 
-Implement Invoice Phase IM-0 as one focused branch/PR program, beginning with ownership, lifecycle, numbering, immutable artifacts, audit events, and legacy preservation.
+Implement Invoice Phases IM-0 and IM-1 together as one focused Invoice Center + Accounts Receivable branch/PR program, beginning with ownership, lifecycle, numbering, immutable artifacts, audit events, legacy preservation, external invoice import, and evidence-backed balances.
 
 Before implementation, confirm two business decisions with Cornerstone:
 
 1. Are Shimizu Technology and Cornerstone Tax Services both valid invoice-from identities under the same organization, and should the active payroll client ever affect invoice ownership?
 2. Which currently generated invoices have already been sent externally and therefore must be preserved as historical issued artifacts before any lifecycle migration?
-

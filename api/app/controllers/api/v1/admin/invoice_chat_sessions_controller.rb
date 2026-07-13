@@ -8,7 +8,7 @@ module Api
 
         def index
           sessions = InvoiceChatSession
-            .where(company_id: current_company_id)
+            .where(organization_id: current_organization_id)
             .includes(:invoice_recipient, :invoice)
             .recent
           sessions = sessions.where(archived: false) unless include_archived_sessions?
@@ -30,7 +30,7 @@ module Api
 
         def create
           session = InvoiceChatSession.new(session_attributes)
-          session.company_id = current_company_id
+          session.organization_id = current_organization_id
           session.created_by = current_user
           session.updated_by = current_user
 
@@ -74,7 +74,7 @@ module Api
 
           image_urls = upload_message_attachments
           preview = InvoiceAiPreviewService.new(
-            company: current_company,
+            company: @session.company || current_company,
             user: current_user,
             session: @session,
             message: content,
@@ -197,7 +197,7 @@ module Api
         def set_session
           @session = InvoiceChatSession
             .includes(:invoice_recipient, :invoice, :messages)
-            .find_by(id: params[:id], company_id: current_company_id)
+            .find_by(id: params[:id], organization_id: current_organization_id)
           return if @session
 
           render json: { error: "Invoice chat session not found" }, status: :not_found
@@ -226,7 +226,7 @@ module Api
 
           invoice = Invoice.new(
             organization_id: current_organization_id,
-            company_id: current_company_id,
+            company_id: @session.company_id,
             invoice_recipient: recipient,
             invoice_billing_profile: billing_profile_from_preview!(preview),
             invoice_date: parse_preview_date(preview["invoice_date"]) || Date.current,
@@ -271,7 +271,7 @@ module Api
           attrs = new_recipient_attributes_from_preview(preview["new_recipient"])
           raise ArgumentError, "Invoice recipient not found" if attrs.blank?
 
-          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, company_id: current_company_id, active: true))
+          InvoiceRecipient.create!(attrs.merge(organization_id: current_organization_id, active: true))
         end
 
         def billing_profile_from_preview!(preview)
@@ -345,7 +345,7 @@ module Api
           Array(params[:images]).compact.each do |file|
             uploaded << InvoiceAiAttachmentStorageService.upload(
               file,
-              company_id: current_company_id,
+              organization_id: current_organization_id,
               session_id: @session.id
             )
           end
@@ -366,6 +366,7 @@ module Api
         def session_payload(session, detailed: false, message_count: nil)
           payload = {
             id: session.id,
+            organization_id: session.organization_id,
             company_id: session.company_id,
             invoice_recipient_id: session.invoice_recipient_id,
             invoice_id: session.invoice_id,
@@ -398,40 +399,7 @@ module Api
         end
 
         def invoice_payload(invoice)
-          {
-            id: invoice.id,
-            organization_id: invoice.organization_id,
-            company_id: invoice.company_id,
-            invoice_recipient_id: invoice.invoice_recipient_id,
-            invoice_billing_profile_id: invoice.invoice_billing_profile_id,
-            recipient_name: invoice.invoice_recipient&.name,
-            billing_profile_name: invoice.invoice_billing_profile&.name,
-            invoice_number: invoice.invoice_number,
-            invoice_date: invoice.invoice_date,
-            service_period_start: invoice.service_period_start,
-            service_period_end: invoice.service_period_end,
-            total_amount: invoice.total_amount.to_f,
-            status: invoice.status,
-            notes: invoice.notes,
-            payment_terms: invoice.payment_terms,
-            email_subject: invoice.email_subject,
-            email_body: invoice.email_body,
-            generated_at: invoice.generated_at,
-            sent_at: invoice.sent_at,
-            paid_at: invoice.paid_at,
-            voided_at: invoice.voided_at,
-            archived_at: invoice.archived_at,
-            created_by_id: invoice.created_by_id,
-            created_by_name: invoice.created_by&.name,
-            updated_by_id: invoice.updated_by_id,
-            updated_by_name: invoice.updated_by&.name,
-            line_item_count: invoice.line_items.size,
-            invoice_recipient: recipient_payload(invoice.invoice_recipient),
-            invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
-            line_items: invoice.line_items.map { |item| invoice_line_item_payload(item) },
-            created_at: invoice.created_at,
-            updated_at: invoice.updated_at
-          }
+          InvoicePayloadBuilder.call(invoice, detailed: true)
         end
 
         def recipient_payload(recipient)

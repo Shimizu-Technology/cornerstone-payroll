@@ -4,38 +4,43 @@ module Api
   module V1
     module Admin
       class InvoicesController < BaseController
-        before_action :set_invoice, only: [ :show, :update, :destroy, :update_status, :preview_pdf, :generate_pdf ]
+        before_action :set_invoice, only: %i[
+          show update destroy update_status preview_pdf generate_pdf issue download_artifact record_delivery
+        ]
 
         def index
-          invoices = Invoice
-            .where(organization_id: current_organization_id)
-            .includes(:invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by)
-            .recent
+          invoices = invoice_scope.recent
+          invoices = invoices.where(invoice_billing_profile_id: params[:billing_profile_id]) if params[:billing_profile_id].present?
+          invoices = invoices.where(invoice_recipient_id: params[:recipient_id]) if params[:recipient_id].present?
+          invoices = invoices.where(origin: params[:origin]) if params[:origin].present?
+          invoices = invoices.where(archived: ActiveModel::Type::Boolean.new.cast(params[:archived])) if params.key?(:archived)
 
-          invoices = invoices.where(status: params[:status]) if params[:status].present?
+          rows = invoices.map { |invoice| InvoicePayloadBuilder.call(invoice) }
+          rows.select! { |row| row[:status] == params[:status] } if params[:status].present?
 
-          render json: {
-            invoices: invoices.map { |invoice| invoice_payload(invoice) }
-          }
+          render json: { invoices: rows }
         end
 
         def show
-          render json: { invoice: invoice_payload(@invoice, detailed: true) }
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice, detailed: true) }
         end
 
         def create
           invoice = Invoice.new(invoice_attributes)
           invoice.organization_id = current_organization_id
-          invoice.company_id = current_company_id
+          invoice.company = optional_source_company
           invoice.created_by = current_user
           invoice.updated_by = current_user
           assign_line_items!(invoice)
 
-          if invoice.save
-            render json: { invoice: invoice_payload(invoice.reload, detailed: true) }, status: :created
-          else
-            render json: { errors: invoice.errors.full_messages }, status: :unprocessable_entity
+          Invoice.transaction do
+            invoice.save!
+            InvoiceEvent.record!(invoice: invoice, event_type: "draft_created", actor: current_user)
           end
+
+          render json: { invoice: InvoicePayloadBuilder.call(invoice.reload, detailed: true) }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
@@ -43,33 +48,24 @@ module Api
         end
 
         def update
-          if @invoice.generated_or_later? && params[:mark_draft] != "true"
-            render json: { error: "Cannot modify a finalized invoice without marking it as draft" }, status: :unprocessable_entity
-            return
-          end
-          if @invoice.generated_or_later? && params[:mark_draft] == "true" && !draft_transition_allowed?
-            render json: { error: "Cannot mark #{@invoice.status} invoice as draft" }, status: :unprocessable_entity
+          unless @invoice.draft?
+            render json: { error: "Issued invoice financial content is immutable" }, status: :unprocessable_entity
             return
           end
 
           @invoice.assign_attributes(invoice_attributes)
+          @invoice.company = optional_source_company if params.dig(:invoice, :company_id).present?
           @invoice.updated_by = current_user
-          if @invoice.generated_or_later? && params[:mark_draft] == "true"
-            @invoice.status = "draft"
-            @invoice.generated_at = nil
-            @invoice.sent_at = nil
-            @invoice.paid_at = nil
-            @invoice.voided_at = nil
-            @invoice.archived_at = nil
-            @invoice.snapshot = {}
-          end
           assign_line_items!(@invoice)
 
-          if @invoice.save
-            render json: { invoice: invoice_payload(@invoice.reload, detailed: true) }
-          else
-            render json: { errors: @invoice.errors.full_messages }, status: :unprocessable_entity
+          Invoice.transaction do
+            @invoice.save!
+            InvoiceEvent.record!(invoice: @invoice, event_type: "draft_updated", actor: current_user)
           end
+
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
@@ -77,58 +73,152 @@ module Api
         end
 
         def destroy
-          if @invoice.generated_or_later?
-            render json: { error: "Finalized invoices cannot be deleted" }, status: :unprocessable_entity
+          unless @invoice.draft?
+            render json: { error: "Issued invoices cannot be deleted" }, status: :unprocessable_entity
             return
           end
 
-          @invoice.destroy!
-          render json: { message: "Invoice deleted" }
+          @invoice.update!(archived: true, archived_at: Time.current, updated_by: current_user)
+          InvoiceEvent.record!(invoice: @invoice, event_type: "draft_deleted", actor: current_user)
+          render json: { message: "Draft invoice removed from active view" }
+        end
+
+        def issue
+          artifact = InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user)
+          render json: {
+            invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true),
+            artifact_id: artifact.id
+          }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit => e
+          Rails.logger.warn("Invoice issue failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
+        end
+
+        def import
+          invoice = build_imported_invoice
+          issued_at = import_issued_at
+          delivery_attributes = import_delivery_attributes
+          invoice.save!
+          artifact = InvoiceArtifactStorageService.new.import_original!(
+            invoice: invoice,
+            actor: current_user,
+            file: params[:file],
+            issued_at: issued_at
+          )
+          create_import_delivery!(invoice, artifact, delivery_attributes)
+
+          render json: { invoice: InvoicePayloadBuilder.call(invoice.reload, detailed: true) }, status: :created
+        rescue ActiveRecord::RecordInvalid => e
+          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError, Date::Error, Time::Error => e
+          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError => e
+          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          Rails.logger.warn("Invoice import failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to store the imported invoice" }, status: :unprocessable_entity
         end
 
         def update_status
-          @invoice.update_status!(params.require(:status), actor: current_user)
-          render json: { invoice: invoice_payload(@invoice.reload, detailed: true) }
+          case params.require(:status).to_s
+          when "open", "generated"
+            InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user)
+          when "voided"
+            @invoice.void!(actor: current_user, reason: params[:reason].presence || "Voided by operator")
+          when "uncollectible"
+            @invoice.mark_uncollectible!(actor: current_user, reason: params[:reason].presence || "Marked uncollectible by operator")
+          when "archived"
+            @invoice.archive!(actor: current_user)
+          when "restored"
+            @invoice.restore!(actor: current_user)
+          else
+            @invoice.update_status!(params[:status], actor: current_user)
+          end
+
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit
+          render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
         end
 
         def preview_pdf
-          return unless ensure_line_items_for_pdf!
-
-          snapshot = @invoice.draft? ? @invoice.draft_snapshot(actor: current_user) : nil
-          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
-          send_data generator.generate,
-            filename: generator.filename,
-            type: "application/pdf",
-            disposition: "inline"
+          if @invoice.draft?
+            snapshot = @invoice.draft_snapshot(actor: current_user)
+            generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
+            send_data generator.generate, filename: generator.filename, type: "application/pdf", disposition: "inline"
+          else
+            send_primary_artifact(disposition: "inline")
+          end
         rescue Prawn::Errors::CannotFit => e
-          render_pdf_generation_error(e)
+          Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to generate invoice PDF" }, status: :unprocessable_entity
         end
 
         def generate_pdf
-          return unless ensure_line_items_for_pdf!
-
-          snapshot = @invoice.draft? ? @invoice.generated_snapshot(actor: current_user) : nil
-          generator = InvoicePdfGenerator.new(@invoice, snapshot: snapshot)
-          pdf_content = generator.generate
-          @invoice.mark_generated!(actor: current_user, snapshot: snapshot) if @invoice.draft?
-          send_data pdf_content,
-            filename: generator.filename,
-            type: "application/pdf",
-            disposition: "attachment"
+          InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user) if @invoice.draft?
+          send_primary_artifact(disposition: "attachment")
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
-        rescue Prawn::Errors::CannotFit => e
-          render_pdf_generation_error(e)
+        rescue R2StorageService::UploadError, Prawn::Errors::CannotFit => e
+          Rails.logger.warn("Invoice PDF generation failed: #{e.class}: #{e.message}")
+          render json: { error: "Unable to issue and store the invoice artifact" }, status: :unprocessable_entity
+        end
+
+        def download_artifact
+          send_primary_artifact(disposition: params[:disposition] == "inline" ? "inline" : "attachment")
+        end
+
+        def record_delivery
+          raise ArgumentError, "Issue the invoice before recording delivery" if @invoice.draft?
+
+          artifact = @invoice.primary_artifact
+          delivery = @invoice.deliveries.create!(
+            organization: @invoice.organization,
+            invoice_artifact: artifact,
+            channel: params.require(:channel),
+            recipient: params[:recipient].presence || @invoice.invoice_recipient.email,
+            delivered_at: params[:delivered_at].presence || Time.current,
+            provider_reference: params[:provider_reference],
+            notes: params[:notes],
+            recorded_by: current_user
+          )
+          @invoice.update!(sent_at: @invoice.sent_at || delivery.delivered_at, updated_by: current_user)
+          InvoiceEvent.record!(
+            invoice: @invoice,
+            event_type: "delivery_recorded",
+            actor: current_user,
+            occurred_at: delivery.delivered_at,
+            metadata: { delivery_id: delivery.id, channel: delivery.channel, recipient: delivery.recipient }
+          )
+
+          render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
 
+        def invoice_scope
+          Invoice
+            .where(organization_id: current_organization_id)
+            .includes(
+              :invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by,
+              :artifacts, :events, :deliveries,
+              payments: [ :recorded_by, :reversed_by ],
+              credit_notes: [ :issued_by, :voided_by ]
+            )
+        end
+
         def set_invoice
-          @invoice = Invoice
-            .includes(:invoice_recipient, :invoice_billing_profile, :line_items, :created_by, :updated_by)
-            .find_by(id: params[:id], organization_id: current_organization_id)
+          @invoice = invoice_scope.find_by(id: params[:id])
           return if @invoice
 
           render json: { error: "Invoice not found" }, status: :not_found
@@ -140,6 +230,9 @@ module Api
             :invoice_billing_profile_id,
             :invoice_number,
             :invoice_date,
+            :due_date,
+            :currency,
+            :customer_reference,
             :service_period_start,
             :service_period_end,
             :notes,
@@ -148,45 +241,42 @@ module Api
             :email_body
           )
 
-          if raw[:invoice_recipient_id].present?
-            recipient = InvoiceRecipient.find_by(id: raw[:invoice_recipient_id], organization_id: current_organization_id)
-            raise ArgumentError, "Invoice recipient not found" unless recipient
-            if inactive_new_recipient?(recipient)
-              raise ArgumentError, "Invoice recipient is archived"
-            end
-          end
-
-          if raw[:invoice_billing_profile_id].present?
-            profile = InvoiceBillingProfile.find_by(id: raw[:invoice_billing_profile_id], organization_id: current_organization_id)
-            raise ArgumentError, "Invoice billing profile not found" unless profile
-            raise ArgumentError, "Invoice billing profile is archived" unless profile.active? || defined?(@invoice) && @invoice&.invoice_billing_profile_id == profile.id
-          end
-
+          validate_recipient!(raw[:invoice_recipient_id]) if raw[:invoice_recipient_id].present?
+          validate_billing_profile!(raw[:invoice_billing_profile_id]) if raw[:invoice_billing_profile_id].present?
           raw
         end
 
-        def inactive_new_recipient?(recipient)
-          return false if recipient.active?
-          return false if defined?(@invoice) && @invoice&.invoice_recipient_id == recipient.id
+        def validate_recipient!(id)
+          recipient = InvoiceRecipient.find_by(id: id, organization_id: current_organization_id)
+          raise ArgumentError, "Invoice recipient not found" unless recipient
+          raise ArgumentError, "Invoice recipient is archived" unless recipient.active? || @invoice&.invoice_recipient_id == recipient.id
 
-          true
+          recipient
         end
 
-        def draft_transition_allowed?
-          Invoice::ALLOWED_TRANSITIONS.fetch(@invoice.status, []).include?("draft")
+        def validate_billing_profile!(id)
+          profile = InvoiceBillingProfile.find_by(id: id, organization_id: current_organization_id)
+          raise ArgumentError, "Invoice billing profile not found" unless profile
+          raise ArgumentError, "Invoice billing profile is archived" unless profile.active? || @invoice&.invoice_billing_profile_id == profile.id
+
+          profile
+        end
+
+        def optional_source_company
+          company_id = params.dig(:invoice, :company_id).presence
+          return nil unless company_id
+
+          company = Company.find_by(id: company_id, organization_id: current_organization_id)
+          raise ArgumentError, "Source company not found" unless company
+
+          company
         end
 
         def line_item_params
           Array(params.dig(:invoice, :line_items)).map do |item|
             item_hash = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
             ActionController::Parameters.new(item_hash).permit(
-              :id,
-              :description,
-              :quantity,
-              :rate,
-              :service_date,
-              :position,
-              :_destroy
+              :id, :description, :quantity, :rate, :service_date, :position, :_destroy
             )
           end
         end
@@ -216,124 +306,110 @@ module Api
           end
 
           invoice.line_items.each do |item|
-            next if item.new_record?
-            next if kept_ids.include?(item.id)
-            next if item.marked_for_destruction?
+            next if item.new_record? || kept_ids.include?(item.id) || item.marked_for_destruction?
 
             item.mark_for_destruction
           end
         end
 
-        def ensure_line_items_for_pdf!
-          return true if @invoice.line_items.any?
+        def build_imported_invoice
+          recipient = validate_recipient!(params.require(:invoice_recipient_id))
+          profile = validate_billing_profile!(params.require(:invoice_billing_profile_id))
+          total = BigDecimal(params.require(:total_amount).to_s)
+          raise ArgumentError, "Invoice total must be greater than zero" unless total.positive?
 
-          render json: { errors: [ "Line items must include at least one item" ] }, status: :unprocessable_entity
-          false
+          invoice = Invoice.new(
+            organization_id: current_organization_id,
+            company: imported_source_company,
+            invoice_recipient: recipient,
+            invoice_billing_profile: profile,
+            invoice_number: params.require(:invoice_number),
+            invoice_date: Date.iso8601(params.require(:invoice_date)),
+            due_date: params[:due_date].presence && Date.iso8601(params[:due_date]),
+            currency: params[:currency].presence || "USD",
+            customer_reference: params[:customer_reference],
+            payment_terms: params[:payment_terms],
+            notes: params[:notes],
+            origin: "imported",
+            total_amount: total,
+            created_by: current_user,
+            updated_by: current_user,
+            source_metadata: { original_filename: params[:file]&.original_filename }
+          )
+          invoice.line_items.build(description: params[:description].presence || "Imported invoice", quantity: 1, rate: total, position: 0)
+          invoice
         end
 
-        def render_pdf_generation_error(error)
-          Rails.logger.warn("Invoice PDF generation failed: #{error.class}: #{error.message}")
-          render json: { error: "Unable to generate invoice PDF" }, status: :unprocessable_entity
+        def imported_source_company
+          company_id = params[:company_id].presence
+          return nil unless company_id
+
+          Company.find_by(id: company_id, organization_id: current_organization_id) ||
+            raise(ArgumentError, "Source company not found")
         end
 
-        def invoice_payload(invoice, detailed: false)
-          payload = {
-            id: invoice.id,
-            organization_id: invoice.organization_id,
-            company_id: invoice.company_id,
-            invoice_recipient_id: invoice.invoice_recipient_id,
-            invoice_billing_profile_id: invoice.invoice_billing_profile_id,
-            recipient_name: invoice.invoice_recipient&.name,
-            billing_profile_name: invoice.invoice_billing_profile&.name,
-            invoice_number: invoice.invoice_number,
-            invoice_date: invoice.invoice_date,
-            service_period_start: invoice.service_period_start,
-            service_period_end: invoice.service_period_end,
-            total_amount: invoice.total_amount.to_f,
-            status: invoice.status,
-            generated_at: invoice.generated_at,
-            sent_at: invoice.sent_at,
-            paid_at: invoice.paid_at,
-            voided_at: invoice.voided_at,
-            archived_at: invoice.archived_at,
-            created_by_id: invoice.created_by_id,
-            created_by_name: invoice.created_by&.name,
-            updated_by_id: invoice.updated_by_id,
-            updated_by_name: invoice.updated_by&.name,
-            line_item_count: invoice.line_items.size,
-            has_snapshot: invoice.snapshot.present?,
-            created_at: invoice.created_at,
-            updated_at: invoice.updated_at
+        def import_issued_at
+          return Time.current if params[:issued_at].blank?
+
+          Time.zone.parse(params[:issued_at]) || raise(ArgumentError, "Issued time is invalid")
+        end
+
+        def import_delivery_attributes
+          return nil if params[:delivered_at].blank?
+
+          channel = params[:delivery_channel].presence || "other"
+          raise ArgumentError, "Delivery channel is invalid" unless channel.in?(InvoiceDelivery::CHANNELS)
+
+          delivered_at = Time.zone.parse(params[:delivered_at]) || raise(ArgumentError, "Delivered time is invalid")
+          {
+            channel: channel,
+            recipient: params[:delivery_recipient].presence,
+            delivered_at: delivered_at
           }
+        end
 
-          if detailed
-            payload.merge!(
-              notes: invoice.notes,
-              payment_terms: invoice.payment_terms,
-              email_subject: invoice.email_subject,
-              email_body: invoice.email_body,
-              invoice_billing_profile: billing_profile_payload(invoice.invoice_billing_profile),
-              invoice_recipient: recipient_payload(invoice.invoice_recipient),
-              line_items: invoice.line_items.map { |item| line_item_payload(item) }
-            )
+        def create_import_delivery!(invoice, artifact, attributes)
+          return unless attributes
+
+          delivery = invoice.deliveries.create!(
+            organization: invoice.organization,
+            invoice_artifact: artifact,
+            channel: attributes[:channel],
+            recipient: attributes[:recipient] || invoice.invoice_recipient.email,
+            delivered_at: attributes[:delivered_at],
+            notes: "Historical delivery recorded during import",
+            recorded_by: current_user
+          )
+          invoice.update!(sent_at: delivery.delivered_at)
+          InvoiceEvent.record!(
+            invoice: invoice,
+            event_type: "delivery_recorded",
+            actor: current_user,
+            occurred_at: delivery.delivered_at,
+            metadata: { delivery_id: delivery.id, source: "invoice_import" }
+          )
+        end
+
+        def send_primary_artifact(disposition:)
+          artifact = @invoice.primary_artifact
+          unless artifact
+            render json: { error: "This legacy invoice does not have a preserved artifact" }, status: :not_found
+            return
           end
 
-          payload
-        end
+          bytes = InvoiceArtifactStorageService.new.download(artifact)
+          unless bytes
+            render json: { error: "Invoice artifact is unavailable" }, status: :not_found
+            return
+          end
 
-        def recipient_payload(recipient)
-          return nil unless recipient
-
-          {
-            id: recipient.id,
-            organization_id: recipient.organization_id,
-            company_id: recipient.company_id,
-            name: recipient.name,
-            email: recipient.email,
-            address: recipient.address,
-            default_rate: recipient.default_rate&.to_f,
-            invoice_prefix: recipient.invoice_prefix,
-            payment_terms: recipient.payment_terms,
-            template_type: recipient.template_type,
-            notes: recipient.notes,
-            active: recipient.active
-          }
-        end
-
-        def billing_profile_payload(profile)
-          return nil unless profile
-
-          {
-            id: profile.id,
-            organization_id: profile.organization_id,
-            name: profile.name,
-            legal_name: profile.legal_name,
-            website: profile.website,
-            phone: profile.phone,
-            email: profile.email,
-            address: profile.address,
-            payment_instructions: profile.payment_instructions,
-            default_payment_terms: profile.default_payment_terms,
-            invoice_prefix: profile.invoice_prefix,
-            remit_to: profile.remit_to,
-            footer_note: profile.footer_note,
-            active: profile.active,
-            is_default: profile.is_default
-          }
-        end
-
-        def line_item_payload(item)
-          {
-            id: item.id,
-            description: item.description,
-            quantity: item.quantity.to_f,
-            rate: item.rate.to_f,
-            amount: item.amount.to_f,
-            service_date: item.service_date,
-            position: item.position,
-            created_at: item.created_at,
-            updated_at: item.updated_at
-          }
+          send_data bytes,
+            filename: artifact.filename,
+            type: artifact.content_type,
+            disposition: disposition
+        rescue R2StorageService::DownloadError => e
+          Rails.logger.warn("Invoice artifact download failed: #{e.class}: #{e.message}")
+          render json: { error: "Invoice artifact is unavailable" }, status: :unprocessable_entity
         end
       end
     end

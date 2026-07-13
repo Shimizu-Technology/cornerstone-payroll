@@ -11,8 +11,8 @@ RSpec.describe Invoice, type: :model do
     expect(invoice.total_amount).to eq(420)
   end
 
-  it "requires line items when generated" do
-    invoice = build(:invoice, status: "generated")
+  it "requires line items when issued" do
+    invoice = build(:invoice, status: "open")
 
     expect(invoice).not_to be_valid
     expect(invoice.errors[:line_items]).to include("must include at least one line item")
@@ -45,13 +45,13 @@ RSpec.describe Invoice, type: :model do
     expect(invoice.snapshot.fetch("line_items").first.fetch("description")).to eq("Payroll services")
   end
 
-  it "rejects backward status transitions" do
-    invoice = create(:invoice, :with_line_item, :generated, status: "paid")
+  it "requires delivery and payment evidence instead of manual workflow status changes" do
+    invoice = create(:invoice, :with_line_item, :generated)
     actor = create(:user, company: invoice.company)
 
     expect {
       invoice.update_status!("sent", actor: actor)
     }.to raise_error(ActiveRecord::RecordInvalid)
-    expect(invoice.reload.status).to eq("paid")
+    expect(invoice.reload.status).to eq("open")
   end
 end
