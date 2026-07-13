@@ -93,6 +93,19 @@ RSpec.describe "Api::V1::Admin::PayComponentTaxRules", type: :request do
     expect(rule.reload.display_name).to eq("Bonus")
   end
 
+  it "returns a validation response if a rule becomes read-only during an update" do
+    rule = company.pay_component_tax_rules.create!(valid_attributes)
+    allow_any_instance_of(PayComponentTaxRule).to receive(:save!).and_raise(ActiveRecord::ReadOnlyRecord)
+
+    patch "/api/v1/admin/pay_component_tax_rules/#{rule.id}", params: {
+      pay_component_tax_rule: { display_name: "Concurrent edit" }
+    }
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body["error"]).to include("Create a new effective-dated version")
+    expect(rule.reload.display_name).to eq("Bonus")
+  end
+
   it "does not expose or update rules from another company" do
     other_company = create(:company)
     other_rule = other_company.pay_component_tax_rules.create!(valid_attributes.merge(component_key: "commission"))

@@ -50,6 +50,10 @@ module Api
           render json: { pay_component_tax_rule: rule_json(@rule) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
+        rescue ActiveRecord::ReadOnlyRecord
+          render json: {
+            error: "This rule has been used by committed payroll. Create a new effective-dated version instead."
+          }, status: :unprocessable_entity
         end
 
         private
