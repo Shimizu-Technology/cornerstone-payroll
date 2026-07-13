@@ -158,30 +158,38 @@ class Invoice < ApplicationRecord
   end
 
   def void!(actor:, reason:)
-    raise_invalid_transition!("Draft invoices should be deleted instead of voided") if draft?
-    raise_invalid_transition!("Paid invoices require payment reversal before voiding") if amount_paid.positive?
-    raise_invalid_transition!("Invoice is already voided") if voided?
+    with_lock do
+      raise_invalid_transition!("Draft invoices should be deleted instead of voided") if draft?
+      raise_invalid_transition!("Paid invoices require payment reversal before voiding") if amount_paid.positive?
+      raise_invalid_transition!("Invoice is already voided") if voided?
 
-    update!(status: "voided", voided_at: Time.current, updated_by: actor)
-    InvoiceEvent.record!(invoice: self, event_type: "voided", actor: actor, metadata: { reason: reason })
+      update!(status: "voided", voided_at: Time.current, updated_by: actor)
+      InvoiceEvent.record!(invoice: self, event_type: "voided", actor: actor, metadata: { reason: reason })
+    end
   end
 
   def mark_uncollectible!(actor:, reason:)
-    raise_invalid_transition!("Only open invoices can be marked uncollectible") unless open?
-    raise_invalid_transition!("Paid invoices cannot be marked uncollectible") if paid?
+    with_lock do
+      raise_invalid_transition!("Only open invoices can be marked uncollectible") unless open?
+      raise_invalid_transition!("Paid invoices cannot be marked uncollectible") if paid?
 
-    update!(status: "uncollectible", updated_by: actor)
-    InvoiceEvent.record!(invoice: self, event_type: "marked_uncollectible", actor: actor, metadata: { reason: reason })
+      update!(status: "uncollectible", updated_by: actor)
+      InvoiceEvent.record!(invoice: self, event_type: "marked_uncollectible", actor: actor, metadata: { reason: reason })
+    end
   end
 
   def archive!(actor:)
-    update!(archived: true, archived_at: Time.current, updated_by: actor)
-    InvoiceEvent.record!(invoice: self, event_type: "archived", actor: actor)
+    with_lock do
+      update!(archived: true, archived_at: Time.current, updated_by: actor)
+      InvoiceEvent.record!(invoice: self, event_type: "archived", actor: actor)
+    end
   end
 
   def restore!(actor:)
-    update!(archived: false, archived_at: nil, updated_by: actor)
-    InvoiceEvent.record!(invoice: self, event_type: "restored", actor: actor)
+    with_lock do
+      update!(archived: false, archived_at: nil, updated_by: actor)
+      InvoiceEvent.record!(invoice: self, event_type: "restored", actor: actor)
+    end
   end
 
   # Backward-compatible action entry point. Paid and sent are evidence-backed actions now.

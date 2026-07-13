@@ -54,4 +54,48 @@ RSpec.describe Invoice, type: :model do
     }.to raise_error(ActiveRecord::RecordInvalid)
     expect(invoice.reload.status).to eq("open")
   end
+
+  it "rolls back lifecycle state when its audit event cannot be recorded" do
+    actor = create(:user)
+    invalid_event = InvoiceEvent.new
+    invalid_event.errors.add(:base, "Forced lifecycle audit failure")
+    transitions = [
+      {
+        invoice: create(:invoice, :with_line_item, :generated, organization: actor.organization, company: actor.company),
+        event_type: "voided",
+        action: ->(invoice) { invoice.void!(actor: actor, reason: "Duplicate") },
+        expected: { status: "open", voided_at: nil }
+      },
+      {
+        invoice: create(:invoice, :with_line_item, :generated, organization: actor.organization, company: actor.company),
+        event_type: "marked_uncollectible",
+        action: ->(invoice) { invoice.mark_uncollectible!(actor: actor, reason: "Collection exhausted") },
+        expected: { status: "open" }
+      },
+      {
+        invoice: create(:invoice, :with_line_item, organization: actor.organization, company: actor.company),
+        event_type: "archived",
+        action: ->(invoice) { invoice.archive!(actor: actor) },
+        expected: { archived: false, archived_at: nil }
+      },
+      {
+        invoice: create(:invoice, :with_line_item, organization: actor.organization, company: actor.company, archived: true, archived_at: 1.day.ago),
+        event_type: "restored",
+        action: ->(invoice) { invoice.restore!(actor: actor) },
+        expected: { archived: true }
+      }
+    ]
+
+    transitions.each do |transition|
+      invoice = transition.fetch(:invoice)
+      allow(InvoiceEvent).to receive(:record!).and_call_original
+      allow(InvoiceEvent).to receive(:record!)
+        .with(hash_including(invoice: have_attributes(id: invoice.id), event_type: transition.fetch(:event_type)))
+        .and_raise(ActiveRecord::RecordInvalid.new(invalid_event))
+
+      expect { transition.fetch(:action).call(invoice) }.to raise_error(ActiveRecord::RecordInvalid)
+      expect(invoice.reload).to have_attributes(transition.fetch(:expected))
+      expect(invoice.events.where(event_type: transition.fetch(:event_type))).to be_empty
+    end
+  end
 end
