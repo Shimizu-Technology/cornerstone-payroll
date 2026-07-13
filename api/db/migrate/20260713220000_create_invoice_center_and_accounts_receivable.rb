@@ -324,7 +324,7 @@ class CreateInvoiceCenterAndAccountsReceivable < ActiveRecord::Migration[8.1]
       SET status = COALESCE(legacy_status,
         CASE
           WHEN archived THEN 'archived'
-          WHEN status = 'open' THEN 'generated'
+          WHEN status IN ('open', 'uncollectible') THEN 'generated'
           ELSE status
         END)
     SQL

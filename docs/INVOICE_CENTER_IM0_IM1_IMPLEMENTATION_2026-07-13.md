@@ -45,6 +45,8 @@ Documents representing money the business owes to a vendor are bills/accounts pa
 6. A payroll company may be linked explicitly as optional engagement context.
 7. Invoice, recipient, billing-profile, chat, artifact, event, payment, credit, and delivery lookups are scoped by organization on the backend.
 
+Rollback compatibility maps the new `uncollectible` state to the legacy `generated` state because the legacy schema has no write-off status. This preserves a constraint-valid issued invoice if IM-0/IM-1 must be rolled back; the richer write-off evidence is available only while the new ledger tables exist.
+
 This allows Shimizu Technology and Cornerstone Tax Services to be separate invoice-from identities without conflating either identity with the currently selected payroll client.
 
 ## Financial lifecycle
