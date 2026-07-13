@@ -2,6 +2,8 @@
 
 Date: May 2, 2026
 
+> **Planning status (2026-07-12):** The native Invoice Maker and General Transmittal foundations described here were implemented. This document remains the historical build rationale. Future invoice integrity, accounts-receivable, payments, delivery, template, and AI work is governed by the [Invoice Maker Audit and Implementation Plan](INVOICE_MAKER_AUDIT_AND_IMPLEMENTATION_PLAN_2026-07-12.md).
+
 ## Purpose
 
 Cornerstone Payroll is becoming the firm's QuickBooks replacement. The core payroll, check printing, reports, Form 500, and pay-period transmittal workflows are already strong enough that the next useful step is to expand the app's general staff tools.
