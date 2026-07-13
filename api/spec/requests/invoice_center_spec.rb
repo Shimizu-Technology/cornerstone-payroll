@@ -126,6 +126,27 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
+  it "rolls back delivery, sent timestamp, and audit history together" do
+    invoice = issue_invoice(total: 125)
+    invalid_event = InvoiceEvent.new
+    invalid_event.errors.add(:base, "Forced delivery audit failure")
+    allow(InvoiceEvent).to receive(:record!).and_call_original
+    allow(InvoiceEvent).to receive(:record!)
+      .with(hash_including(invoice: have_attributes(id: invoice.id), event_type: "delivery_recorded"))
+      .and_raise(ActiveRecord::RecordInvalid.new(invalid_event))
+
+    expect do
+      post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: {
+        channel: "email",
+        recipient: "customer@example.com"
+      }
+    end.not_to change(InvoiceDelivery, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(invoice.reload.sent_at).to be_nil
+    expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
+  end
+
   it "tracks partial and final payments, rejects overpayment, and reverses without deleting evidence" do
     invoice = issue_invoice(total: 300)
 

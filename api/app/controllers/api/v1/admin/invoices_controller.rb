@@ -177,25 +177,28 @@ module Api
         def record_delivery
           raise ArgumentError, "Issue the invoice before recording delivery" if @invoice.draft?
 
-          artifact = @invoice.primary_artifact
-          delivery = @invoice.deliveries.create!(
-            organization: @invoice.organization,
-            invoice_artifact: artifact,
-            channel: params.require(:channel),
-            recipient: params[:recipient].presence || @invoice.invoice_recipient.email,
-            delivered_at: params[:delivered_at].presence || Time.current,
-            provider_reference: params[:provider_reference],
-            notes: params[:notes],
-            recorded_by: current_user
-          )
-          @invoice.update!(sent_at: @invoice.sent_at || delivery.delivered_at, updated_by: current_user)
-          InvoiceEvent.record!(
-            invoice: @invoice,
-            event_type: "delivery_recorded",
-            actor: current_user,
-            occurred_at: delivery.delivered_at,
-            metadata: { delivery_id: delivery.id, channel: delivery.channel, recipient: delivery.recipient }
-          )
+          Invoice.transaction do
+            @invoice.lock!
+            artifact = @invoice.primary_artifact
+            delivery = @invoice.deliveries.create!(
+              organization: @invoice.organization,
+              invoice_artifact: artifact,
+              channel: params.require(:channel),
+              recipient: params[:recipient].presence || @invoice.invoice_recipient.email,
+              delivered_at: params[:delivered_at].presence || Time.current,
+              provider_reference: params[:provider_reference],
+              notes: params[:notes],
+              recorded_by: current_user
+            )
+            @invoice.update!(sent_at: @invoice.sent_at || delivery.delivered_at, updated_by: current_user)
+            InvoiceEvent.record!(
+              invoice: @invoice,
+              event_type: "delivery_recorded",
+              actor: current_user,
+              occurred_at: delivery.delivered_at,
+              metadata: { delivery_id: delivery.id, channel: delivery.channel, recipient: delivery.recipient }
+            )
+          end
 
           render json: { invoice: InvoicePayloadBuilder.call(@invoice.reload, detailed: true) }
         rescue ActiveRecord::RecordInvalid => e
