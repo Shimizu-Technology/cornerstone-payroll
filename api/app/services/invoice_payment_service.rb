@@ -52,6 +52,7 @@ class InvoicePaymentService
   def self.ensure_payable!(invoice)
     raise ArgumentError, "Draft invoices cannot receive payments" if invoice.draft?
     raise ArgumentError, "Voided invoices cannot receive payments" if invoice.voided?
+    raise ArgumentError, "Uncollectible invoices cannot receive payments" if invoice.uncollectible?
     raise ArgumentError, "Invoice is already fully paid" if invoice.balance_due.zero?
   end
 

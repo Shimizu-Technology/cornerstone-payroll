@@ -6,6 +6,7 @@ class InvoiceCreditService
       invoice = Invoice.lock.find(invoice.id)
       raise ArgumentError, "Draft invoices cannot receive credits" if invoice.draft?
       raise ArgumentError, "Voided invoices cannot receive credits" if invoice.voided?
+      raise ArgumentError, "Uncollectible invoices cannot receive credits" if invoice.uncollectible?
 
       amount = BigDecimal(amount.to_s)
       raise ArgumentError, "Credit amount must be greater than zero" unless amount.positive?

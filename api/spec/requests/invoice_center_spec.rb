@@ -73,6 +73,28 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("error")).to eq("Issued invoice financial content is immutable")
   end
 
+  it "reloads the locked draft before rendering the official artifact" do
+    invoice = create_draft(total: 100)
+    stale_invoice = Invoice.includes(:line_items).find(invoice.id)
+    stale_invoice.line_items.load
+
+    patch "/api/v1/admin/invoices/#{invoice.id}", params: {
+      invoice: {
+        line_items: [
+          { id: invoice.line_items.sole.id, description: "Updated services", quantity: 2, rate: 125, position: 0 }
+        ]
+      }
+    }
+    expect(response).to have_http_status(:ok), response.body
+
+    InvoiceArtifactStorageService.new.issue_native!(invoice: stale_invoice, actor: admin_user)
+
+    snapshot = invoice.reload.snapshot
+    expect(snapshot.dig("invoice", "total_amount")).to eq("250.0")
+    expect(snapshot.dig("line_items", 0, "description")).to eq("Updated services")
+    expect(snapshot.dig("line_items", 0, "rate")).to eq("125.0")
+  end
+
   it "imports and preserves the exact original invoice with optional historical delivery evidence" do
     file = Tempfile.new([ "outside-invoice", ".pdf" ])
     file.binmode
@@ -207,6 +229,28 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to include(
       archived.id, uncollectible.id, voided.id, draft.id
     )
+  end
+
+  it "does not apply payments or credits after an invoice is written off as uncollectible" do
+    invoice = issue_invoice(total: 200)
+    invoice.mark_uncollectible!(actor: admin_user, reason: "Collection exhausted")
+
+    post "/api/v1/admin/invoices/#{invoice.id}/payments", params: {
+      amount: 25,
+      received_on: "2026-06-10",
+      payment_method: "check"
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Uncollectible invoices cannot receive payments")
+
+    post "/api/v1/admin/invoices/#{invoice.id}/credit_notes", params: {
+      amount: 25,
+      issue_date: "2026-06-10",
+      reason: "Late adjustment"
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Uncollectible invoices cannot receive credits")
+    expect(invoice.reload).to have_attributes(balance_due: 200.to_d)
   end
 
   it "validates historical delivery data before an imported invoice is issued" do

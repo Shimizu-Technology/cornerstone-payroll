@@ -14,25 +14,32 @@ class InvoiceArtifactStorageService
   end
 
   def issue_native!(invoice:, actor:)
-    if invoice.line_items.reject(&:marked_for_destruction?).empty?
-      invoice.errors.add(:line_items, "must include at least one line item")
-      raise ActiveRecord::RecordInvalid, invoice
+    Invoice.transaction do
+      # The official snapshot and artifact must be rendered from the same
+      # row/line-item state that becomes immutable. Holding the invoice lock
+      # prevents a concurrent draft edit from landing between render and issue.
+      locked_invoice = Invoice.lock.find(invoice.id)
+      locked_invoice.line_items.load
+      if locked_invoice.line_items.reject(&:marked_for_destruction?).empty?
+        locked_invoice.errors.add(:line_items, "must include at least one line item")
+        raise ActiveRecord::RecordInvalid, locked_invoice
+      end
+
+      snapshot = locked_invoice.issued_snapshot(actor: actor)
+      pdf_bytes = InvoicePdfGenerator.new(locked_invoice, snapshot: snapshot).generate
+
+      store_and_issue!(
+        invoice: locked_invoice,
+        actor: actor,
+        bytes: pdf_bytes,
+        filename: "#{locked_invoice.invoice_number}.pdf",
+        content_type: "application/pdf",
+        kind: "issued_pdf",
+        snapshot: snapshot,
+        renderer_version: RENDERER_VERSION,
+        template_version: TEMPLATE_VERSION
+      )
     end
-
-    snapshot = invoice.issued_snapshot(actor: actor)
-    pdf_bytes = InvoicePdfGenerator.new(invoice, snapshot: snapshot).generate
-
-    store_and_issue!(
-      invoice: invoice,
-      actor: actor,
-      bytes: pdf_bytes,
-      filename: "#{invoice.invoice_number}.pdf",
-      content_type: "application/pdf",
-      kind: "issued_pdf",
-      snapshot: snapshot,
-      renderer_version: RENDERER_VERSION,
-      template_version: TEMPLATE_VERSION
-    )
   end
 
   def import_original!(invoice:, actor:, file:, issued_at: Time.current)
@@ -108,7 +115,11 @@ class InvoiceArtifactStorageService
       artifact
     end
   rescue StandardError
-    storage.delete(key) if key.present?
+    begin
+      storage.delete(key) if key.present?
+    rescue StandardError => cleanup_error
+      Rails.logger.warn("Invoice artifact cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}")
+    end
     raise
   end
 

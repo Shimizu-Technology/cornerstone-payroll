@@ -6,7 +6,7 @@ module Api
       class InvoiceReceivablesController < BaseController
         def show
           render json: InvoiceReceivablesSummary.new(
-            organization: current_user.organization,
+            organization: current_organization,
             billing_profile_id: params[:billing_profile_id],
             as_of: params[:as_of].present? ? Date.iso8601(params[:as_of]) : Date.current
           ).call
@@ -15,13 +15,13 @@ module Api
         end
 
         def statement
-          recipient = InvoiceRecipient.find_by(id: params[:recipient_id], organization_id: current_organization_id)
+          recipient = InvoiceRecipient.find_by(id: params[:recipient_id], organization: current_organization)
           unless recipient
             render json: { error: "Invoice recipient not found" }, status: :not_found
             return
           end
 
-          scope = Invoice.where(organization_id: current_organization_id, invoice_recipient: recipient)
+          scope = Invoice.where(organization: current_organization, invoice_recipient: recipient)
             .includes(:invoice_billing_profile, :line_items, :payments, :credit_notes, :artifacts)
             .recent
           scope = scope.where(invoice_billing_profile_id: params[:billing_profile_id]) if params[:billing_profile_id].present?
