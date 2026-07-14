@@ -181,16 +181,22 @@ class Invoice < ApplicationRecord
 
   def archive!(actor:)
     with_lock do
-      update!(archived: true, archived_at: Time.current, updated_by: actor)
-      InvoiceEvent.record!(invoice: self, event_type: "archived", actor: actor)
+      unless archived?
+        update!(archived: true, archived_at: Time.current, updated_by: actor)
+        InvoiceEvent.record!(invoice: self, event_type: "archived", actor: actor)
+      end
     end
+    self
   end
 
   def restore!(actor:)
     with_lock do
-      update!(archived: false, archived_at: nil, updated_by: actor)
-      InvoiceEvent.record!(invoice: self, event_type: "restored", actor: actor)
+      if archived?
+        update!(archived: false, archived_at: nil, updated_by: actor)
+        InvoiceEvent.record!(invoice: self, event_type: "restored", actor: actor)
+      end
     end
+    self
   end
 
   # Backward-compatible action entry point. Paid and sent are evidence-backed actions now.

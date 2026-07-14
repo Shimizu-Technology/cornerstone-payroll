@@ -99,6 +99,31 @@ RSpec.describe Invoice, type: :model do
     end
   end
 
+  it "does not create duplicate archive or restore audit events" do
+    actor = create(:user)
+    invoice = create(
+      :invoice,
+      :with_line_item,
+      organization: actor.organization,
+      company: actor.company
+    )
+
+    invoice.archive!(actor: actor)
+    archived_at = invoice.reload.archived_at
+    archived_updated_at = invoice.updated_at
+
+    expect { invoice.archive!(actor: actor) }
+      .not_to change { invoice.events.where(event_type: "archived").count }
+    expect(invoice.reload).to have_attributes(archived: true, archived_at: archived_at, updated_at: archived_updated_at)
+
+    invoice.restore!(actor: actor)
+    restored_updated_at = invoice.reload.updated_at
+
+    expect { invoice.restore!(actor: actor) }
+      .not_to change { invoice.events.where(event_type: "restored").count }
+    expect(invoice.reload).to have_attributes(archived: false, archived_at: nil, updated_at: restored_updated_at)
+  end
+
   it "requires active credits to be voided before the invoice can be voided" do
     actor = create(:user)
     invoice = create(

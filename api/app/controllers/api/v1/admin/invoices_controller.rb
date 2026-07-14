@@ -377,23 +377,26 @@ module Api
         def create_import_delivery!(invoice, artifact, attributes)
           return unless attributes
 
-          delivery = invoice.deliveries.create!(
-            organization: invoice.organization,
-            invoice_artifact: artifact,
-            channel: attributes[:channel],
-            recipient: attributes[:recipient] || invoice.invoice_recipient.email,
-            delivered_at: attributes[:delivered_at],
-            notes: "Historical delivery recorded during import",
-            recorded_by: current_user
-          )
-          invoice.update!(sent_at: delivery.delivered_at)
-          InvoiceEvent.record!(
-            invoice: invoice,
-            event_type: "delivery_recorded",
-            actor: current_user,
-            occurred_at: delivery.delivered_at,
-            metadata: { delivery_id: delivery.id, source: "invoice_import" }
-          )
+          Invoice.transaction do
+            locked_invoice = Invoice.lock.find(invoice.id)
+            delivery = locked_invoice.deliveries.create!(
+              organization: locked_invoice.organization,
+              invoice_artifact: artifact,
+              channel: attributes[:channel],
+              recipient: attributes[:recipient] || locked_invoice.invoice_recipient.email,
+              delivered_at: attributes[:delivered_at],
+              notes: "Historical delivery recorded during import",
+              recorded_by: current_user
+            )
+            locked_invoice.update!(sent_at: delivery.delivered_at, updated_by: current_user)
+            InvoiceEvent.record!(
+              invoice: locked_invoice,
+              event_type: "delivery_recorded",
+              actor: current_user,
+              occurred_at: delivery.delivered_at,
+              metadata: { delivery_id: delivery.id, source: "invoice_import" }
+            )
+          end
         end
 
         def send_primary_artifact(disposition:)

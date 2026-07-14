@@ -179,6 +179,41 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
+  it "rolls back imported delivery evidence when its audit event cannot be recorded" do
+    file = Tempfile.new([ "outside-invoice", ".pdf" ])
+    file.binmode
+    file.write("%PDF-1.4\nexternal invoice evidence\n%%EOF\n")
+    file.rewind
+    upload = Rack::Test::UploadedFile.new(file.path, "application/pdf", original_filename: "outside invoice.pdf")
+    invalid_event = InvoiceEvent.new
+    invalid_event.errors.add(:base, "Forced imported delivery audit failure")
+    allow(InvoiceEvent).to receive(:record!).and_call_original
+    allow(InvoiceEvent).to receive(:record!)
+      .with(hash_including(event_type: "delivery_recorded"))
+      .and_raise(ActiveRecord::RecordInvalid.new(invalid_event))
+
+    expect do
+      post "/api/v1/admin/invoices/import", params: {
+        file: upload,
+        invoice_recipient_id: recipient.id,
+        invoice_billing_profile_id: profile.id,
+        invoice_number: "EXT-ROLLBACK",
+        invoice_date: "2026-06-01",
+        due_date: "2026-06-15",
+        total_amount: "850.25",
+        delivered_at: "2026-06-01T09:30:00+10:00",
+        delivery_channel: "email"
+      }
+    end.not_to change(InvoiceDelivery, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    invoice = Invoice.find_by!(invoice_number: "EXT-ROLLBACK")
+    expect(invoice).to have_attributes(status: "open", sent_at: nil)
+    expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
+  ensure
+    file&.close!
+  end
+
   it "rolls back delivery, sent timestamp, and audit history together" do
     invoice = issue_invoice(total: 125)
     invalid_event = InvoiceEvent.new
