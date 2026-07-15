@@ -116,9 +116,12 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           cleanup_uncommitted_import_draft(invoice)
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
-        rescue ArgumentError, Date::Error, Time::Error => e
+        rescue ArgumentError, Date::Error => e
           cleanup_uncommitted_import_draft(invoice)
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotUnique
+          cleanup_uncommitted_import_draft(invoice)
+          render json: { errors: [ "Invoice number has already been taken" ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError => e
           cleanup_uncommitted_import_draft(invoice)
           Rails.logger.warn("Invoice import failed: #{e.class}: #{e.message}")

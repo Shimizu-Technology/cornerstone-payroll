@@ -217,6 +217,37 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
+  it "returns a validation error when a concurrent import wins the invoice-number race" do
+    file = Tempfile.new([ "outside-invoice", ".pdf" ])
+    file.binmode
+    file.write("%PDF-1.4\nexternal invoice evidence\n%%EOF\n")
+    file.rewind
+    upload = Rack::Test::UploadedFile.new(file.path, "application/pdf", original_filename: "outside invoice.pdf")
+
+    allow_any_instance_of(Invoice).to receive(:save!).and_wrap_original do |method, *args|
+      raise ActiveRecord::RecordNotUnique if method.receiver.invoice_number == "EXT-RACE"
+
+      method.call(*args)
+    end
+
+    expect do
+      post "/api/v1/admin/invoices/import", params: {
+        file: upload,
+        invoice_recipient_id: recipient.id,
+        invoice_billing_profile_id: profile.id,
+        invoice_number: "EXT-RACE",
+        invoice_date: "2026-06-01",
+        due_date: "2026-06-15",
+        total_amount: "850.25"
+      }
+    end.not_to change(Invoice, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to eq([ "Invoice number has already been taken" ])
+  ensure
+    file&.close!
+  end
+
   it "rolls back delivery, sent timestamp, and audit history together" do
     invoice = issue_invoice(total: 125)
     invalid_event = InvoiceEvent.new
