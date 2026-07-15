@@ -45,6 +45,11 @@ import {
 
 type Modal = 'new' | 'import' | 'details' | null;
 type DetailAction = 'payment' | 'delivery' | 'credit' | null;
+type Payment = NonNullable<Invoice['payments']>[number];
+type CreditNote = NonNullable<Invoice['credit_notes']>[number];
+type FinancialActivity =
+  | { kind: 'payment'; activityAt: string; payment: Payment }
+  | { kind: 'credit'; activityAt: string; credit: CreditNote };
 
 interface DraftLine extends InvoiceLineItem {
   localId: string;
@@ -159,8 +164,8 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
   wide?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/45 p-3 sm:p-6">
-      <div className={`flex max-h-[94vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-3xl'}`}>
+    <div className="invoice-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/45 p-3 sm:p-6">
+      <div className={`invoice-modal-panel flex max-h-[94vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${wide ? 'max-w-6xl' : 'max-w-3xl'}`}>
         <div className="flex items-start justify-between gap-4 border-b border-neutral-200 px-5 py-4 sm:px-6">
           <div>
             <h2 className="text-xl font-semibold text-neutral-950">{title}</h2>
@@ -195,8 +200,8 @@ export function InvoiceCenter() {
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const [invoiceResult, recipientResult, profileResult, summaryResult] = await Promise.all([
@@ -215,7 +220,7 @@ export function InvoiceCenter() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load the Invoice Center');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -233,10 +238,39 @@ export function InvoiceCenter() {
     return matchesStatus && matchesSearch;
   }), [invoices, search, statusFilter]);
 
+  const financialActivity = useMemo<FinancialActivity[]>(() => {
+    if (!selected) return [];
+    const payments: FinancialActivity[] = (selected.payments || []).map((payment) => ({
+      kind: 'payment',
+      payment,
+      activityAt: payment.reversed_at || payment.created_at,
+    }));
+    const credits: FinancialActivity[] = (selected.credit_notes || []).map((credit) => ({
+      kind: 'credit',
+      credit,
+      activityAt: credit.voided_at || credit.created_at,
+    }));
+    return [...payments, ...credits].sort((left, right) =>
+      new Date(right.activityAt).getTime() - new Date(left.activityAt).getTime()
+    );
+  }, [selected]);
+
+  const deliveryHistory = useMemo(() => [...(selected?.deliveries || [])].sort((left, right) =>
+    new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+  ), [selected]);
+
+  const auditTimeline = useMemo(() => [...(selected?.events || [])].sort((left, right) =>
+    new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+  ), [selected]);
+
+  const applyInvoice = (invoice: Invoice) => {
+    setSelected(invoice);
+    setInvoices((current) => current.map((row) => row.id === invoice.id ? invoice : row));
+  };
+
   const refreshSelected = async (id: number) => {
     const response = await invoicesApi.get(id);
-    setSelected(response.invoice);
-    setInvoices((current) => current.map((invoice) => invoice.id === id ? response.invoice : invoice));
+    applyInvoice(response.invoice);
     return response.invoice;
   };
 
@@ -261,7 +295,7 @@ export function InvoiceCenter() {
     setSuccess(null);
     try {
       await action();
-      await load();
+      await load({ silent: true });
       setSuccess(message);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Invoice action failed');
@@ -324,8 +358,9 @@ export function InvoiceCenter() {
       : await invoicesApi.create(payload);
     setDraft(emptyDraft());
     setEditingDraftId(null);
-    setModal(null);
-    await openDetails(result.invoice.id);
+    applyInvoice(result.invoice);
+    setModal('details');
+    setDetailAction(null);
   }, editingDraftId ? 'Draft invoice updated.' : 'Draft invoice created. Review it, then issue it when ready.');
 
   const submitImport = () => run(async () => {
@@ -345,13 +380,14 @@ export function InvoiceCenter() {
       delivery_channel: importForm.delivery_channel,
     });
     setImportForm(emptyImport());
-    setModal(null);
-    await openDetails(result.invoice.id);
+    applyInvoice(result.invoice);
+    setModal('details');
+    setDetailAction(null);
   }, 'External invoice imported with its original file preserved.');
 
   const issueSelected = () => selected && run(async () => {
-    await invoicesApi.issue(selected.id);
-    await refreshSelected(selected.id);
+    const response = await invoicesApi.issue(selected.id);
+    applyInvoice(response.invoice);
   }, 'Invoice issued and its exact PDF preserved.');
 
   const previewSelected = async () => {
@@ -392,14 +428,14 @@ export function InvoiceCenter() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     await run(async () => {
-      await invoicesApi.recordPayment(selected.id, {
+      const response = await invoicesApi.recordPayment(selected.id, {
         amount: Number(form.get('amount')),
         received_on: String(form.get('received_on')),
         payment_method: String(form.get('payment_method')),
         reference_number: String(form.get('reference_number') || '') || undefined,
         notes: String(form.get('notes') || '') || undefined,
       });
-      await refreshSelected(selected.id);
+      applyInvoice(response.invoice);
       setDetailAction(null);
     }, 'Payment recorded and the receivable balance updated.');
   };
@@ -409,14 +445,14 @@ export function InvoiceCenter() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     await run(async () => {
-      await invoicesApi.recordDelivery(selected.id, {
+      const response = await invoicesApi.recordDelivery(selected.id, {
         channel: String(form.get('channel')),
         recipient: String(form.get('recipient') || '') || undefined,
         delivered_at: String(form.get('delivered_at') || '') || undefined,
         provider_reference: String(form.get('provider_reference') || '') || undefined,
         notes: String(form.get('notes') || '') || undefined,
       });
-      await refreshSelected(selected.id);
+      applyInvoice(response.invoice);
       setDetailAction(null);
     }, 'Delivery evidence recorded.');
   };
@@ -426,12 +462,12 @@ export function InvoiceCenter() {
     if (!selected) return;
     const form = new FormData(event.currentTarget);
     await run(async () => {
-      await invoicesApi.issueCredit(selected.id, {
+      const response = await invoicesApi.issueCredit(selected.id, {
         amount: Number(form.get('amount')),
         issue_date: String(form.get('issue_date')),
         reason: String(form.get('reason')),
       });
-      await refreshSelected(selected.id);
+      applyInvoice(response.invoice);
       setDetailAction(null);
     }, 'Credit note issued and applied to the balance.');
   };
@@ -441,8 +477,8 @@ export function InvoiceCenter() {
     const reason = window.prompt('Why is this payment being reversed?');
     if (!reason?.trim()) return;
     await run(async () => {
-      await invoicesApi.reversePayment(selected.id, paymentId, reason.trim());
-      await refreshSelected(selected.id);
+      const response = await invoicesApi.reversePayment(selected.id, paymentId, reason.trim());
+      applyInvoice(response.invoice);
     }, 'Payment reversed; the original record remains in history.');
   };
 
@@ -451,8 +487,8 @@ export function InvoiceCenter() {
     const reason = window.prompt('Why is this credit note being voided?');
     if (!reason?.trim()) return;
     await run(async () => {
-      await invoicesApi.voidCredit(selected.id, creditId, reason.trim());
-      await refreshSelected(selected.id);
+      const response = await invoicesApi.voidCredit(selected.id, creditId, reason.trim());
+      applyInvoice(response.invoice);
     }, 'Credit note voided; its history remains intact.');
   };
 
@@ -461,7 +497,7 @@ export function InvoiceCenter() {
     if (status === 'voided' && !window.confirm('Void this invoice? This keeps the invoice and history but removes it from receivables.')) return;
     await run(async () => {
       const response = await invoicesApi.updateStatus(selected.id, status);
-      setSelected(response.invoice);
+      applyInvoice(response.invoice);
     }, status === 'archived' ? 'Invoice archived.' : status === 'restored' ? 'Invoice restored.' : `Invoice marked ${status}.`);
   };
 
@@ -482,7 +518,7 @@ export function InvoiceCenter() {
       />
 
       {(error || success) && (
-        <div className={`rounded-xl border px-4 py-3 text-sm ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
+        <div role="status" className={`invoice-toast fixed right-4 top-4 z-[80] w-[min(28rem,calc(100vw-2rem))] rounded-xl border px-4 py-3 text-sm shadow-xl ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
           <div className="flex items-start justify-between gap-3">
             <span>{error || success}</span>
             <button onClick={() => { setError(null); setSuccess(null); }}><X className="h-4 w-4" /></button>
@@ -592,12 +628,12 @@ export function InvoiceCenter() {
       </ModalShell>}
 
       {modal === 'details' && selected && <ModalShell title={`${selected.invoice_number} · ${selected.recipient_name || 'Customer'}`} subtitle={`${selected.origin === 'imported' ? 'Imported invoice' : 'Cornerstone invoice'} · ${statusLabel(selected.status)}`} onClose={() => { setModal(null); setDetailAction(null); }} wide>
-        <div className="space-y-6">
+        <div className={`space-y-6 transition-opacity duration-200 ${busy ? 'opacity-70' : 'opacity-100'}`}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[['Invoice total', money(selected.total_amount, selected.currency)], ['Paid', money(selected.amount_paid, selected.currency)], ['Credits', money(selected.credit_total, selected.currency)], ['Balance due', money(selected.balance_due, selected.currency)]].map(([label, value]) => <div key={label} className="rounded-xl border border-neutral-200 p-4"><p className="text-xs font-medium uppercase tracking-wide text-neutral-400">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>)}
           </div>
           {selected.legacy_artifact_missing && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">This legacy invoice has lifecycle history but no exact preserved file. New and imported invoices always preserve immutable evidence.</div>}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-h-11 flex-wrap gap-2 transition-all duration-200">
             <Button variant="outline" onClick={previewSelected} disabled={busy}><Eye className="mr-1.5 h-4 w-4" />Preview</Button>
             {selected.status === 'draft' ? <><Button variant="outline" onClick={editSelectedDraft}>Edit draft</Button><Button onClick={issueSelected} disabled={busy}><CheckCircle2 className="mr-1.5 h-4 w-4" />Issue invoice</Button></> : <Button variant="outline" onClick={downloadSelected} disabled={!selected.has_artifact || busy}><Download className="mr-1.5 h-4 w-4" />Download original</Button>}
             {!['draft', 'voided'].includes(selected.status) && <Button variant="outline" onClick={() => setDetailAction('delivery')}><MailCheck className="mr-1.5 h-4 w-4" />Record delivery</Button>}
@@ -607,9 +643,9 @@ export function InvoiceCenter() {
             {!['draft', 'voided', 'paid'].includes(selected.status) && <Button variant="outline" className="text-red-700" onClick={() => changeLifecycle('voided')}>Void invoice</Button>}
           </div>
 
-          {detailAction && <div className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4">
+          {detailAction && <div key={detailAction} className="invoice-action-panel rounded-2xl border border-primary-200 bg-primary-50/40 p-4">
             {detailAction === 'payment' && <form onSubmit={submitPayment} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" defaultValue={selected.balance_due} className="mt-1" /></label><label className="text-sm font-medium">Received on<Input required name="received_on" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Method<select name="payment_method" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="check">Check</option><option value="ach">ACH</option><option value="cash">Cash</option><option value="card">Card</option><option value="wire">Wire</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Reference<Input name="reference_number" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Save payment</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
-            {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Record delivery</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
+            {detailAction === 'delivery' && <form onSubmit={submitDelivery} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"><label className="text-sm font-medium">Channel<select name="channel" className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="email">Email</option><option value="mail">Mail</option><option value="hand_delivery">Hand delivery</option><option value="portal">Portal</option><option value="other">Other</option></select></label><label className="text-sm font-medium">Recipient<Input name="recipient" defaultValue={selected.invoice_recipient?.email || ''} className="mt-1" /></label><label className="text-sm font-medium">Delivered at<Input name="delivered_at" type="datetime-local" className="mt-1" /></label><label className="text-sm font-medium">Reference<Input name="provider_reference" className="mt-1" /></label><label className="text-sm font-medium">Notes<Input name="notes" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Record delivery</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
             {detailAction === 'credit' && <form onSubmit={submitCredit} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-sm font-medium">Amount<Input required name="amount" type="number" min="0.01" max={selected.balance_due} step="0.01" className="mt-1" /></label><label className="text-sm font-medium">Issue date<Input required name="issue_date" type="date" defaultValue={dateOnly()} className="mt-1" /></label><label className="text-sm font-medium">Reason<Input required name="reason" className="mt-1" /></label><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>Issue credit</Button><Button type="button" variant="ghost" onClick={() => setDetailAction(null)}>Cancel</Button></div></form>}
           </div>}
 
@@ -618,18 +654,22 @@ export function InvoiceCenter() {
               {!!selected.line_items?.length && <div className="rounded-xl border border-neutral-200 p-4"><h3 className="font-semibold">Line items</h3><div className="mt-3 divide-y divide-neutral-100">{selected.line_items.map((line) => <div key={line.id || line.description} className="flex justify-between gap-4 py-2 text-sm"><div><p className="font-medium">{line.description}</p><p className="text-neutral-400">{line.quantity} × {money(line.rate, selected.currency)}</p></div><span className="font-semibold">{money(line.amount, selected.currency)}</span></div>)}</div></div>}
             </div>
             <div className="space-y-4">
-              <div className="rounded-xl border border-neutral-200 p-4"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Payments and credits</h3><div className="mt-3 space-y-2">
-                {selected.payments?.map((payment) => <div key={`payment-${payment.id}`} className="flex items-start justify-between gap-3 rounded-lg bg-neutral-50 p-3 text-sm"><div><p className="font-medium">Payment · {money(payment.amount, selected.currency)}</p><p className="text-neutral-500">{formatDate(payment.received_on)} · {payment.payment_method}{payment.reference_number ? ` · ${payment.reference_number}` : ''}</p>{payment.reversed && <p className="mt-1 text-red-600">Reversed: {payment.reversal_reason}</p>}</div>{!payment.reversed && <button onClick={() => reversePayment(payment.id)} className="text-xs font-medium text-red-600"><Undo2 className="mr-1 inline h-3 w-3" />Reverse</button>}</div>)}
-                {selected.credit_notes?.map((credit) => <div key={`credit-${credit.id}`} className="flex items-start justify-between gap-3 rounded-lg bg-neutral-50 p-3 text-sm"><div><p className="font-medium">Credit {credit.credit_number} · {money(credit.total_amount, selected.currency)}</p><p className="text-neutral-500">{formatDate(credit.issue_date)} · {credit.reason}</p>{credit.status === 'voided' && <p className="mt-1 text-red-600">Voided: {credit.void_reason}</p>}</div>{credit.status === 'issued' && <button onClick={() => voidCredit(credit.id)} className="text-xs font-medium text-red-600">Void</button>}</div>)}
-                {!selected.payments?.length && !selected.credit_notes?.length && <p className="py-3 text-sm text-neutral-500">No payments or credits recorded.</p>}
+              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Payments and credits</h3><span className="text-xs text-neutral-400">Newest activity first</span></div><div className="mt-3 space-y-2">
+                {financialActivity.map((activity) => activity.kind === 'payment' ? (
+                  <div key={`payment-${activity.payment.id}`} className="flex items-start justify-between gap-3 rounded-lg bg-neutral-50 p-3 text-sm"><div><p className="font-medium">Payment · {money(activity.payment.amount, selected.currency)}</p><p className="text-neutral-500">Effective {formatDate(activity.payment.received_on)} · {activity.payment.payment_method}{activity.payment.reference_number ? ` · ${activity.payment.reference_number}` : ''}</p><p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(activity.payment.created_at)}{activity.payment.recorded_by_name ? ` · ${activity.payment.recorded_by_name}` : ''}</p>{activity.payment.reversed && <p className="mt-1 text-red-600">Reversed {formatDateTime(activity.payment.reversed_at)}: {activity.payment.reversal_reason}</p>}</div>{!activity.payment.reversed && <button onClick={() => reversePayment(activity.payment.id)} className="text-xs font-medium text-red-600"><Undo2 className="mr-1 inline h-3 w-3" />Reverse</button>}</div>
+                ) : (
+                  <div key={`credit-${activity.credit.id}`} className="flex items-start justify-between gap-3 rounded-lg bg-neutral-50 p-3 text-sm"><div><p className="font-medium">Credit {activity.credit.credit_number} · {money(activity.credit.total_amount, selected.currency)}</p><p className="text-neutral-500">Effective {formatDate(activity.credit.issue_date)} · {activity.credit.reason}</p><p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(activity.credit.created_at)}{activity.credit.issued_by_name ? ` · ${activity.credit.issued_by_name}` : ''}</p>{activity.credit.status === 'voided' && <p className="mt-1 text-red-600">Voided {formatDateTime(activity.credit.voided_at)}: {activity.credit.void_reason}</p>}</div>{activity.credit.status === 'issued' && <button onClick={() => voidCredit(activity.credit.id)} className="text-xs font-medium text-red-600">Void</button>}</div>
+                ))}
+                {!financialActivity.length && <p className="py-3 text-sm text-neutral-500">No payments or credits recorded.</p>}
               </div></div>
-              <div className="rounded-xl border border-neutral-200 p-4"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><div className="mt-3 space-y-3">{selected.events?.slice().reverse().map((event) => <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">{formatDateTime(event.occurred_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p></div></div>)}</div></div>
+              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><MailCheck className="h-4 w-4" />Delivery history</h3><span className="text-xs text-neutral-400">Newest first</span></div><div className="mt-3 space-y-2">{deliveryHistory.map((delivery) => <div key={delivery.id} className="rounded-lg bg-neutral-50 p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium capitalize">{delivery.channel.replaceAll('_', ' ')}</p><span className="text-xs text-neutral-400">{formatDateTime(delivery.delivered_at)}</span></div><p className="mt-1 text-neutral-600">To {delivery.recipient || 'Recipient not recorded'}</p>{delivery.provider_reference && <p className="mt-1 text-xs text-neutral-500">Reference: {delivery.provider_reference}</p>}{delivery.notes && <p className="mt-1 text-xs text-neutral-500">{delivery.notes}</p>}<p className="mt-1 text-xs text-neutral-400">Recorded {formatDateTime(delivery.created_at)}{delivery.recorded_by_name ? ` · ${delivery.recorded_by_name}` : ''}{delivery.artifact_id ? ' · Preserved invoice attached' : ''}</p></div>)}{!deliveryHistory.length && <p className="py-3 text-sm text-neutral-500">No delivery has been recorded.</p>}</div></div>
+              <div className="rounded-xl border border-neutral-200 p-4"><div className="flex items-center justify-between gap-3"><h3 className="flex items-center gap-2 font-semibold"><History className="h-4 w-4" />Audit timeline</h3><span className="text-xs text-neutral-400">Recorded order</span></div><div className="mt-3 space-y-3">{auditTimeline.map((event) => { const effectiveDiffers = Math.abs(new Date(event.created_at).getTime() - new Date(event.occurred_at).getTime()) > 60_000; return <div key={event.id} className="flex gap-3 text-sm"><span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-500" /><div><p className="font-medium capitalize">{event.event_type.replaceAll('_', ' ')}</p><p className="text-xs text-neutral-400">Recorded {formatDateTime(event.created_at)}{event.actor_name ? ` · ${event.actor_name}` : ''}</p>{effectiveDiffers && <p className="text-xs text-neutral-400">Effective {formatDateTime(event.occurred_at)}</p>}</div></div>; })}</div></div>
             </div>
           </div>
         </div>
       </ModalShell>}
 
-      {previewUrl && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-neutral-950/60 p-4"><div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white"><div className="flex items-center justify-between border-b px-4 py-3"><span className="font-semibold">Invoice evidence</span><Button variant="ghost" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>Close</Button></div><iframe title="Invoice evidence" src={previewUrl} className="h-full w-full" /></div></div>}
+      {previewUrl && <div className="invoice-modal-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-neutral-950/60 p-4"><div className="invoice-modal-panel flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white"><div className="flex items-center justify-between border-b px-4 py-3"><div><span className="font-semibold">Invoice preview</span>{selected && <span className="ml-2 text-sm text-neutral-400">{selected.invoice_number}</span>}</div><Button variant="ghost" onClick={() => { URL.revokeObjectURL(previewUrl); setPreviewUrl(null); }}>Close</Button></div><iframe title="Invoice preview" src={previewUrl} className="h-full w-full" /></div></div>}
 
       {busy && !modal && <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-full bg-neutral-950 px-4 py-2 text-sm text-white shadow-lg"><Loader2 className="h-4 w-4 animate-spin" />Working</div>}
     </div>

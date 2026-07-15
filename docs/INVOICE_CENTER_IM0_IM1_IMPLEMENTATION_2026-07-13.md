@@ -122,6 +122,8 @@ Legacy generated invoices are preserved explicitly. Migration may capture their 
 - existing-invoice import and immutable original download;
 - searchable/filterable invoice list;
 - dedicated detail and financial timeline;
+- newest-activity-first payment and credit history with recorded and effective dates kept distinct;
+- visible delivery history including channel, recipient, reference, notes, recorder, and preserved artifact linkage;
 - record/reverse payment flow;
 - issue/void/uncollectible/archive controls;
 - aging buckets;
@@ -166,6 +168,7 @@ Legacy generated invoices are preserved explicitly. Migration may capture their 
 - due-date and aging boundaries;
 - legacy paid and archived preservation;
 - PDF multi-page and long-content behavior;
+- measured standard-template layout, terms/total alignment, conditional service-date columns, and rendered visual inspection;
 - frontend typecheck, lint, production build, and browser workflows;
 - full backend regression suite; and
 - local end-to-end creation, import, payment, reversal, aging, and statement checks.
@@ -177,3 +180,16 @@ After this implementation is stable:
 1. **IM-2:** Gmail delivery, reminders, recurrence, scheduled drafts, and communication queues.
 2. **IM-3:** branded standard/hourly/project/tuition templates, estimates, receipts, and visual regression coverage.
 3. **IM-4/5:** safer AI/source automation and an optional customer/payment portal.
+
+## Standard template and timeline refinement
+
+The IM-0/IM-1 standard invoice uses template version `standard-v3`. Its title/metadata region is measured rather than positioned with a fixed cursor offset, so optional metadata cannot collide with Bill To or Remit To content. Party information is presented in balanced cards, the service-date column is omitted when every line item lacks a service date, and payment terms and total due share a consistently aligned summary row.
+
+Invoice Center activity distinguishes two timestamps:
+
+- **recorded at** controls audit and newest-activity ordering; and
+- **effective at/on** captures the accounting or delivery date selected by the operator.
+
+Deliveries remain evidence records rather than financial status flags. Their full details are shown separately from the concise append-only audit event.
+
+AI invoice sessions remain organization-wide by design. They must not infer invoice ownership from the payroll client currently selected in the sidebar. A `company_id` may only be attached when an explicit engagement context is supplied; otherwise it remains blank rather than being guessed.

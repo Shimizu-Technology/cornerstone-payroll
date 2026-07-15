@@ -7,7 +7,7 @@ class InvoiceArtifactStorageService
   MAX_FILE_SIZE = 15.megabytes
   IMPORT_CONTENT_TYPES = %w[application/pdf image/jpeg image/png image/webp].freeze
   RENDERER_VERSION = "prawn-v2"
-  TEMPLATE_VERSION = "standard-v2"
+  TEMPLATE_VERSION = "standard-v3"
 
   def initialize(storage: R2StorageService.new)
     @storage = storage

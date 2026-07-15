@@ -206,7 +206,8 @@ class InvoicePayloadBuilder
       event_type: event.event_type,
       occurred_at: event.occurred_at,
       actor_name: event.actor&.name,
-      metadata: event.metadata
+      metadata: event.metadata,
+      created_at: event.created_at
     }
   end
 

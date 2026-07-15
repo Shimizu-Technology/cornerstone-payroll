@@ -2908,6 +2908,7 @@ export interface InvoiceEvent {
   occurred_at: string;
   actor_name?: string | null;
   metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface InvoiceReceivablesSummary {

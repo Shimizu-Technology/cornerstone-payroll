@@ -235,6 +235,34 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
   end
 
+  it "returns complete delivery evidence and recorded-at audit timestamps" do
+    invoice = issue_invoice(total: 125)
+
+    post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: {
+      channel: "email",
+      recipient: "accounts@customer.example",
+      delivered_at: "2026-07-15T19:47:00+10:00",
+      provider_reference: "EMAIL-DELIVERY-42",
+      notes: "Sent from the billing mailbox"
+    }
+
+    expect(response).to have_http_status(:ok), response.body
+    delivery = response.parsed_body.dig("invoice", "deliveries").sole
+    expect(delivery).to include(
+      "channel" => "email",
+      "recipient" => "accounts@customer.example",
+      "provider_reference" => "EMAIL-DELIVERY-42",
+      "notes" => "Sent from the billing mailbox",
+      "artifact_id" => invoice.artifacts.sole.id,
+      "recorded_by_name" => admin_user.name
+    )
+    expect(delivery.fetch("created_at")).to be_present
+
+    event = response.parsed_body.dig("invoice", "events").find { |row| row.fetch("event_type") == "delivery_recorded" }
+    expect(event.fetch("created_at")).to be_present
+    expect(event.fetch("occurred_at")).to start_with("2026-07-15T09:47:00")
+  end
+
   it "tracks partial and final payments, rejects overpayment, and reverses without deleting evidence" do
     invoice = issue_invoice(total: 300)
 
