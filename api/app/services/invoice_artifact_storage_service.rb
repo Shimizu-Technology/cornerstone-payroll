@@ -42,7 +42,7 @@ class InvoiceArtifactStorageService
     end
   end
 
-  def import_original!(invoice:, actor:, file:, issued_at: Time.current)
+  def import_original!(invoice:, actor:, file:, issued_at: Time.current, delivery_attributes: nil)
     bytes, content_type, filename = validate_import!(file)
 
     store_and_issue!(
@@ -56,7 +56,14 @@ class InvoiceArtifactStorageService
       issued_at: issued_at,
       renderer_version: nil,
       template_version: nil
-    )
+    ) do |locked_invoice, artifact|
+      create_import_delivery!(
+        invoice: locked_invoice,
+        artifact: artifact,
+        actor: actor,
+        attributes: delivery_attributes
+      )
+    end
   end
 
   def download(artifact)
@@ -84,7 +91,7 @@ class InvoiceArtifactStorageService
   end
 
   def store_and_issue!(invoice:, actor:, bytes:, filename:, content_type:, kind:, snapshot:, issued_at: Time.current,
-                       renderer_version:, template_version:)
+                       renderer_version:, template_version:, &after_issue)
     key = storage_key(invoice: invoice, filename: filename)
     storage.upload(key, StringIO.new(bytes), content_type: content_type)
 
@@ -112,6 +119,7 @@ class InvoiceArtifactStorageService
         occurred_at: issued_at,
         metadata: { artifact_id: artifact.id, sha256: artifact.sha256, filename: artifact.filename }
       )
+      after_issue&.call(locked_invoice, artifact)
       artifact
     end
   rescue StandardError
@@ -121,6 +129,28 @@ class InvoiceArtifactStorageService
       Rails.logger.warn("Invoice artifact cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}")
     end
     raise
+  end
+
+  def create_import_delivery!(invoice:, artifact:, actor:, attributes:)
+    return unless attributes
+
+    delivery = invoice.deliveries.create!(
+      organization: invoice.organization,
+      invoice_artifact: artifact,
+      channel: attributes.fetch(:channel),
+      recipient: attributes[:recipient].presence || invoice.invoice_recipient.email,
+      delivered_at: attributes.fetch(:delivered_at),
+      notes: "Historical delivery recorded during import",
+      recorded_by: actor
+    )
+    invoice.update!(sent_at: delivery.delivered_at, updated_by: actor)
+    InvoiceEvent.record!(
+      invoice: invoice,
+      event_type: "delivery_recorded",
+      actor: actor,
+      occurred_at: delivery.delivered_at,
+      metadata: { delivery_id: delivery.id, source: "invoice_import" }
+    )
   end
 
   def storage_key(invoice:, filename:)

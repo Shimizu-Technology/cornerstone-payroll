@@ -117,6 +117,7 @@ Legacy generated invoices are preserved explicitly. Migration may capture their 
 ## Included user experience
 
 - organization-wide Invoice Center dashboard with invoice-from identity visible on each invoice;
+- an explicit Invoice Business scope that filters the invoice list, headline totals, aging, and customer balances by billing profile without inheriting the selected payroll client;
 - outstanding, overdue, paid, and draft headline totals;
 - native invoice creation;
 - existing-invoice import and immutable original download;
@@ -193,3 +194,17 @@ Invoice Center activity distinguishes two timestamps:
 Deliveries remain evidence records rather than financial status flags. Their full details are shown separately from the concise append-only audit event.
 
 AI invoice sessions remain organization-wide by design. They must not infer invoice ownership from the payroll client currently selected in the sidebar. A `company_id` may only be attached when an explicit engagement context is supplied; otherwise it remains blank rather than being guessed.
+
+## Organization workspace and invoice-business scope
+
+The Invoice Center is an organization finance workspace, not a payroll-client page. Its page header identifies the organization instead of repeating the active payroll client, and the Invoice Business selector provides the working scope:
+
+- **All invoice businesses** shows consolidated organization receivables;
+- selecting a billing profile such as Shimizu Technology or Cornerstone Tax Services scopes invoices, totals, aging, and customer balances to that issuer; and
+- each invoice row always shows its invoice-from identity so consolidated results remain unambiguous.
+
+The selected Invoice Business may preselect the From field for a new draft, but the operator must still confirm the issuer before saving. Payroll companies remain optional engagement context and never become invoice ownership merely because they are selected in the sidebar.
+
+## Imported-invoice atomicity
+
+An imported artifact, the transition from draft to open, the import audit event, and any optional historical delivery evidence are committed in one database transaction after the original file is uploaded. If any database step fails, every database write rolls back and the uploaded object is deleted. The controller then queries current database state before removing the remaining bare draft, avoiding stale association caches and preventing a failed response from leaving a hidden open invoice that could be duplicated on retry.

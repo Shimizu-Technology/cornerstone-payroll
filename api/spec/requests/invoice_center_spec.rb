@@ -179,7 +179,7 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     file&.close!
   end
 
-  it "rolls back imported delivery evidence when its audit event cannot be recorded" do
+  it "rolls back the entire import when historical delivery evidence cannot be recorded" do
     file = Tempfile.new([ "outside-invoice", ".pdf" ])
     file.binmode
     file.write("%PDF-1.4\nexternal invoice evidence\n%%EOF\n")
@@ -204,12 +204,15 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
         delivered_at: "2026-06-01T09:30:00+10:00",
         delivery_channel: "email"
       }
-    end.not_to change(InvoiceDelivery, :count)
+    end.not_to change(Invoice, :count)
 
     expect(response).to have_http_status(:unprocessable_entity)
-    invoice = Invoice.find_by!(invoice_number: "EXT-ROLLBACK")
-    expect(invoice).to have_attributes(status: "open", sent_at: nil)
-    expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
+    expect(Invoice.find_by(invoice_number: "EXT-ROLLBACK")).to be_nil
+    expect(InvoiceArtifact.count).to eq(0)
+    expect(InvoiceEvent.count).to eq(0)
+    expect(InvoiceDelivery.count).to eq(0)
+    stored_files = Dir[R2StorageService::LOCAL_STORAGE_ROOT.join("invoice-center/**/*")].reject { |path| File.directory?(path) }
+    expect(stored_files).to be_empty
   ensure
     file&.close!
   end
@@ -343,6 +346,31 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to contain_exactly(overdue.id, current.id)
   end
 
+  it "scopes invoice lists and receivable totals by the selected invoice business" do
+    other_profile = create(
+      :invoice_billing_profile,
+      organization: company.organization,
+      name: "Cornerstone Tax Services",
+      invoice_prefix: "CTS"
+    )
+    shimizu_invoice = issue_invoice(total: 100)
+    cornerstone_invoice = issue_invoice(total: 250, billing_profile: other_profile)
+
+    get "/api/v1/admin/invoices", params: { billing_profile_id: other_profile.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") })
+      .to contain_exactly(cornerstone_invoice.id)
+
+    get "/api/v1/admin/invoice_receivables", params: { billing_profile_id: other_profile.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("totals", "outstanding")).to eq(250.0)
+    expect(response.parsed_body.dig("totals", "open_count")).to eq(1)
+    expect(response.parsed_body.dig("by_recipient", 0, "invoice_count")).to eq(1)
+    expect(shimizu_invoice.reload.balance_due).to eq(100.to_d)
+  end
+
   it "keeps archived receivables in financial totals but excludes uncollectible and voided balances" do
     archived = issue_invoice(total: 300)
     uncollectible = issue_invoice(total: 200)
@@ -425,11 +453,12 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("errors").join(" ")).to include("Record a delivery")
   end
 
-  def create_draft(invoice_number: "TEST-100", total: 300, invoice_date: Date.new(2026, 6, 1), due_date: Date.new(2026, 6, 30))
+  def create_draft(invoice_number: "TEST-100", total: 300, invoice_date: Date.new(2026, 6, 1),
+                   due_date: Date.new(2026, 6, 30), billing_profile: profile)
     post "/api/v1/admin/invoices", params: {
       invoice: {
         invoice_recipient_id: recipient.id,
-        invoice_billing_profile_id: profile.id,
+        invoice_billing_profile_id: billing_profile.id,
         invoice_number: invoice_number,
         invoice_date: invoice_date.iso8601,
         due_date: due_date.iso8601,
@@ -441,8 +470,14 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     Invoice.find(response.parsed_body.dig("invoice", "id"))
   end
 
-  def issue_invoice(total:, invoice_date: Date.new(2026, 6, 1), due_date: Date.new(2026, 6, 30))
-    invoice = create_draft(invoice_number: "TEST-#{SecureRandom.hex(4)}", total: total, invoice_date: invoice_date, due_date: due_date)
+  def issue_invoice(total:, invoice_date: Date.new(2026, 6, 1), due_date: Date.new(2026, 6, 30), billing_profile: profile)
+    invoice = create_draft(
+      invoice_number: "TEST-#{SecureRandom.hex(4)}",
+      total: total,
+      invoice_date: invoice_date,
+      due_date: due_date,
+      billing_profile: billing_profile
+    )
     InvoiceArtifactStorageService.new.issue_native!(invoice: invoice, actor: admin_user)
     invoice.reload
   end

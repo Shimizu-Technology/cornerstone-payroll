@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Archive,
   Bot,
+  Building2,
   CalendarClock,
   CheckCircle2,
   CircleDollarSign,
@@ -24,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
+import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -182,6 +184,7 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: {
 }
 
 export function InvoiceCenter() {
+  const { user } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [profiles, setProfiles] = useState<InvoiceBillingProfile[]>([]);
@@ -193,38 +196,54 @@ export function InvoiceCenter() {
   const [editingDraftId, setEditingDraftId] = useState<number | null>(null);
   const [importForm, setImportForm] = useState<ImportForm>(emptyImport);
   const [statusFilter, setStatusFilter] = useState<'active' | InvoiceStatus | 'archived' | 'all'>('active');
+  const [businessFilter, setBusinessFilter] = useState<'all' | string>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [scopeLoading, setScopeLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const loadSequence = useRef(0);
 
   const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    const sequence = ++loadSequence.current;
+    const billingProfileId = businessFilter === 'all' ? undefined : Number(businessFilter);
     if (!silent) setLoading(true);
     setError(null);
     try {
       const [invoiceResult, recipientResult, profileResult, summaryResult] = await Promise.all([
-        invoicesApi.list(),
+        invoicesApi.list({ billing_profile_id: billingProfileId }),
         invoiceRecipientsApi.list({ active: true }),
-        invoiceBillingProfilesApi.list({ active: true }),
-        invoiceReceivablesApi.summary(),
+        invoiceBillingProfilesApi.list(),
+        invoiceReceivablesApi.summary({ billing_profile_id: billingProfileId }),
       ]);
+      if (sequence !== loadSequence.current) return;
       setInvoices(invoiceResult.invoices);
       setRecipients(recipientResult.invoice_recipients);
       setProfiles(profileResult.invoice_billing_profiles);
       setSummary(summaryResult);
-      const defaultProfile = profileResult.invoice_billing_profiles.find((profile) => profile.is_default) || profileResult.invoice_billing_profiles[0];
+      const activeProfiles = profileResult.invoice_billing_profiles.filter((profile) => profile.active);
+      const defaultProfile = activeProfiles.find((profile) => profile.is_default) || activeProfiles[0];
       setDraft((current) => ({ ...current, invoice_billing_profile_id: current.invoice_billing_profile_id || String(defaultProfile?.id || '') }));
       setImportForm((current) => ({ ...current, invoice_billing_profile_id: current.invoice_billing_profile_id || String(defaultProfile?.id || '') }));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Unable to load the Invoice Center');
+      if (sequence === loadSequence.current) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load the Invoice Center');
+      }
     } finally {
-      if (!silent) setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
-  }, []);
+  }, [businessFilter]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    let active = true;
+    setScopeLoading(true);
+    void load({ silent: true }).finally(() => {
+      if (active) setScopeLoading(false);
+    });
+    return () => { active = false; };
+  }, [load]);
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
   const filteredInvoices = useMemo(() => invoices.filter((invoice) => {
@@ -233,10 +252,15 @@ export function InvoiceCenter() {
       || (statusFilter === 'archived' && invoice.archived)
       || invoice.status === statusFilter;
     const needle = search.trim().toLowerCase();
-    const matchesSearch = !needle || [invoice.invoice_number, invoice.recipient_name, invoice.customer_reference]
+    const matchesSearch = !needle || [invoice.invoice_number, invoice.recipient_name, invoice.billing_profile_name, invoice.customer_reference]
       .some((value) => value?.toLowerCase().includes(needle));
     return matchesStatus && matchesSearch;
   }), [invoices, search, statusFilter]);
+
+  const activeProfiles = useMemo(() => profiles.filter((profile) => profile.active), [profiles]);
+  const selectedBusiness = businessFilter === 'all'
+    ? null
+    : profiles.find((profile) => String(profile.id) === businessFilter) || null;
 
   const financialActivity = useMemo<FinancialActivity[]>(() => {
     if (!selected) return [];
@@ -305,7 +329,9 @@ export function InvoiceCenter() {
   };
 
   const openNewDraft = () => {
-    const defaultProfile = profiles.find((profile) => profile.is_default) || profiles[0];
+    const defaultProfile = selectedBusiness?.active
+      ? selectedBusiness
+      : activeProfiles.find((profile) => profile.is_default) || activeProfiles[0];
     setEditingDraftId(null);
     setDraft({ ...emptyDraft(), invoice_billing_profile_id: String(defaultProfile?.id || '') });
     setModal('new');
@@ -415,7 +441,7 @@ export function InvoiceCenter() {
         : await invoicesApi.downloadArtifact(selected.id);
       downloadBlob(data, `${selected.invoice_number}.pdf`);
       await refreshSelected(selected.id);
-      await load();
+      await load({ silent: true });
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Unable to download invoice');
     } finally {
@@ -507,7 +533,9 @@ export function InvoiceCenter() {
     <div className="space-y-6">
       <Header
         title="Invoice Center"
-        description="Create invoices, preserve outside invoices, and track every receivable from issue through payment."
+        description="Create invoices, preserve outside invoices, and track organization receivables from issue through payment."
+        contextLabel="Organization"
+        contextValue={user?.organization_name || 'Organization-wide finance'}
         actions={(
           <div className="flex flex-wrap gap-2">
             <Link to="/tools/invoices/assistant" className="inline-flex min-h-11 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800"><Bot className="mr-1.5 h-4 w-4" />AI invoice maker</Link>
@@ -516,6 +544,35 @@ export function InvoiceCenter() {
           </div>
         )}
       />
+
+      <div className="flex flex-col gap-4 rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50/80 to-white p-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex items-start gap-3">
+          <div className="rounded-xl bg-white p-2.5 text-primary-700 shadow-sm"><Building2 className="h-5 w-5" /></div>
+          <div>
+            <p className="font-semibold text-neutral-950">Organization-wide accounts receivable</p>
+            <p className="mt-1 max-w-2xl text-sm leading-5 text-neutral-600">
+              Invoices belong to an invoice-from business, not the payroll client selected in the sidebar. Choose a business to focus its totals and activity.
+            </p>
+          </div>
+        </div>
+        <label className="min-w-64 text-sm font-medium text-neutral-700">
+          Invoice business
+          <div className="relative mt-1">
+            <select
+              value={businessFilter}
+              onChange={(event) => setBusinessFilter(event.target.value)}
+              disabled={scopeLoading}
+              className="h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 pr-9 text-sm font-semibold text-neutral-900 disabled:opacity-70"
+            >
+              <option value="all">All invoice businesses</option>
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.name}{profile.active ? '' : ' (archived)'}</option>
+              ))}
+            </select>
+            {scopeLoading && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-primary-600" />}
+          </div>
+        </label>
+      </div>
 
       {(error || success) && (
         <div role="status" className={`invoice-toast fixed right-4 top-4 z-[80] w-[min(28rem,calc(100vw-2rem))] rounded-xl border px-4 py-3 text-sm shadow-xl ${error ? 'border-red-200 bg-red-50 text-red-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
@@ -544,7 +601,7 @@ export function InvoiceCenter() {
         <Card>
           <CardContent className="p-0">
             <div className="flex flex-col gap-3 border-b border-neutral-200 p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div><h2 className="font-semibold text-neutral-950">Invoices</h2><p className="text-sm text-neutral-500">Organization-wide, independent of the selected payroll client</p></div>
+              <div><h2 className="font-semibold text-neutral-950">Invoices</h2><p className="text-sm text-neutral-500">{selectedBusiness ? `Issued by ${selectedBusiness.name}` : 'All invoice businesses in this organization'}</p></div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search number or customer" className="pl-9 sm:w-64" /></div>
                 <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className="h-10 rounded-md border border-neutral-300 bg-white px-3 text-sm">
@@ -560,7 +617,7 @@ export function InvoiceCenter() {
               <div className="divide-y divide-neutral-100">
                 {filteredInvoices.map((invoice) => (
                   <button key={invoice.id} type="button" onClick={() => openDetails(invoice.id)} className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-neutral-50 sm:grid-cols-[minmax(0,1fr)_130px_130px_28px] sm:items-center">
-                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
+                    <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-neutral-950">{invoice.invoice_number}</span><Badge className={statusStyles[invoice.status]}>{statusLabel(invoice.status)}</Badge>{invoice.origin === 'imported' && <Badge className="bg-sky-50 text-sky-700">Imported</Badge>}{invoice.archived && <Badge className="bg-neutral-200 text-neutral-700">Archived</Badge>}</div><p className="mt-1 truncate text-sm text-neutral-600">{invoice.recipient_name}</p><p className="mt-0.5 text-xs text-neutral-400">From {invoice.billing_profile_name || 'Invoice business'} · Invoice {formatDate(invoice.invoice_date)} · Due {formatDate(invoice.due_date)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Balance</p><p className={`font-semibold ${invoice.status === 'overdue' ? 'text-amber-700' : 'text-neutral-900'}`}>{money(invoice.balance_due, invoice.currency)}</p></div>
                     <div><p className="text-xs uppercase tracking-wide text-neutral-400">Invoice total</p><p className="font-medium text-neutral-700">{money(invoice.total_amount, invoice.currency)}</p></div>
                     <Eye className="h-4 w-4 text-neutral-400" />
@@ -588,7 +645,7 @@ export function InvoiceCenter() {
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="text-sm font-medium">From<select value={draft.invoice_billing_profile_id} onChange={(e) => setDraft({ ...draft, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+              <label className="text-sm font-medium">From<select value={draft.invoice_billing_profile_id} onChange={(e) => setDraft({ ...draft, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
               <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => setDraft({ ...draft, invoice_recipient_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
               <label className="text-sm font-medium">Invoice number <span className="font-normal text-neutral-400">(automatic if blank)</span><Input className="mt-1" value={draft.invoice_number} onChange={(e) => setDraft({ ...draft, invoice_number: e.target.value })} placeholder="ST-2026-0001" /></label>
               <label className="text-sm font-medium">Customer reference<Input className="mt-1" value={draft.customer_reference} onChange={(e) => setDraft({ ...draft, customer_reference: e.target.value })} placeholder="PO number or project" /></label>
@@ -613,7 +670,7 @@ export function InvoiceCenter() {
         <div className="space-y-5">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-neutral-300 bg-neutral-50 px-6 py-8 text-center hover:border-primary-400"><Upload className="h-8 w-8 text-primary-600" /><span className="mt-3 font-medium text-neutral-900">{importForm.file?.name || 'Choose the original PDF or image'}</span><span className="mt-1 text-sm text-neutral-500">PDF, JPEG, PNG, or WebP · up to 15 MB</span><input type="file" className="sr-only" accept="application/pdf,image/jpeg,image/png,image/webp" onChange={(e) => setImportForm({ ...importForm, file: e.target.files?.[0] || null })} /></label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="text-sm font-medium">From<select value={importForm.invoice_billing_profile_id} onChange={(e) => setImportForm({ ...importForm, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
+            <label className="text-sm font-medium">From<select value={importForm.invoice_billing_profile_id} onChange={(e) => setImportForm({ ...importForm, invoice_billing_profile_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose billing profile</option>{activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
             <label className="text-sm font-medium">Customer<select value={importForm.invoice_recipient_id} onChange={(e) => setImportForm({ ...importForm, invoice_recipient_id: e.target.value })} className="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-white px-3"><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
             <label className="text-sm font-medium">Invoice number<Input className="mt-1" value={importForm.invoice_number} onChange={(e) => setImportForm({ ...importForm, invoice_number: e.target.value })} /></label>
             <label className="text-sm font-medium">Invoice total<Input className="mt-1" type="number" min="0.01" step="0.01" value={importForm.total_amount} onChange={(e) => setImportForm({ ...importForm, total_amount: e.target.value })} /></label>

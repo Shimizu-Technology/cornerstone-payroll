@@ -104,23 +104,23 @@ module Api
           issued_at = import_issued_at
           delivery_attributes = import_delivery_attributes
           invoice.save!
-          artifact = InvoiceArtifactStorageService.new.import_original!(
+          InvoiceArtifactStorageService.new.import_original!(
             invoice: invoice,
             actor: current_user,
             file: params[:file],
-            issued_at: issued_at
+            issued_at: issued_at,
+            delivery_attributes: delivery_attributes
           )
-          create_import_delivery!(invoice, artifact, delivery_attributes)
 
           render json: { invoice: InvoicePayloadBuilder.call(invoice.reload, detailed: true) }, status: :created
         rescue ActiveRecord::RecordInvalid => e
-          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          cleanup_uncommitted_import_draft(invoice)
           render json: { errors: e.record.errors.full_messages }, status: :unprocessable_entity
         rescue ArgumentError, Date::Error, Time::Error => e
-          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          cleanup_uncommitted_import_draft(invoice)
           render json: { error: e.message }, status: :unprocessable_entity
         rescue R2StorageService::UploadError => e
-          invoice&.destroy if invoice&.persisted? && invoice.draft? && invoice.events.empty? && invoice.artifacts.empty?
+          cleanup_uncommitted_import_draft(invoice)
           Rails.logger.warn("Invoice import failed: #{e.class}: #{e.message}")
           render json: { error: "Unable to store the imported invoice" }, status: :unprocessable_entity
         end
@@ -374,29 +374,18 @@ module Api
           }
         end
 
-        def create_import_delivery!(invoice, artifact, attributes)
-          return unless attributes
+        def cleanup_uncommitted_import_draft(invoice)
+          return unless invoice&.persisted?
 
-          Invoice.transaction do
-            locked_invoice = Invoice.lock.find(invoice.id)
-            delivery = locked_invoice.deliveries.create!(
-              organization: locked_invoice.organization,
-              invoice_artifact: artifact,
-              channel: attributes[:channel],
-              recipient: attributes[:recipient] || locked_invoice.invoice_recipient.email,
-              delivered_at: attributes[:delivered_at],
-              notes: "Historical delivery recorded during import",
-              recorded_by: current_user
-            )
-            locked_invoice.update!(sent_at: delivery.delivered_at, updated_by: current_user)
-            InvoiceEvent.record!(
-              invoice: locked_invoice,
-              event_type: "delivery_recorded",
-              actor: current_user,
-              occurred_at: delivery.delivered_at,
-              metadata: { delivery_id: delivery.id, source: "invoice_import" }
-            )
-          end
+          persisted_invoice = Invoice.find_by(id: invoice.id)
+          return unless persisted_invoice&.draft?
+          return if persisted_invoice.events.exists? || persisted_invoice.artifacts.exists? ||
+            persisted_invoice.deliveries.exists? || persisted_invoice.payments.exists? ||
+            persisted_invoice.credit_notes.exists?
+
+          persisted_invoice.destroy!
+        rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordInvalid => e
+          Rails.logger.warn("Invoice import draft cleanup failed: #{e.class}: #{e.message}")
         end
 
         def send_primary_artifact(disposition:)
