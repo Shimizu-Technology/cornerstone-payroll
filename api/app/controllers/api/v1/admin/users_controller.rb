@@ -180,13 +180,13 @@ module Api
           email_queued = false
 
           if clerk_result[:success] && clerk_result[:url].present?
+            @user.update!(invited_at: Time.current)
             send_invite_email(@user, clerk_result[:url])
             email_queued = true
-            @user.update!(invited_at: Time.current)
           end
 
           @user.reload
-          record_user_audit!(
+          record_user_audit_after_external_effect(
             "invitation_resent",
             @user,
             before_values: before_values,
@@ -416,6 +416,27 @@ module Api
             event_category: "security"
           )
           skip_default_audit_log!
+        end
+
+        # A Clerk invitation and its email enqueue cannot participate in the
+        # database transaction that stores an AuditLog. Once those external
+        # effects succeed, an audit outage must not turn the response into a
+        # 500 that encourages the operator to resend the invitation again.
+        # Leave the generic Auditable after_action enabled as a best-effort
+        # fallback when this exact lifecycle event cannot be persisted.
+        def record_user_audit_after_external_effect(verb, target, before_values:, after_values:, extra_metadata: {})
+          record_user_audit!(
+            verb,
+            target,
+            before_values: before_values,
+            after_values: after_values,
+            extra_metadata: extra_metadata
+          )
+        rescue StandardError => e
+          Rails.logger.error(
+            "[UsersController] Invitation completed but exact audit logging failed " \
+            "for user #{target.id}: #{e.class}: #{e.message}"
+          )
         end
       end
     end

@@ -376,4 +376,41 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(change_request.reload.requested_by_id).to be_nil
     end
   end
+
+  describe "POST /api/v1/admin/users/:id/resend_invitation" do
+    before do
+      managed_user.update!(
+        invitation_status: "pending",
+        clerk_invitation_id: nil,
+        invited_at: 2.days.ago
+      )
+    end
+
+    it "confirms a completed resend even when the exact audit insert fails" do
+      allow_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:create_clerk_invitation)
+        .and_return({ success: true, url: "https://accounts.example.test/invitations/new", invitation_id: "inv_new" })
+      expect_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:send_invite_email)
+        .with(managed_user, "https://accounts.example.test/invitations/new")
+        .once
+      allow_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:record_user_audit!)
+        .and_raise(ActiveRecord::ConnectionNotEstablished, "audit database unavailable")
+
+      previous_invited_at = managed_user.invited_at
+      post "/api/v1/admin/users/#{managed_user.id}/resend_invitation"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include(
+        "invitation_sent" => true,
+        "invitation_error" => nil
+      )
+      expect(managed_user.reload.invited_at).to be > previous_invited_at
+      expect(AuditLog.find_by!(record_id: managed_user.id)).to have_attributes(
+        action: "users#resend_invitation",
+        event_category: "security"
+      )
+    end
+  end
 end
