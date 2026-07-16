@@ -36,14 +36,15 @@ class InvoiceCreditService
 
   def self.void!(credit_note:, actor:, reason:)
     Invoice.transaction do
-      credit_note = InvoiceCreditNote.lock.find(credit_note.id)
+      invoice = Invoice.lock.find(credit_note.invoice_id)
+      credit_note = InvoiceCreditNote.lock.find_by!(id: credit_note.id, invoice_id: invoice.id)
       raise ArgumentError, "Credit is already voided" if credit_note.voided?
       raise ArgumentError, "Void reason is required" if reason.blank?
 
       credit_note.update!(status: "voided", voided_at: Time.current, voided_by: actor, void_reason: reason)
-      credit_note.invoice.update!(paid_at: nil, updated_by: actor)
+      invoice.update!(paid_at: nil, updated_by: actor)
       InvoiceEvent.record!(
-        invoice: credit_note.invoice,
+        invoice: invoice,
         event_type: "credit_voided",
         actor: actor,
         metadata: { credit_note_id: credit_note.id, amount: credit_note.total_amount.to_s, reason: reason }

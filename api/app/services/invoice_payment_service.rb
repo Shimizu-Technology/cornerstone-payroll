@@ -33,14 +33,15 @@ class InvoicePaymentService
 
   def self.reverse!(payment:, actor:, reason:)
     Invoice.transaction do
-      payment = InvoicePayment.lock.find(payment.id)
+      invoice = Invoice.lock.find(payment.invoice_id)
+      payment = InvoicePayment.lock.find_by!(id: payment.id, invoice_id: invoice.id)
       raise ArgumentError, "Payment has already been reversed" if payment.reversed?
       raise ArgumentError, "Reversal reason is required" if reason.blank?
 
       payment.update!(reversed_at: Time.current, reversed_by: actor, reversal_reason: reason)
-      payment.invoice.update!(paid_at: nil, updated_by: actor)
+      invoice.update!(paid_at: nil, updated_by: actor)
       InvoiceEvent.record!(
-        invoice: payment.invoice,
+        invoice: invoice,
         event_type: "payment_reversed",
         actor: actor,
         metadata: { payment_id: payment.id, amount: payment.amount.to_s, reason: reason }
