@@ -14,8 +14,16 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   end
 
   it "returns complete paginated organization history without leaking other organizations" do
+    second_company = create(:company, organization: organization, name: "Second Audit Client")
     3.times do |index|
-      AuditLog.record!(user: admin, organization_id: organization.id, action: "users#updated", record_type: "users", record_id: index + 1)
+      AuditLog.record!(
+        user: admin,
+        organization_id: organization.id,
+        company_id: index.zero? ? second_company.id : company.id,
+        action: "users#updated",
+        record_type: "users",
+        record_id: index + 1
+      )
     end
     AuditLog.record!(user: foreign_admin, organization_id: foreign_organization.id, action: "users#updated", record_type: "users")
 
@@ -25,6 +33,24 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response.parsed_body.fetch("data").length).to eq(1)
     expect(response.parsed_body.fetch("meta")).to include("current_page" => 2, "per_page" => 2, "total_count" => 3, "total_pages" => 2)
     expect(response.parsed_body.fetch("data").pluck("organization_id")).to all(eq(organization.id))
+
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data").pluck("company_id")).to include(company.id, second_company.id)
+  end
+
+  it "keeps the organization-wide governance history unavailable to scoped staff" do
+    %i[manager accountant].each do |role|
+      scoped_staff = create(:user, organization: organization, company: company, role: role)
+      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(scoped_staff)
+      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(scoped_staff.id)
+
+      get "/api/v1/admin/audit_logs"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Admin access required")
+    end
   end
 
   it "exports filtered history as CSV and records the export" do

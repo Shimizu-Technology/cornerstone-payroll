@@ -82,6 +82,12 @@ module Api
         def organization_scope
           return AuditLog.all if current_user.super_admin?
 
+          # This is intentionally an organization-level governance view, not
+          # a selected-client operational view. require_admin! limits it to
+          # organization administrators (legacy admin/org_admin) while
+          # managers and accountants remain company-scoped and cannot reach
+          # this controller. Firm administrators must be able to investigate
+          # an event even when a different client is active in the UI.
           company_ids = current_user.accessible_company_ids
           AuditLog.where(organization_id: current_user.organization_id)
                   .or(AuditLog.where(organization_id: nil, company_id: company_ids))

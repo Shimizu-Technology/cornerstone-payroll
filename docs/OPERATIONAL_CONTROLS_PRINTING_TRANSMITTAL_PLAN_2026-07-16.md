@@ -28,6 +28,7 @@ Required behavior:
 - Record every successful state-changing admin/client request unless explicitly classified as a read-only preview.
 - Record important security-sensitive reads and exports explicitly.
 - Scope audit records to the organization, with an optional payroll-client scope.
+- Treat the full audit history as an organization-governance surface: organization administrators see the complete firm history regardless of the currently selected client, while managers and accountants remain excluded from the organization-wide log.
 - Preserve actor name, email, and role snapshots even if the user is later removed.
 - Capture safe before/after values for user-management changes and safe field-name metadata elsewhere.
 - Never store passwords, tokens, SSNs, bank-account values, encrypted fields, or uploaded file contents in audit metadata.
