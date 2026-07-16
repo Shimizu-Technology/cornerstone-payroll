@@ -185,6 +185,8 @@ module Api
 
           Invoice.transaction do
             @invoice.lock!
+            raise ArgumentError, "Only open invoices can record delivery" unless @invoice.open?
+
             artifact = @invoice.primary_artifact
             delivery = @invoice.deliveries.create!(
               organization: @invoice.organization,

@@ -269,6 +269,32 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
   end
 
+  it "rechecks invoice state after locking before recording delivery" do
+    invoice = issue_invoice(total: 125)
+    transitioned = false
+
+    allow_any_instance_of(Invoice).to receive(:draft?).and_wrap_original do |method, *args|
+      result = method.call(*args)
+      if method.receiver.id == invoice.id && !transitioned
+        transitioned = true
+        Invoice.where(id: invoice.id).update_all(status: "voided", voided_at: Time.current)
+      end
+      result
+    end
+
+    expect do
+      post "/api/v1/admin/invoices/#{invoice.id}/record_delivery", params: {
+        channel: "email",
+        recipient: "customer@example.com"
+      }
+    end.not_to change(InvoiceDelivery, :count)
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Only open invoices can record delivery")
+    expect(invoice.reload).to have_attributes(status: "voided", sent_at: nil)
+    expect(invoice.events.where(event_type: "delivery_recorded")).to be_empty
+  end
+
   it "returns complete delivery evidence and recorded-at audit timestamps" do
     invoice = issue_invoice(total: 125)
 
