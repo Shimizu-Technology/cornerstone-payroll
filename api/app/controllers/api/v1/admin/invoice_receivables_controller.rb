@@ -24,7 +24,17 @@ module Api
           end
 
           scope = Invoice.where(organization: current_organization, invoice_recipient: recipient)
-            .includes(:invoice_billing_profile, :line_items, :payments, :credit_notes, :artifacts, :deliveries)
+            .includes(
+              :invoice_recipient,
+              :invoice_billing_profile,
+              :line_items,
+              :payments,
+              :credit_notes,
+              :artifacts,
+              :deliveries,
+              :created_by,
+              :updated_by
+            )
             .recent
           scope = scope.where(invoice_billing_profile_id: params[:billing_profile_id]) if params[:billing_profile_id].present?
           receivables = scope.reject { |invoice| invoice.draft? || invoice.voided? || invoice.uncollectible? }

@@ -167,8 +167,12 @@ module Api
         end
 
         def generate_pdf
-          InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user) if @invoice.draft?
-          send_primary_artifact(disposition: "attachment")
+          artifact = if @invoice.draft?
+            InvoiceArtifactStorageService.new.issue_native!(invoice: @invoice, actor: current_user)
+          else
+            @invoice.primary_artifact
+          end
+          send_artifact(artifact, disposition: "attachment")
         rescue ActiveRecord::RecordInvalid => e
           render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         rescue R2StorageService::UploadError, Prawn::Errors::CannotFit => e
@@ -394,7 +398,10 @@ module Api
         end
 
         def send_primary_artifact(disposition:)
-          artifact = @invoice.primary_artifact
+          send_artifact(@invoice.primary_artifact, disposition: disposition)
+        end
+
+        def send_artifact(artifact, disposition:)
           unless artifact
             render json: { error: "This legacy invoice does not have a preserved artifact" }, status: :not_found
             return

@@ -3,6 +3,7 @@
 class Invoice < ApplicationRecord
   STATUSES = %w[draft open voided uncollectible].freeze
   ORIGINS = %w[native imported].freeze
+  PRIMARY_ARTIFACT_KINDS = %w[issued_pdf imported_original legacy_snapshot].freeze
   SNAPSHOT_VERSION = 2
 
   belongs_to :company, optional: true
@@ -122,8 +123,15 @@ class Invoice < ApplicationRecord
   end
 
   def primary_artifact
-    artifacts.order(created_at: :desc, id: :desc).find do |artifact|
-      artifact.kind.in?(%w[issued_pdf imported_original legacy_snapshot])
+    if artifacts.loaded?
+      artifacts
+        .select { |artifact| artifact.persisted? && artifact.kind.in?(PRIMARY_ARTIFACT_KINDS) }
+        .max_by { |artifact| [ artifact.created_at, artifact.id ] }
+    else
+      artifacts
+        .where(kind: PRIMARY_ARTIFACT_KINDS)
+        .order(created_at: :desc, id: :desc)
+        .first
     end
   end
 

@@ -12,6 +12,7 @@ class InvoicePayloadBuilder
   end
 
   def call
+    primary_artifact = invoice.primary_artifact
     payload = {
       id: invoice.id,
       organization_id: invoice.organization_id,
@@ -48,8 +49,8 @@ class InvoicePayloadBuilder
       updated_by_name: invoice.updated_by&.name,
       line_item_count: invoice.line_items.size,
       has_snapshot: invoice.snapshot.present?,
-      has_artifact: invoice.primary_artifact.present?,
-      legacy_artifact_missing: invoice.issued? && invoice.primary_artifact.blank?,
+      has_artifact: primary_artifact.present?,
+      legacy_artifact_missing: invoice.issued? && primary_artifact.blank?,
       created_at: invoice.created_at,
       updated_at: invoice.updated_at
     }

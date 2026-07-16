@@ -403,6 +403,30 @@ RSpec.describe "Invoice Center and accounts receivable API", type: :request do
     expect(response.parsed_body.fetch("invoices").map { |row| row.fetch("id") }).to contain_exactly(overdue.id, current.id)
   end
 
+  it "preloads every association used to build statement invoice payloads" do
+    issue_invoice(total: 100)
+    issue_invoice(total: 250)
+
+    allow(InvoicePayloadBuilder).to receive(:call).and_wrap_original do |method, invoice, **options|
+      expect(invoice.association(:invoice_recipient)).to be_loaded
+      expect(invoice.association(:invoice_billing_profile)).to be_loaded
+      expect(invoice.association(:line_items)).to be_loaded
+      expect(invoice.association(:payments)).to be_loaded
+      expect(invoice.association(:credit_notes)).to be_loaded
+      expect(invoice.association(:artifacts)).to be_loaded
+      expect(invoice.association(:deliveries)).to be_loaded
+      expect(invoice.association(:created_by)).to be_loaded
+      expect(invoice.association(:updated_by)).to be_loaded
+
+      method.call(invoice, **options)
+    end
+
+    get "/api/v1/admin/invoice_receivables/statement", params: { recipient_id: recipient.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(InvoicePayloadBuilder).to have_received(:call).twice
+  end
+
   it "scopes invoice lists and receivable totals by the selected invoice business" do
     other_profile = create(
       :invoice_billing_profile,

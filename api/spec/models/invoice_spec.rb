@@ -33,6 +33,30 @@ RSpec.describe Invoice, type: :model do
     expect(invoice.invoice_number).to match(/\AST-\d{4}-\d{4}\z/)
   end
 
+  it "uses preloaded artifacts to find the newest primary artifact without another query" do
+    invoice = create(:invoice, :with_line_item)
+    older_primary = create_artifact(invoice: invoice, kind: "issued_pdf", created_at: 2.days.ago)
+    create_artifact(invoice: invoice, kind: "payment_receipt", created_at: 1.hour.ago)
+    newest_primary = create_artifact(invoice: invoice, kind: "legacy_snapshot", created_at: 1.day.ago)
+    preloaded_invoice = described_class.includes(:artifacts).find(invoice.id)
+    preloaded_invoice.artifacts.build(kind: "issued_pdf")
+    sql_queries = []
+    callback = lambda do |_name, _start, _finish, _id, payload|
+      next if payload[:name] == "SCHEMA" || payload[:cached]
+
+      sql_queries << payload[:sql]
+    end
+
+    result = nil
+    ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+      result = preloaded_invoice.primary_artifact
+    end
+
+    expect(result).to eq(newest_primary)
+    expect(result).not_to eq(older_primary)
+    expect(sql_queries.grep(/invoice_artifacts/i)).to be_empty
+  end
+
   it "captures a billing and recipient snapshot when generated" do
     billing_profile = create(:invoice_billing_profile, name: "Shimizu Technology", invoice_prefix: "ST")
     recipient = create(:invoice_recipient, company: billing_profile.organization.companies.first || create(:company, organization: billing_profile.organization), name: "Pacific Client")
@@ -148,5 +172,18 @@ RSpec.describe Invoice, type: :model do
     expect(invoice.reload.status).to eq("open")
     expect(credit.reload.status).to eq("issued")
     expect(invoice.events.where(event_type: "voided")).to be_empty
+  end
+
+  def create_artifact(invoice:, kind:, created_at:)
+    invoice.artifacts.create!(
+      organization: invoice.organization,
+      kind: kind,
+      storage_key: "invoice-center/spec/#{SecureRandom.uuid}",
+      filename: "#{kind}.pdf",
+      content_type: "application/pdf",
+      byte_size: 1,
+      sha256: Digest::SHA256.hexdigest(kind),
+      created_at: created_at
+    )
   end
 end
