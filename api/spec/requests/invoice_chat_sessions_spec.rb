@@ -12,13 +12,14 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
   end
 
   describe "POST /api/v1/admin/invoice_chat_sessions" do
-    it "creates a company-scoped assistant session" do
+    it "creates an organization-scoped assistant session independent of the active payroll client" do
       post "/api/v1/admin/invoice_chat_sessions", params: { invoice_chat_session: { title: "May invoices" } }
 
       expect(response).to have_http_status(:created)
       body = response.parsed_body.fetch("invoice_chat_session")
       expect(body["title"]).to eq("May invoices")
-      expect(body["company_id"]).to eq(company.id)
+      expect(body["organization_id"]).to eq(company.organization_id)
+      expect(body["company_id"]).to be_nil
     end
 
     it "allows a recipient from another company in the same organization" do
@@ -367,7 +368,7 @@ RSpec.describe "Invoice Chat Sessions Admin API", type: :request do
       recipient = InvoiceRecipient.last
       invoice = Invoice.last
       expect(recipient).to have_attributes(
-        company_id: company.id,
+        company_id: nil,
         name: "Pacific Tech",
         email: "billing@pacific.example",
         payment_terms: "Due on receipt",

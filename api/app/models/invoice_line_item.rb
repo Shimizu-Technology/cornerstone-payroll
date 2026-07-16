@@ -5,6 +5,8 @@ class InvoiceLineItem < ApplicationRecord
 
   before_validation :normalize_values
   before_validation :calculate_amount
+  before_update :prevent_issued_invoice_change
+  before_destroy :prevent_issued_invoice_change
 
   validates :description, presence: true
   validates :quantity, numericality: { greater_than_or_equal_to: 0 }
@@ -13,6 +15,13 @@ class InvoiceLineItem < ApplicationRecord
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
 
   private
+
+  def prevent_issued_invoice_change
+    return unless invoice&.issued?
+
+    errors.add(:base, "Issued invoice line items are immutable")
+    throw :abort
+  end
 
   def normalize_values
     self.description = description.to_s.strip

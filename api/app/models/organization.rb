@@ -9,6 +9,13 @@ class Organization < ApplicationRecord
   has_many :invoice_billing_profiles, dependent: :restrict_with_error
   has_many :invoice_recipients, dependent: :restrict_with_error
   has_many :invoices, dependent: :restrict_with_error
+  has_many :invoice_chat_sessions, dependent: :restrict_with_error
+  has_many :invoice_number_sequences, dependent: :restrict_with_error
+  has_many :invoice_artifacts, dependent: :restrict_with_error
+  has_many :invoice_events, dependent: :restrict_with_error
+  has_many :invoice_payments, dependent: :restrict_with_error
+  has_many :invoice_credit_notes, dependent: :restrict_with_error
+  has_many :invoice_deliveries, dependent: :restrict_with_error
   belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug

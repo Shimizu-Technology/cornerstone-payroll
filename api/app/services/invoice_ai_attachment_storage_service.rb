@@ -5,20 +5,20 @@ require "marcel"
 class InvoiceAiAttachmentStorageService
   ALLOWED_CONTENT_TYPES = %w[image/jpeg image/png image/webp application/pdf].freeze
 
-  def self.upload(file, company_id:, session_id:)
-    new(file, company_id: company_id, session_id: session_id).upload
+  def self.upload(file, organization_id:, session_id:)
+    new(file, organization_id: organization_id, session_id: session_id).upload
   end
 
-  def initialize(file, company_id:, session_id:)
+  def initialize(file, organization_id:, session_id:)
     @file = file
-    @company_id = company_id
+    @organization_id = organization_id
     @session_id = session_id
   end
 
   def upload
     raise ArgumentError, "Unsupported attachment type" unless ALLOWED_CONTENT_TYPES.include?(detected_content_type)
 
-    key = "invoice-assistant/company-#{@company_id}/session-#{@session_id}/#{SecureRandom.uuid}#{extension}"
+    key = "invoice-assistant/organization-#{@organization_id}/session-#{@session_id}/#{SecureRandom.uuid}#{extension}"
     R2StorageService.new.upload(key, @file.tempfile, content_type: detected_content_type)
     key
   end

@@ -3,6 +3,7 @@
 class InvoiceBillingProfile < ApplicationRecord
   belongs_to :organization
   has_many :invoices, dependent: :restrict_with_error
+  has_many :invoice_number_sequences, dependent: :restrict_with_error
 
   before_validation :normalize_blanks
   before_save :clear_other_defaults, if: :is_default?

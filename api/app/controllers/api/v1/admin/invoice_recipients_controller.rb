@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class InvoiceRecipientsController < BaseController
+        before_action :require_admin!
+
         before_action :set_recipient, only: [ :show, :update, :destroy ]
 
         def index
@@ -25,7 +27,6 @@ module Api
         def create
           recipient = InvoiceRecipient.new(recipient_attributes)
           recipient.organization_id = current_organization_id
-          recipient.company_id = current_company_id
 
           if recipient.save
             render json: { invoice_recipient: recipient_payload(recipient) }, status: :created

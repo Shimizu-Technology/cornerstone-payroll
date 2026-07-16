@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class InvoiceBillingProfilesController < BaseController
+        before_action :require_admin!
+
         before_action :set_profile, only: [ :show, :update, :destroy ]
 
         def index

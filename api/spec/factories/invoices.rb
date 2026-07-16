@@ -25,7 +25,8 @@ FactoryBot.define do
     end
 
     trait :generated do
-      status { "generated" }
+      status { "open" }
+      issued_at { Time.current }
       generated_at { Time.current }
     end
   end

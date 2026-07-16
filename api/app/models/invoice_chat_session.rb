@@ -3,7 +3,8 @@
 class InvoiceChatSession < ApplicationRecord
   STATUSES = %w[active invoice_created archived].freeze
 
-  belongs_to :company
+  belongs_to :organization
+  belongs_to :company, optional: true
   belongs_to :invoice_recipient, optional: true
   belongs_to :invoice, optional: true
   belongs_to :created_by, class_name: "User", optional: true
@@ -41,6 +42,7 @@ class InvoiceChatSession < ApplicationRecord
   private
 
   def normalize_blanks
+    self.organization ||= company&.organization
     self.title = title.to_s.strip.presence || "Invoice Assistant"
     self.status = status.presence || "active"
     self.current_preview = current_preview.presence || {}
@@ -48,15 +50,15 @@ class InvoiceChatSession < ApplicationRecord
   end
 
   def recipient_must_belong_to_organization
-    return if invoice_recipient.blank? || company_id.blank?
-    return if invoice_recipient.organization_id == company&.organization_id
+    return if invoice_recipient.blank? || organization_id.blank?
+    return if invoice_recipient.organization_id == organization_id
 
     errors.add(:invoice_recipient, "must belong to the same organization")
   end
 
   def invoice_must_belong_to_organization
-    return if invoice.blank? || company_id.blank?
-    return if invoice.organization_id == company&.organization_id
+    return if invoice.blank? || organization_id.blank?
+    return if invoice.organization_id == organization_id
 
     errors.add(:invoice, "must belong to the same organization")
   end

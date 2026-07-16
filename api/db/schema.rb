@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -519,6 +519,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.check_constraint "threshold_amount >= 0::numeric", name: "information_return_threshold_nonnegative"
   end
 
+  create_table "invoice_artifacts", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.string "content_type", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "filename", null: false
+    t.bigint "invoice_id", null: false
+    t.string "kind", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.bigint "organization_id", null: false
+    t.string "renderer_version"
+    t.string "sha256", null: false
+    t.string "storage_key", null: false
+    t.string "template_version"
+    t.datetime "updated_at", null: false
+    t.index ["created_by_id"], name: "index_invoice_artifacts_on_created_by_id"
+    t.index ["invoice_id", "kind", "created_at"], name: "idx_invoice_artifacts_on_invoice_kind_created"
+    t.index ["invoice_id"], name: "index_invoice_artifacts_on_invoice_id"
+    t.index ["organization_id"], name: "index_invoice_artifacts_on_organization_id"
+    t.index ["storage_key"], name: "index_invoice_artifacts_on_storage_key", unique: true
+    t.check_constraint "byte_size >= 0", name: "check_invoice_artifacts_byte_size"
+    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying, 'imported_original'::character varying, 'legacy_snapshot'::character varying, 'credit_note'::character varying, 'payment_receipt'::character varying]::text[])", name: "check_invoice_artifacts_kind"
+  end
+
   create_table "invoice_billing_profiles", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.text "address"
@@ -558,13 +582,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
 
   create_table "invoice_chat_sessions", force: :cascade do |t|
     t.boolean "archived", default: false, null: false
-    t.bigint "company_id", null: false
+    t.bigint "company_id"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
     t.jsonb "current_preview", default: {}, null: false
     t.integer "current_preview_version", default: 0, null: false
     t.bigint "invoice_id"
     t.bigint "invoice_recipient_id"
+    t.bigint "organization_id", null: false
     t.string "status", default: "active", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
@@ -574,8 +599,70 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.index ["created_by_id"], name: "index_invoice_chat_sessions_on_created_by_id"
     t.index ["invoice_id"], name: "index_invoice_chat_sessions_on_invoice_id"
     t.index ["invoice_recipient_id"], name: "index_invoice_chat_sessions_on_invoice_recipient_id"
+    t.index ["organization_id", "archived", "updated_at"], name: "idx_invoice_chat_sessions_on_org_archive_updated"
+    t.index ["organization_id"], name: "index_invoice_chat_sessions_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoice_chat_sessions_on_updated_by_id"
     t.check_constraint "status::text = ANY (ARRAY['active'::character varying::text, 'invoice_created'::character varying::text, 'archived'::character varying::text])", name: "check_invoice_chat_sessions_status"
+  end
+
+  create_table "invoice_credit_notes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "credit_number", null: false
+    t.string "currency", default: "USD", null: false
+    t.bigint "invoice_id", null: false
+    t.date "issue_date", null: false
+    t.bigint "issued_by_id"
+    t.bigint "organization_id", null: false
+    t.text "reason", null: false
+    t.string "status", default: "issued", null: false
+    t.decimal "total_amount", precision: 14, scale: 2, null: false
+    t.datetime "updated_at", null: false
+    t.text "void_reason"
+    t.datetime "voided_at"
+    t.bigint "voided_by_id"
+    t.index ["invoice_id", "issue_date"], name: "idx_invoice_credit_notes_invoice_date"
+    t.index ["invoice_id"], name: "index_invoice_credit_notes_on_invoice_id"
+    t.index ["issued_by_id"], name: "index_invoice_credit_notes_on_issued_by_id"
+    t.index ["organization_id", "credit_number"], name: "idx_invoice_credit_notes_unique_number", unique: true
+    t.index ["organization_id"], name: "index_invoice_credit_notes_on_organization_id"
+    t.index ["voided_by_id"], name: "index_invoice_credit_notes_on_voided_by_id"
+    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying, 'voided'::character varying]::text[])", name: "check_invoice_credit_notes_status"
+    t.check_constraint "total_amount > 0::numeric", name: "check_invoice_credit_notes_positive_amount"
+  end
+
+  create_table "invoice_deliveries", force: :cascade do |t|
+    t.string "channel", null: false
+    t.datetime "created_at", null: false
+    t.datetime "delivered_at", null: false
+    t.bigint "invoice_artifact_id"
+    t.bigint "invoice_id", null: false
+    t.text "notes"
+    t.bigint "organization_id", null: false
+    t.string "provider_reference"
+    t.string "recipient"
+    t.bigint "recorded_by_id"
+    t.datetime "updated_at", null: false
+    t.index ["invoice_artifact_id"], name: "index_invoice_deliveries_on_invoice_artifact_id"
+    t.index ["invoice_id", "delivered_at"], name: "idx_invoice_deliveries_invoice_date"
+    t.index ["invoice_id"], name: "index_invoice_deliveries_on_invoice_id"
+    t.index ["organization_id"], name: "index_invoice_deliveries_on_organization_id"
+    t.index ["recorded_by_id"], name: "index_invoice_deliveries_on_recorded_by_id"
+    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying, 'mail'::character varying, 'hand_delivery'::character varying, 'portal'::character varying, 'other'::character varying]::text[])", name: "check_invoice_deliveries_channel"
+  end
+
+  create_table "invoice_events", force: :cascade do |t|
+    t.bigint "actor_id"
+    t.datetime "created_at", null: false
+    t.string "event_type", null: false
+    t.bigint "invoice_id", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "occurred_at", null: false
+    t.bigint "organization_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["actor_id"], name: "index_invoice_events_on_actor_id"
+    t.index ["invoice_id", "occurred_at", "id"], name: "idx_invoice_events_timeline"
+    t.index ["invoice_id"], name: "index_invoice_events_on_invoice_id"
+    t.index ["organization_id"], name: "index_invoice_events_on_organization_id"
   end
 
   create_table "invoice_line_items", force: :cascade do |t|
@@ -592,10 +679,48 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.index ["invoice_id"], name: "index_invoice_line_items_on_invoice_id"
   end
 
+  create_table "invoice_number_sequences", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "invoice_billing_profile_id", null: false
+    t.integer "last_number", default: 0, null: false
+    t.integer "sequence_year", null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_billing_profile_id", "sequence_year"], name: "idx_invoice_number_sequences_unique_year", unique: true
+    t.index ["invoice_billing_profile_id"], name: "index_invoice_number_sequences_on_invoice_billing_profile_id"
+    t.check_constraint "last_number >= 0", name: "check_invoice_number_sequence_last_number"
+    t.check_constraint "sequence_year >= 1900 AND sequence_year <= 9999", name: "check_invoice_number_sequence_year"
+  end
+
+  create_table "invoice_payments", force: :cascade do |t|
+    t.decimal "amount", precision: 14, scale: 2, null: false
+    t.datetime "created_at", null: false
+    t.string "currency", default: "USD", null: false
+    t.bigint "invoice_id", null: false
+    t.text "notes"
+    t.bigint "organization_id", null: false
+    t.string "payment_method", null: false
+    t.date "received_on", null: false
+    t.bigint "recorded_by_id"
+    t.string "reference_number"
+    t.text "reversal_reason"
+    t.datetime "reversed_at"
+    t.bigint "reversed_by_id"
+    t.boolean "system_generated", default: false, null: false
+    t.datetime "updated_at", null: false
+    t.index ["invoice_id", "received_on"], name: "idx_invoice_payments_on_invoice_received"
+    t.index ["invoice_id"], name: "index_invoice_payments_on_invoice_id"
+    t.index ["organization_id"], name: "index_invoice_payments_on_organization_id"
+    t.index ["recorded_by_id"], name: "index_invoice_payments_on_recorded_by_id"
+    t.index ["reversed_by_id"], name: "index_invoice_payments_on_reversed_by_id"
+    t.check_constraint "amount > 0::numeric", name: "check_invoice_payments_positive_amount"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'adjustment'::character varying, 'legacy'::character varying, 'other'::character varying]::text[])", name: "check_invoice_payments_method"
+    t.check_constraint "reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL OR reversed_at IS NOT NULL AND reversal_reason IS NOT NULL", name: "check_invoice_payments_reversal_fields"
+  end
+
   create_table "invoice_recipients", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.text "address"
-    t.bigint "company_id", null: false
+    t.bigint "company_id"
     t.datetime "created_at", null: false
     t.decimal "default_rate", precision: 12, scale: 2
     t.string "email"
@@ -613,10 +738,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
   end
 
   create_table "invoices", force: :cascade do |t|
+    t.boolean "archived", default: false, null: false
     t.datetime "archived_at"
-    t.bigint "company_id", null: false
+    t.bigint "company_id"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
+    t.string "currency", default: "USD", null: false
+    t.string "customer_reference"
+    t.date "due_date"
     t.text "email_body"
     t.string "email_subject"
     t.datetime "generated_at"
@@ -624,8 +753,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.date "invoice_date", null: false
     t.string "invoice_number", null: false
     t.bigint "invoice_recipient_id", null: false
+    t.datetime "issued_at"
+    t.string "legacy_status"
     t.text "notes"
     t.bigint "organization_id", null: false
+    t.string "origin", default: "native", null: false
     t.datetime "paid_at"
     t.text "payment_terms"
     t.datetime "sent_at"
@@ -633,6 +765,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.date "service_period_start"
     t.jsonb "snapshot", default: {}, null: false
     t.integer "snapshot_version", default: 1, null: false
+    t.jsonb "source_metadata", default: {}, null: false
     t.string "status", default: "draft", null: false
     t.decimal "total_amount", precision: 12, scale: 2, default: "0.0", null: false
     t.datetime "updated_at", null: false
@@ -643,13 +776,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
     t.index ["company_id"], name: "index_invoices_on_company_id"
     t.index ["created_by_id"], name: "index_invoices_on_created_by_id"
     t.index ["invoice_billing_profile_id", "invoice_number"], name: "index_invoices_on_billing_profile_invoice_number", unique: true
+    t.index ["invoice_billing_profile_id", "status", "due_date"], name: "idx_invoices_on_profile_status_due_date"
     t.index ["invoice_billing_profile_id"], name: "index_invoices_on_invoice_billing_profile_id"
     t.index ["invoice_recipient_id"], name: "index_invoices_on_invoice_recipient_id"
+    t.index ["organization_id", "archived", "invoice_date"], name: "idx_invoices_on_org_archive_invoice_date"
     t.index ["organization_id", "invoice_date"], name: "index_invoices_on_org_invoice_date"
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text, 'sent'::character varying::text, 'paid'::character varying::text, 'voided'::character varying::text, 'archived'::character varying::text])", name: "check_invoices_status"
+    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying, 'imported'::character varying]::text[])", name: "check_invoices_origin"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'open'::character varying, 'voided'::character varying, 'uncollectible'::character varying]::text[])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -1677,14 +1813,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_190000) do
   add_foreign_key "general_transmittals", "companies"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
+  add_foreign_key "invoice_artifacts", "invoices"
+  add_foreign_key "invoice_artifacts", "organizations"
+  add_foreign_key "invoice_artifacts", "users", column: "created_by_id"
   add_foreign_key "invoice_billing_profiles", "organizations"
   add_foreign_key "invoice_chat_messages", "invoice_chat_sessions", on_delete: :cascade
   add_foreign_key "invoice_chat_sessions", "companies"
   add_foreign_key "invoice_chat_sessions", "invoice_recipients"
   add_foreign_key "invoice_chat_sessions", "invoices"
+  add_foreign_key "invoice_chat_sessions", "organizations"
   add_foreign_key "invoice_chat_sessions", "users", column: "created_by_id"
   add_foreign_key "invoice_chat_sessions", "users", column: "updated_by_id"
+  add_foreign_key "invoice_credit_notes", "invoices"
+  add_foreign_key "invoice_credit_notes", "organizations"
+  add_foreign_key "invoice_credit_notes", "users", column: "issued_by_id"
+  add_foreign_key "invoice_credit_notes", "users", column: "voided_by_id"
+  add_foreign_key "invoice_deliveries", "invoice_artifacts"
+  add_foreign_key "invoice_deliveries", "invoices"
+  add_foreign_key "invoice_deliveries", "organizations"
+  add_foreign_key "invoice_deliveries", "users", column: "recorded_by_id"
+  add_foreign_key "invoice_events", "invoices"
+  add_foreign_key "invoice_events", "organizations"
+  add_foreign_key "invoice_events", "users", column: "actor_id"
   add_foreign_key "invoice_line_items", "invoices"
+  add_foreign_key "invoice_number_sequences", "invoice_billing_profiles"
+  add_foreign_key "invoice_payments", "invoices"
+  add_foreign_key "invoice_payments", "organizations"
+  add_foreign_key "invoice_payments", "users", column: "recorded_by_id"
+  add_foreign_key "invoice_payments", "users", column: "reversed_by_id"
   add_foreign_key "invoice_recipients", "companies"
   add_foreign_key "invoice_recipients", "organizations"
   add_foreign_key "invoices", "companies"
