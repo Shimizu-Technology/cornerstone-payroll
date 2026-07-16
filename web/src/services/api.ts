@@ -2708,7 +2708,8 @@ export const generalTransmittalsApi = {
 // ============================================================
 // Invoice Maker API
 // ============================================================
-export type InvoiceStatus = 'draft' | 'generated' | 'sent' | 'paid' | 'voided' | 'archived';
+export type InvoiceStatus = 'draft' | 'open' | 'partially_paid' | 'paid' | 'overdue' | 'voided' | 'uncollectible' | 'generated' | 'sent' | 'archived';
+export type InvoiceOrigin = 'native' | 'imported';
 export type InvoiceTemplateType = 'standard' | 'hourly' | 'project' | 'tuition';
 
 export interface InvoiceBillingProfile {
@@ -2734,7 +2735,7 @@ export interface InvoiceBillingProfile {
 export interface InvoiceRecipient {
   id: number;
   organization_id: number;
-  company_id: number;
+  company_id?: number | null;
   name: string;
   email?: string | null;
   address?: string | null;
@@ -2763,17 +2764,26 @@ export interface InvoiceLineItem {
 export interface Invoice {
   id: number;
   organization_id: number;
-  company_id: number;
+  company_id?: number | null;
   invoice_recipient_id: number;
   invoice_billing_profile_id: number;
   recipient_name?: string | null;
   billing_profile_name?: string | null;
   invoice_number: string;
   invoice_date: string;
+  due_date?: string | null;
+  currency: string;
+  customer_reference?: string | null;
+  origin: InvoiceOrigin;
   service_period_start?: string | null;
   service_period_end?: string | null;
   total_amount: number;
+  amount_paid: number;
+  credit_total: number;
+  balance_due: number;
   status: InvoiceStatus;
+  base_status: 'draft' | 'open' | 'voided' | 'uncollectible';
+  archived: boolean;
   notes?: string | null;
   payment_terms?: string | null;
   email_subject?: string | null;
@@ -2789,6 +2799,13 @@ export interface Invoice {
   updated_by_name?: string | null;
   line_item_count: number;
   has_snapshot?: boolean;
+  has_artifact?: boolean;
+  legacy_artifact_missing?: boolean;
+  artifacts?: InvoiceArtifact[];
+  payments?: InvoicePayment[];
+  credit_notes?: InvoiceCreditNote[];
+  deliveries?: InvoiceDelivery[];
+  events?: InvoiceEvent[];
   invoice_billing_profile?: InvoiceBillingProfile | null;
   invoice_recipient?: InvoiceRecipient | null;
   line_items?: InvoiceLineItem[];
@@ -2813,6 +2830,9 @@ export interface InvoicePayload {
   invoice_billing_profile_id?: number;
   invoice_number?: string | null;
   invoice_date: string;
+  due_date?: string | null;
+  currency?: string;
+  customer_reference?: string | null;
   service_period_start?: string | null;
   service_period_end?: string | null;
   notes?: string | null;
@@ -2822,6 +2842,99 @@ export interface InvoicePayload {
   line_items?: Array<Partial<InvoiceLineItem> & {
     id?: number;
     _destroy?: boolean;
+  }>;
+}
+
+export interface InvoiceArtifact {
+  id: number;
+  kind: string;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  renderer_version?: string | null;
+  template_version?: string | null;
+  created_by_name?: string | null;
+  created_at: string;
+}
+
+export interface InvoicePayment {
+  id: number;
+  amount: number;
+  received_on: string;
+  payment_method: string;
+  reference_number?: string | null;
+  notes?: string | null;
+  currency: string;
+  recorded_by_name?: string | null;
+  reversed: boolean;
+  reversed_at?: string | null;
+  reversed_by_name?: string | null;
+  reversal_reason?: string | null;
+  system_generated: boolean;
+  created_at: string;
+}
+
+export interface InvoiceCreditNote {
+  id: number;
+  credit_number: string;
+  issue_date: string;
+  reason: string;
+  total_amount: number;
+  currency: string;
+  status: 'issued' | 'voided';
+  issued_by_name?: string | null;
+  voided_at?: string | null;
+  voided_by_name?: string | null;
+  void_reason?: string | null;
+  created_at: string;
+}
+
+export interface InvoiceDelivery {
+  id: number;
+  channel: string;
+  recipient?: string | null;
+  delivered_at: string;
+  provider_reference?: string | null;
+  notes?: string | null;
+  artifact_id?: number | null;
+  recorded_by_name?: string | null;
+  created_at: string;
+}
+
+export interface InvoiceEvent {
+  id: number;
+  event_type: string;
+  occurred_at: string;
+  actor_name?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface InvoiceReceivablesSummary {
+  as_of: string;
+  totals: {
+    outstanding: number;
+    overdue: number;
+    paid: number;
+    credits: number;
+    draft_count: number;
+    open_count: number;
+    overdue_count: number;
+  };
+  aging: {
+    current: number;
+    days_1_30: number;
+    days_31_60: number;
+    days_61_90: number;
+    days_91_plus: number;
+  };
+  by_recipient: Array<{
+    recipient_id: number;
+    recipient_name: string;
+    invoice_count: number;
+    outstanding: number;
+    oldest_due_date?: string | null;
   }>;
 }
 
@@ -2886,7 +2999,8 @@ export interface InvoiceChatMessage {
 
 export interface InvoiceChatSession {
   id: number;
-  company_id: number;
+  organization_id: number;
+  company_id?: number | null;
   invoice_recipient_id?: number | null;
   invoice_id?: number | null;
   title: string;
@@ -2929,7 +3043,7 @@ export const invoiceBillingProfilesApi = {
 };
 
 export const invoicesApi = {
-  list: (params?: { status?: InvoiceStatus }) =>
+  list: (params?: { status?: InvoiceStatus; billing_profile_id?: number; recipient_id?: number; origin?: InvoiceOrigin; archived?: boolean }) =>
     api.get<{ invoices: Invoice[] }>('/admin/invoices', params),
   get: (id: number) =>
     api.get<{ invoice: Invoice }>(`/admin/invoices/${id}`),
@@ -2942,12 +3056,56 @@ export const invoicesApi = {
     ),
   delete: (id: number) =>
     api.delete<{ message: string }>(`/admin/invoices/${id}`),
-  updateStatus: (id: number, status: InvoiceStatus) =>
+  updateStatus: (id: number, status: InvoiceStatus | 'restored') =>
     api.patch<{ invoice: Invoice }>(`/admin/invoices/${id}/update_status`, { status }),
   previewPdf: (id: number) =>
     api.postBlob(`/admin/invoices/${id}/preview_pdf`, {}),
   generatePdf: (id: number) =>
     api.postBlob(`/admin/invoices/${id}/generate_pdf`, {}),
+  issue: (id: number) =>
+    api.post<{ invoice: Invoice; artifact_id: number }>(`/admin/invoices/${id}/issue`, {}),
+  import: (data: {
+    file: File;
+    invoice_recipient_id: number;
+    invoice_billing_profile_id: number;
+    invoice_number?: string;
+    invoice_date: string;
+    due_date?: string;
+    total_amount: number;
+    customer_reference?: string;
+    notes?: string;
+    issued_at?: string;
+    delivery_channel?: string;
+    delivered_at?: string;
+  }) => {
+    const form = new FormData();
+    Object.entries(data).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') form.append(key, value instanceof File ? value : String(value));
+    });
+    return api.postForm<{ invoice: Invoice }>('/admin/invoices/import', form);
+  },
+  downloadArtifact: (id: number, disposition: 'inline' | 'attachment' = 'attachment') =>
+    api.getBlobWithParams(`/admin/invoices/${id}/download_artifact`, { disposition }),
+  recordDelivery: (id: number, data: { channel: string; recipient?: string; delivered_at?: string; provider_reference?: string; notes?: string }) =>
+    api.post<{ invoice: Invoice }>(`/admin/invoices/${id}/record_delivery`, data),
+  recordPayment: (id: number, data: { amount: number; received_on: string; payment_method: string; reference_number?: string; notes?: string }) =>
+    api.post<{ payment_id: number; invoice: Invoice }>(`/admin/invoices/${id}/payments`, data),
+  reversePayment: (invoiceId: number, paymentId: number, reason: string) =>
+    api.post<{ invoice: Invoice }>(`/admin/invoices/${invoiceId}/payments/${paymentId}/reverse`, { reason }),
+  issueCredit: (id: number, data: { amount: number; issue_date: string; reason: string }) =>
+    api.post<{ credit_note_id: number; invoice: Invoice }>(`/admin/invoices/${id}/credit_notes`, data),
+  voidCredit: (invoiceId: number, creditId: number, reason: string) =>
+    api.post<{ invoice: Invoice }>(`/admin/invoices/${invoiceId}/credit_notes/${creditId}/void`, { reason }),
+};
+
+export const invoiceReceivablesApi = {
+  summary: (params?: { billing_profile_id?: number; as_of?: string }) =>
+    api.get<InvoiceReceivablesSummary>('/admin/invoice_receivables', params),
+  statement: (recipientId: number, billingProfileId?: number) =>
+    api.get<{ recipient: Pick<InvoiceRecipient, 'id' | 'name' | 'email' | 'address'>; invoices: Invoice[]; outstanding: number }>(
+      '/admin/invoice_receivables/statement',
+      { recipient_id: recipientId, billing_profile_id: billingProfileId }
+    ),
 };
 
 export const invoiceChatSessionsApi = {

@@ -189,7 +189,7 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
   end
 
   describe "PATCH /api/v1/admin/invoices/:id" do
-    it "blocks finalized invoice edits unless marking draft" do
+    it "blocks issued invoice edits" do
       invoice = create(:invoice, :with_line_item, :generated, company: company)
 
       patch "/api/v1/admin/invoices/#{invoice.id}",
@@ -211,11 +211,11 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
         }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to eq("Cannot modify a finalized invoice without marking it as draft")
+      expect(response.parsed_body["error"]).to eq("Issued invoice financial content is immutable")
       expect(invoice.line_items.first.reload.description).not_to eq("Changed after generation")
     end
 
-    it "allows finalized invoice edits when marking draft" do
+    it "does not permit issued invoices to return to draft" do
       invoice = create(:invoice, :with_line_item, :generated, company: company)
 
       patch "/api/v1/admin/invoices/#{invoice.id}",
@@ -237,10 +237,10 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
           }
         }
 
-      expect(response).to have_http_status(:ok)
-      expect(invoice.reload.status).to eq("draft")
-      expect(invoice.generated_at).to be_nil
-      expect(invoice.line_items.first.reload.description).to eq("Changed as draft")
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Issued invoice financial content is immutable")
+      expect(invoice.reload.status).to eq("open")
+      expect(invoice.line_items.first.reload.description).not_to eq("Changed as draft")
     end
 
     it "allows an invoice to keep its existing archived recipient" do
@@ -295,22 +295,23 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
         }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to eq("Cannot mark voided invoice as draft")
+      expect(response.parsed_body["error"]).to eq("Issued invoice financial content is immutable")
       expect(invoice.reload.status).to eq("voided")
       expect(invoice.notes).not_to eq("Should not be accepted")
     end
   end
 
   describe "POST /api/v1/admin/invoices/:id/generate_pdf" do
-    it "generates a PDF and marks the invoice generated" do
+    it "issues, stores, and downloads the invoice PDF" do
       invoice = create(:invoice, :with_line_item, company: company)
 
       post "/api/v1/admin/invoices/#{invoice.id}/generate_pdf"
 
       expect(response).to have_http_status(:ok)
       expect(response.media_type).to eq("application/pdf")
-      expect(invoice.reload.status).to eq("generated")
+      expect(invoice.reload.status).to eq("open")
       expect(invoice.generated_at).to be_present
+      expect(invoice.artifacts.sole.kind).to eq("issued_pdf")
     end
 
     it "returns validation errors before rendering when there are no line items" do
@@ -321,7 +322,7 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
       post "/api/v1/admin/invoices/#{invoice.id}/generate_pdf"
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["errors"]).to include("Line items must include at least one item")
+      expect(response.parsed_body["errors"]).to include("Line items must include at least one line item")
       expect(invoice.reload.status).to eq("draft")
     end
 
@@ -339,24 +340,24 @@ RSpec.describe "Invoice Maker Admin API", type: :request do
   end
 
   describe "PATCH /api/v1/admin/invoices/:id/update_status" do
-    it "marks an invoice paid" do
-      invoice = create(:invoice, :with_line_item, company: company, status: "sent", generated_at: 1.day.ago, sent_at: Time.current)
+    it "rejects manually marking an invoice paid" do
+      invoice = create(:invoice, :with_line_item, :generated, company: company)
 
       patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "paid" }
 
-      expect(response).to have_http_status(:ok)
-      expect(invoice.reload.status).to eq("paid")
-      expect(invoice.paid_at).to be_present
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["errors"].join(" ")).to include("Record a payment or credit")
+      expect(invoice.reload.status).to eq("open")
     end
 
-    it "rejects invalid backward transitions" do
-      invoice = create(:invoice, :with_line_item, company: company, status: "paid", paid_at: Time.current)
+    it "rejects manually marking an invoice sent" do
+      invoice = create(:invoice, :with_line_item, :generated, company: company)
 
       patch "/api/v1/admin/invoices/#{invoice.id}/update_status", params: { status: "sent" }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["errors"].join(" ")).to include("cannot transition from paid to sent")
-      expect(invoice.reload.status).to eq("paid")
+      expect(response.parsed_body["errors"].join(" ")).to include("Record a delivery")
+      expect(invoice.reload.status).to eq("open")
     end
   end
 end

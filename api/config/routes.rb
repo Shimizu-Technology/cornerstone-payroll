@@ -296,15 +296,30 @@ Rails.application.routes.draw do
           end
         end
 
-        # Invoice Maker (standalone firm tool)
+        # Invoice Center and bounded accounts receivable
         resources :invoice_billing_profiles, except: [:new, :edit]
         resources :invoice_recipients, except: [:new, :edit]
         resources :invoices, except: [:new, :edit] do
+          collection do
+            post :import
+          end
           member do
             patch :update_status
             post :preview_pdf
             post :generate_pdf
+            post :issue
+            get :download_artifact
+            post :record_delivery
           end
+          resources :payments, controller: :invoice_payments, only: [:create] do
+            post :reverse, on: :member
+          end
+          resources :credit_notes, controller: :invoice_credit_notes, only: [:create] do
+            post :void, on: :member
+          end
+        end
+        resource :invoice_receivables, only: [:show] do
+          get :statement
         end
         resources :invoice_chat_sessions, except: [:new, :edit] do
           member do

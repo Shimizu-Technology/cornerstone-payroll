@@ -191,16 +191,18 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         href: '/tools/transmittals',
       });
 
-      add({
-        id: 'invoice-maker',
-        label: 'Invoice Maker',
-        description: 'Create and manage client invoices.',
-        group: 'Tools',
-        keywords: ['invoice', 'billing'],
-        icon: <ReceiptText className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/tools/invoices',
-      });
+      if (isAdmin) {
+        add({
+          id: 'invoice-center',
+          label: 'Invoice Center',
+          description: 'Create, import, and track customer invoices and receivables.',
+          group: 'Tools',
+          keywords: ['invoice', 'billing', 'receivables', 'payments'],
+          icon: <ReceiptText className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/tools/invoices',
+        });
+      }
 
       add({
         id: 'check-settings',

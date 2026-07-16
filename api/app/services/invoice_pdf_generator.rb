@@ -7,11 +7,13 @@ class InvoicePdfGenerator
   include ActionView::Helpers::NumberHelper
 
   PAGE_MARGIN = 48
+  PAGE_BOTTOM_MARGIN = 68
   INK = "111827"
   MUTED = "6B7280"
   LINE = "D1D5DB"
   PANEL = "F8FAFC"
   ACCENT = "0F766E"
+  ACCENT_SOFT = "ECFDF5"
 
   def initialize(invoice, snapshot: nil)
     @invoice = invoice
@@ -24,7 +26,7 @@ class InvoicePdfGenerator
   end
 
   def generate
-    Prawn::Document.new(page_size: "LETTER", margin: PAGE_MARGIN) do |pdf|
+    Prawn::Document.new(page_size: "LETTER", margin: [ PAGE_MARGIN, PAGE_MARGIN, PAGE_BOTTOM_MARGIN, PAGE_MARGIN ]) do |pdf|
       letterhead(pdf)
       invoice_title(pdf)
       parties(pdf)
@@ -70,32 +72,35 @@ class InvoicePdfGenerator
   end
 
   def invoice_title(pdf)
-    y = pdf.cursor
-    pdf.bounding_box([ pdf.bounds.left, y ], width: 240, height: 76) do
-      pdf.fill_color INK
-      pdf.text "INVOICE", size: 30, style: :bold
-      pdf.move_down 3
-      pdf.fill_color ACCENT
-      pdf.text invoice_data["invoice_number"].presence || "Draft", size: 11, style: :bold
-      pdf.fill_color INK
-    end
-
     rows = [
       [ "Invoice Date", format_date(invoice_data["invoice_date"]) ],
+      [ "Due Date", format_date(invoice_data["due_date"]) ],
       [ "Service Period", service_period ],
+      [ "Customer Reference", invoice_data["customer_reference"] ],
       [ "Status", invoice_data["status"].to_s.titleize.presence || "Draft" ]
     ].reject { |_label, value| value.blank? }
 
-    pdf.bounding_box([ pdf.bounds.right - 250, y ], width: 250) do
-      pdf.table(rows, width: 250, cell_style: { size: 9, padding: [ 6, 8 ], border_color: "E5E7EB" }) do
-        columns(0).font_style = :bold
-        columns(0).text_color = "374151"
-        columns(0).width = 95
-        columns(1).width = 155
-      end
+    title = pdf.make_table(
+      [
+        [ { content: "INVOICE", size: 30, font_style: :bold, text_color: INK } ],
+        [ { content: invoice_data["invoice_number"].presence || "Draft", size: 11, font_style: :bold, text_color: ACCENT, padding: [ 4, 0, 0, 0 ] } ]
+      ],
+      width: 240,
+      cell_style: { borders: [], padding: 0 }
+    )
+    metadata = pdf.make_table(rows, width: 250, cell_style: { size: 9, padding: [ 6, 8 ], border_color: "E5E7EB" }) do
+      columns(0).font_style = :bold
+      columns(0).text_color = "374151"
+      columns(0).background_color = PANEL
+      columns(0).width = 95
+      columns(1).width = 155
     end
 
-    pdf.move_cursor_to(y - 92)
+    pdf.table([ [ title, metadata ] ], width: pdf.bounds.width, cell_style: { borders: [], padding: 0, valign: :top }) do
+      columns(0).width = pdf.bounds.width - 250
+      columns(1).width = 250
+    end
+    pdf.move_down 20
   end
 
   def parties(pdf)
@@ -111,11 +116,11 @@ class InvoicePdfGenerator
       billing["phone"]
     ])
 
-    pdf.table([[ bill_to, remit_to ]], width: pdf.bounds.width, cell_style: { borders: [], padding: [ 0, 16, 0, 0 ], size: 10 }) do
+    pdf.table([ [ bill_to, remit_to ] ], width: pdf.bounds.width, cell_style: { border_color: "E5E7EB", padding: [ 12, 14 ], size: 10, background_color: PANEL, valign: :top }) do
       columns(0).width = pdf.bounds.width / 2
       columns(1).width = pdf.bounds.width / 2
     end
-    pdf.move_down 22
+    pdf.move_down 20
   end
 
   def labeled_block(label, lines)
@@ -124,28 +129,29 @@ class InvoicePdfGenerator
   end
 
   def line_items(pdf)
+    include_service_date = line_item_rows.any? { |item| item["service_date"].present? }
     rows = [
       [
         { content: "Description", font_style: :bold },
-        { content: "Date", font_style: :bold },
+        (include_service_date ? { content: "Date", font_style: :bold } : nil),
         { content: "Qty", font_style: :bold, align: :right },
         { content: "Rate", font_style: :bold, align: :right },
         { content: "Amount", font_style: :bold, align: :right }
-      ]
+      ].compact
     ]
 
     line_item_rows.each do |item|
       rows << [
         item["description"].to_s,
-        format_date(item["service_date"]),
+        (include_service_date ? format_date(item["service_date"]) : nil),
         format_decimal(item["quantity"]),
         money(item["rate"]),
         money(item["amount"])
-      ]
+      ].compact
     end
 
     table_width = pdf.bounds.width
-    date_width = 74
+    date_width = include_service_date ? 74 : 0
     quantity_width = 52
     rate_width = 78
     amount_width = 80
@@ -154,11 +160,18 @@ class InvoicePdfGenerator
       row(0).background_color = "ECFDF5"
       row(0).text_color = "064E3B"
       columns(0).width = table_width - date_width - quantity_width - rate_width - amount_width
-      columns(1).width = date_width
-      columns(2).width = quantity_width
-      columns(3).width = rate_width
-      columns(4).width = amount_width
-      columns(2..4).align = :right
+      if include_service_date
+        columns(1).width = date_width
+        columns(2).width = quantity_width
+        columns(3).width = rate_width
+        columns(4).width = amount_width
+        columns(2..4).align = :right
+      else
+        columns(1).width = quantity_width
+        columns(2).width = rate_width
+        columns(3).width = amount_width
+        columns(1..3).align = :right
+      end
     end
   end
 
@@ -170,31 +183,36 @@ class InvoicePdfGenerator
 
     if payment_text.present? || terms.present?
       pdf.table(
-        [[
+        [ [
           { content: payment_block(payment_text, terms) },
-          { content: "Total Due\n#{total}", align: :right }
-        ]],
+          { content: "TOTAL DUE\n#{total}", align: :right, font_style: :bold }
+        ] ],
         width: pdf.bounds.width,
-        cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10 }
+        cell_style: { border_color: LINE, padding: [ 14, 14 ], size: 10, valign: :top }
       ) do
         columns(0).width = pdf.bounds.width - 180
         columns(1).width = 180
         columns(0).background_color = PANEL
-        columns(1).background_color = "F0FDFA"
-        columns(1).font_style = :bold
+        columns(1).background_color = ACCENT_SOFT
+        columns(0).valign = :top
+        columns(1).valign = :top
       end
     else
       pdf.bounding_box([ pdf.bounds.right - 180, pdf.cursor ], width: 180) do
-        pdf.table([[ { content: "Total Due\n#{total}", align: :right } ]], width: 180, cell_style: { border_color: LINE, padding: [ 12, 12 ], size: 10, background_color: "F0FDFA", font_style: :bold })
+        pdf.table(
+          [ [ { content: "TOTAL DUE\n#{total}", align: :right, font_style: :bold } ] ],
+          width: 180,
+          cell_style: { border_color: LINE, padding: [ 14, 14 ], size: 10, background_color: ACCENT_SOFT, valign: :top }
+        )
       end
     end
   end
 
   def payment_block(payment_text, terms)
     parts = []
-    parts << "Payment Instructions\n#{payment_text}" if payment_text.present?
-    parts << "\nTerms\n#{terms}" if terms.present?
-    parts.join("\n")
+    parts << "PAYMENT INSTRUCTIONS\n#{payment_text}" if payment_text.present?
+    parts << "TERMS\n#{terms}" if terms.present?
+    parts.join("\n\n")
   end
 
   def visible_payment_instructions
@@ -222,10 +240,12 @@ class InvoicePdfGenerator
     footer_text = [ note, generated_at && "Generated #{format_timestamp(generated_at)}" ].compact.join(" | ")
 
     pdf.repeat(:all) do
-      pdf.bounding_box([ pdf.bounds.left, 24 ], width: pdf.bounds.width, height: 20) do
-        pdf.fill_color "9CA3AF"
-        pdf.text footer_text, size: 8, align: :center
-        pdf.fill_color INK
+      pdf.canvas do
+        pdf.bounding_box([ PAGE_MARGIN, 34 ], width: pdf.page.dimensions[2] - (PAGE_MARGIN * 2), height: 14) do
+          pdf.fill_color "9CA3AF"
+          pdf.text footer_text, size: 8, align: :center
+          pdf.fill_color INK
+        end
       end
     end
   end

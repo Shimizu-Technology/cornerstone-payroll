@@ -1,0 +1,173 @@
+# frozen_string_literal: true
+
+require "digest"
+require "marcel"
+
+class InvoiceArtifactStorageService
+  MAX_FILE_SIZE = 15.megabytes
+  IMPORT_CONTENT_TYPES = %w[application/pdf image/jpeg image/png image/webp].freeze
+  RENDERER_VERSION = "prawn-v2"
+  TEMPLATE_VERSION = "standard-v3"
+
+  def initialize(storage: R2StorageService.new)
+    @storage = storage
+  end
+
+  def issue_native!(invoice:, actor:)
+    Invoice.transaction do
+      # The official snapshot and artifact must be rendered from the same
+      # row/line-item state that becomes immutable. Holding the invoice lock
+      # prevents a concurrent draft edit from landing between render and issue.
+      locked_invoice = Invoice.lock.find(invoice.id)
+      locked_invoice.line_items.load
+      if locked_invoice.line_items.reject(&:marked_for_destruction?).empty?
+        locked_invoice.errors.add(:line_items, "must include at least one line item")
+        raise ActiveRecord::RecordInvalid, locked_invoice
+      end
+
+      snapshot = locked_invoice.issued_snapshot(actor: actor)
+      pdf_bytes = InvoicePdfGenerator.new(locked_invoice, snapshot: snapshot).generate
+
+      store_and_issue!(
+        invoice: locked_invoice,
+        actor: actor,
+        bytes: pdf_bytes,
+        filename: "#{locked_invoice.invoice_number}.pdf",
+        content_type: "application/pdf",
+        kind: "issued_pdf",
+        snapshot: snapshot,
+        renderer_version: RENDERER_VERSION,
+        template_version: TEMPLATE_VERSION
+      )
+    end
+  end
+
+  def import_original!(invoice:, actor:, file:, issued_at: Time.current, delivery_attributes: nil)
+    bytes, content_type, filename = validate_import!(file)
+
+    store_and_issue!(
+      invoice: invoice,
+      actor: actor,
+      bytes: bytes,
+      filename: filename,
+      content_type: content_type,
+      kind: "imported_original",
+      snapshot: invoice.issued_snapshot(actor: actor, issued_at: issued_at),
+      issued_at: issued_at,
+      renderer_version: nil,
+      template_version: nil
+    ) do |locked_invoice, artifact|
+      create_import_delivery!(
+        invoice: locked_invoice,
+        artifact: artifact,
+        actor: actor,
+        attributes: delivery_attributes
+      )
+    end
+  end
+
+  def download(artifact)
+    storage.download(artifact.storage_key)
+  end
+
+  private
+
+  attr_reader :storage
+
+  def validate_import!(file)
+    raise ArgumentError, "Invoice file is required" unless file
+    raise ArgumentError, "Invoice file exceeds the 15 MB limit" if file.size.to_i > MAX_FILE_SIZE
+
+    file.tempfile.rewind
+    content_type = Marcel::MimeType.for(file.tempfile, name: file.original_filename)
+    file.tempfile.rewind
+    raise ArgumentError, "Invoice file must be a PDF, JPEG, PNG, or WebP" unless IMPORT_CONTENT_TYPES.include?(content_type)
+
+    bytes = file.tempfile.read
+    file.tempfile.rewind
+    raise ArgumentError, "Invoice file is empty" if bytes.blank?
+
+    [ bytes, content_type, sanitized_filename(file.original_filename, content_type) ]
+  end
+
+  def store_and_issue!(invoice:, actor:, bytes:, filename:, content_type:, kind:, snapshot:, issued_at: Time.current,
+                       renderer_version:, template_version:, &after_issue)
+    key = storage_key(invoice: invoice, filename: filename)
+    storage.upload(key, StringIO.new(bytes), content_type: content_type)
+
+    Invoice.transaction do
+      locked_invoice = Invoice.lock.find(invoice.id)
+      raise ActiveRecord::RecordInvalid, locked_invoice unless locked_invoice.draft?
+
+      artifact = locked_invoice.artifacts.create!(
+        organization: locked_invoice.organization,
+        kind: kind,
+        storage_key: key,
+        filename: filename,
+        content_type: content_type,
+        byte_size: bytes.bytesize,
+        sha256: Digest::SHA256.hexdigest(bytes),
+        renderer_version: renderer_version,
+        template_version: template_version,
+        created_by: actor
+      )
+      locked_invoice.issue!(actor: actor, snapshot: snapshot, issued_at: issued_at)
+      InvoiceEvent.record!(
+        invoice: locked_invoice,
+        event_type: kind == "imported_original" ? "imported" : "issued",
+        actor: actor,
+        occurred_at: issued_at,
+        metadata: { artifact_id: artifact.id, sha256: artifact.sha256, filename: artifact.filename }
+      )
+      after_issue&.call(locked_invoice, artifact)
+      artifact
+    end
+  rescue StandardError
+    begin
+      storage.delete(key) if key.present?
+    rescue StandardError => cleanup_error
+      Rails.logger.warn("Invoice artifact cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}")
+    end
+    raise
+  end
+
+  def create_import_delivery!(invoice:, artifact:, actor:, attributes:)
+    return unless attributes
+
+    delivery = invoice.deliveries.create!(
+      organization: invoice.organization,
+      invoice_artifact: artifact,
+      channel: attributes.fetch(:channel),
+      recipient: attributes[:recipient].presence || invoice.invoice_recipient.email,
+      delivered_at: attributes.fetch(:delivered_at),
+      notes: "Historical delivery recorded during import",
+      recorded_by: actor
+    )
+    invoice.update!(sent_at: delivery.delivered_at, updated_by: actor)
+    InvoiceEvent.record!(
+      invoice: invoice,
+      event_type: "delivery_recorded",
+      actor: actor,
+      occurred_at: delivery.delivered_at,
+      metadata: { delivery_id: delivery.id, source: "invoice_import" }
+    )
+  end
+
+  def storage_key(invoice:, filename:)
+    extension = File.extname(filename).downcase.presence || ".bin"
+    "invoice-center/organization-#{invoice.organization_id}/invoice-#{invoice.id}/#{SecureRandom.uuid}#{extension}"
+  end
+
+  def sanitized_filename(filename, content_type)
+    basename = File.basename(filename.to_s).gsub(/[^a-zA-Z0-9._-]/, "_").presence || "invoice"
+    return basename if File.extname(basename).present?
+
+    extension = {
+      "application/pdf" => ".pdf",
+      "image/jpeg" => ".jpg",
+      "image/png" => ".png",
+      "image/webp" => ".webp"
+    }.fetch(content_type)
+    "#{basename}#{extension}"
+  end
+end

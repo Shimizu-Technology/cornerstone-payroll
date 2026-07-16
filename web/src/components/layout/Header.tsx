@@ -6,11 +6,15 @@ interface HeaderProps {
   description?: string;
   subtitle?: string;
   actions?: React.ReactNode;
+  contextLabel?: string;
+  contextValue?: string;
 }
 
-export function Header({ title, description, subtitle, actions }: HeaderProps) {
+export function Header({ title, description, subtitle, actions, contextLabel, contextValue }: HeaderProps) {
   const helperText = description ?? subtitle;
   const { activeCompany } = useCompany();
+  const displayedContext = contextValue || activeCompany?.name;
+  const displayedLabel = contextValue ? contextLabel || 'Workspace' : 'Client';
 
   return (
     <div className="sticky top-0 z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8">
@@ -18,11 +22,11 @@ export function Header({ title, description, subtitle, actions }: HeaderProps) {
         <div>
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-primary-700">Workspace</p>
-            {activeCompany && (
+            {displayedContext && (
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50/80 px-2.5 py-1 text-[11px] font-semibold text-neutral-700 shadow-sm shadow-primary-100/40">
                 <Building2 className="h-3.5 w-3.5 shrink-0 text-primary-700" />
-                <span className="text-neutral-500">Client</span>
-                <span className="max-w-[16rem] truncate text-neutral-950 sm:max-w-[22rem]">{activeCompany.name}</span>
+                <span className="text-neutral-500">{displayedLabel}</span>
+                <span className="max-w-[16rem] truncate text-neutral-950 sm:max-w-[22rem]">{displayedContext}</span>
               </span>
             )}
           </div>

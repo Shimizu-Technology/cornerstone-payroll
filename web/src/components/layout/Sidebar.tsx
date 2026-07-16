@@ -74,7 +74,7 @@ const portalNavigation: NavItem[] = [
 const toolsNavigation: NavItem[] = [
   { name: 'Timecard OCR', href: '/tools/timecard-ocr', icon: <ScanLine className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'General Transmittals', href: '/tools/transmittals', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Invoice Maker', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Invoice Center', href: '/tools/invoices', icon: <ReceiptText className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const clientSettingsNavigation: NavItem[] = [
@@ -290,7 +290,11 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           <>
             <SectionDivider icon={<Wrench className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Tools" collapsed={collapsed} />
             <div className="space-y-1.5">
-              <NavSection items={toolsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+              <NavSection
+                items={isAdmin ? toolsNavigation : toolsNavigation.filter((item) => item.href !== '/tools/invoices')}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+              />
             </div>
           </>
         )}
