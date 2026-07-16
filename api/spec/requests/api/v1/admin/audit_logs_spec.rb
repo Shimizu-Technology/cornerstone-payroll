@@ -38,4 +38,29 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response.media_type).to eq("text/csv")
     expect(response.body).to include("Audit Admin", "users#updated")
   end
+
+  it "exports in the requested timestamp order and neutralizes spreadsheet formulas" do
+    AuditLog.create!(
+      user: admin,
+      organization: organization,
+      action: "users#created",
+      record_type: "users",
+      created_at: 1.day.ago
+    )
+    AuditLog.create!(
+      user: admin,
+      organization: organization,
+      action: "users#updated",
+      record_type: "users",
+      subject_name: "=HYPERLINK(\"https://example.test\",\"open\")",
+      created_at: 2.days.ago
+    )
+
+    get "/api/v1/admin/audit_logs/export", params: { sort_direction: "asc" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body.index("users#updated")).to be < response.body.index("users#created")
+    expect(response.body).to include("'=HYPERLINK")
+    expect(response.body).not_to include(",=HYPERLINK")
+  end
 end

@@ -31,7 +31,7 @@ class AuditLog < ApplicationRecord
   )
     organization_id ||= Current.organization_id || user&.organization_id || Company.where(id: company_id).pick(:organization_id)
 
-    create!(
+    log = create!(
       user: user,
       organization_id: organization_id,
       company_id: company_id,
@@ -48,5 +48,7 @@ class AuditLog < ApplicationRecord
       actor_email: user&.email,
       actor_role: user&.role
     )
+    Current.domain_audit_recorded = true unless action == "authentication#signed_in"
+    log
   end
 end

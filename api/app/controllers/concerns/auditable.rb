@@ -47,7 +47,7 @@ module Auditable
     return unless response.successful?
     return unless current_user
     return if @skip_default_audit_log
-    return if request_already_has_domain_audit?
+    return if Current.domain_audit_recorded
 
     record_type = controller_path.gsub("api/v1/admin/", "")
                                  .gsub("api/v1/client/", "client_")
@@ -96,12 +96,6 @@ module Auditable
     return true if _extra_audit_actions.include?(action_name)
 
     action_name.match?(SENSITIVE_READ_PATTERN)
-  end
-
-  def request_already_has_domain_audit?
-    AuditLog.where(request_id: request.request_id)
-            .where.not(action: "authentication#signed_in")
-            .exists?
   end
 
   def audit_company_id

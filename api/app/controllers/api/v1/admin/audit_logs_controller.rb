@@ -33,10 +33,10 @@ module Api
         end
 
         def export
-          logs = filtered_scope.includes(:user, :company, :organization)
+          logs = ordered(filtered_scope).includes(:user, :company, :organization)
           csv = CSV.generate(headers: true) do |rows|
             rows << [ "Time", "Actor", "Actor email", "Role", "Action", "Category", "Subject", "Record type", "Record ID", "Organization", "Company", "IP address", "Request ID", "Details" ]
-            logs.find_each(order: audit_order) do |log|
+            logs.each do |log|
               rows << [
                 log.created_at&.iso8601,
                 log.actor_name.presence || log.user&.name || "System",
@@ -52,7 +52,7 @@ module Api
                 log.ip_address,
                 log.request_id,
                 log.metadata.to_json
-              ]
+              ].map { |value| csv_safe(value) }
             end
           end
 
@@ -100,6 +100,13 @@ module Api
 
         def audit_order
           params[:sort_direction] == "asc" ? :asc : :desc
+        end
+
+        def csv_safe(value)
+          return value unless value.is_a?(String)
+          return value unless value.match?(/\A[=+\-@]/)
+
+          "'#{value}"
         end
 
         def audit_log_json(log)
