@@ -14,6 +14,8 @@ import {
 import { auditLogsApi, usersApi } from '@/services/api';
 import type { AuditLogEntry } from '@/services/api';
 import type { User } from '@/types';
+import { Button } from '@/components/ui/button';
+import { ArrowDownUp, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
@@ -78,6 +80,11 @@ export function AuditLogs() {
   const [toFilter, setToFilter] = useState<string>('');
   const [users, setUsers] = useState<User[]>([]);
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [isExporting, setIsExporting] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
@@ -89,16 +96,49 @@ export function AuditLogs() {
         user_id: userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
-        limit: 200,
+        page,
+        per_page: 50,
+        sort_direction: sortDirection,
       });
       setLogs(response.data);
+      setTotalPages(response.meta.total_pages || 1);
+      setTotal(response.meta.total_count);
       setSelectedLogId((current) => response.data.find((log) => log.id === current)?.id || response.data[0]?.id || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     } finally {
       setIsLoading(false);
     }
-  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter]);
+  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, sortDirection]);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    setError(null);
+    try {
+      const result = await auditLogsApi.exportCsv({
+        action_filter: actionFilter || undefined,
+        record_type: recordTypeFilter || undefined,
+        user_id: userFilter ? parseInt(userFilter, 10) : undefined,
+        from: fromFilter || undefined,
+        to: toFilter || undefined,
+        sort_direction: sortDirection,
+      });
+      const url = URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = result.filename || 'audit-history.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export audit history');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -135,6 +175,22 @@ export function AuditLogs() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mb-4 p-4">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-neutral-950">Complete activity history</p>
+              <p className="text-sm text-neutral-500">{total.toLocaleString()} recorded actions across the organization</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setSortDirection((value) => value === 'desc' ? 'asc' : 'desc')}>
+                <ArrowDownUp className="mr-2 h-4 w-4" />
+                {sortDirection === 'desc' ? 'Newest first' : 'Oldest first'}
+              </Button>
+              <Button variant="outline" onClick={() => void handleExport()} disabled={isExporting}>
+                <Download className="mr-2 h-4 w-4" />
+                {isExporting ? 'Exporting...' : 'Export CSV'}
+              </Button>
+            </div>
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <Input
               placeholder="Search actions"
@@ -234,6 +290,19 @@ export function AuditLogs() {
                 </TableBody>
                 </Table>
               </div>
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-neutral-200 px-4 py-3">
+                  <p className="text-sm text-neutral-500">Page {page} of {totalPages}</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page === 1}>
+                      <ChevronLeft className="mr-1 h-4 w-4" /> Previous
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page === totalPages}>
+                      Next <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
 
             <Card>
@@ -253,7 +322,11 @@ export function AuditLogs() {
                     <DetailList
                       rows={[
                         ['Person', selectedLog.user_name || 'System'],
+                        ['Actor email', selectedLog.actor_email || '—'],
+                        ['Role', selectedLog.actor_role ? humanizeKey(selectedLog.actor_role) : '—'],
                         ['Record', `${humanizeKey(selectedLog.record_type || 'General')}${selectedLog.record_id ? ` #${selectedLog.record_id}` : ''}`],
+                        ['Subject', selectedLog.subject_name || '—'],
+                        ['Client', selectedLog.company_name || 'Organization-wide'],
                         ['Source', formatValue(selectedLog.metadata?.source)],
                         ['Address', selectedLog.ip_address || '—'],
                       ]}

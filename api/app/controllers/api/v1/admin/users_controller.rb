@@ -12,7 +12,7 @@ module Api
         # GET /api/v1/admin/users
         # Organization admins see users in their firm; super admins can see all firms.
         def index
-          users = manageable_users.includes(company_assignments: :company, company: :organization).order(:name)
+          users = manageable_users.includes(:organization, :invited_by, company_assignments: :company, company: :organization).order(:name)
           if params[:search].present?
             query = "%#{params[:search]}%"
             users = users.where("name ILIKE ? OR email ILIKE ?", query, query)
@@ -49,6 +49,8 @@ module Api
           ActiveRecord::Base.transaction do
             user.save!
             sync_company_assignments!(user, company_ids: company_ids, role: user.role, company_ids_provided: company_ids_provided)
+            user.association(:company_assignments).reset
+            record_user_audit!("created", user, before_values: {}, after_values: user_audit_snapshot(user))
           end
 
           clerk_result = create_clerk_invitation(user)
@@ -59,7 +61,7 @@ module Api
             email_queued = true
           end
 
-          user = User.includes(company_assignments: :company).find(user.id)
+          user = User.includes(:organization, :invited_by, company_assignments: :company).find(user.id)
           render json: {
             data: user_json(user),
             invitation_sent: email_queued,
@@ -71,6 +73,7 @@ module Api
 
         # PATCH /api/v1/admin/users/:id
         def update
+          before_values = user_audit_snapshot(@user)
           permitted = user_params
           role_provided = params.dig(:user, :role).present?
           requested_role = role_provided ? requested_user_role : @user.role
@@ -96,9 +99,11 @@ module Api
             @user.role = requested_role if role_provided
             @user.save!
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
+            @user.association(:company_assignments).reset
+            record_user_audit!("updated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
 
-          @user = User.includes(company_assignments: :company).find(@user.id)
+          @user = User.includes(:organization, :invited_by, company_assignments: :company).find(@user.id)
           render json: { data: user_json(@user) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -106,7 +111,11 @@ module Api
 
         # POST /api/v1/admin/users/:id/activate
         def activate
-          @user.update!(active: true)
+          before_values = user_audit_snapshot(@user)
+          ActiveRecord::Base.transaction do
+            @user.update!(active: true)
+            record_user_audit!("activated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
+          end
           render json: { data: user_json(@user) }
         end
 
@@ -122,7 +131,11 @@ module Api
             end
           end
 
-          @user.update!(active: false)
+          before_values = user_audit_snapshot(@user)
+          ActiveRecord::Base.transaction do
+            @user.update!(active: false)
+            record_user_audit!("deactivated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
+          end
           render json: { data: user_json(@user) }
         end
 
@@ -138,12 +151,16 @@ module Api
             end
           end
 
+          before_values = user_audit_snapshot(@user)
           if @user.clerk_invitation_id.present? && @user.invitation_pending?
             service = ClerkInvitationService.new
             service.revoke_invitation(@user.clerk_invitation_id) if service.configured?
           end
 
-          @user.destroy!
+          ActiveRecord::Base.transaction do
+            @user.destroy!
+            record_user_audit!("deleted", @user, before_values: before_values, after_values: {})
+          end
           head :no_content
         end
 
@@ -153,6 +170,7 @@ module Api
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
           end
 
+          before_values = user_audit_snapshot(@user)
           if @user.clerk_invitation_id.present?
             service = ClerkInvitationService.new
             service.revoke_invitation(@user.clerk_invitation_id) if service.configured?
@@ -167,6 +185,15 @@ module Api
             @user.update!(invited_at: Time.current)
           end
 
+          @user.reload
+          record_user_audit!(
+            "invitation_resent",
+            @user,
+            before_values: before_values,
+            after_values: user_audit_snapshot(@user),
+            extra_metadata: { invitation_sent: email_queued, invitation_error: clerk_result[:success] ? nil : clerk_result[:error] }
+          )
+
           render json: {
             data: user_json(@user),
             invitation_sent: email_queued,
@@ -179,7 +206,7 @@ module Api
         private
 
         def set_user
-          @user = manageable_users.includes(company_assignments: :company).find_by(id: params[:id])
+          @user = manageable_users.includes(:organization, :invited_by, company_assignments: :company).find_by(id: params[:id])
           return if @user
 
           render json: { error: "User not found" }, status: :not_found
@@ -323,7 +350,10 @@ module Api
             invitation_status: user.invitation_status,
             invitation_pending: user.invitation_pending?,
             invited_at: user.invited_at,
+            invited_by_id: user.invited_by_id,
+            invited_by_name: user.invited_by&.name,
             last_login_at: user.last_login_at,
+            last_active_at: user.last_active_at,
             created_at: user.created_at,
             updated_at: user.updated_at
           }
@@ -350,6 +380,42 @@ module Api
           end
 
           data
+        end
+
+        def user_audit_snapshot(user)
+          {
+            "id" => user.id,
+            "name" => user.name,
+            "email" => user.email,
+            "role" => user.role,
+            "active" => user.active,
+            "invitation_status" => user.invitation_status,
+            "invited_at" => user.invited_at&.iso8601,
+            "assigned_company_ids" => current_assignment_ids_for(user).sort
+          }
+        end
+
+        def record_user_audit!(verb, target, before_values:, after_values:, extra_metadata: {})
+          changed_fields = (before_values.keys | after_values.keys).select do |field|
+            before_values[field] != after_values[field]
+          end
+
+          AuditLog.record!(
+            user: current_user,
+            organization_id: target.organization_id,
+            company_id: nil,
+            action: "users##{verb}",
+            record_type: "users",
+            record_id: target.id,
+            subject_name: target.name.presence || target.email,
+            metadata: {
+              before_values: before_values,
+              after_values: after_values,
+              changed_fields: changed_fields
+            }.merge(extra_metadata).compact,
+            event_category: "security"
+          )
+          skip_default_audit_log!
         end
       end
     end

@@ -19,18 +19,18 @@ module ClerkAuthenticatable
       return
     end
 
-    payload = verify_clerk_token(token)
-    unless payload
+    @clerk_token_payload = verify_clerk_token(token)
+    unless @clerk_token_payload
       render json: { error: "Invalid or expired token" }, status: :unauthorized
       return
     end
 
-    clerk_id = payload["sub"]
+    clerk_id = @clerk_token_payload["sub"]
     @current_user = User.find_by(clerk_id: clerk_id)
 
     unless @current_user
       # Auto-provision user from Clerk token data
-      @current_user = provision_user_from_clerk(payload)
+      @current_user = provision_user_from_clerk(@clerk_token_payload)
     end
 
     unless @current_user
@@ -130,7 +130,7 @@ module ClerkAuthenticatable
 
     email = clerk_user.dig("email_addresses", 0, "email_address")&.strip&.downcase
     return nil unless email
-    clerk_name = [clerk_user["first_name"], clerk_user["last_name"]].compact.join(" ").presence
+    clerk_name = [ clerk_user["first_name"], clerk_user["last_name"] ].compact.join(" ").presence
 
     # Check if user exists by email (invited user signing in for first time)
     user = User.find_by("LOWER(email) = ?", email)

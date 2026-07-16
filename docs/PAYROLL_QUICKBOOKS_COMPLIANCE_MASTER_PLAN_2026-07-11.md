@@ -1,6 +1,6 @@
 # Cornerstone Payroll: QuickBooks, Payroll, and Compliance Master Plan
 
-> **Implementation status (2026-07-13):** Phase 0 engineering was merged through PR #111 (`44f60f7`). Phase 1A now has an implementation candidate on `codex/phase-1-payroll-liability-foundation`; see the [Phase 1A Payroll Liability Foundation](PHASE_1A_PAYROLL_LIABILITY_FOUNDATION_2026-07-13.md). It adds effective-dated component-rule evidence, immutable commit/reversal/replacement liability postings, explicit historical backfill, and pay-period reconciliation without changing payroll calculations. Phase 0 operational evidence and Phase 1A production validation still require signoff before deployment/backfill. Later Phase 1 operational capabilities remain planned.
+> **Implementation status (2026-07-16):** Phase 0 was merged through PR #111, Phase 1A through PR #112, and Invoice Center IM-0/IM-1 through PR #113. Before Phase 1B liability settlement work, implement the approved user/audit foundation, unified check-printing workflow, and unified transmittal builder described in the [Operational Controls, Unified Printing, and Transmittal Plan](OPERATIONAL_CONTROLS_PRINTING_TRANSMITTAL_PLAN_2026-07-16.md). These foundations ensure Phase 1B payment actions are attributable and can flow into a stable operator workflow.
 
 **Status:** Active source of truth for post-July 2026 planning
 **Created:** 2026-07-11

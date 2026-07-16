@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle } from 'lucide-react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
 import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { UserActivityPanel } from '@/components/users/UserActivityPanel';
 
 const roleOptions: { value: UserRole; label: string; description: string }[] = [
   { value: 'admin', label: 'Admin', description: 'Full access to all payroll clients, user management, tax config, and audit logs' },
@@ -61,6 +62,7 @@ export function Users() {
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [activityUser, setActivityUser] = useState<User | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -502,10 +504,11 @@ export function Users() {
                           )}
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Role" value={roleOptions.find((role) => role.value === user.role)?.label || user.role} />
-                            <MobileField label="Last login" value={user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : '—'} />
+                            <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
                           <MobileCardActions>
+                            <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
                             {user.invitation_pending && (
                               <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
@@ -539,7 +542,7 @@ export function Users() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Last Login</TableHead>
+                  <TableHead>Last Active</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -587,7 +590,7 @@ export function Users() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.last_login_at ? new Date(user.last_login_at).toLocaleString() : '\u2014'}
+                        {user.last_active_at ? new Date(user.last_active_at).toLocaleString() : '\u2014'}
                       </TableCell>
                       <TableCell className="text-right">
                         {editingId === user.id ? (
@@ -602,6 +605,7 @@ export function Users() {
                           </div>
                         ) : (
                           <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
                             <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
                             {user.invitation_pending && (
                               <Button
@@ -677,6 +681,7 @@ export function Users() {
           </>
         )}
       </div>
+      {activityUser && <UserActivityPanel user={activityUser} onClose={() => setActivityUser(null)} />}
     </div>
   );
 }

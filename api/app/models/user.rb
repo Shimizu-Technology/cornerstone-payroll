@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+
 class User < ApplicationRecord
   INVITATION_STATUSES = %w[pending accepted].freeze
 
@@ -30,6 +32,28 @@ class User < ApplicationRecord
   before_validation :default_organization_from_company
 
   scope :active, -> { where(active: true) }
+
+  ACTIVITY_WRITE_INTERVAL = 5.minutes
+
+  def record_authenticated_activity!(session_id: nil, occurred_at: Time.current)
+    session_digest = session_id.present? ? Digest::SHA256.hexdigest(session_id.to_s) : nil
+    new_session = session_digest.present? && session_digest != last_session_id_digest
+
+    updates = {}
+    if new_session
+      updates[:last_session_id_digest] = session_digest
+      updates[:last_login_at] = occurred_at
+    end
+    if last_active_at.blank? || last_active_at < occurred_at - ACTIVITY_WRITE_INTERVAL
+      updates[:last_active_at] = occurred_at
+    end
+
+    return false if updates.empty?
+
+    self.class.where(id: id).update_all(updates)
+    assign_attributes(updates)
+    new_session
+  end
 
   def invitation_pending?
     invitation_status == "pending"
@@ -79,7 +103,7 @@ class User < ApplicationRecord
           # companies (falling back to their home company when none exist yet).
           assigned_ids.presence || Array(company_id)
         else
-          ([company_id] + assigned_ids).uniq
+          ([ company_id ] + assigned_ids).uniq
         end
       end
     end

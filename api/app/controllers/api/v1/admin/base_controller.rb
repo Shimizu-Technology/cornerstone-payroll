@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class BaseController < ApplicationController
+        include Auditable
+
         before_action :require_staff_access!
         before_action :enforce_company_access!
 

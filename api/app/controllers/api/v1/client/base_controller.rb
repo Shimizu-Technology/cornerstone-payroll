@@ -4,6 +4,8 @@ module Api
   module V1
     module Client
       class BaseController < ApplicationController
+        include Auditable
+
         before_action :require_client_portal_access!
         before_action :enforce_company_access!
 

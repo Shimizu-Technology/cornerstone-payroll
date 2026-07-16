@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -32,17 +32,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
 
   create_table "audit_logs", force: :cascade do |t|
     t.string "action", null: false
+    t.string "actor_email"
+    t.string "actor_name"
+    t.string "actor_role"
     t.bigint "company_id"
     t.datetime "created_at", null: false
+    t.string "event_category", default: "activity", null: false
     t.string "ip_address"
     t.jsonb "metadata", default: {}, null: false
+    t.bigint "organization_id"
     t.bigint "record_id"
     t.string "record_type"
+    t.string "request_id"
+    t.string "subject_name"
     t.string "user_agent"
     t.bigint "user_id"
     t.index ["company_id"], name: "index_audit_logs_on_company_id"
     t.index ["created_at"], name: "index_audit_logs_on_created_at"
+    t.index ["organization_id", "created_at", "id"], name: "idx_audit_logs_org_history"
+    t.index ["organization_id", "record_type", "record_id"], name: "idx_audit_logs_org_subject"
+    t.index ["organization_id"], name: "index_audit_logs_on_organization_id"
     t.index ["record_type", "record_id"], name: "index_audit_logs_on_record_type_and_record_id"
+    t.index ["request_id"], name: "index_audit_logs_on_request_id"
     t.index ["user_id"], name: "index_audit_logs_on_user_id"
   end
 
@@ -540,7 +551,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["organization_id"], name: "index_invoice_artifacts_on_organization_id"
     t.index ["storage_key"], name: "index_invoice_artifacts_on_storage_key", unique: true
     t.check_constraint "byte_size >= 0", name: "check_invoice_artifacts_byte_size"
-    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying, 'imported_original'::character varying, 'legacy_snapshot'::character varying, 'credit_note'::character varying, 'payment_receipt'::character varying]::text[])", name: "check_invoice_artifacts_kind"
+    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying::text, 'imported_original'::character varying::text, 'legacy_snapshot'::character varying::text, 'credit_note'::character varying::text, 'payment_receipt'::character varying::text])", name: "check_invoice_artifacts_kind"
   end
 
   create_table "invoice_billing_profiles", force: :cascade do |t|
@@ -626,7 +637,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["organization_id", "credit_number"], name: "idx_invoice_credit_notes_unique_number", unique: true
     t.index ["organization_id"], name: "index_invoice_credit_notes_on_organization_id"
     t.index ["voided_by_id"], name: "index_invoice_credit_notes_on_voided_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying, 'voided'::character varying]::text[])", name: "check_invoice_credit_notes_status"
+    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying::text, 'voided'::character varying::text])", name: "check_invoice_credit_notes_status"
     t.check_constraint "total_amount > 0::numeric", name: "check_invoice_credit_notes_positive_amount"
   end
 
@@ -647,7 +658,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["invoice_id"], name: "index_invoice_deliveries_on_invoice_id"
     t.index ["organization_id"], name: "index_invoice_deliveries_on_organization_id"
     t.index ["recorded_by_id"], name: "index_invoice_deliveries_on_recorded_by_id"
-    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying, 'mail'::character varying, 'hand_delivery'::character varying, 'portal'::character varying, 'other'::character varying]::text[])", name: "check_invoice_deliveries_channel"
+    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying::text, 'mail'::character varying::text, 'hand_delivery'::character varying::text, 'portal'::character varying::text, 'other'::character varying::text])", name: "check_invoice_deliveries_channel"
   end
 
   create_table "invoice_events", force: :cascade do |t|
@@ -713,7 +724,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["recorded_by_id"], name: "index_invoice_payments_on_recorded_by_id"
     t.index ["reversed_by_id"], name: "index_invoice_payments_on_reversed_by_id"
     t.check_constraint "amount > 0::numeric", name: "check_invoice_payments_positive_amount"
-    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'adjustment'::character varying, 'legacy'::character varying, 'other'::character varying]::text[])", name: "check_invoice_payments_method"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying::text, 'check'::character varying::text, 'ach'::character varying::text, 'card'::character varying::text, 'wire'::character varying::text, 'adjustment'::character varying::text, 'legacy'::character varying::text, 'other'::character varying::text])", name: "check_invoice_payments_method"
     t.check_constraint "reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL OR reversed_at IS NOT NULL AND reversal_reason IS NOT NULL", name: "check_invoice_payments_reversal_fields"
   end
 
@@ -784,8 +795,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying, 'imported'::character varying]::text[])", name: "check_invoices_origin"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'open'::character varying, 'voided'::character varying, 'uncollectible'::character varying]::text[])", name: "check_invoices_status"
+    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying::text, 'imported'::character varying::text])", name: "check_invoices_origin"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'open'::character varying::text, 'voided'::character varying::text, 'uncollectible'::character varying::text])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -1729,7 +1740,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.string "invitation_status", default: "accepted", null: false
     t.datetime "invited_at"
     t.bigint "invited_by_id"
+    t.datetime "last_active_at"
     t.datetime "last_login_at"
+    t.string "last_session_id_digest"
     t.string "name", null: false
     t.bigint "organization_id", null: false
     t.integer "role", default: 0, null: false
@@ -1761,6 +1774,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
   end
 
   add_foreign_key "audit_logs", "companies"
+  add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
   add_foreign_key "cable_connection_tickets", "companies"
   add_foreign_key "cable_connection_tickets", "users"

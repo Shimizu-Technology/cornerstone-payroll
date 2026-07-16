@@ -149,6 +149,9 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         include("id" => client_company.id, "name" => client_company.name),
         include("id" => other_company.id, "name" => other_company.name)
       ])
+      audit = AuditLog.find_by!(action: "users#created", record_id: created_user.id)
+      expect(audit).to have_attributes(subject_name: "New Accountant", actor_name: admin_user.name, organization_id: organization.id)
+      expect(audit.metadata.fetch("after_values")).to include("email" => "new-accountant@example.com", "role" => "accountant")
     end
 
     it "returns validation errors without persisting a user" do
@@ -210,6 +213,8 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           "name" => other_company.name
         }
       ])
+      audit = AuditLog.find_by!(action: "users#updated", record_id: managed_user.id)
+      expect(audit.metadata.fetch("changed_fields")).to include("name", "role", "assigned_company_ids")
     end
 
     it "clears stale client assignments when the role no longer uses them" do

@@ -3,7 +3,50 @@
 class ApplicationController < ActionController::API
   include ClerkAuthenticatable
 
+  around_action :reset_current_context, prepend: true
+  before_action :set_current_context
+  before_action :track_authenticated_user_activity
+
   private
+
+  def reset_current_context
+    yield
+  ensure
+    Current.reset
+  end
+
+  def set_current_context
+    authenticated_user = current_user
+    Current.user = authenticated_user if authenticated_user.is_a?(User)
+    Current.organization_id = authenticated_user.organization_id if authenticated_user.is_a?(User)
+    Current.company_id = current_company_id if authenticated_user.is_a?(User)
+    Current.request_id = request.request_id
+    Current.ip_address = request.remote_ip
+    Current.user_agent = request.user_agent
+  end
+
+  def track_authenticated_user_activity
+    return unless current_user.is_a?(User)
+
+    new_session = current_user.record_authenticated_activity!(
+      session_id: @clerk_token_payload&.fetch("sid", nil)
+    )
+    return unless new_session
+
+    AuditLog.record!(
+      user: current_user,
+      organization_id: current_user.organization_id,
+      company_id: nil,
+      action: "authentication#signed_in",
+      record_type: "users",
+      record_id: current_user.id,
+      subject_name: current_user.name,
+      metadata: { source: "clerk_session" },
+      event_category: "security"
+    )
+  rescue ActiveRecord::ActiveRecordError => e
+    Rails.logger.warn("[UserActivity] Failed to record activity for user=#{current_user&.id}: #{e.message}")
+  end
 
   def auth_disabled?
     return false if Rails.env.production?
