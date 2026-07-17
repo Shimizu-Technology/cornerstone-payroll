@@ -432,6 +432,26 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(edit.edited_by_id).to eq(admin_user.id)
     end
 
+    it "publishes the same exact before and after values to the organization audit log" do
+      expect {
+        patch "/api/v1/admin/non_employee_checks/#{check.id}",
+          params: {
+            non_employee_check: { check_number: "2469" },
+            reason: "Actual non-employee check stock used"
+          },
+          as: :json
+      }.to change { AuditLog.where(action: "non_employee_checks#updated").count }.by(1)
+
+      log = AuditLog.where(action: "non_employee_checks#updated").last
+      expect(log.subject_name).to eq("Island Vendor")
+      expect(log.metadata).to include(
+        "changed_fields" => [ "check_number" ],
+        "before_values" => { "check_number" => nil },
+        "after_values" => { "check_number" => "2469" },
+        "reason" => "Actual non-employee check stock used"
+      )
+    end
+
     it "does not create an audit entry when no audited fields actually change" do
       expect {
         patch "/api/v1/admin/non_employee_checks/#{check.id}",

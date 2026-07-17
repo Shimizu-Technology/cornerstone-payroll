@@ -126,6 +126,7 @@ module Api
           # (and static analysis). We do all the writes atomically and then
           # render based on the outcome once we're back at the controller scope.
           updated = false
+          changed = []
           ActiveRecord::Base.transaction do
             if attrs.key?("check_number")
               @check.company.lock!
@@ -156,6 +157,14 @@ module Api
                 sync_transmittal_check_number!(@check)
               end
 
+              record_non_employee_check_audit!(
+                check: @check,
+                before_snapshot: before_snapshot,
+                after_snapshot: after_snapshot,
+                changed: changed,
+                reason: reason
+              ) if changed.any?
+
               updated = true
             else
               raise ActiveRecord::Rollback
@@ -165,6 +174,8 @@ module Api
           unless updated
             return render json: { errors: @check.errors.full_messages }, status: :unprocessable_entity
           end
+
+          skip_default_audit_log!
 
           # Reset the edits association so the freshly-created edit (or no-op)
           # is reflected in `edit_count` without issuing a second COUNT query.
@@ -593,6 +604,28 @@ module Api
           AUDITED_FIELDS.select do |field|
             normalize_for_diff(field, before[field]) != normalize_for_diff(field, after[field])
           end
+        end
+
+        def record_non_employee_check_audit!(check:, before_snapshot:, after_snapshot:, changed:, reason:)
+          AuditLog.record!(
+            user: current_user,
+            organization_id: check.company.organization_id,
+            company_id: check.company_id,
+            action: "non_employee_checks#updated",
+            record_type: "non_employee_checks",
+            record_id: check.id,
+            subject_name: check.payable_to,
+            metadata: {
+              changed_fields: changed,
+              before_values: before_snapshot.slice(*changed),
+              after_values: after_snapshot.slice(*changed),
+              reason: reason
+            }.compact,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent,
+            request_id: request.request_id,
+            event_category: "activity"
+          )
         end
 
         def normalize_for_diff(field, value)

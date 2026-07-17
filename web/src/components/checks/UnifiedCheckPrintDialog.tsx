@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Maximize2, Printer, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { checksApi } from '@/services/api';
+import { checksApi, nonEmployeeChecksApi } from '@/services/api';
 import type { CheckPrintQueueItem, CheckPrintQueueResponse, CheckPrintRun } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { InlineCheckNumberField } from './InlineCheckNumberField';
 
 interface UnifiedCheckPrintDialogProps {
   open: boolean;
@@ -44,6 +45,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [numberSavingKeys, setNumberSavingKeys] = useState<Set<string>>(new Set());
+  const compactPreviewRef = useRef<HTMLIFrameElement>(null);
+  const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
 
   const revokePreview = useCallback(() => {
     setPreviewUrl((url) => {
@@ -52,13 +56,21 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     });
   }, []);
 
-  const loadQueue = useCallback(async () => {
+  const loadQueue = useCallback(async (options?: { preserveSelection?: boolean; selectKey?: string }) => {
     setLoading(true);
     setError(null);
     try {
       const data = await checksApi.printQueue(payPeriodId);
       setQueue(data);
-      setSelected(new Set(data.items.filter((item) => item.eligible && item.status === 'unprinted').map((item) => item.key)));
+      setSelected((current) => {
+        const eligibleUnprinted = data.items.filter((item) => item.eligible && item.status === 'unprinted');
+        if (!options?.preserveSelection) return new Set(eligibleUnprinted.map((item) => item.key));
+
+        const eligibleKeys = new Set(eligibleUnprinted.map((item) => item.key));
+        const next = new Set(Array.from(current).filter((key) => eligibleKeys.has(key)));
+        if (options.selectKey && eligibleKeys.has(options.selectKey)) next.add(options.selectKey);
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load the check queue.');
     } finally {
@@ -107,6 +119,25 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     visibleItems.filter((item) => item.eligible).forEach((item) => next.add(item.key));
     return next;
   });
+
+  const saveCheckNumber = async (item: CheckPrintQueueItem, value: string | null) => {
+    if (!value) throw new Error('Enter a check number before printing.');
+    setNumberSavingKeys((current) => new Set(current).add(item.key));
+    try {
+      if (item.source_type === 'payroll_item') {
+        await checksApi.updateCheckNumber(item.source_id, value, 'Updated while preparing a check print package');
+      } else {
+        await nonEmployeeChecksApi.updateCheckNumber(item.source_id, value, 'Updated while preparing a check print package');
+      }
+      await loadQueue({ preserveSelection: true, selectKey: item.key });
+    } finally {
+      setNumberSavingKeys((current) => {
+        const next = new Set(current);
+        next.delete(item.key);
+        return next;
+      });
+    }
+  };
 
   const loadPreview = async (printRun: CheckPrintRun) => {
     setAction('Loading and verifying the generated PDF…');
@@ -166,13 +197,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const print = () => {
-    if (!previewUrl) return;
-    const frame = document.createElement('iframe');
-    frame.style.display = 'none';
-    frame.src = previewUrl;
-    frame.onload = () => frame.contentWindow?.print();
-    document.body.appendChild(frame);
-    setTimeout(() => frame.remove(), 60_000);
+    const frame = previewExpanded ? expandedPreviewRef.current : compactPreviewRef.current;
+    frame?.contentWindow?.print();
   };
 
   const confirm = async () => {
@@ -180,10 +206,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     setAction('Recording print confirmation…');
     setError(null);
     try {
-      await checksApi.confirmPrintRun(run.id);
+      const response = await checksApi.confirmPrintRun(run.id);
       onConfirmed();
       await loadQueue();
-      setRun((current) => current ? { ...current, status: 'confirmed', confirmed_at: new Date().toISOString() } : current);
+      setRun(response.check_print_run);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not confirm the print run.');
     } finally {
@@ -227,6 +253,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
               </div>
             </div>
 
+            <p className="mb-3 text-xs text-slate-500">
+              Edit check numbers in place. Press Enter or move to another field to save.
+            </p>
+
             {loading ? <div className="py-16 text-center text-sm text-slate-500">Loading check queue…</div> : (
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm">
@@ -235,8 +265,13 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     {visibleItems.map((item) => (
                       <tr key={item.key} className={selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}>
                         <td className="p-3"><input type="checkbox" checked={selected.has(item.key)} disabled={!item.eligible || Boolean(run)} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} /></td>
-                        <td className="p-3 font-mono font-semibold text-slate-900">
-                          {item.check_number ? `#${item.check_number}` : <span className="font-sans text-xs text-amber-700">Not assigned</span>}
+                        <td className="p-3 text-slate-900">
+                          <InlineCheckNumberField
+                            value={item.check_number}
+                            ariaLabel={`Check number for ${item.payee}`}
+                            disabled={Boolean(run) || item.status === 'voided'}
+                            onSave={(value) => saveCheckNumber(item, value)}
+                          />
                         </td>
                         <td className="p-3"><div className="font-medium text-slate-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
                         <td className="p-3 text-slate-600">{item.kind_label}</td>
@@ -285,7 +320,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                   </div>
                 </div>
                 {previewUrl ? (
-                  <iframe title="Check package preview" src={previewUrl} className="h-80 w-full bg-slate-900" />
+                  <iframe ref={compactPreviewRef} title="Check package preview" src={previewUrl} className="h-80 w-full bg-slate-900" />
                 ) : (
                   <div className="border-b border-slate-100 px-4 py-8 text-center">
                     <p className="text-sm text-slate-600">Preview unavailable. Reload and verify the exact package before confirming it.</p>
@@ -302,7 +337,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
         <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action)}>Generate print package</Button>}
+          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action) || numberSavingKeys.size > 0}>Generate print package</Button>}
           {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
           </DialogFooter>
         </DialogContent>
@@ -327,6 +362,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
           {previewUrl && (
             <iframe
+              ref={expandedPreviewRef}
               title="Expanded check package preview"
               src={previewUrl}
               className="min-h-0 w-full flex-1 bg-slate-900"

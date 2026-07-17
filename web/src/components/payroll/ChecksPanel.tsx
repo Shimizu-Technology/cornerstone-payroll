@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
+import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
@@ -68,9 +69,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchAction, setBatchAction] = useState<string | null>(null);
   const [startingSlot, setStartingSlot] = useState(1);
-  const [editingCheckId, setEditingCheckId] = useState<number | null>(null);
-  const [draftCheckNumber, setDraftCheckNumber] = useState('');
-  const [checkNumberError, setCheckNumberError] = useState<{ id: number; message: string } | null>(null);
   const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
 
   // Modal state
@@ -237,35 +235,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
-  const startCheckNumberEdit = (item: CheckItem) => {
-    setEditingCheckId(item.id);
-    setDraftCheckNumber(item.check_number || '');
-    setCheckNumberError(null);
-  };
-
-  const cancelCheckNumberEdit = () => {
-    setEditingCheckId(null);
-    setDraftCheckNumber('');
-    setCheckNumberError(null);
-  };
-
-  const handleSaveCheckNumber = async (item: CheckItem) => {
-    const nextNumber = draftCheckNumber.trim();
-    if (!nextNumber) {
-      setCheckNumberError({ id: item.id, message: 'Enter a check number.' });
-      return;
-    }
-    if (!/^\d+$/.test(nextNumber)) {
-      setCheckNumberError({ id: item.id, message: 'Check number must be numeric.' });
-      return;
-    }
-    if (nextNumber === item.check_number) {
-      cancelCheckNumberEdit();
-      return;
-    }
-
+  const handleSaveCheckNumber = async (item: CheckItem, nextNumber: string | null) => {
+    if (!nextNumber) throw new Error('Enter a check number.');
     setActionLoading({ id: item.id, action: 'saveCheckNumber' });
-    setCheckNumberError(null);
     try {
       const result = await checksApi.updateCheckNumber(
         item.id,
@@ -278,12 +250,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       setPreviewItem((current) =>
         current?.id === item.id ? result.payroll_item : current
       );
-      cancelCheckNumberEdit();
-    } catch (err) {
-      setCheckNumberError({
-        id: item.id,
-        message: err instanceof Error ? err.message : 'Failed to update check number',
-      });
     } finally {
       setActionLoading(null);
     }
@@ -491,8 +457,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     {checkStatusBadge(item)}
                   </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <MobileField label="Check #" value={item.check_number || '—'} />
+                  <div className="mt-4 grid grid-cols-1 gap-3">
                     <MobileField label="Net pay" value={formatCurrency(item.net_pay)} />
                   </div>
 
@@ -511,38 +476,15 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     </div>
                   )}
 
-                  {editingCheckId === item.id ? (
-                    <div className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50 p-3">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={draftCheckNumber}
-                        onChange={(e) => setDraftCheckNumber(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveCheckNumber(item);
-                          if (e.key === 'Escape') cancelCheckNumberEdit();
-                        }}
-                        className="h-11 w-full rounded-xl border border-blue-300 px-3 font-mono text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                        autoFocus
+                  {!item.voided && item.check_number && (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="mb-2 text-xs font-medium text-slate-500">Check number</p>
+                      <InlineCheckNumberField
+                        value={item.check_number}
+                        ariaLabel={`Check number for ${item.employee_name}`}
+                        onSave={(value) => handleSaveCheckNumber(item, value)}
                       />
-                      {checkNumberError?.id === item.id && (
-                        <p className="text-xs font-normal text-red-600">{checkNumberError.message}</p>
-                      )}
-                      <MobileCardActions className="mt-0 grid grid-cols-2">
-                        <Button size="sm" onClick={() => handleSaveCheckNumber(item)} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Save</Button>
-                        <Button size="sm" variant="outline" onClick={cancelCheckNumberEdit} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Cancel</Button>
-                      </MobileCardActions>
                     </div>
-                  ) : (
-                    !item.voided && item.check_number && (
-                      <button
-                        type="button"
-                        onClick={() => startCheckNumberEdit(item)}
-                        className="mt-3 text-sm font-semibold text-blue-700"
-                      >
-                        Edit check number
-                      </button>
-                    )
                   )}
 
                   <MobileCardActions className="grid grid-cols-2">
@@ -620,62 +562,22 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     />
                   </td>
                   <td className="px-3 py-2 text-gray-800">
-                    {editingCheckId === item.id ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftCheckNumber}
-                            onChange={(e) => setDraftCheckNumber(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveCheckNumber(item);
-                              if (e.key === 'Escape') cancelCheckNumberEdit();
-                            }}
-                            className="h-8 w-24 rounded border border-blue-300 px-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                            autoFocus
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleSaveCheckNumber(item)}
-                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
-                            className="h-8 px-2 text-xs"
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={cancelCheckNumberEdit}
-                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
-                            className="h-8 px-2 text-xs"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                        {checkNumberError?.id === item.id && (
-                          <p className="max-w-xs text-xs font-normal text-red-600">{checkNumberError.message}</p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      {item.voided || !item.check_number ? (
                         <span className="font-mono">{item.check_number || '—'}</span>
-                        {item.reprint_of_check_number && (
-                          <span className="text-xs text-orange-700" title={`Reissued replacement for #${item.reprint_of_check_number}`}>
-                            replaces #{item.reprint_of_check_number}
-                          </span>
-                        )}
-                        {!item.voided && item.check_number && (
-                          <button
-                            type="button"
-                            onClick={() => startCheckNumberEdit(item)}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </div>
-                    )}
+                      ) : (
+                        <InlineCheckNumberField
+                          value={item.check_number}
+                          ariaLabel={`Check number for ${item.employee_name}`}
+                          onSave={(value) => handleSaveCheckNumber(item, value)}
+                        />
+                      )}
+                      {item.reprint_of_check_number && (
+                        <span className="text-xs text-orange-700" title={`Reissued replacement for #${item.reprint_of_check_number}`}>
+                          replaces #{item.reprint_of_check_number}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-gray-900">
                     <div className="space-y-0.5">
