@@ -47,12 +47,15 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps) {
 
   useEffect(() => {
     void loadPage(1);
+  }, [loadPage]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [loadPage, onClose]);
+  }, [onClose]);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-neutral-950/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-label={`Activity for ${user.name}`}>

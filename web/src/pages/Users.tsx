@@ -63,6 +63,7 @@ export function Users() {
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [activityUser, setActivityUser] = useState<User | null>(null);
+  const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -681,7 +682,7 @@ export function Users() {
           </>
         )}
       </div>
-      {activityUser && <UserActivityPanel user={activityUser} onClose={() => setActivityUser(null)} />}
+      {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}
     </div>
   );
 }
