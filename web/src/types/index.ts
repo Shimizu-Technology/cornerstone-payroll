@@ -59,6 +59,7 @@ export interface User {
   invited_by_name?: string | null;
   last_login_at?: string | null;
   last_active_at?: string | null;
+  platform_owner?: boolean;
   created_at: string;
   updated_at: string;
 }

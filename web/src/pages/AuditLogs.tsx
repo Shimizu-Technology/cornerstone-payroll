@@ -15,7 +15,7 @@ import { auditLogsApi, usersApi } from '@/services/api';
 import type { AuditLogEntry } from '@/services/api';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowDownUp, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
@@ -41,6 +41,10 @@ function formatAction(action: string) {
   const [area, verb] = action.split('#');
   const cleanedArea = area.replace(/^client_/, 'client ').replace(/^admin_/, 'admin ').replace(/\//g, ' ').replace(/_/g, ' ');
   return `${humanizeKey(cleanedArea)} ${verb ? verb.replace(/_/g, ' ') : ''}`.trim();
+}
+
+function displayAction(log: AuditLogEntry) {
+  return log.display_action || formatAction(log.action);
 }
 
 function formatValue(value: unknown): string {
@@ -133,8 +137,10 @@ export function AuditLogs() {
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = result.filename || 'audit-history.csv';
+      document.body.appendChild(anchor);
       anchor.click();
-      URL.revokeObjectURL(url);
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to export audit history');
     } finally {
@@ -165,7 +171,10 @@ export function AuditLogs() {
   );
 
   const changedFields = Array.isArray(selectedLog?.metadata?.changed_fields)
-    ? selectedLog.metadata.changed_fields.filter((field): field is string => typeof field === 'string')
+    ? selectedLog.metadata.changed_fields.filter((field): field is string => typeof field === 'string' && field !== 'id')
+    : [];
+  const redactedFields = Array.isArray(selectedLog?.metadata?.redacted_fields)
+    ? selectedLog.metadata.redacted_fields.filter((field): field is string => typeof field === 'string')
     : [];
 
   const beforeValues = (selectedLog?.metadata?.before_values as Record<string, unknown> | undefined) || {};
@@ -274,13 +283,13 @@ export function AuditLogs() {
                     tone={selectedLogId === log.id ? 'primary' : 'default'}
                     onClick={() => setSelectedLogId(log.id)}
                   >
-                    <p className="font-semibold text-neutral-950">{formatAction(log.action)}</p>
+                    <p className="font-semibold text-neutral-950">{displayAction(log)}</p>
                     <p className="mt-1 text-sm text-neutral-500">
                       {log.user_name || 'System'} • {new Date(log.created_at).toLocaleString()}
                     </p>
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MobileField label="Record" value={`${humanizeKey(log.record_type || 'General')}${log.record_id ? ` #${log.record_id}` : ''}`} />
-                      <MobileField label="IP" value={log.ip_address || '—'} />
+                      <MobileField label="Affected record" value={log.display_subject || log.subject_name || humanizeKey(log.record_type || 'General')} />
+                      <MobileField label="Client" value={log.company_name || 'Organization-wide'} />
                     </div>
                   </MobileRecordCard>
                 ))}
@@ -291,9 +300,9 @@ export function AuditLogs() {
                   <TableRow>
                     <TableHead>Time</TableHead>
                     <TableHead>User</TableHead>
-                    <TableHead>Action</TableHead>
-                    <TableHead>Record</TableHead>
-                    <TableHead>IP</TableHead>
+                    <TableHead>Activity</TableHead>
+                    <TableHead>Affected record</TableHead>
+                    <TableHead>Client</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -305,12 +314,9 @@ export function AuditLogs() {
                     >
                       <TableCell>{new Date(log.created_at).toLocaleString()}</TableCell>
                       <TableCell>{log.user_name || 'System'}</TableCell>
-                      <TableCell>{formatAction(log.action)}</TableCell>
-                      <TableCell>
-                        {humanizeKey(log.record_type || 'General')}
-                        {log.record_id ? ` #${log.record_id}` : ''}
-                      </TableCell>
-                      <TableCell>{log.ip_address || '—'}</TableCell>
+                      <TableCell className="font-medium text-neutral-900">{displayAction(log)}</TableCell>
+                      <TableCell>{log.display_subject || log.subject_name || humanizeKey(log.record_type || 'General')}</TableCell>
+                      <TableCell>{log.company_name || 'Organization-wide'}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -339,7 +345,7 @@ export function AuditLogs() {
                 {selectedLog ? (
                   <>
                     <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-4">
-                      <p className="text-lg font-semibold text-neutral-900">{formatAction(selectedLog.action)}</p>
+                      <p className="text-lg font-semibold text-neutral-900">{displayAction(selectedLog)}</p>
                       <p className="mt-1 text-sm text-neutral-500">
                         {selectedLog.user_name || 'System'} • {new Date(selectedLog.created_at).toLocaleString()}
                       </p>
@@ -348,29 +354,10 @@ export function AuditLogs() {
                     <DetailList
                       rows={[
                         ['Person', selectedLog.user_name || 'System'],
-                        ['Actor email', selectedLog.actor_email || '—'],
-                        ['Role', selectedLog.actor_role ? humanizeKey(selectedLog.actor_role) : '—'],
-                        ['Record', `${humanizeKey(selectedLog.record_type || 'General')}${selectedLog.record_id ? ` #${selectedLog.record_id}` : ''}`],
-                        ['Subject', selectedLog.subject_name || '—'],
+                        ['Affected record', selectedLog.display_subject || selectedLog.subject_name || humanizeKey(selectedLog.record_type || 'General')],
                         ['Client', selectedLog.company_name || 'Organization-wide'],
-                        ['Source', formatValue(selectedLog.metadata?.source)],
-                        ['Address', selectedLog.ip_address || '—'],
                       ]}
                     />
-
-                    {detailEntries.length > 0 ? (
-                      <div>
-                        <p className="text-sm font-medium text-neutral-900">Details</p>
-                        <div className="mt-3 space-y-3">
-                          {detailEntries.map(([key, value]) => (
-                            <div key={key} className="rounded-xl border border-neutral-200 px-4 py-3">
-                              <p className="text-sm font-medium text-neutral-900">{humanizeKey(key)}</p>
-                              <p className="mt-1 whitespace-pre-wrap text-sm text-neutral-600">{formatValue(value)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
 
                     {changedFields.length > 0 ? (
                       <div>
@@ -380,14 +367,51 @@ export function AuditLogs() {
                             <div key={field} className="rounded-2xl border border-neutral-200 bg-white p-4">
                               <p className="text-sm font-semibold text-neutral-900">{humanizeKey(field)}</p>
                               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                                <ValueCard label="Before" value={beforeValues[field]} />
-                                <ValueCard label="After" value={afterValues[field]} />
+                                {redactedFields.includes(field) ? (
+                                  <p className="col-span-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                    Sensitive value updated. The original and new values are intentionally never stored in the audit log.
+                                  </p>
+                                ) : (
+                                  <>
+                                    <ValueCard label="Before" value={beforeValues[field]} />
+                                    <ValueCard label="After" value={afterValues[field]} />
+                                  </>
+                                )}
                               </div>
                             </div>
                           ))}
                         </div>
                       </div>
-                    ) : null}
+                    ) : (
+                      <p className="rounded-xl border border-dashed border-neutral-300 px-4 py-3 text-sm text-neutral-500">
+                        Detailed before-and-after values were not captured for this historical activity.
+                      </p>
+                    )}
+
+                    <details className="group rounded-2xl border border-neutral-200 bg-white">
+                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-semibold text-neutral-700">
+                        Advanced technical details
+                        <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                      </summary>
+                      <div className="space-y-3 border-t border-neutral-200 p-4">
+                        <DetailList
+                          rows={[
+                            ['Technical action', selectedLog.action],
+                            ['Actor email', selectedLog.actor_email || '—'],
+                            ['Role', selectedLog.actor_role ? humanizeKey(selectedLog.actor_role) : '—'],
+                            ['Record reference', `${selectedLog.record_type || 'general'}${selectedLog.record_id ? ` #${selectedLog.record_id}` : ''}`],
+                            ['IP address', selectedLog.ip_address || '—'],
+                            ['Request ID', selectedLog.request_id || '—'],
+                          ]}
+                        />
+                        {detailEntries.map(([key, value]) => (
+                          <div key={key} className="rounded-xl border border-neutral-200 px-4 py-3">
+                            <p className="text-sm font-medium text-neutral-900">{humanizeKey(key)}</p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm text-neutral-600">{formatValue(value)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
                   </>
                 ) : (
                   <p className="text-sm text-neutral-500">Select an audit entry to see the full activity details.</p>

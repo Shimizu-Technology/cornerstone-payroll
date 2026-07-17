@@ -40,6 +40,28 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response.parsed_body.fetch("data").pluck("company_id")).to include(company.id, second_company.id)
   end
 
+  it "returns plain-English activity and affected-record labels" do
+    log = AuditLog.record!(
+      user: admin,
+      organization_id: organization.id,
+      company_id: company.id,
+      action: "employees#destroy",
+      record_type: "employees",
+      record_id: 106,
+      subject_name: "Ada Payroll"
+    )
+
+    get "/api/v1/admin/audit_logs", params: { record_id: log.record_id, record_type: "employees" }
+
+    expect(response).to have_http_status(:ok)
+    payload = response.parsed_body.fetch("data").first
+    expect(payload).to include(
+      "display_action" => "Audit Admin terminated Ada Payroll",
+      "display_subject" => "Ada Payroll",
+      "summary" => "Audit Admin terminated Ada Payroll · Audit Client"
+    )
+  end
+
   it "keeps the organization-wide governance history unavailable to scoped staff" do
     %i[manager accountant].each do |role|
       scoped_staff = create(:user, organization: organization, company: company, role: role)

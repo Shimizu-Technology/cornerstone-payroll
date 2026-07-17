@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -551,7 +551,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["organization_id"], name: "index_invoice_artifacts_on_organization_id"
     t.index ["storage_key"], name: "index_invoice_artifacts_on_storage_key", unique: true
     t.check_constraint "byte_size >= 0", name: "check_invoice_artifacts_byte_size"
-    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying::text, 'imported_original'::character varying::text, 'legacy_snapshot'::character varying::text, 'credit_note'::character varying::text, 'payment_receipt'::character varying::text])", name: "check_invoice_artifacts_kind"
+    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying, 'imported_original'::character varying, 'legacy_snapshot'::character varying, 'credit_note'::character varying, 'payment_receipt'::character varying]::text[])", name: "check_invoice_artifacts_kind"
   end
 
   create_table "invoice_billing_profiles", force: :cascade do |t|
@@ -637,7 +637,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["organization_id", "credit_number"], name: "idx_invoice_credit_notes_unique_number", unique: true
     t.index ["organization_id"], name: "index_invoice_credit_notes_on_organization_id"
     t.index ["voided_by_id"], name: "index_invoice_credit_notes_on_voided_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying::text, 'voided'::character varying::text])", name: "check_invoice_credit_notes_status"
+    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying, 'voided'::character varying]::text[])", name: "check_invoice_credit_notes_status"
     t.check_constraint "total_amount > 0::numeric", name: "check_invoice_credit_notes_positive_amount"
   end
 
@@ -658,7 +658,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["invoice_id"], name: "index_invoice_deliveries_on_invoice_id"
     t.index ["organization_id"], name: "index_invoice_deliveries_on_organization_id"
     t.index ["recorded_by_id"], name: "index_invoice_deliveries_on_recorded_by_id"
-    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying::text, 'mail'::character varying::text, 'hand_delivery'::character varying::text, 'portal'::character varying::text, 'other'::character varying::text])", name: "check_invoice_deliveries_channel"
+    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying, 'mail'::character varying, 'hand_delivery'::character varying, 'portal'::character varying, 'other'::character varying]::text[])", name: "check_invoice_deliveries_channel"
   end
 
   create_table "invoice_events", force: :cascade do |t|
@@ -724,7 +724,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["recorded_by_id"], name: "index_invoice_payments_on_recorded_by_id"
     t.index ["reversed_by_id"], name: "index_invoice_payments_on_reversed_by_id"
     t.check_constraint "amount > 0::numeric", name: "check_invoice_payments_positive_amount"
-    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying::text, 'check'::character varying::text, 'ach'::character varying::text, 'card'::character varying::text, 'wire'::character varying::text, 'adjustment'::character varying::text, 'legacy'::character varying::text, 'other'::character varying::text])", name: "check_invoice_payments_method"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'adjustment'::character varying, 'legacy'::character varying, 'other'::character varying]::text[])", name: "check_invoice_payments_method"
     t.check_constraint "reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL OR reversed_at IS NOT NULL AND reversal_reason IS NOT NULL", name: "check_invoice_payments_reversal_fields"
   end
 
@@ -795,8 +795,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying::text, 'imported'::character varying::text])", name: "check_invoices_origin"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'open'::character varying::text, 'voided'::character varying::text, 'uncollectible'::character varying::text])", name: "check_invoices_status"
+    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying, 'imported'::character varying]::text[])", name: "check_invoices_origin"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'open'::character varying, 'voided'::character varying, 'uncollectible'::character varying]::text[])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -1745,6 +1745,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.string "last_session_id_digest"
     t.string "name", null: false
     t.bigint "organization_id", null: false
+    t.boolean "platform_owner", default: false, null: false
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
@@ -1752,7 +1753,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_100000) do
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["organization_id"], name: "index_users_on_organization_id"
+    t.index ["platform_owner"], name: "index_users_on_single_platform_owner", unique: true, where: "(platform_owner = true)"
     t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
+    t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
   end
 
   create_table "w2_filing_readinesses", force: :cascade do |t|

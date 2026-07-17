@@ -186,6 +186,19 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.fetch("error")).to eq("Cannot assign that role")
     end
+
+
+    it "allows a super admin to create another super admin" do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin_user.id)
+
+      post "/api/v1/admin/users", params: {
+        user: { email: "second-super-admin@example.com", name: "Second Super Admin", role: "super_admin" }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(User.find(response.parsed_body.dig("data", "id"))).to be_super_admin
+    end
   end
 
   describe "PATCH /api/v1/admin/users/:id" do
@@ -374,6 +387,43 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(document.reload.uploaded_by_id).to be_nil
       expect(invitation.reload.invited_by_id).to be_nil
       expect(change_request.reload.requested_by_id).to be_nil
+    end
+  end
+
+  describe "primary platform owner protection" do
+    let!(:platform_owner) do
+      User.create!(
+        company: company,
+        organization: organization,
+        email: User::PRIMARY_PLATFORM_OWNER_EMAIL,
+        name: "Leon",
+        role: "super_admin",
+        active: true,
+        platform_owner: true
+      )
+    end
+
+    before do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin_user.id)
+    end
+
+    it "identifies the owner and refuses role, status, or deletion mutations" do
+      get "/api/v1/admin/users/#{platform_owner.id}"
+      expect(response.parsed_body.dig("data", "platform_owner")).to be(true)
+
+      patch "/api/v1/admin/users/#{platform_owner.id}", params: { user: { role: "admin" } }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      post "/api/v1/admin/users/#{platform_owner.id}/deactivate"
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      expect {
+        delete "/api/v1/admin/users/#{platform_owner.id}"
+      }.not_to change(User, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(platform_owner.reload).to be_super_admin
+      expect(platform_owner).to be_active
     end
   end
 

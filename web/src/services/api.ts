@@ -636,6 +636,9 @@ export const organizationsApi = {
 export interface AuditLogEntry {
   id: number;
   action: string;
+  display_action: string;
+  display_subject: string;
+  summary: string;
   record_type: string | null;
   record_id: number | null;
   user_id: number | null;

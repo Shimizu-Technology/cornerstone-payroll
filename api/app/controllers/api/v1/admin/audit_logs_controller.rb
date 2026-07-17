@@ -33,30 +33,11 @@ module Api
         end
 
         def export
-          logs = ordered(filtered_scope).includes(:user, :company, :organization)
-          csv = CSV.generate(headers: true) do |rows|
-            rows << [ "Time", "Actor", "Actor email", "Role", "Action", "Category", "Subject", "Record type", "Record ID", "Organization", "Company", "IP address", "Request ID", "Details" ]
-            logs.each do |log|
-              rows << [
-                log.created_at&.iso8601,
-                log.actor_name.presence || log.user&.name || "System",
-                log.actor_email.presence || log.user&.email,
-                log.actor_role.presence || log.user&.role,
-                log.action,
-                log.event_category,
-                log.subject_name,
-                log.record_type,
-                log.record_id,
-                log.organization&.name,
-                log.company&.name,
-                log.ip_address,
-                log.request_id,
-                log.metadata.to_json
-              ].map { |value| csv_safe(value) }
-            end
-          end
-
-          send_data csv, filename: "audit-history-#{Time.zone.today.iso8601}.csv", type: "text/csv"
+          scope = filtered_scope.reorder(nil)
+          filename = "audit-history-#{Time.zone.today.iso8601}.csv"
+          response.headers["Content-Type"] = "text/csv; charset=utf-8"
+          response.headers["Content-Disposition"] = %(attachment; filename="#{filename}")
+          self.response_body = audit_csv_stream(scope)
         rescue ArgumentError
           render json: { error: "Invalid date format" }, status: :unprocessable_entity
         end
@@ -115,10 +96,67 @@ module Api
           "'#{value}"
         end
 
+        # Return an iterable response body so even a complete, multi-year
+        # audit export has bounded memory use. The created_at/id cursor keeps
+        # ordering stable when multiple events share a timestamp.
+        def audit_csv_stream(scope)
+          Enumerator.new do |stream|
+            stream << CSV.generate_line([ "Time", "Person", "Activity", "Actor email", "Role", "Category", "Affected record", "Technical action", "Record type", "Record ID", "Organization", "Client", "IP address", "Request ID", "Advanced details" ])
+            cursor = nil
+
+            loop do
+              batch = export_batch(scope, cursor)
+              break if batch.empty?
+
+              batch.each do |log|
+                presenter = AuditLogPresenter.new(log)
+                stream << CSV.generate_line([
+                  log.created_at&.iso8601,
+                  log.actor_name.presence || log.user&.name || "System",
+                  presenter.headline,
+                  log.actor_email.presence || log.user&.email,
+                  log.actor_role.presence || log.user&.role,
+                  log.event_category,
+                  presenter.subject,
+                  log.action,
+                  log.record_type,
+                  log.record_id,
+                  log.organization&.name,
+                  log.company&.name,
+                  log.ip_address,
+                  log.request_id,
+                  log.metadata.to_json
+                ].map { |value| csv_safe(value) })
+              end
+
+              last = batch.last
+              cursor = [ last.created_at, last.id ]
+            end
+          end
+        end
+
+        def export_batch(scope, cursor)
+          relation = scope.includes(:user, :company, :organization)
+          if cursor
+            operator = audit_order == :asc ? ">" : "<"
+            relation = relation.where(
+              "audit_logs.created_at #{operator} :created_at OR (audit_logs.created_at = :created_at AND audit_logs.id #{operator} :id)",
+              created_at: cursor.first,
+              id: cursor.last
+            )
+          end
+
+          ordered(relation).limit(1_000).to_a
+        end
+
         def audit_log_json(log)
+          presenter = AuditLogPresenter.new(log)
           {
             id: log.id,
             action: log.action,
+            display_action: presenter.headline,
+            display_subject: presenter.subject,
+            summary: presenter.summary,
             event_category: log.event_category,
             record_type: log.record_type,
             record_id: log.record_id,

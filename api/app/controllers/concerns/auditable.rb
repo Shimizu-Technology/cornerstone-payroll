@@ -24,7 +24,7 @@ module Auditable
   SAFE_METHODS = %w[GET HEAD OPTIONS].freeze
   SENSITIVE_READ_PATTERN = /(download|export|pdf|print|preview)/i
   FILTERED_PARAM_KEYS = %w[
-    controller action format authenticity_token password password_confirmation
+    controller action format id authenticity_token password password_confirmation
     token access_token refresh_token secret shared_secret ssn ssn_encrypted
     routing_number account_number bank_account ciphertext file upload
   ].freeze
@@ -66,7 +66,11 @@ module Auditable
     end
 
     response_subject = extract_response_subject
+    record = audit_record_for_log
     record_id ||= response_subject&.fetch("id", nil)
+    record_id ||= record&.id
+    changes = AuditRecordSnapshot.changes_for(record)
+    changed_fields = changes[:changed_fields].presence || safe_changed_fields
 
     AuditLog.record!(
       user: current_user,
@@ -75,11 +79,14 @@ module Auditable
       action: action_label,
       record_type: record_type,
       record_id: record_id,
-      subject_name: subject_name_from(response_subject),
+      subject_name: AuditRecordSnapshot.subject_name(record).presence || subject_name_from(response_subject),
       metadata: {
         http_method: request.request_method,
         path: request.path,
-        changed_fields: safe_changed_fields,
+        changed_fields: changed_fields,
+        before_values: changes[:before_values].presence,
+        after_values: changes[:after_values].presence,
+        redacted_fields: changes[:redacted_fields].presence,
         response_status: response.status
       }.compact,
       ip_address: request.remote_ip,
@@ -121,6 +128,12 @@ module Auditable
           .flat_map { |key, value| safe_field_names(key, value) }
           .uniq
           .sort
+  end
+
+  def audit_record_for_log
+    return audit_record if respond_to?(:audit_record, true)
+
+    nil
   end
 
   def safe_field_names(prefix, value)

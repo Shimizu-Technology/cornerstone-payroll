@@ -4,6 +4,7 @@ require "digest"
 
 class User < ApplicationRecord
   INVITATION_STATUSES = %w[pending accepted].freeze
+  PRIMARY_PLATFORM_OWNER_EMAIL = "shimizutechnology@gmail.com"
 
   belongs_to :organization
   belongs_to :company
@@ -28,8 +29,11 @@ class User < ApplicationRecord
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
   validate :company_must_belong_to_organization
+  validate :platform_owner_requirements
+  validate :platform_owner_identity_is_immutable, on: :update
 
   before_validation :default_organization_from_company
+  before_destroy :prevent_platform_owner_destroy
 
   scope :active, -> { where(active: true) }
 
@@ -115,6 +119,30 @@ class User < ApplicationRecord
   end
 
   private
+
+  def platform_owner_requirements
+    return unless platform_owner?
+
+    errors.add(:email, "must remain #{PRIMARY_PLATFORM_OWNER_EMAIL}") unless email.to_s.casecmp?(PRIMARY_PLATFORM_OWNER_EMAIL)
+    errors.add(:role, "must remain Super Admin") unless super_admin?
+    errors.add(:active, "must remain active") unless active?
+  end
+
+  def platform_owner_identity_is_immutable
+    return unless platform_owner_in_database
+
+    errors.add(:email, "cannot be changed for the primary platform owner") if will_save_change_to_email?
+    errors.add(:role, "cannot be changed for the primary platform owner") if will_save_change_to_role?
+    errors.add(:active, "cannot be changed for the primary platform owner") if will_save_change_to_active?
+    errors.add(:platform_owner, "cannot be removed from the primary platform owner") if will_save_change_to_platform_owner?
+  end
+
+  def prevent_platform_owner_destroy
+    return unless platform_owner?
+
+    errors.add(:base, "The primary platform owner cannot be deleted")
+    throw :abort
+  end
 
   def default_organization_from_company
     self.organization ||= company&.organization

@@ -31,6 +31,9 @@ Required behavior:
 - Treat the full audit history as an organization-governance surface: organization administrators see the complete firm history regardless of the currently selected client, while managers and accountants remain excluded from the organization-wide log.
 - Preserve actor name, email, and role snapshots even if the user is later removed.
 - Capture safe before/after values for user-management changes and safe field-name metadata elsewhere.
+- Present activity in plain business language with the affected employee, user, pay period, or client named; keep request paths, HTTP methods, response codes, IP addresses, and request IDs under an advanced technical disclosure.
+- Separate each user's actions performed from changes made to that user's account.
+- Protect one permanent primary platform owner (`shimizutechnology@gmail.com`) at the database and application layers while allowing that owner and other super admins to create additional super admins.
 - Never store passwords, tokens, SSNs, bank-account values, encrypted fields, or uploaded file contents in audit metadata.
 - Make persisted audit records application-read-only.
 - Support full-history pagination, filters, newest/oldest ordering, and CSV export rather than returning only the latest 200 rows.
@@ -50,6 +53,8 @@ Exit criteria:
 - New authenticated sessions and recent activity update the correct fields without writing on every API request.
 - Mutations in controllers that previously lacked `Auditable` coverage create organization-scoped audit events.
 - Administrators can page from the newest audit event to the oldest retained event and export the filtered result.
+- CSV export streams the full filtered history without loading every audit row into application memory.
+- The primary platform owner cannot be demoted, deactivated, deleted, or reassigned, even by another super admin.
 - Organization isolation, authorization, pagination, immutability, and sensitive-field redaction are covered by tests.
 
 ### PR 2 — Unified employee and non-employee check printing

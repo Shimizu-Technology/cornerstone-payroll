@@ -75,4 +75,29 @@ RSpec.describe User, type: :model do
       expect(user.errors[:company]).to include("must belong to the user's organization")
     end
   end
+
+  describe "primary platform owner protection" do
+    let(:company) { create(:company) }
+    let!(:owner) do
+      User.create!(
+        company: company,
+        organization: company.organization,
+        email: User::PRIMARY_PLATFORM_OWNER_EMAIL,
+        name: "Leon",
+        role: "super_admin",
+        active: true,
+        platform_owner: true
+      )
+    end
+
+    it "cannot be demoted, deactivated, unmarked, or destroyed through the model" do
+      owner.assign_attributes(role: "admin", active: false, platform_owner: false)
+      expect(owner).not_to be_valid
+      expect(owner.errors.full_messages.join(" ")).to include("primary platform owner")
+
+      owner.reload
+      expect(owner.destroy).to be(false)
+      expect(User.exists?(owner.id)).to be(true)
+    end
+  end
 end

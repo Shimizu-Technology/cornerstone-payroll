@@ -186,7 +186,8 @@ module ClerkAuthenticatable
         clerk_id: payload["sub"],
         company: company,
         organization: company.organization,
-        role: "admin",
+        role: email.casecmp?(User::PRIMARY_PLATFORM_OWNER_EMAIL) ? "super_admin" : "admin",
+        platform_owner: email.casecmp?(User::PRIMARY_PLATFORM_OWNER_EMAIL),
         invitation_status: "accepted"
       )
     end.tap do |user|

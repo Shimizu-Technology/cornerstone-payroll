@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Activity, Clock3, Loader2, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Activity, Clock3, Loader2, UserRoundCog, X } from 'lucide-react';
 import { auditLogsApi, type AuditLogEntry } from '@/services/api';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -9,43 +9,54 @@ interface UserActivityPanelProps {
   onClose: () => void;
 }
 
-function formatAction(action: string) {
-  return action.split('#').at(-1)?.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || action;
-}
+type ActivityView = 'performed' | 'account';
 
 function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString() : 'Not recorded';
 }
 
+function fallbackAction(action: string) {
+  return action.split('#').at(-1)?.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) || action;
+}
+
 export function UserActivityPanel({ user, onClose }: UserActivityPanelProps) {
+  const [view, setView] = useState<ActivityView>('performed');
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number) => {
+    const requestId = ++requestIdRef.current;
     setIsLoading(true);
     setError(null);
     try {
       const response = await auditLogsApi.list({
-        record_type: 'users',
-        record_id: user.id,
+        ...(view === 'performed'
+          ? { user_id: user.id }
+          : { record_type: 'users', record_id: user.id, action_filter: 'users#' }),
         page: nextPage,
         per_page: 25,
         sort_direction: 'desc',
       });
+      if (requestId !== requestIdRef.current) return;
+
       setLogs((current) => nextPage === 1 ? response.data : [...current, ...response.data]);
       setPage(nextPage);
       setTotalPages(response.meta.total_pages || 1);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load user activity');
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) setIsLoading(false);
     }
-  }, [user.id]);
+  }, [user.id, view]);
 
   useEffect(() => {
+    setLogs([]);
+    setPage(1);
     void loadPage(1);
   }, [loadPage]);
 
@@ -81,29 +92,39 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps) {
           <Summary label="Created by" value={user.invited_by_name || 'Not recorded'} />
         </div>
 
+        <div className="border-b border-neutral-200 px-6 pt-4">
+          <div className="grid grid-cols-2 rounded-xl bg-neutral-100 p-1" role="tablist" aria-label="User history views">
+            <Tab active={view === 'performed'} onClick={() => setView('performed')} icon={<Activity className="h-4 w-4" />} label="Actions performed" />
+            <Tab active={view === 'account'} onClick={() => setView('account')} icon={<UserRoundCog className="h-4 w-4" />} label="Account history" />
+          </div>
+          <p className="py-3 text-xs leading-5 text-neutral-500">
+            {view === 'performed'
+              ? `Everything ${user.name} did in the system, including sign-ins and payroll actions.`
+              : `Changes other administrators made to ${user.name}'s account, role, and access.`}
+          </p>
+        </div>
+
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           <div className="mb-4 flex items-center gap-2">
             <Clock3 className="h-4 w-4 text-neutral-500" />
-            <h3 className="font-semibold text-neutral-950">History</h3>
+            <h3 className="font-semibold text-neutral-950">{view === 'performed' ? 'Activity timeline' : 'Account timeline'}</h3>
           </div>
           {error && <p className="rounded-xl bg-danger-50 p-3 text-sm text-danger-700">{error}</p>}
           {!isLoading && logs.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500">
-              No tracked activity exists for this user yet. New changes and sign-ins will appear here.
+              No tracked activity exists in this view yet.
             </p>
           ) : (
             <ol className="space-y-4">
               {logs.map((log) => (
                 <li key={log.id} className="relative border-l border-neutral-200 pl-5">
                   <span className="absolute -left-1.5 top-1 h-3 w-3 rounded-full border-2 border-white bg-primary-600" />
-                  <p className="font-medium text-neutral-950">{formatAction(log.action)}</p>
+                  <p className="font-medium text-neutral-950">{log.display_action || fallbackAction(log.action)}</p>
                   <p className="mt-1 text-sm text-neutral-500">
-                    {log.user_name || 'System'} · {formatDate(log.created_at)}
+                    {formatDate(log.created_at)}{log.company_name ? ` · ${log.company_name}` : ''}
                   </p>
-                  {Array.isArray(log.metadata?.changed_fields) && log.metadata.changed_fields.length > 0 && (
-                    <p className="mt-2 text-sm text-neutral-600">
-                      Changed: {log.metadata.changed_fields.join(', ').replace(/_/g, ' ')}
-                    </p>
+                  {log.display_subject && (
+                    <p className="mt-2 text-sm text-neutral-600">Affected record: {log.display_subject}</p>
                   )}
                 </li>
               ))}
@@ -122,6 +143,20 @@ export function UserActivityPanel({ user, onClose }: UserActivityPanelProps) {
         </div>
       </section>
     </div>
+  );
+}
+
+function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: ReactNode; label: string }) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active ? 'bg-white text-neutral-950 shadow-sm' : 'text-neutral-500 hover:text-neutral-800'}`}
+    >
+      {icon}{label}
+    </button>
   );
 }
 

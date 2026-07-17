@@ -31,14 +31,14 @@ module Api
 
         # POST /api/v1/admin/employees
         def create
-          employee = Employee.new(employee_params.merge(company_id: current_company_id))
+          @employee = Employee.new(employee_params.merge(company_id: current_company_id))
 
-          if employee.save
-            render json: { data: serialize_employee(employee, include_sensitive: true) }, status: :created
+          if @employee.save
+            render json: { data: serialize_employee(@employee, include_sensitive: true) }, status: :created
           else
             render json: {
               error: "Validation failed",
-              details: employee.errors.messages
+              details: @employee.errors.messages
             }, status: :unprocessable_entity
           end
         end
@@ -72,6 +72,10 @@ module Api
         end
 
         private
+
+        def audit_record
+          @employee
+        end
 
         def set_employee
           @employee = Employee.find_by(id: params[:id], company_id: current_company_id)

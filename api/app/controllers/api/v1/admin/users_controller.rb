@@ -73,6 +73,8 @@ module Api
 
         # PATCH /api/v1/admin/users/:id
         def update
+          return if reject_platform_owner_mutation!
+
           before_values = user_audit_snapshot(@user)
           permitted = user_params
           role_provided = params.dig(:user, :role).present?
@@ -121,6 +123,8 @@ module Api
 
         # POST /api/v1/admin/users/:id/deactivate
         def deactivate
+          return if reject_platform_owner_mutation!
+
           if @user.id == current_user_id
             return render json: { error: "Cannot deactivate your own account" }, status: :unprocessable_entity
           end
@@ -141,6 +145,8 @@ module Api
 
         # DELETE /api/v1/admin/users/:id
         def destroy
+          return if reject_platform_owner_mutation!
+
           if @user.id == current_user_id
             return render json: { error: "Cannot delete your own account" }, status: :unprocessable_entity
           end
@@ -204,6 +210,13 @@ module Api
         end
 
         private
+
+        def reject_platform_owner_mutation!
+          return false unless @user&.platform_owner?
+
+          render json: { error: "The primary platform owner cannot be changed, deactivated, or deleted" }, status: :unprocessable_entity
+          true
+        end
 
         def set_user
           @user = manageable_users.includes(:organization, :invited_by, company_assignments: :company).find_by(id: params[:id])
@@ -355,7 +368,8 @@ module Api
             last_login_at: user.last_login_at,
             last_active_at: user.last_active_at,
             created_at: user.created_at,
-            updated_at: user.updated_at
+            updated_at: user.updated_at,
+            platform_owner: user.platform_owner?
           }
 
           assigned = if user.association(:company_assignments).loaded?
@@ -389,6 +403,7 @@ module Api
             "email" => user.email,
             "role" => user.role,
             "active" => user.active,
+            "platform_owner" => user.platform_owner?,
             "invitation_status" => user.invitation_status,
             "invited_at" => user.invited_at&.iso8601,
             "assigned_company_ids" => current_assignment_ids_for(user).sort
