@@ -26,6 +26,14 @@ module Api
           render json: { check_print_run: run_payload(run) }, status: :created
         rescue ArgumentError, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue StandardError => e
+          Rails.logger.error(
+            "[check_print_runs#create] pay_period=#{@pay_period&.id} request_id=#{request.request_id} " \
+            "#{e.class}: #{e.message}"
+          )
+          render json: {
+            error: "The check package could not be generated. No checks were marked printed. Please try again."
+          }, status: :service_unavailable
         end
 
         def pdf
