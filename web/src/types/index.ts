@@ -55,7 +55,11 @@ export interface User {
   invitation_status?: 'pending' | 'accepted';
   invitation_pending?: boolean;
   invited_at?: string | null;
+  invited_by_id?: number | null;
+  invited_by_name?: string | null;
   last_login_at?: string | null;
+  last_active_at?: string | null;
+  platform_owner?: boolean;
   created_at: string;
   updated_at: string;
 }

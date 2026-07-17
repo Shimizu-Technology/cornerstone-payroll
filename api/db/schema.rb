@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -32,17 +32,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
 
   create_table "audit_logs", force: :cascade do |t|
     t.string "action", null: false
+    t.string "actor_email"
+    t.string "actor_name"
+    t.string "actor_role"
     t.bigint "company_id"
     t.datetime "created_at", null: false
+    t.string "event_category", default: "activity", null: false
     t.string "ip_address"
     t.jsonb "metadata", default: {}, null: false
+    t.bigint "organization_id"
     t.bigint "record_id"
     t.string "record_type"
+    t.string "request_id"
+    t.string "subject_name"
     t.string "user_agent"
     t.bigint "user_id"
     t.index ["company_id"], name: "index_audit_logs_on_company_id"
     t.index ["created_at"], name: "index_audit_logs_on_created_at"
+    t.index ["organization_id", "created_at", "id"], name: "idx_audit_logs_org_history"
+    t.index ["organization_id", "record_type", "record_id"], name: "idx_audit_logs_org_subject"
+    t.index ["organization_id"], name: "index_audit_logs_on_organization_id"
     t.index ["record_type", "record_id"], name: "index_audit_logs_on_record_type_and_record_id"
+    t.index ["request_id"], name: "index_audit_logs_on_request_id"
     t.index ["user_id"], name: "index_audit_logs_on_user_id"
   end
 
@@ -1729,9 +1740,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.string "invitation_status", default: "accepted", null: false
     t.datetime "invited_at"
     t.bigint "invited_by_id"
+    t.datetime "last_active_at"
     t.datetime "last_login_at"
+    t.string "last_session_id_digest"
     t.string "name", null: false
     t.bigint "organization_id", null: false
+    t.boolean "platform_owner", default: false, null: false
     t.integer "role", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "workos_id"
@@ -1739,7 +1753,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
     t.index ["company_id"], name: "index_users_on_company_id"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["organization_id"], name: "index_users_on_organization_id"
+    t.index ["platform_owner"], name: "index_users_on_single_platform_owner", unique: true, where: "(platform_owner = true)"
     t.index ["workos_id"], name: "index_users_on_workos_id", unique: true
+    t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
   end
 
   create_table "w2_filing_readinesses", force: :cascade do |t|
@@ -1761,6 +1777,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_13_220000) do
   end
 
   add_foreign_key "audit_logs", "companies"
+  add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"
   add_foreign_key "cable_connection_tickets", "companies"
   add_foreign_key "cable_connection_tickets", "users"

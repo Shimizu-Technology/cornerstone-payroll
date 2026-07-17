@@ -1,7 +1,10 @@
 # frozen_string_literal: true
 
+require "digest"
+
 class User < ApplicationRecord
   INVITATION_STATUSES = %w[pending accepted].freeze
+  PRIMARY_PLATFORM_OWNER_EMAIL = "shimizutechnology@gmail.com"
 
   belongs_to :organization
   belongs_to :company
@@ -26,10 +29,42 @@ class User < ApplicationRecord
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
   validate :company_must_belong_to_organization
+  validate :platform_owner_requirements
+  validate :platform_owner_identity_is_immutable, on: :update
 
   before_validation :default_organization_from_company
+  before_destroy :prevent_platform_owner_destroy
 
   scope :active, -> { where(active: true) }
+
+  ACTIVITY_WRITE_INTERVAL = 5.minutes
+
+  def authenticated_activity_write_due?(session_id: nil, occurred_at: Time.current)
+    session_digest = session_id.present? ? Digest::SHA256.hexdigest(session_id.to_s) : nil
+    new_session = session_digest.present? && session_digest != last_session_id_digest
+    activity_stale = last_active_at.blank? || last_active_at < occurred_at - ACTIVITY_WRITE_INTERVAL
+
+    new_session || activity_stale
+  end
+
+  def record_authenticated_activity!(session_id: nil, occurred_at: Time.current)
+    session_digest = session_id.present? ? Digest::SHA256.hexdigest(session_id.to_s) : nil
+    new_session = session_digest.present? && session_digest != last_session_id_digest
+
+    updates = {}
+    if new_session
+      updates[:last_session_id_digest] = session_digest
+      updates[:last_login_at] = occurred_at
+    end
+    if last_active_at.blank? || last_active_at < occurred_at - ACTIVITY_WRITE_INTERVAL
+      updates[:last_active_at] = occurred_at
+    end
+
+    return false if updates.empty?
+
+    update_columns(updates)
+    new_session
+  end
 
   def invitation_pending?
     invitation_status == "pending"
@@ -79,7 +114,7 @@ class User < ApplicationRecord
           # companies (falling back to their home company when none exist yet).
           assigned_ids.presence || Array(company_id)
         else
-          ([company_id] + assigned_ids).uniq
+          ([ company_id ] + assigned_ids).uniq
         end
       end
     end
@@ -92,6 +127,30 @@ class User < ApplicationRecord
   end
 
   private
+
+  def platform_owner_requirements
+    return unless platform_owner?
+
+    errors.add(:email, "must remain #{PRIMARY_PLATFORM_OWNER_EMAIL}") unless email.to_s.casecmp?(PRIMARY_PLATFORM_OWNER_EMAIL)
+    errors.add(:role, "must remain Super Admin") unless super_admin?
+    errors.add(:active, "must remain active") unless active?
+  end
+
+  def platform_owner_identity_is_immutable
+    return unless platform_owner_in_database
+
+    errors.add(:email, "cannot be changed for the primary platform owner") if will_save_change_to_email?
+    errors.add(:role, "cannot be changed for the primary platform owner") if will_save_change_to_role?
+    errors.add(:active, "cannot be changed for the primary platform owner") if will_save_change_to_active?
+    errors.add(:platform_owner, "cannot be removed from the primary platform owner") if will_save_change_to_platform_owner?
+  end
+
+  def prevent_platform_owner_destroy
+    return unless platform_owner?
+
+    errors.add(:base, "The primary platform owner cannot be deleted")
+    throw :abort
+  end
 
   def default_organization_from_company
     self.organization ||= company&.organization

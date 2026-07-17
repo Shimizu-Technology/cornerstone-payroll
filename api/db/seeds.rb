@@ -191,12 +191,15 @@ if Rails.env.development?
   puts "Created Cornerstone Tax Services with #{company.employees.count} employees"
 
   # Admin user for development
-  User.find_or_create_by!(email: "shimizutechnology@gmail.com") do |u|
-    u.name = "Leon Shimizu"
-    u.clerk_id = "user_3A6fIlTloHIiJxXCDqEnqzO0ogg"
-    u.company = company
-    u.role = :admin
-  end
+  platform_owner = User.find_or_initialize_by(email: User::PRIMARY_PLATFORM_OWNER_EMAIL)
+  platform_owner.name = "Leon Shimizu" if platform_owner.name.blank?
+  platform_owner.clerk_id = "user_3A6fIlTloHIiJxXCDqEnqzO0ogg" if platform_owner.clerk_id.blank?
+  platform_owner.company ||= company
+  platform_owner.organization ||= company.organization
+  platform_owner.role = :super_admin
+  platform_owner.active = true
+  platform_owner.platform_owner = true
+  platform_owner.save!
 
   puts "Created admin user: shimizutechnology@gmail.com"
 

@@ -358,6 +358,11 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         json = response.parsed_body
         expect(json["data"]["first_name"]).to eq("Updated")
         expect(employee.reload.first_name).to eq("Updated")
+
+        audit = AuditLog.find_by!(action: "employees#update", record_id: employee.id)
+        expect(audit.subject_name).to include("Updated")
+        expect(audit.metadata.fetch("before_values")).to include("first_name" => "Original")
+        expect(audit.metadata.fetch("after_values")).to include("first_name" => "Updated")
       end
 
       it "updates pay rate" do
@@ -434,6 +439,11 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       expect(response).to have_http_status(:no_content)
       expect(employee.reload.status).to eq("terminated")
       expect(employee.termination_date).to eq(Date.current)
+
+      audit = AuditLog.find_by!(action: "employees#destroy", record_id: employee.id)
+      expect(audit.subject_name).to eq(employee.display_name)
+      expect(audit.metadata.fetch("before_values")).to include("status" => "active")
+      expect(audit.metadata.fetch("after_values")).to include("status" => "terminated")
     end
 
     it "does not hard delete the employee" do

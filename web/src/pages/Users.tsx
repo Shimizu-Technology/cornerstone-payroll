@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle } from 'lucide-react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,8 +18,10 @@ import { usersApi, companiesApi, ApiError } from '@/services/api';
 import type { User, UserRole } from '@/types';
 import type { CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { UserActivityPanel } from '@/components/users/UserActivityPanel';
 
-const roleOptions: { value: UserRole; label: string; description: string }[] = [
+const allRoleOptions: { value: UserRole; label: string; description: string }[] = [
+  { value: 'super_admin', label: 'Super Admin', description: 'Platform-wide access across every organization and client' },
   { value: 'admin', label: 'Admin', description: 'Full access to all payroll clients, user management, tax config, and audit logs' },
   { value: 'manager', label: 'Manager', description: 'Can run payroll and manage employees for assigned clients' },
   { value: 'accountant', label: 'Accountant', description: 'Can manage employees and payroll operations for assigned clients' },
@@ -31,6 +33,9 @@ const needsClientAssignment = (role: UserRole) => role === 'manager' || role ===
 
 export function Users() {
   const { user: currentUser } = useAuth();
+  const roleOptions = currentUser?.role === 'super_admin'
+    ? allRoleOptions
+    : allRoleOptions.filter((role) => role.value !== 'super_admin');
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -61,6 +66,8 @@ export function Users() {
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [activityUser, setActivityUser] = useState<User | null>(null);
+  const handleCloseActivity = useCallback(() => setActivityUser(null), []);
 
   const fetchUsers = useCallback(async () => {
     setIsLoading(true);
@@ -489,7 +496,10 @@ export function Users() {
                         <>
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="truncate font-semibold text-neutral-950">{user.name}</p>
+                              <p className="flex items-center gap-2 truncate font-semibold text-neutral-950">
+                                {user.name}
+                                {user.platform_owner && <OwnerBadge />}
+                              </p>
                               <p className="truncate text-sm text-neutral-500">{user.email}</p>
                             </div>
                             {user.active === false ? <span className="text-sm text-neutral-500">Inactive</span> : <span className="text-sm font-medium text-green-600">Active</span>}
@@ -502,18 +512,19 @@ export function Users() {
                           )}
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Role" value={roleOptions.find((role) => role.value === user.role)?.label || user.role} />
-                            <MobileField label="Last login" value={user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : '—'} />
+                            <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
                           <MobileCardActions>
-                            <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
+                            <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button size="sm" variant="outline" onClick={() => handleResendInvitation(user)} disabled={resendingId === user.id}>
                                 <RefreshCw className={`mr-1 h-4 w-4 ${resendingId === user.id ? 'animate-spin' : ''}`} />
                                 Resend
                               </Button>
                             )}
-                            {user.id !== currentUser?.id && (
+                            {user.id !== currentUser?.id && !user.platform_owner && (
                               <>
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {user.active === false ? 'Activate' : 'Deactivate'}
@@ -539,7 +550,7 @@ export function Users() {
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Last Login</TableHead>
+                  <TableHead>Last Active</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -553,6 +564,7 @@ export function Users() {
                         ) : (
                           <span className="flex items-center gap-2">
                             {user.name}
+                            {user.platform_owner && <OwnerBadge />}
                             {user.invitation_pending && (
                               <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
                                 <Mail className="w-3 h-3" />
@@ -587,7 +599,7 @@ export function Users() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.last_login_at ? new Date(user.last_login_at).toLocaleString() : '\u2014'}
+                        {user.last_active_at ? new Date(user.last_active_at).toLocaleString() : '\u2014'}
                       </TableCell>
                       <TableCell className="text-right">
                         {editingId === user.id ? (
@@ -602,7 +614,8 @@ export function Users() {
                           </div>
                         ) : (
                           <div className="flex justify-end gap-2">
-                            <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>
+                            <Button size="sm" variant="outline" onClick={() => setActivityUser(user)}><Activity className="mr-1 h-4 w-4" />Activity</Button>
+                            {!user.platform_owner && <Button size="sm" variant="outline" onClick={() => handleStartEdit(user)}>Edit</Button>}
                             {user.invitation_pending && (
                               <Button
                                 size="sm"
@@ -614,7 +627,7 @@ export function Users() {
                                 Resend
                               </Button>
                             )}
-                            {user.id !== currentUser?.id && (
+                            {user.id !== currentUser?.id && !user.platform_owner && (
                               <>
                                 <Button size="sm" variant="ghost" onClick={() => handleToggleActive(user)} disabled={togglingId === user.id || deletingId === user.id}>
                                   {togglingId === user.id ? (
@@ -677,6 +690,15 @@ export function Users() {
           </>
         )}
       </div>
+      {activityUser && <UserActivityPanel user={activityUser} onClose={handleCloseActivity} />}
     </div>
+  );
+}
+
+function OwnerBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700" title="Permanent primary platform owner">
+      <ShieldCheck className="h-3 w-3" /> Primary owner
+    </span>
   );
 }

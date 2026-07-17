@@ -636,13 +636,25 @@ export const organizationsApi = {
 export interface AuditLogEntry {
   id: number;
   action: string;
+  display_action: string;
+  display_subject: string;
+  summary: string;
   record_type: string | null;
   record_id: number | null;
   user_id: number | null;
   user_name: string | null;
+  actor_email: string | null;
+  actor_role: string | null;
+  event_category: string;
+  subject_name: string | null;
+  organization_id: number | null;
+  organization_name: string | null;
+  company_id: number | null;
+  company_name: string | null;
   metadata: Record<string, unknown>;
   ip_address: string | null;
   user_agent: string | null;
+  request_id: string | null;
   created_at: string;
 }
 
@@ -654,9 +666,22 @@ export const auditLogsApi = {
     record_id?: number;
     from?: string;
     to?: string;
-    limit?: number;
+    page?: number;
+    per_page?: number;
+    sort_direction?: 'asc' | 'desc';
+    company_id?: number;
   }) =>
-    api.get<{ data: AuditLogEntry[] }>('/admin/audit_logs', params),
+    api.get<{ data: AuditLogEntry[]; meta: PaginationMeta }>('/admin/audit_logs', params),
+  exportCsv: (params?: {
+    user_id?: number;
+    action_filter?: string;
+    record_type?: string;
+    record_id?: number;
+    from?: string;
+    to?: string;
+    sort_direction?: 'asc' | 'desc';
+    company_id?: number;
+  }) => api.getBlobWithParams('/admin/audit_logs/export', params),
 };
 
 // Tax Configs (Admin API)
