@@ -196,6 +196,38 @@ RSpec.describe "Clerk Authentication", type: :request do
     end
   end
 
+  describe "authenticated activity auditing" do
+    before do
+      allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
+        "sub" => valid_clerk_id,
+        "sid" => "session-audit-123"
+      })
+    end
+
+    it "records the session marker and sign-in audit together" do
+      expect {
+        get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+      }.to change {
+        AuditLog.where(action: "authentication#signed_in", user_id: user.id).count
+      }.by(1)
+
+      expect(response).to have_http_status(:ok)
+      expect(user.reload.last_session_id_digest).to eq(Digest::SHA256.hexdigest("session-audit-123"))
+      expect(user.last_login_at).to be_present
+    end
+
+    it "rolls back the session marker when the sign-in audit fails so a later request can retry" do
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "audit unavailable")
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:ok)
+      expect(user.reload.last_session_id_digest).to be_nil
+      expect(user.last_login_at).to be_nil
+      expect(user.last_active_at).to be_nil
+    end
+  end
+
   describe "auth bypass" do
     before do
       allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(true)

@@ -10,6 +10,7 @@ RSpec.describe User, type: :model do
     expect(user.reload.last_login_at).to eq(time)
     expect(user.last_active_at).to eq(time)
     expect(user.last_session_id_digest).to eq(Digest::SHA256.hexdigest("session-one"))
+    expect(user).not_to be_changed
   end
 
   it "throttles activity writes within the same session" do

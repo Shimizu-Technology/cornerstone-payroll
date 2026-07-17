@@ -28,22 +28,27 @@ class ApplicationController < ActionController::API
   def track_authenticated_user_activity
     return unless current_user.is_a?(User)
 
-    new_session = current_user.record_authenticated_activity!(
-      session_id: @clerk_token_payload&.fetch("sid", nil)
-    )
-    return unless new_session
+    current_user.with_lock do
+      new_session = current_user.record_authenticated_activity!(
+        session_id: @clerk_token_payload&.fetch("sid", nil)
+      )
+      next unless new_session
 
-    AuditLog.record!(
-      user: current_user,
-      organization_id: current_user.organization_id,
-      company_id: nil,
-      action: "authentication#signed_in",
-      record_type: "users",
-      record_id: current_user.id,
-      subject_name: current_user.name,
-      metadata: { source: "clerk_session" },
-      event_category: "security"
-    )
+      # Keep the session marker and its durable sign-in evidence atomic. If
+      # the audit insert fails, the digest rolls back so the next request can
+      # retry instead of silently losing this session's sign-in event.
+      AuditLog.record!(
+        user: current_user,
+        organization_id: current_user.organization_id,
+        company_id: nil,
+        action: "authentication#signed_in",
+        record_type: "users",
+        record_id: current_user.id,
+        subject_name: current_user.name,
+        metadata: { source: "clerk_session" },
+        event_category: "security"
+      )
+    end
   rescue ActiveRecord::ActiveRecordError => e
     Rails.logger.warn("[UserActivity] Failed to record activity for user=#{current_user&.id}: #{e.message}")
   end

@@ -50,8 +50,7 @@ class User < ApplicationRecord
 
     return false if updates.empty?
 
-    self.class.where(id: id).update_all(updates)
-    assign_attributes(updates)
+    update_columns(updates)
     new_session
   end
 
