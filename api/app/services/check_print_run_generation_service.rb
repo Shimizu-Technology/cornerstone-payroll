@@ -34,6 +34,8 @@ class CheckPrintRunGenerationService
       manifest = build_manifest(payroll_items, non_employee_checks)
       raise ArgumentError, "Select at least one printable check" if manifest.empty?
 
+      # Keep rendering and storage inside this lock boundary intentionally. The immutable manifest must describe the
+      # exact rows used by the PDF; releasing the locks before upload would allow a correction to make them diverge.
       pdf_bytes = render_pdf(payroll_items, non_employee_checks, manifest)
       key = storage_key
       filename = print_run_filename

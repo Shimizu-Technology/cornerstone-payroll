@@ -37,6 +37,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [startingSlot, setStartingSlot] = useState(1);
   const [run, setRun] = useState<CheckPrintRun | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [artifactVerified, setArtifactVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   useEffect(() => {
     if (!open) return;
     setRun(null);
+    setArtifactVerified(false);
     revokePreview();
     void loadQueue();
   }, [open, loadQueue, revokePreview]);
@@ -101,6 +103,24 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     return next;
   });
 
+  const loadPreview = async (printRun: CheckPrintRun) => {
+    setAction('Loading and verifying the generated PDF…');
+    setError(null);
+    setArtifactVerified(false);
+    try {
+      const pdf = await checksApi.printRunPdf(printRun.id);
+      revokePreview();
+      setPreviewUrl(URL.createObjectURL(pdf.blob));
+      setArtifactVerified(true);
+    } catch (err) {
+      setError(err instanceof Error
+        ? `The package was generated, but its preview could not be loaded: ${err.message}`
+        : 'The package was generated, but its preview could not be loaded. Retry before confirming it as printed.');
+    } finally {
+      setAction(null);
+    }
+  };
+
   const generate = async () => {
     if (selectedItems.length === 0) return;
     setAction('Generating an exact print package…');
@@ -112,9 +132,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         startingSlot,
       });
       setRun(response.check_print_run);
-      const pdf = await checksApi.printRunPdf(response.check_print_run.id);
-      revokePreview();
-      setPreviewUrl(URL.createObjectURL(pdf.blob));
+      await loadPreview(response.check_print_run);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not generate the print package.');
     } finally {
@@ -125,6 +143,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const download = async () => {
     if (!run) return;
     setAction('Preparing download…');
+    setError(null);
     try {
       const result = await checksApi.printRunPdf(run.id, 'attachment');
       const url = URL.createObjectURL(result.blob);
@@ -132,7 +151,10 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
       link.href = url;
       link.download = result.filename || run.filename;
       link.click();
+      setArtifactVerified(true);
       setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not download the check package. Retry before confirming it as printed.');
     } finally {
       setAction(null);
     }
@@ -149,7 +171,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   const confirm = async () => {
-    if (!run || !window.confirm(`Confirm that all ${run.selected_count} selected checks printed correctly?`)) return;
+    if (!run || !artifactVerified || !window.confirm(`Confirm that all ${run.selected_count} selected checks printed correctly?`)) return;
     setAction('Recording print confirmation…');
     setError(null);
     try {
@@ -240,8 +262,15 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
             {run && (
               <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
                 <div className="flex items-center justify-between border-b border-slate-100 p-4"><div><div className="font-semibold">Generated package #{run.id}</div><div className="mt-1 font-mono text-xs text-slate-500">SHA-256 {run.sha256.slice(0, 16)}…</div></div><Badge variant={run.status === 'confirmed' ? 'success' : 'warning'}>{run.status === 'confirmed' ? 'Confirmed' : 'Awaiting confirmation'}</Badge></div>
-                {previewUrl && <iframe title="Check package preview" src={previewUrl} className="h-80 w-full bg-slate-900" />}
-                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print}>Print</Button><Button variant="outline" onClick={() => void download()}>Download</Button></div>
+                {previewUrl ? (
+                  <iframe title="Check package preview" src={previewUrl} className="h-80 w-full bg-slate-900" />
+                ) : (
+                  <div className="border-b border-slate-100 px-4 py-8 text-center">
+                    <p className="text-sm text-slate-600">Preview unavailable. Reload and verify the exact package before confirming it.</p>
+                    <Button className="mt-3" size="sm" variant="outline" onClick={() => void loadPreview(run)} disabled={Boolean(action)}>Retry preview</Button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2 p-4"><Button variant="outline" onClick={print} disabled={!previewUrl}>Print</Button><Button variant="outline" onClick={() => void download()}>Download</Button></div>
               </div>
             )}
             {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -252,7 +281,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action)}>Generate print package</Button>}
-          {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action)} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
+          {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
