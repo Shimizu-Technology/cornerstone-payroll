@@ -190,6 +190,7 @@ Rails.application.routes.draw do
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
           get  "check_print_queue",          to: "check_print_runs#queue"
+          patch "check_numbers",              to: "check_numbers#update"
           post "check_print_runs",           to: "check_print_runs#create"
         end
 

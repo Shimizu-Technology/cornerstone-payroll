@@ -50,7 +50,13 @@ module Api
                     type: "application/pdf",
                     disposition: params[:disposition] == "attachment" ? "attachment" : "inline"
         rescue R2StorageService::DownloadError => e
-          render json: { error: e.message }, status: :service_unavailable
+          Rails.logger.error(
+            "[check_print_runs#pdf] run=#{@run&.id} request_id=#{request.request_id} " \
+            "#{e.class}: #{e.message}"
+          )
+          render json: {
+            error: "The generated check package could not be downloaded. Please try again."
+          }, status: :service_unavailable
         end
 
         def confirm

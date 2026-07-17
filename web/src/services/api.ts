@@ -2122,6 +2122,15 @@ export const checksApi = {
   printQueue: (payPeriodId: number) =>
     api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
 
+  updateCheckNumbers: (
+    payPeriodId: number,
+    changes: Array<{ source_type: 'payroll_item' | 'non_employee_check'; source_id: number; check_number: string | null }>,
+    reason?: string
+  ) => api.patch<{ updated_count: number; check_print_queue: CheckPrintQueueResponse }>(
+    `/admin/pay_periods/${payPeriodId}/check_numbers`,
+    { changes, reason }
+  ),
+
   createPrintRun: (
     payPeriodId: number,
     data: { payrollItemIds: number[]; nonEmployeeCheckIds: number[]; startingSlot: number }

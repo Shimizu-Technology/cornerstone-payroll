@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
-import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
+import { checksApi, nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
@@ -14,6 +14,7 @@ import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 import { formatCurrency } from '@/lib/utils';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
+import { checkNumberValidationError } from './checkNumberDrafts';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
@@ -114,6 +115,9 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
   const [form500Open, setForm500Open] = useState(false);
   const [startingSlot, setStartingSlot] = useState(1);
+  const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
+  const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
+  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -135,6 +139,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     // and remounts the history component, which re-runs its fetch effect —
     // no fragile setTimeout(0) remount trick needed.
     setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    setCheckNumberDrafts(prev => ({ ...prev, [updated.id]: updated.check_number || '' }));
     setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
@@ -151,6 +156,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
       setChecks(res.non_employee_checks);
+      setCheckNumberDrafts(Object.fromEntries(res.non_employee_checks.map((check) => [check.id, check.check_number || ''])));
     } catch {
       // ignore
     } finally {
@@ -314,13 +320,49 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const handleSaveCheckNumber = async (check: NonEmployeeCheck, nextNumber: string | null) => {
-    const result = await nonEmployeeChecksApi.updateCheckNumber(
-      check.id,
-      nextNumber,
-      'Corrected from the non-employee Checks section'
-    );
-    handleSavedCheck(result.non_employee_check);
+  const checkNumberChanges = useMemo(() => checks.filter((check) =>
+    !check.voided && (checkNumberDrafts[check.id] ?? check.check_number ?? '').trim() !== (check.check_number || '').trim()
+  ), [checkNumberDrafts, checks]);
+  const checkNumberErrors = useMemo(() => {
+    const errors: Record<number, string> = {};
+    const owners = new Map<string, number[]>();
+    checks.filter((check) => !check.voided).forEach((check) => {
+      const value = (checkNumberDrafts[check.id] ?? check.check_number ?? '').trim();
+      const validationError = checkNumberValidationError(value, true);
+      if (validationError) errors[check.id] = validationError;
+      if (value) owners.set(value, [...(owners.get(value) || []), check.id]);
+    });
+    owners.forEach((ids, number) => {
+      if (ids.length > 1) ids.forEach((id) => { errors[id] = `Check #${number} is entered more than once.`; });
+    });
+    return errors;
+  }, [checkNumberDrafts, checks]);
+
+  const discardCheckNumberChanges = () => {
+    setCheckNumberDrafts(Object.fromEntries(checks.map((check) => [check.id, check.check_number || ''])));
+    setCheckNumberSaveError(null);
+  };
+
+  const saveCheckNumberChanges = async () => {
+    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    setSavingCheckNumbers(true);
+    setCheckNumberSaveError(null);
+    try {
+      await checksApi.updateCheckNumbers(
+        payPeriodId,
+        checkNumberChanges.map((check) => ({
+          source_type: 'non_employee_check',
+          source_id: check.id,
+          check_number: (checkNumberDrafts[check.id] || '').trim() || null,
+        })),
+        'Saved from the non-employee Checks worksheet'
+      );
+      await loadChecks();
+    } catch (err) {
+      setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
+    } finally {
+      setSavingCheckNumbers(false);
+    }
   };
 
   // Identify the auto-generated FIT deposit by its stable marker, falling back
@@ -396,6 +438,24 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
           </div>
         </div>
       </div>
+
+      {checkNumberChanges.length > 0 && (
+        <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-950">
+              {checkNumberChanges.length} unsaved check-number change{checkNumberChanges.length === 1 ? '' : 's'}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-800">Review the highlighted fields. Nothing changes until you save.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+              {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {checkNumberSaveError && <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
 
       {showForm && (
         <div className="p-4 border-b bg-blue-50/30">
@@ -582,10 +642,14 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                             <span className="font-mono">{check.check_number || '—'}</span>
                           ) : (
                             <InlineCheckNumberField
-                              value={check.check_number}
+                              value={checkNumberDrafts[check.id] ?? check.check_number ?? ''}
                               ariaLabel={`Check number for ${check.payable_to}`}
                               allowBlank
-                              onSave={(value) => handleSaveCheckNumber(check, value)}
+                              disabled={savingCheckNumbers}
+                              dirty={checkNumberChanges.some((changed) => changed.id === check.id)}
+                              error={checkNumberErrors[check.id]}
+                              onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [check.id]: value }))}
+                              onReset={() => setCheckNumberDrafts((current) => ({ ...current, [check.id]: check.check_number || '' }))}
                             />
                           )}
                         </div>

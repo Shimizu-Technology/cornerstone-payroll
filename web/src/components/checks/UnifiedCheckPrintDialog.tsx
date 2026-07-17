@@ -10,10 +10,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { checksApi, nonEmployeeChecksApi } from '@/services/api';
+import { checksApi } from '@/services/api';
 import type { CheckPrintQueueItem, CheckPrintQueueResponse, CheckPrintRun } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
+import { checkNumberValidationError } from './checkNumberDrafts';
 
 interface UnifiedCheckPrintDialogProps {
   open: boolean;
@@ -45,7 +46,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [numberSavingKeys, setNumberSavingKeys] = useState<Set<string>>(new Set());
+  const [draftNumbers, setDraftNumbers] = useState<Record<string, string>>({});
+  const [savingNumbers, setSavingNumbers] = useState(false);
   const compactPreviewRef = useRef<HTMLIFrameElement>(null);
   const expandedPreviewRef = useRef<HTMLIFrameElement>(null);
 
@@ -62,6 +64,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     try {
       const data = await checksApi.printQueue(payPeriodId);
       setQueue(data);
+      setDraftNumbers(Object.fromEntries(data.items.map((item) => [item.key, item.check_number || ''])));
       setSelected((current) => {
         const eligibleUnprinted = data.items.filter((item) => item.eligible && item.status === 'unprinted');
         if (!options?.preserveSelection) return new Set(eligibleUnprinted.map((item) => item.key));
@@ -101,6 +104,26 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     [queue, selected]
   );
   const selectedTotal = selectedItems.reduce((sum, item) => sum + Number(item.amount), 0);
+  const numberChanges = useMemo(() => (queue?.items || []).filter((item) =>
+    (draftNumbers[item.key] ?? item.check_number ?? '').trim() !== (item.check_number || '').trim()
+  ), [draftNumbers, queue]);
+  const numberErrors = useMemo(() => {
+    const errors: Record<string, string> = {};
+    const numberOwners = new Map<string, string[]>();
+
+    (queue?.items || []).forEach((item) => {
+      const value = (draftNumbers[item.key] ?? item.check_number ?? '').trim();
+      const validationError = checkNumberValidationError(value, item.source_type === 'non_employee_check');
+      if (validationError) errors[item.key] = validationError;
+      if (value) numberOwners.set(value, [...(numberOwners.get(value) || []), item.key]);
+    });
+    numberOwners.forEach((keys, number) => {
+      if (keys.length > 1) keys.forEach((key) => { errors[key] = `Check #${number} is entered more than once.`; });
+    });
+    return errors;
+  }, [draftNumbers, queue]);
+  const hasUnsavedNumbers = numberChanges.length > 0;
+  const hasNumberErrors = Object.keys(numberErrors).length > 0;
   const sheetCount = queue?.meta.check_stock_type === 'first_hawaiian_4up'
     ? Math.ceil((Math.max(1, startingSlot) - 1 + selectedItems.length) / 4)
     : selectedItems.length;
@@ -120,23 +143,38 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     return next;
   });
 
-  const saveCheckNumber = async (item: CheckPrintQueueItem, value: string | null) => {
-    if (!value) throw new Error('Enter a check number before printing.');
-    setNumberSavingKeys((current) => new Set(current).add(item.key));
+  const discardNumberChanges = () => {
+    setDraftNumbers(Object.fromEntries((queue?.items || []).map((item) => [item.key, item.check_number || ''])));
+    setError(null);
+  };
+
+  const saveNumberChanges = async () => {
+    if (!hasUnsavedNumbers || hasNumberErrors) return;
+    setSavingNumbers(true);
+    setError(null);
     try {
-      if (item.source_type === 'payroll_item') {
-        await checksApi.updateCheckNumber(item.source_id, value, 'Updated while preparing a check print package');
-      } else {
-        await nonEmployeeChecksApi.updateCheckNumber(item.source_id, value, 'Updated while preparing a check print package');
-      }
-      await loadQueue({ preserveSelection: true, selectKey: item.key });
+      await checksApi.updateCheckNumbers(
+        payPeriodId,
+        numberChanges.map((item) => ({
+          source_type: item.source_type,
+          source_id: item.source_id,
+          check_number: (draftNumbers[item.key] || '').trim() || null,
+        })),
+        'Saved from the unified check-print worksheet'
+      );
+      await loadQueue({ preserveSelection: true });
+      onConfirmed();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the check numbers. No changes were applied.');
     } finally {
-      setNumberSavingKeys((current) => {
-        const next = new Set(current);
-        next.delete(item.key);
-        return next;
-      });
+      setSavingNumbers(false);
     }
+  };
+
+  const requestClose = () => {
+    if (hasUnsavedNumbers && !window.confirm('Discard the unsaved check-number changes?')) return;
+    discardNumberChanges();
+    onOpenChange(false);
   };
 
   const loadPreview = async (printRun: CheckPrintRun) => {
@@ -219,7 +257,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : requestClose()}>
         <DialogContent className="dialog-wide flex max-h-[92vh] flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
           <div className="flex items-start justify-between gap-4 pr-8">
@@ -254,8 +292,25 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
             </div>
 
             <p className="mb-3 text-xs text-slate-500">
-              Edit check numbers in place. Press Enter or move to another field to save.
+              Edit any check numbers you need, review the highlighted drafts, then save the worksheet once.
             </p>
+
+            {hasUnsavedNumbers && (
+              <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-amber-950">
+                    {numberChanges.length} unsaved check-number change{numberChanges.length === 1 ? '' : 's'}
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-800">Nothing changes until you save this reviewed batch.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={discardNumberChanges} disabled={savingNumbers}>Discard</Button>
+                  <Button size="sm" onClick={() => void saveNumberChanges()} disabled={savingNumbers || hasNumberErrors}>
+                    {savingNumbers ? 'Saving…' : 'Save check numbers'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {loading ? <div className="py-16 text-center text-sm text-slate-500">Loading check queue…</div> : (
               <div className="overflow-hidden rounded-xl border border-slate-200">
@@ -267,10 +322,14 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                         <td className="p-3"><input type="checkbox" checked={selected.has(item.key)} disabled={!item.eligible || Boolean(run)} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} /></td>
                         <td className="p-3 text-slate-900">
                           <InlineCheckNumberField
-                            value={item.check_number}
+                            value={draftNumbers[item.key] ?? item.check_number ?? ''}
                             ariaLabel={`Check number for ${item.payee}`}
-                            disabled={Boolean(run) || item.status === 'voided'}
-                            onSave={(value) => saveCheckNumber(item, value)}
+                            disabled={Boolean(run) || item.status === 'voided' || savingNumbers}
+                            allowBlank={item.source_type === 'non_employee_check'}
+                            dirty={numberChanges.some((changed) => changed.key === item.key)}
+                            error={numberErrors[item.key]}
+                            onChange={(value) => setDraftNumbers((current) => ({ ...current, [item.key]: value }))}
+                            onReset={() => setDraftNumbers((current) => ({ ...current, [item.key]: item.check_number || '' }))}
                           />
                         </td>
                         <td className="p-3"><div className="font-medium text-slate-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
@@ -336,8 +395,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
         </div>
 
         <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action) || numberSavingKeys.size > 0}>Generate print package</Button>}
+          <Button variant="outline" onClick={requestClose}>Close</Button>
+          {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action) || savingNumbers || hasUnsavedNumbers}>Generate print package</Button>}
           {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
           </DialogFooter>
         </DialogContent>

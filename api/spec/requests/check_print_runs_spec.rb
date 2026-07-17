@@ -62,6 +62,24 @@ RSpec.describe "Check print runs", type: :request do
     ))
   end
 
+  it "does not expose storage details when a generated package download fails" do
+    allow_any_instance_of(R2StorageService)
+      .to receive(:download).and_raise(R2StorageService::DownloadError, "private R2 endpoint detail")
+    allow(Rails.logger).to receive(:error)
+
+    get "/api/v1/admin/check_print_runs/#{print_run.id}/pdf"
+
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body).to eq(
+      "error" => "The generated check package could not be downloaded. Please try again."
+    )
+    expect(response.body).not_to include("private R2 endpoint detail")
+    expect(Rails.logger).to have_received(:error).with(include(
+      "[check_print_runs#pdf]",
+      "R2StorageService::DownloadError: private R2 endpoint detail"
+    ))
+  end
+
   it "returns a structured retryable response when print confirmation has an infrastructure failure" do
     service = instance_double(CheckPrintRunConfirmationService)
     allow(CheckPrintRunConfirmationService).to receive(:new).and_return(service)

@@ -2,7 +2,7 @@
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
@@ -12,6 +12,7 @@ import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/u
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
 import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
+import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
@@ -19,7 +20,7 @@ interface ChecksPanelProps {
   refreshToken?: number;
 }
 
-type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted' | 'stub';
+type CheckAction = 'preview' | 'markPrinted' | 'stub';
 
 function checkStatusBadge(item: CheckItem) {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
@@ -70,6 +71,9 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const [batchAction, setBatchAction] = useState<string | null>(null);
   const [startingSlot, setStartingSlot] = useState(1);
   const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
+  const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
+  const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
+  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -84,6 +88,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       const data = await checksApi.list(payPeriod.id);
       setChecks(data.checks);
       setMeta(data.meta);
+      setCheckNumberDrafts(Object.fromEntries(data.checks.map((item) => [item.id, item.check_number || ''])));
       setSelectedStubIds((current) => current.filter((id) => data.checks.some((item) => item.id === id && !item.voided)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load checks');
@@ -235,23 +240,48 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
-  const handleSaveCheckNumber = async (item: CheckItem, nextNumber: string | null) => {
-    if (!nextNumber) throw new Error('Enter a check number.');
-    setActionLoading({ id: item.id, action: 'saveCheckNumber' });
+  const checkNumberChanges = useMemo(() => checks.filter((item) =>
+    !item.voided && (checkNumberDrafts[item.id] ?? item.check_number ?? '').trim() !== (item.check_number || '').trim()
+  ), [checkNumberDrafts, checks]);
+  const checkNumberErrors = useMemo(() => {
+    const errors: Record<number, string> = {};
+    const owners = new Map<string, number[]>();
+    checks.filter((item) => !item.voided && item.check_number).forEach((item) => {
+      const value = (checkNumberDrafts[item.id] ?? item.check_number ?? '').trim();
+      const validationError = checkNumberValidationError(value);
+      if (validationError) errors[item.id] = validationError;
+      if (value) owners.set(value, [...(owners.get(value) || []), item.id]);
+    });
+    owners.forEach((ids, number) => {
+      if (ids.length > 1) ids.forEach((id) => { errors[id] = `Check #${number} is entered more than once.`; });
+    });
+    return errors;
+  }, [checkNumberDrafts, checks]);
+
+  const discardCheckNumberChanges = () => {
+    setCheckNumberDrafts(Object.fromEntries(checks.map((item) => [item.id, item.check_number || ''])));
+    setCheckNumberSaveError(null);
+  };
+
+  const saveCheckNumberChanges = async () => {
+    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    setSavingCheckNumbers(true);
+    setCheckNumberSaveError(null);
     try {
-      const result = await checksApi.updateCheckNumber(
-        item.id,
-        nextNumber,
-        'Corrected from the pay period Checks section'
+      await checksApi.updateCheckNumbers(
+        payPeriod.id,
+        checkNumberChanges.map((item) => ({
+          source_type: 'payroll_item',
+          source_id: item.id,
+          check_number: (checkNumberDrafts[item.id] || '').trim(),
+        })),
+        'Saved from the pay period Checks worksheet'
       );
-      setChecks((current) =>
-        current.map((check) => (check.id === item.id ? result.payroll_item : check))
-      );
-      setPreviewItem((current) =>
-        current?.id === item.id ? result.payroll_item : current
-      );
+      await load();
+    } catch (err) {
+      setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
     } finally {
-      setActionLoading(null);
+      setSavingCheckNumbers(false);
     }
   };
 
@@ -423,6 +453,24 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
         Before printing on live check stock, print one test page on plain paper or a photocopy of the real check and confirm the alignment.
       </div>
 
+      {checkNumberChanges.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-950">
+              {checkNumberChanges.length} unsaved check-number change{checkNumberChanges.length === 1 ? '' : 's'}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-800">Review the highlighted fields. Nothing changes until you save.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+              {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {checkNumberSaveError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
+
       {/* Checks table */}
       {filteredChecks.length === 0 ? (
         <div className="py-8 text-center text-gray-500 text-sm">
@@ -480,9 +528,13 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <p className="mb-2 text-xs font-medium text-slate-500">Check number</p>
                       <InlineCheckNumberField
-                        value={item.check_number}
+                        value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                         ariaLabel={`Check number for ${item.employee_name}`}
-                        onSave={(value) => handleSaveCheckNumber(item, value)}
+                        disabled={savingCheckNumbers}
+                        dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
+                        error={checkNumberErrors[item.id]}
+                        onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
+                        onReset={() => setCheckNumberDrafts((current) => ({ ...current, [item.id]: item.check_number || '' }))}
                       />
                     </div>
                   )}
@@ -567,9 +619,13 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                         <span className="font-mono">{item.check_number || '—'}</span>
                       ) : (
                         <InlineCheckNumberField
-                          value={item.check_number}
+                          value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
                           ariaLabel={`Check number for ${item.employee_name}`}
-                          onSave={(value) => handleSaveCheckNumber(item, value)}
+                          disabled={savingCheckNumbers}
+                          dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
+                          error={checkNumberErrors[item.id]}
+                          onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
+                          onReset={() => setCheckNumberDrafts((current) => ({ ...current, [item.id]: item.check_number || '' }))}
                         />
                       )}
                       {item.reprint_of_check_number && (
