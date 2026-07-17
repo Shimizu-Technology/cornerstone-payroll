@@ -90,7 +90,11 @@ Rails.application.routes.draw do
             post :resend_invitation
           end
         end
-        resources :audit_logs, only: [ :index ]
+        resources :audit_logs, only: [ :index ] do
+          collection do
+            get :export
+          end
+        end
         resources :employee_change_requests, only: [ :index, :show ] do
           member do
             patch :approve

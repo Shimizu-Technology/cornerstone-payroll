@@ -149,6 +149,9 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
         include("id" => client_company.id, "name" => client_company.name),
         include("id" => other_company.id, "name" => other_company.name)
       ])
+      audit = AuditLog.find_by!(action: "users#created", record_id: created_user.id)
+      expect(audit).to have_attributes(subject_name: "New Accountant", actor_name: admin_user.name, organization_id: organization.id)
+      expect(audit.metadata.fetch("after_values")).to include("email" => "new-accountant@example.com", "role" => "accountant")
     end
 
     it "returns validation errors without persisting a user" do
@@ -183,6 +186,19 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.fetch("error")).to eq("Cannot assign that role")
     end
+
+
+    it "allows a super admin to create another super admin" do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin_user.id)
+
+      post "/api/v1/admin/users", params: {
+        user: { email: "second-super-admin@example.com", name: "Second Super Admin", role: "super_admin" }
+      }
+
+      expect(response).to have_http_status(:created)
+      expect(User.find(response.parsed_body.dig("data", "id"))).to be_super_admin
+    end
   end
 
   describe "PATCH /api/v1/admin/users/:id" do
@@ -210,6 +226,8 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
           "name" => other_company.name
         }
       ])
+      audit = AuditLog.find_by!(action: "users#updated", record_id: managed_user.id)
+      expect(audit.metadata.fetch("changed_fields")).to include("name", "role", "assigned_company_ids")
     end
 
     it "clears stale client assignments when the role no longer uses them" do
@@ -369,6 +387,80 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(document.reload.uploaded_by_id).to be_nil
       expect(invitation.reload.invited_by_id).to be_nil
       expect(change_request.reload.requested_by_id).to be_nil
+    end
+  end
+
+  describe "primary platform owner protection" do
+    let!(:platform_owner) do
+      User.create!(
+        company: company,
+        organization: organization,
+        email: User::PRIMARY_PLATFORM_OWNER_EMAIL,
+        name: "Leon",
+        role: "super_admin",
+        active: true,
+        platform_owner: true
+      )
+    end
+
+    before do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(super_admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(super_admin_user.id)
+    end
+
+    it "identifies the owner and refuses role, status, or deletion mutations" do
+      get "/api/v1/admin/users/#{platform_owner.id}"
+      expect(response.parsed_body.dig("data", "platform_owner")).to be(true)
+
+      patch "/api/v1/admin/users/#{platform_owner.id}", params: { user: { role: "admin" } }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      post "/api/v1/admin/users/#{platform_owner.id}/deactivate"
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      expect {
+        delete "/api/v1/admin/users/#{platform_owner.id}"
+      }.not_to change(User, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(platform_owner.reload).to be_super_admin
+      expect(platform_owner).to be_active
+    end
+  end
+
+  describe "POST /api/v1/admin/users/:id/resend_invitation" do
+    before do
+      managed_user.update!(
+        invitation_status: "pending",
+        clerk_invitation_id: nil,
+        invited_at: 2.days.ago
+      )
+    end
+
+    it "confirms a completed resend even when the exact audit insert fails" do
+      allow_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:create_clerk_invitation)
+        .and_return({ success: true, url: "https://accounts.example.test/invitations/new", invitation_id: "inv_new" })
+      expect_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:send_invite_email)
+        .with(managed_user, "https://accounts.example.test/invitations/new")
+        .once
+      allow_any_instance_of(Api::V1::Admin::UsersController)
+        .to receive(:record_user_audit!)
+        .and_raise(ActiveRecord::ConnectionNotEstablished, "audit database unavailable")
+
+      previous_invited_at = managed_user.invited_at
+      post "/api/v1/admin/users/#{managed_user.id}/resend_invitation"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include(
+        "invitation_sent" => true,
+        "invitation_error" => nil
+      )
+      expect(managed_user.reload.invited_at).to be > previous_invited_at
+      expect(AuditLog.find_by!(record_id: managed_user.id)).to have_attributes(
+        action: "users#invitation_resent",
+        event_category: "security"
+      )
     end
   end
 end
