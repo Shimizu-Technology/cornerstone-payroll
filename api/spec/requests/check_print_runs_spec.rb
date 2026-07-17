@@ -31,6 +31,17 @@ RSpec.describe "Check print runs", type: :request do
       .to receive(:current_user).and_return(admin_user)
   end
 
+  it "returns a structured conflict when the pay period is no longer printable" do
+    pay_period.update!(status: "calculated", committed_at: nil)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/check_print_queue"
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body).to eq(
+      "error" => "Checks are only available for committed pay periods"
+    )
+  end
+
   it "returns a structured retryable response when package generation has an infrastructure failure" do
     service = instance_double(CheckPrintRunGenerationService)
     allow(CheckPrintRunGenerationService).to receive(:new).and_return(service)

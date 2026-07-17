@@ -11,6 +11,8 @@ module Api
 
         def queue
           render json: CheckPrintQueueService.new(pay_period: @pay_period).call
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :conflict
         end
 
         def create
