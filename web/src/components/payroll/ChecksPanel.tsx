@@ -15,6 +15,7 @@ import { ReprintCheckModal } from './ReprintCheckModal';
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
   searchTerm?: string;
+  refreshToken?: number;
 }
 
 type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted' | 'stub';
@@ -58,7 +59,7 @@ function eventLabel(eventType: string) {
   }
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,50 +94,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     }
   }, [payPeriod.id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refreshToken]);
 
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
-
-  // ---- Batch PDF download ----
-  const handleBatchDownload = async () => {
-    setBatchLoading(true);
-    setBatchAction('Generating PDF...');
-    try {
-      const result = await checksApi.batchPdf(payPeriod.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      setBatchAction('Downloading...');
-      const url = URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename || `checks_${payPeriod.pay_date ?? 'undated'}_batch.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download PDF');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  // ---- Mark all printed ----
-  const handleMarkAllPrinted = async () => {
-    if (!window.confirm('Mark all unprinted checks as printed?')) return;
-    setBatchLoading(true);
-    setBatchAction('Marking as printed...');
-    try {
-      const result = await checksApi.markAllPrinted(payPeriod.id);
-      await load();
-      if (result.marked_printed > 0) {
-        alert(`${result.marked_printed} check(s) marked as printed.`);
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark checks as printed');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
 
   // ---- Preview single check PDF ----
   const handlePreviewPdf = async (item: CheckItem) => {
@@ -216,31 +177,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       alert(err instanceof Error ? err.message : 'Failed to print pay stub');
     } finally {
       setActionLoading(null);
-    }
-  };
-
-  const handlePrintAll = async () => {
-    setBatchLoading(true);
-    setBatchAction('Generating checks for printing...');
-    try {
-      const result = await checksApi.batchPdf(payPeriod.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      setBatchAction('Opening print dialog...');
-      const url = URL.createObjectURL(result.blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate PDF for printing');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
     }
   };
 
@@ -406,7 +342,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     );
   }
 
-  const unprintedCount = meta?.unprinted ?? 0;
   const isFirstHawaiian4Up = meta?.check_stock_type === 'first_hawaiian_4up';
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredChecks = normalizedSearch
@@ -493,16 +428,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           {batchAction && (
             <span className="text-sm text-blue-600 animate-pulse mr-2">{batchAction}</span>
           )}
-          {unprintedCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleMarkAllPrinted}
-              disabled={batchLoading}
-            >
-              Mark All Printed
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
@@ -518,21 +443,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
             disabled={batchLoading || !hasPrintableStub}
           >
             {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download All Stubs'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handlePrintAll}
-            disabled={batchLoading || checks.length === 0}
-          >
-            Print All Checks
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleBatchDownload}
-            disabled={batchLoading || checks.length === 0}
-          >
-            Download All Checks PDF
           </Button>
         </div>
       </div>

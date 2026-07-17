@@ -324,6 +324,8 @@ import type {
   PaginationMeta,
   User,
   CheckListResponse,
+  CheckPrintQueueResponse,
+  CheckPrintRun,
   CheckItem,
   CheckLayoutResponse,
   CheckSettings,
@@ -2116,6 +2118,26 @@ export const checksApi = {
   // List all checks for a committed pay period
   list: (payPeriodId: number) =>
     api.get<CheckListResponse>(`/admin/pay_periods/${payPeriodId}/checks`),
+
+  printQueue: (payPeriodId: number) =>
+    api.get<CheckPrintQueueResponse>(`/admin/pay_periods/${payPeriodId}/check_print_queue`),
+
+  createPrintRun: (
+    payPeriodId: number,
+    data: { payrollItemIds: number[]; nonEmployeeCheckIds: number[]; startingSlot: number }
+  ) => api.post<{ check_print_run: CheckPrintRun }>(`/admin/pay_periods/${payPeriodId}/check_print_runs`, {
+    payroll_item_ids: data.payrollItemIds,
+    non_employee_check_ids: data.nonEmployeeCheckIds,
+    starting_slot: data.startingSlot,
+  }),
+
+  printRunPdf: (runId: number, disposition: 'inline' | 'attachment' = 'inline') =>
+    api.getBlobWithParams(`/admin/check_print_runs/${runId}/pdf`, { disposition }),
+
+  confirmPrintRun: (runId: number) =>
+    api.post<{ check_print_run: CheckPrintRun; already_confirmed: boolean; marked_printed: number }>(
+      `/admin/check_print_runs/${runId}/confirm`
+    ),
 
 
   // POST to generate batch PDF (returns blob)

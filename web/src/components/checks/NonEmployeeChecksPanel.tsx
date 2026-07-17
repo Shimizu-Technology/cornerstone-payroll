@@ -19,6 +19,7 @@ interface NonEmployeeChecksPanelProps {
   companyId: number;
   payPeriodStatus?: string;
   payDate?: string;
+  refreshToken?: number;
   /**
    * Fired whenever the set of checks is (re)loaded or a single check is
    * updated locally. Lets parent pages observe non-employee-check state
@@ -82,7 +83,7 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -102,8 +103,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
-  const [batchLoading, setBatchLoading] = useState(false);
-  const [batchAction, setBatchAction] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
@@ -162,7 +161,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   }, [payPeriodId]);
 
-  useEffect(() => { loadChecks(); }, [loadChecks]);
+  useEffect(() => { loadChecks(); }, [loadChecks, refreshToken]);
 
   // Notify the parent whenever the local checks array changes (initial load,
   // reloads, or single-check updates). Done in an effect so it stays out of
@@ -179,7 +178,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
   const isFirstHawaiian4Up = company?.check_stock_type === 'first_hawaiian_4up';
   const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
-  const unprintedPrintableCount = printableChecks.filter(check => !check.printed_at).length;
 
   const handleCreate = async () => {
     setFormError(null);
@@ -319,77 +317,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const handleBatchDownload = async () => {
-    if (printableChecks.length === 0) {
-      alert('No printable non-employee checks with check numbers were found.');
-      return;
-    }
-
-    setBatchLoading(true);
-    setBatchAction('Generating non-employee checks...');
-    try {
-      const result = await nonEmployeeChecksApi.batchPdf({
-        payPeriodId,
-        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
-      });
-      setBatchAction('Downloading...');
-      const url = URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename || `non_employee_checks_${payDate ?? payPeriodId}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download non-employee checks');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const handlePrintAll = async () => {
-    if (printableChecks.length === 0) {
-      alert('No printable non-employee checks with check numbers were found.');
-      return;
-    }
-
-    setBatchLoading(true);
-    setBatchAction('Generating non-employee checks...');
-    try {
-      const result = await nonEmployeeChecksApi.batchPdf({
-        payPeriodId,
-        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
-      });
-      setBatchAction('Opening print dialog...');
-      openBlobForPrint(result.blob);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to print non-employee checks');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const handleMarkAllPrinted = async () => {
-    if (unprintedPrintableCount === 0) return;
-    if (!window.confirm(`Mark ${unprintedPrintableCount} non-employee check${unprintedPrintableCount === 1 ? '' : 's'} as printed?`)) return;
-
-    setBatchLoading(true);
-    setBatchAction('Marking as printed...');
-    try {
-      const result = await nonEmployeeChecksApi.markAllPrinted({ payPeriodId });
-      await loadChecks();
-      if (result.marked_printed > 0) {
-        alert(`${result.marked_printed} non-employee check${result.marked_printed === 1 ? '' : 's'} marked as printed.`);
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark non-employee checks as printed');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
   const startCheckNumberEdit = (check: NonEmployeeCheck) => {
     setEditingCheckNumberId(check.id);
     setDraftCheckNumber(check.check_number || '');
@@ -475,7 +402,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   className="rounded border border-blue-200 bg-white px-2 py-1 text-sm text-gray-900"
                   value={startingSlot}
                   onChange={(e) => setStartingSlot(Number(e.target.value))}
-                  disabled={pdfLoading !== null || batchLoading}
+                  disabled={pdfLoading !== null}
                 >
                   <option value={1}>1</option>
                   <option value={2}>2</option>
@@ -484,47 +411,18 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 </select>
               </label>
             )}
-            {batchAction && (
-              <span className="text-sm text-blue-700 animate-pulse">{batchAction}</span>
-            )}
-            {unprintedPrintableCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleMarkAllPrinted}
-                disabled={batchLoading}
-              >
-                Mark All Printed
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handlePrintAll}
-              disabled={batchLoading || printableChecks.length === 0}
-            >
-              Print All Checks
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleBatchDownload}
-              disabled={batchLoading || printableChecks.length === 0}
-            >
-              Download Checks PDF
-            </Button>
             {showGenerateFit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit || batchLoading}
+                disabled={generatingFit}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
                 {generatingFit ? 'Generating...' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={batchLoading}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>

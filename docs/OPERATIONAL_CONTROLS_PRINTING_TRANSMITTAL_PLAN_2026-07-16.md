@@ -59,6 +59,8 @@ Exit criteria:
 
 ### PR 2 — Unified employee and non-employee check printing
 
+**Implementation status (July 17, 2026):** Implemented on `codex/unified-check-printing`. The workflow creates an immutable, SHA-256-verified PDF artifact and a manifest snapshot before printing. Employee and non-employee records remain unmodified until the operator explicitly confirms the exact generated package; confirmation is rejected if any selected source record changed in the meantime.
+
 Purpose: let the payroll processor prepare the complete check run from one place without wasting First Hawaiian four-up stock.
 
 Required behavior:

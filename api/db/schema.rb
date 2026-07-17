@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_17_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -85,6 +85,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_120000) do
     t.index ["payroll_item_id", "event_type"], name: "index_check_events_on_payroll_item_id_and_event_type"
     t.index ["payroll_item_id"], name: "index_check_events_on_payroll_item_id"
     t.index ["user_id"], name: "index_check_events_on_user_id"
+  end
+
+  create_table "check_print_runs", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.string "check_stock_type", null: false
+    t.bigint "company_id", null: false
+    t.datetime "confirmed_at"
+    t.bigint "confirmed_by_id"
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "filename", null: false
+    t.datetime "generated_at", null: false
+    t.jsonb "manifest", default: [], null: false
+    t.bigint "pay_period_id", null: false
+    t.integer "selected_count", null: false
+    t.string "sha256", null: false
+    t.integer "starting_slot", default: 1, null: false
+    t.string "status", default: "generated", null: false
+    t.string "storage_key", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_check_print_runs_on_company_id"
+    t.index ["confirmed_by_id"], name: "index_check_print_runs_on_confirmed_by_id"
+    t.index ["created_by_id"], name: "index_check_print_runs_on_created_by_id"
+    t.index ["pay_period_id", "generated_at"], name: "idx_check_print_runs_period_generated"
+    t.index ["pay_period_id"], name: "index_check_print_runs_on_pay_period_id"
+    t.index ["storage_key"], name: "index_check_print_runs_on_storage_key", unique: true
+    t.check_constraint "byte_size > 0", name: "check_print_runs_byte_size_check"
+    t.check_constraint "selected_count > 0", name: "check_print_runs_selected_count_check"
+    t.check_constraint "starting_slot >= 1 AND starting_slot <= 4", name: "check_print_runs_starting_slot_check"
+    t.check_constraint "status::text = ANY (ARRAY['generated'::character varying, 'confirmed'::character varying]::text[])", name: "check_print_runs_status_check"
   end
 
   create_table "check_signoff_sheets", force: :cascade do |t|
@@ -1783,6 +1813,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_120000) do
   add_foreign_key "cable_connection_tickets", "users"
   add_foreign_key "check_events", "payroll_items"
   add_foreign_key "check_events", "users", on_delete: :nullify
+  add_foreign_key "check_print_runs", "companies"
+  add_foreign_key "check_print_runs", "pay_periods"
+  add_foreign_key "check_print_runs", "users", column: "confirmed_by_id"
+  add_foreign_key "check_print_runs", "users", column: "created_by_id"
   add_foreign_key "check_signoff_sheets", "companies"
   add_foreign_key "check_signoff_sheets", "pay_periods"
   add_foreign_key "check_signoff_sheets", "users", column: "updated_by_id"

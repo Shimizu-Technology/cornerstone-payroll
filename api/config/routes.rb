@@ -189,6 +189,15 @@ Rails.application.routes.draw do
           get  "checks",                    to: "checks#index"
           post "checks/batch_pdf",          to: "checks#batch_pdf"
           post "checks/mark_all_printed",   to: "checks#mark_all_printed"
+          get  "check_print_queue",          to: "check_print_runs#queue"
+          post "check_print_runs",           to: "check_print_runs#create"
+        end
+
+        resources :check_print_runs, only: [] do
+          member do
+            get :pdf
+            post :confirm
+          end
         end
 
         # CPR-66: Per-item check actions (payroll_item_id param)
