@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -85,8 +85,10 @@ export function AuditLogs() {
   const [total, setTotal] = useState(0);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isExporting, setIsExporting] = useState(false);
+  const latestRequestId = useRef(0);
 
   const fetchLogs = useCallback(async () => {
+    const requestId = ++latestRequestId.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -100,20 +102,20 @@ export function AuditLogs() {
         per_page: 50,
         sort_direction: sortDirection,
       });
+      if (requestId !== latestRequestId.current) return;
+
       setLogs(response.data);
       setTotalPages(response.meta.total_pages || 1);
       setTotal(response.meta.total_count);
       setSelectedLogId((current) => response.data.find((log) => log.id === current)?.id || response.data[0]?.id || null);
     } catch (err) {
+      if (requestId !== latestRequestId.current) return;
+
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     } finally {
-      setIsLoading(false);
+      if (requestId === latestRequestId.current) setIsLoading(false);
     }
   }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, sortDirection]);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -151,8 +153,11 @@ export function AuditLogs() {
 
   useEffect(() => {
     void fetchLogs();
+  }, [fetchLogs]);
+
+  useEffect(() => {
     void fetchUsers();
-  }, [fetchLogs, fetchUsers]);
+  }, [fetchUsers]);
 
   const selectedLog = useMemo(
     () => logs.find((log) => log.id === selectedLogId) || null,
@@ -181,7 +186,13 @@ export function AuditLogs() {
               <p className="text-sm text-neutral-500">{total.toLocaleString()} recorded actions across the organization</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setSortDirection((value) => value === 'desc' ? 'asc' : 'desc')}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSortDirection((value) => value === 'desc' ? 'asc' : 'desc');
+                  setPage(1);
+                }}
+              >
                 <ArrowDownUp className="mr-2 h-4 w-4" />
                 {sortDirection === 'desc' ? 'Newest first' : 'Oldest first'}
               </Button>
@@ -195,17 +206,26 @@ export function AuditLogs() {
             <Input
               placeholder="Search actions"
               value={actionFilter}
-              onChange={(e) => setActionFilter(e.target.value)}
+              onChange={(e) => {
+                setActionFilter(e.target.value);
+                setPage(1);
+              }}
             />
             <Input
               placeholder="Search records"
               value={recordTypeFilter}
-              onChange={(e) => setRecordTypeFilter(e.target.value)}
+              onChange={(e) => {
+                setRecordTypeFilter(e.target.value);
+                setPage(1);
+              }}
             />
             <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               value={userFilter}
-              onChange={(e) => setUserFilter(e.target.value)}
+              onChange={(e) => {
+                setUserFilter(e.target.value);
+                setPage(1);
+              }}
             >
               <option value="">All users</option>
               {users.map((user) => (
@@ -219,12 +239,18 @@ export function AuditLogs() {
             <Input
               type="datetime-local"
               value={fromFilter}
-              onChange={(e) => setFromFilter(e.target.value)}
+              onChange={(e) => {
+                setFromFilter(e.target.value);
+                setPage(1);
+              }}
             />
             <Input
               type="datetime-local"
               value={toFilter}
-              onChange={(e) => setToFilter(e.target.value)}
+              onChange={(e) => {
+                setToFilter(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
         </Card>
