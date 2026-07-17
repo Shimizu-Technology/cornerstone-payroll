@@ -44,6 +44,17 @@ RSpec.describe "Api::V1::Admin::NonEmployeeChecks", type: :request do
       expect(NonEmployeeCheck.last.payment_period_type).to eq("pay_period")
     end
 
+    it "automatically reserves the next safe check number when none is supplied" do
+      company.update!(next_check_number: 4200)
+
+      post "/api/v1/admin/non_employee_checks", params: valid_params, as: :json
+
+      expect(response).to have_http_status(:created)
+      expect(NonEmployeeCheck.last.check_number).to eq("4200")
+      expect(company.reload.next_check_number).to eq(4201)
+      expect(response.parsed_body.dig("non_employee_check", "check_status")).to eq("unprinted")
+    end
+
     it "creates a standalone GRT check without a pay period" do
       expect {
         post "/api/v1/admin/non_employee_checks",

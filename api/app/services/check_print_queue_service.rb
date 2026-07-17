@@ -15,7 +15,6 @@ class CheckPrintQueueService
       .map { |item| queue_item_for_payroll_item(item) }
 
     non_employee_items = pay_period.non_employee_checks
-      .where.not(check_number: [ nil, "" ])
       .to_a
       .map { |check| queue_item_for_non_employee_check(check) }
 
@@ -59,7 +58,7 @@ class CheckPrintQueueService
   end
 
   def queue_item_for_non_employee_check(check)
-    eligible = !check.voided?
+    eligible = !check.voided? && check.check_number.present?
     {
       key: "non_employee_check:#{check.id}",
       source_type: "non_employee_check",
@@ -73,8 +72,15 @@ class CheckPrintQueueService
       print_count: check.print_count.to_i,
       printed_at: check.printed_at&.iso8601,
       eligible: eligible,
-      disabled_reason: check.voided? ? "Voided checks cannot be printed" : nil
+      disabled_reason: non_employee_check_disabled_reason(check)
     }
+  end
+
+  def non_employee_check_disabled_reason(check)
+    return "Voided checks cannot be printed" if check.voided?
+    return "Assign a check number before printing" if check.check_number.blank?
+
+    nil
   end
 
   def payroll_item_disabled_reason(item)

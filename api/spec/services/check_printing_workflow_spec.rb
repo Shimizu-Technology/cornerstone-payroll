@@ -44,6 +44,28 @@ RSpec.describe "Unified check printing workflow" do
     expect(result.dig(:meta, :check_stock_type)).to eq("first_hawaiian_4up")
   end
 
+  it "keeps an older unnumbered non-employee check visible but ineligible" do
+    pending_check = create(:non_employee_check,
+      company: company,
+      pay_period: pay_period,
+      payment_period_type: "pay_period",
+      tax_year: nil,
+      tax_month: nil,
+      check_number: nil,
+      payable_to: "Treasurer of Guam",
+      amount: 43.13)
+
+    result = CheckPrintQueueService.new(pay_period: pay_period).call
+    item = result.fetch(:items).find { |entry| entry.fetch(:key) == "non_employee_check:#{pending_check.id}" }
+
+    expect(item).to include(
+      check_number: "",
+      status: "pending",
+      eligible: false,
+      disabled_reason: "Assign a check number before printing"
+    )
+  end
+
   it "persists the exact mixed package and marks records only after confirmation" do
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,

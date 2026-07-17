@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Maximize2, Printer, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,6 +27,7 @@ type StatusFilter = 'all' | 'unprinted' | 'printed';
 function statusBadge(item: CheckPrintQueueItem) {
   if (item.status === 'voided') return <Badge variant="danger">Voided</Badge>;
   if (item.status === 'printed') return <Badge variant="success">Printed ×{item.print_count}</Badge>;
+  if (item.status === 'pending') return <Badge variant="warning">Needs number</Badge>;
   return <Badge variant="warning">Unprinted</Badge>;
 }
 
@@ -37,6 +39,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   const [startingSlot, setStartingSlot] = useState(1);
   const [run, setRun] = useState<CheckPrintRun | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [artifactVerified, setArtifactVerified] = useState(false);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState<string | null>(null);
@@ -67,6 +70,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
     if (!open) return;
     setRun(null);
     setArtifactVerified(false);
+    setPreviewExpanded(false);
     revokePreview();
     void loadQueue();
   }, [open, loadQueue, revokePreview]);
@@ -75,7 +79,8 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
   const visibleItems = useMemo(() => (queue?.items || []).filter((item) => {
     if (sourceFilter !== 'all' && item.kind !== sourceFilter) return false;
-    if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+    if (statusFilter === 'unprinted' && item.status !== 'unprinted' && item.status !== 'pending') return false;
+    if (statusFilter === 'printed' && item.status !== 'printed') return false;
     return true;
   }), [queue, sourceFilter, statusFilter]);
 
@@ -187,8 +192,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="dialog-wide flex max-h-[92vh] flex-col overflow-hidden p-0">
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="dialog-wide flex max-h-[92vh] flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-slate-200 bg-slate-950 px-6 py-5 text-white">
           <div className="flex items-start justify-between gap-4 pr-8">
             <div>
@@ -229,7 +235,9 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
                     {visibleItems.map((item) => (
                       <tr key={item.key} className={selected.has(item.key) ? 'bg-blue-50/70' : 'bg-white'}>
                         <td className="p-3"><input type="checkbox" checked={selected.has(item.key)} disabled={!item.eligible || Boolean(run)} onChange={() => toggle(item)} aria-label={`Select check ${item.check_number}`} /></td>
-                        <td className="p-3 font-mono font-semibold text-slate-900">#{item.check_number}</td>
+                        <td className="p-3 font-mono font-semibold text-slate-900">
+                          {item.check_number ? `#${item.check_number}` : <span className="font-sans text-xs text-amber-700">Not assigned</span>}
+                        </td>
                         <td className="p-3"><div className="font-medium text-slate-900">{item.payee}</div>{item.disabled_reason && <div className="text-xs text-red-600">{item.disabled_reason}</div>}</td>
                         <td className="p-3 text-slate-600">{item.kind_label}</td>
                         <td className="p-3">{statusBadge(item)}</td>
@@ -261,7 +269,21 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
 
             {run && (
               <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                <div className="flex items-center justify-between border-b border-slate-100 p-4"><div><div className="font-semibold">Generated package #{run.id}</div><div className="mt-1 font-mono text-xs text-slate-500">SHA-256 {run.sha256.slice(0, 16)}…</div></div><Badge variant={run.status === 'confirmed' ? 'success' : 'warning'}>{run.status === 'confirmed' ? 'Confirmed' : 'Awaiting confirmation'}</Badge></div>
+                <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4">
+                  <div>
+                    <div className="font-semibold">Generated package #{run.id}</div>
+                    <div className="mt-1 font-mono text-xs text-slate-500">SHA-256 {run.sha256.slice(0, 16)}…</div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <Badge variant={run.status === 'confirmed' ? 'success' : 'warning'}>{run.status === 'confirmed' ? 'Confirmed' : 'Awaiting confirmation'}</Badge>
+                    {previewUrl && (
+                      <Button size="sm" variant="outline" onClick={() => setPreviewExpanded(true)} className="gap-1.5">
+                        <Maximize2 className="h-3.5 w-3.5" />
+                        Enlarge
+                      </Button>
+                    )}
+                  </div>
+                </div>
                 {previewUrl ? (
                   <iframe title="Check package preview" src={previewUrl} className="h-80 w-full bg-slate-900" />
                 ) : (
@@ -282,8 +304,48 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onCon
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           {!run && <Button onClick={() => void generate()} disabled={selectedItems.length === 0 || Boolean(action)}>Generate print package</Button>}
           {run && run.status !== 'confirmed' && <Button onClick={() => void confirm()} disabled={Boolean(action) || !artifactVerified} className="bg-emerald-700 hover:bg-emerald-800">Confirm printed correctly</Button>}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={previewExpanded && Boolean(previewUrl)} onOpenChange={setPreviewExpanded}>
+        <DialogContent className="dialog-wide flex h-[94vh] max-h-[94vh] flex-col overflow-hidden p-0">
+          <DialogHeader className="border-b border-slate-800 bg-slate-950 px-6 py-4 text-white">
+            <div className="flex items-center justify-between gap-6 pr-8">
+              <div className="min-w-0">
+                <DialogTitle className="text-lg text-white">Inspect check package #{run?.id}</DialogTitle>
+                <DialogDescription className="mt-1 flex items-center gap-1.5 text-slate-300">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                  Integrity verified · Review every check before confirming the print run.
+                </DialogDescription>
+              </div>
+              <div className="hidden shrink-0 font-mono text-xs text-slate-400 sm:block">
+                {run ? `${run.selected_count} CHECK${run.selected_count === 1 ? '' : 'S'}` : ''}
+              </div>
+            </div>
+          </DialogHeader>
+
+          {previewUrl && (
+            <iframe
+              title="Expanded check package preview"
+              src={previewUrl}
+              className="min-h-0 w-full flex-1 bg-slate-900"
+            />
+          )}
+
+          <DialogFooter className="border-t border-slate-200 bg-white px-6 py-4">
+            <Button variant="outline" onClick={() => setPreviewExpanded(false)}>Return to package</Button>
+            <Button variant="outline" onClick={print} disabled={!previewUrl} className="gap-2">
+              <Printer className="h-4 w-4" />
+              Print
+            </Button>
+            <Button variant="outline" onClick={() => void download()} className="gap-2">
+              <Download className="h-4 w-4" />
+              Download
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

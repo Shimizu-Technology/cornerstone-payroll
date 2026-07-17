@@ -77,6 +77,7 @@ module Api
           created = false
           ActiveRecord::Base.transaction do
             check.company.lock!
+            check.check_number = check.company.next_check_number! if check.check_number.blank?
             validate_check_number_assignment!(check_number_value(attrs), excluding_non_employee_check_id: nil)
             created = check.save
             advance_next_check_number!(check.company, check.check_number) if created

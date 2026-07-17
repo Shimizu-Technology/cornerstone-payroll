@@ -360,21 +360,22 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
   // Identify the auto-generated FIT deposit by its stable marker, falling back
   // to the legacy string match for any rows not yet caught by the data backfill.
-  const hasFitCheck = checks.some(
+  const fitCheck = checks.find(
     c =>
       !c.voided &&
       (c.auto_generated_type === 'fit_deposit' ||
         (c.check_type === 'tax_deposit' &&
           (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
   );
-  const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
+  const fitCheckNeedsNumber = Boolean(fitCheck && !fitCheck.check_number);
+  const showGenerateFit = payPeriodStatus === 'committed' && (!fitCheck || fitCheckNeedsNumber);
 
   const handleGenerateFitCheck = async () => {
     setGeneratingFit(true);
     setFitError(null);
     try {
       await payPeriodsApi.generateFitCheck(payPeriodId);
-      loadChecks();
+      await loadChecks();
     } catch (err) {
       setFitError(err instanceof Error ? err.message : 'Failed to generate FIT check');
     } finally {
@@ -419,7 +420,9 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 disabled={generatingFit}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
-                {generatingFit ? 'Generating...' : 'Generate FIT Check'}
+                {generatingFit
+                  ? fitCheckNeedsNumber ? 'Assigning...' : 'Generating...'
+                  : fitCheckNeedsNumber ? 'Assign FIT number' : 'Generate FIT Check'}
               </Button>
             )}
             <Button size="sm" onClick={() => setShowForm(!showForm)}>
