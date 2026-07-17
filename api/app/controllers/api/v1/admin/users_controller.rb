@@ -448,6 +448,7 @@ module Api
             extra_metadata: extra_metadata
           )
         rescue StandardError => e
+          override_default_audit_action!("users#invitation_resent")
           Rails.logger.error(
             "[UsersController] Invitation completed but exact audit logging failed " \
             "for user #{target.id}: #{e.class}: #{e.message}"

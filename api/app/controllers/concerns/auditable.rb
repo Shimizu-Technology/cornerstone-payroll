@@ -52,7 +52,7 @@ module Auditable
     record_type = controller_path.gsub("api/v1/admin/", "")
                                  .gsub("api/v1/client/", "client_")
                                  .gsub("api/v1/", "")
-    action_label = "#{record_type}##{action_name}"
+    action_label = @default_audit_action_override.presence || "#{record_type}##{action_name}"
 
     record_id = params[:id]
 
@@ -189,5 +189,9 @@ module Auditable
 
   def skip_default_audit_log!
     @skip_default_audit_log = true
+  end
+
+  def override_default_audit_action!(action)
+    @default_audit_action_override = action
   end
 end

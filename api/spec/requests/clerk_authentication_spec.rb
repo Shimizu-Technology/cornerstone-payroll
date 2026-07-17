@@ -216,6 +216,18 @@ RSpec.describe "Clerk Authentication", type: :request do
       expect(user.last_login_at).to be_present
     end
 
+    it "does not lock the user row when no activity write is due" do
+      user.update_columns(
+        last_session_id_digest: Digest::SHA256.hexdigest("session-audit-123"),
+        last_active_at: Time.current
+      )
+      expect_any_instance_of(User).not_to receive(:with_lock)
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it "rolls back the session marker when the sign-in audit fails so a later request can retry" do
       allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "audit unavailable")
 

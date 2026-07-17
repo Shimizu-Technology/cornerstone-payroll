@@ -39,6 +39,14 @@ class User < ApplicationRecord
 
   ACTIVITY_WRITE_INTERVAL = 5.minutes
 
+  def authenticated_activity_write_due?(session_id: nil, occurred_at: Time.current)
+    session_digest = session_id.present? ? Digest::SHA256.hexdigest(session_id.to_s) : nil
+    new_session = session_digest.present? && session_digest != last_session_id_digest
+    activity_stale = last_active_at.blank? || last_active_at < occurred_at - ACTIVITY_WRITE_INTERVAL
+
+    new_session || activity_stale
+  end
+
   def record_authenticated_activity!(session_id: nil, occurred_at: Time.current)
     session_digest = session_id.present? ? Digest::SHA256.hexdigest(session_id.to_s) : nil
     new_session = session_digest.present? && session_digest != last_session_id_digest

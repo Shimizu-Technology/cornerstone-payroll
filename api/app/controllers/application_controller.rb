@@ -28,9 +28,12 @@ class ApplicationController < ActionController::API
   def track_authenticated_user_activity
     return unless current_user.is_a?(User)
 
+    session_id = @clerk_token_payload&.fetch("sid", nil)
+    return unless current_user.authenticated_activity_write_due?(session_id: session_id)
+
     current_user.with_lock do
       new_session = current_user.record_authenticated_activity!(
-        session_id: @clerk_token_payload&.fetch("sid", nil)
+        session_id: session_id
       )
       next unless new_session
 

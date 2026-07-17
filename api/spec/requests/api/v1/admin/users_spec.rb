@@ -458,7 +458,7 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       )
       expect(managed_user.reload.invited_at).to be > previous_invited_at
       expect(AuditLog.find_by!(record_id: managed_user.id)).to have_attributes(
-        action: "users#resend_invitation",
+        action: "users#invitation_resent",
         event_category: "security"
       )
     end
