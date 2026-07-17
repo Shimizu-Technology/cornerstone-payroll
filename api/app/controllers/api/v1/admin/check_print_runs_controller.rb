@@ -65,6 +65,14 @@ module Api
           }
         rescue CheckPrintRunConfirmationService::StaleSelectionError, ArgumentError => e
           render json: { error: e.message }, status: :conflict
+        rescue StandardError => e
+          Rails.logger.error(
+            "[check_print_runs#confirm] run=#{@run&.id} request_id=#{request.request_id} " \
+            "#{e.class}: #{e.message}"
+          )
+          render json: {
+            error: "Print confirmation could not be recorded. No check print statuses were changed. Please try again."
+          }, status: :service_unavailable
         end
 
         private

@@ -6,6 +6,23 @@ RSpec.describe "Check print runs", type: :request do
   let(:company) { create(:company) }
   let(:admin_user) { create(:user, company: company, organization: company.organization) }
   let(:pay_period) { create(:pay_period, :committed, company: company) }
+  let(:print_run) do
+    CheckPrintRun.create!(
+      company: company,
+      pay_period: pay_period,
+      created_by: admin_user,
+      status: "generated",
+      check_stock_type: company.check_stock_type,
+      starting_slot: 1,
+      selected_count: 1,
+      manifest: [ { "source_type" => "payroll_item", "source_id" => 123 } ],
+      storage_key: "check-print-runs/spec-package.pdf",
+      filename: "spec-package.pdf",
+      sha256: "a" * 64,
+      byte_size: 100,
+      generated_at: Time.current
+    )
+  end
 
   before do
     allow_any_instance_of(Api::V1::Admin::CheckPrintRunsController)
@@ -31,6 +48,25 @@ RSpec.describe "Check print runs", type: :request do
     expect(Rails.logger).to have_received(:error).with(include(
       "[check_print_runs#create]",
       "R2StorageService::UploadError: private storage detail"
+    ))
+  end
+
+  it "returns a structured retryable response when print confirmation has an infrastructure failure" do
+    service = instance_double(CheckPrintRunConfirmationService)
+    allow(CheckPrintRunConfirmationService).to receive(:new).and_return(service)
+    allow(service).to receive(:call).and_raise(ActiveRecord::ConnectionNotEstablished, "private database detail")
+    allow(Rails.logger).to receive(:error)
+
+    post "/api/v1/admin/check_print_runs/#{print_run.id}/confirm"
+
+    expect(response).to have_http_status(:service_unavailable)
+    expect(response.parsed_body).to eq(
+      "error" => "Print confirmation could not be recorded. No check print statuses were changed. Please try again."
+    )
+    expect(response.body).not_to include("private database detail")
+    expect(Rails.logger).to have_received(:error).with(include(
+      "[check_print_runs#confirm]",
+      "ActiveRecord::ConnectionNotEstablished: private database detail"
     ))
   end
 end
