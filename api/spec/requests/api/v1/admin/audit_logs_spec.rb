@@ -78,6 +78,11 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   it "exports filtered history as CSV and records the export" do
     AuditLog.record!(user: admin, organization_id: organization.id, action: "users#updated", record_type: "users", record_id: admin.id)
 
+    # One populated batch plus one empty sentinel batch. If Auditable reads
+    # response.body, the streaming Enumerator is consumed twice (four calls).
+    expect_any_instance_of(Api::V1::Admin::AuditLogsController)
+      .to receive(:export_batch).twice.and_call_original
+
     expect {
       get "/api/v1/admin/audit_logs/export", params: { record_type: "users", record_id: admin.id }
     }.to change { AuditLog.where(action: "audit_logs#export").count }.by(1)

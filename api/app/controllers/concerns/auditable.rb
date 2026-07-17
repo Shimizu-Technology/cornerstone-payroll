@@ -56,7 +56,7 @@ module Auditable
 
     record_id = params[:id]
 
-    if action_name == "create" && record_id.blank?
+    if action_name == "create" && record_id.blank? && json_response?
       begin
         body = JSON.parse(response.body)
         record_id = extract_record_id_from_body(body)
@@ -151,6 +151,8 @@ module Auditable
   end
 
   def extract_response_subject
+    return nil unless json_response?
+
     body = JSON.parse(response.body)
     return body if body.is_a?(Hash) && body["id"].present?
     return body["data"] if body.is_a?(Hash) && body["data"].is_a?(Hash)
@@ -158,6 +160,13 @@ module Auditable
     body.values.find { |value| value.is_a?(Hash) && value["id"].present? } if body.is_a?(Hash)
   rescue JSON::ParserError, TypeError
     nil
+  end
+
+  # Calling response.body on a streaming response consumes its Enumerator.
+  # Only JSON responses can contain a record subject for the generic audit
+  # hook, so CSV/PDF/file responses must remain untouched for Rack to stream.
+  def json_response?
+    response.media_type.to_s.end_with?("json")
   end
 
   def subject_name_from(subject)
