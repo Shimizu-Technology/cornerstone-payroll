@@ -849,6 +849,36 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.gross_pay.to_f).to eq(190.0)
     end
 
+    it "calculates a default percentage payroll field from first-run base gross" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "First Run Commission",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "percentage",
+        default_percentage: 10,
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, percentage: 10)
+
+      expect(pay_period.payroll_items.where(employee: employee)).not_to exist
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: {
+          employee.id.to_s => { field.id.to_s => { mode: "default" } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      item = pay_period.reload.payroll_items.find_by!(employee: employee)
+      entry = item.payroll_item_field_entries.find_by!(payroll_field_definition: field)
+      expect(entry).to have_attributes(source: "employee_default", amount: 15.to_d)
+      expect(item.gross_pay).to eq(165.to_d)
+    end
+
     it "does not add an omitted hourly employee to an imported payroll just because worksheet defaults were submitted" do
       omitted_employee = Employee.create!(
         company: company,

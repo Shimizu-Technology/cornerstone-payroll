@@ -28,6 +28,9 @@ class PayrollFieldInputApplier
       attributes = snapshot_attributes(assignment, field)
 
       if input.fetch(:mode) == "default"
+        # Percentage defaults are deliberately refreshed by PayrollCalculator
+        # after it computes the employee's base gross. This initial amount only
+        # establishes the selected source before calculate! runs.
         amount = assignment.effective_amount_for(payroll_item.gross_pay.to_d)
         if entry
           entry.assign_attributes(attributes.merge(amount: amount, source: "employee_default", metadata: (entry.metadata || {}).except("uncapped_amount")))
