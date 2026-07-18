@@ -71,12 +71,14 @@ class NonEmployeeCheck < ApplicationRecord
   end
 
   def mark_printed!
-    raise ArgumentError, "Cannot print a voided check" if voided?
+    with_lock do
+      raise ArgumentError, "Cannot print a voided check" if voided?
 
-    update!(
-      printed_at: printed_at || Time.current,
-      print_count: print_count + 1
-    )
+      update!(
+        printed_at: printed_at || Time.current,
+        print_count: print_count + 1
+      )
+    end
   end
 
   def void!(reason:)

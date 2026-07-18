@@ -28,6 +28,12 @@ class AuditLogPresenter
     "pay_periods#generate_fit_check" => "generated the FIT check for",
     "pay_periods#void" => "voided payroll for",
     "pay_periods#correct_pay_date" => "corrected the pay date for",
+    "checks#update_check_number" => "updated the check number for",
+    "checks#check_number_updated" => "updated the check number for",
+    "non_employee_checks#update" => "updated",
+    "non_employee_checks#updated" => "updated",
+    "check_print_runs#generated" => "generated a check print package for",
+    "check_print_runs#confirmed" => "confirmed printed checks for",
     "correct_committed_pay_date" => "corrected the committed pay date for",
     "create_correction_run" => "created a correction run for",
     "void_pay_period" => "voided payroll for"

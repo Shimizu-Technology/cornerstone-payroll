@@ -2,7 +2,7 @@
  * CPR-66: ChecksPanel
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
 import { checksApi, payStubsApi } from '@/services/api';
@@ -11,13 +11,16 @@ import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { VoidCheckModal } from './VoidCheckModal';
 import { ReprintCheckModal } from './ReprintCheckModal';
+import { InlineCheckNumberField } from '@/components/checks/InlineCheckNumberField';
+import { checkNumberValidationError } from '@/components/checks/checkNumberDrafts';
 
 interface ChecksPanelProps {
   payPeriod: PayPeriod;
   searchTerm?: string;
+  refreshToken?: number;
 }
 
-type CheckAction = 'preview' | 'saveCheckNumber' | 'markPrinted' | 'stub';
+type CheckAction = 'preview' | 'markPrinted' | 'stub';
 
 function checkStatusBadge(item: CheckItem) {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
@@ -58,7 +61,7 @@ function eventLabel(eventType: string) {
   }
 }
 
-export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
+export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: ChecksPanelProps) {
   const [checks, setChecks] = useState<CheckItem[]>([]);
   const [meta, setMeta] = useState<CheckListMeta | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,10 +70,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchAction, setBatchAction] = useState<string | null>(null);
   const [startingSlot, setStartingSlot] = useState(1);
-  const [editingCheckId, setEditingCheckId] = useState<number | null>(null);
-  const [draftCheckNumber, setDraftCheckNumber] = useState('');
-  const [checkNumberError, setCheckNumberError] = useState<{ id: number; message: string } | null>(null);
   const [selectedStubIds, setSelectedStubIds] = useState<number[]>([]);
+  const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
+  const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
+  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
 
   // Modal state
   const [voidTarget, setVoidTarget] = useState<CheckItem | null>(null);
@@ -85,6 +88,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       const data = await checksApi.list(payPeriod.id);
       setChecks(data.checks);
       setMeta(data.meta);
+      setCheckNumberDrafts(Object.fromEntries(data.checks.map((item) => [item.id, item.check_number || ''])));
       setSelectedStubIds((current) => current.filter((id) => data.checks.some((item) => item.id === id && !item.voided)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load checks');
@@ -93,50 +97,10 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     }
   }, [payPeriod.id]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refreshToken]);
 
   const isActionLoading = (id: number, action: CheckAction) =>
     actionLoading?.id === id && actionLoading.action === action;
-
-  // ---- Batch PDF download ----
-  const handleBatchDownload = async () => {
-    setBatchLoading(true);
-    setBatchAction('Generating PDF...');
-    try {
-      const result = await checksApi.batchPdf(payPeriod.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      setBatchAction('Downloading...');
-      const url = URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename || `checks_${payPeriod.pay_date ?? 'undated'}_batch.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download PDF');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  // ---- Mark all printed ----
-  const handleMarkAllPrinted = async () => {
-    if (!window.confirm('Mark all unprinted checks as printed?')) return;
-    setBatchLoading(true);
-    setBatchAction('Marking as printed...');
-    try {
-      const result = await checksApi.markAllPrinted(payPeriod.id);
-      await load();
-      if (result.marked_printed > 0) {
-        alert(`${result.marked_printed} check(s) marked as printed.`);
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark checks as printed');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
 
   // ---- Preview single check PDF ----
   const handlePreviewPdf = async (item: CheckItem) => {
@@ -219,31 +183,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     }
   };
 
-  const handlePrintAll = async () => {
-    setBatchLoading(true);
-    setBatchAction('Generating checks for printing...');
-    try {
-      const result = await checksApi.batchPdf(payPeriod.id, isFirstHawaiian4Up ? { startingSlot } : undefined);
-      setBatchAction('Opening print dialog...');
-      const url = URL.createObjectURL(result.blob);
-      const printWindow = window.open(url);
-      if (printWindow) {
-        printWindow.addEventListener('load', () => {
-          printWindow.print();
-          setTimeout(() => URL.revokeObjectURL(url), 60000);
-        });
-      } else {
-        URL.revokeObjectURL(url);
-        alert('Pop-up blocked. Please allow pop-ups for this site to print checks.');
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to generate PDF for printing');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
   const selectedStubIdSet = new Set(selectedStubIds);
 
   const selectedStubRequestIds = () =>
@@ -301,55 +240,48 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     }
   };
 
-  const startCheckNumberEdit = (item: CheckItem) => {
-    setEditingCheckId(item.id);
-    setDraftCheckNumber(item.check_number || '');
-    setCheckNumberError(null);
+  const checkNumberChanges = useMemo(() => checks.filter((item) =>
+    !item.voided && (checkNumberDrafts[item.id] ?? item.check_number ?? '').trim() !== (item.check_number || '').trim()
+  ), [checkNumberDrafts, checks]);
+  const checkNumberErrors = useMemo(() => {
+    const errors: Record<number, string> = {};
+    const owners = new Map<string, number[]>();
+    checks.filter((item) => !item.voided && item.check_number).forEach((item) => {
+      const value = (checkNumberDrafts[item.id] ?? item.check_number ?? '').trim();
+      const validationError = checkNumberValidationError(value);
+      if (validationError) errors[item.id] = validationError;
+      if (value) owners.set(value, [...(owners.get(value) || []), item.id]);
+    });
+    owners.forEach((ids, number) => {
+      if (ids.length > 1) ids.forEach((id) => { errors[id] = `Check #${number} is entered more than once.`; });
+    });
+    return errors;
+  }, [checkNumberDrafts, checks]);
+
+  const discardCheckNumberChanges = () => {
+    setCheckNumberDrafts(Object.fromEntries(checks.map((item) => [item.id, item.check_number || ''])));
+    setCheckNumberSaveError(null);
   };
 
-  const cancelCheckNumberEdit = () => {
-    setEditingCheckId(null);
-    setDraftCheckNumber('');
-    setCheckNumberError(null);
-  };
-
-  const handleSaveCheckNumber = async (item: CheckItem) => {
-    const nextNumber = draftCheckNumber.trim();
-    if (!nextNumber) {
-      setCheckNumberError({ id: item.id, message: 'Enter a check number.' });
-      return;
-    }
-    if (!/^\d+$/.test(nextNumber)) {
-      setCheckNumberError({ id: item.id, message: 'Check number must be numeric.' });
-      return;
-    }
-    if (nextNumber === item.check_number) {
-      cancelCheckNumberEdit();
-      return;
-    }
-
-    setActionLoading({ id: item.id, action: 'saveCheckNumber' });
-    setCheckNumberError(null);
+  const saveCheckNumberChanges = async () => {
+    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    setSavingCheckNumbers(true);
+    setCheckNumberSaveError(null);
     try {
-      const result = await checksApi.updateCheckNumber(
-        item.id,
-        nextNumber,
-        'Corrected from the pay period Checks section'
+      await checksApi.updateCheckNumbers(
+        payPeriod.id,
+        checkNumberChanges.map((item) => ({
+          source_type: 'payroll_item',
+          source_id: item.id,
+          check_number: (checkNumberDrafts[item.id] || '').trim(),
+        })),
+        'Saved from the pay period Checks worksheet'
       );
-      setChecks((current) =>
-        current.map((check) => (check.id === item.id ? result.payroll_item : check))
-      );
-      setPreviewItem((current) =>
-        current?.id === item.id ? result.payroll_item : current
-      );
-      cancelCheckNumberEdit();
+      await load();
     } catch (err) {
-      setCheckNumberError({
-        id: item.id,
-        message: err instanceof Error ? err.message : 'Failed to update check number',
-      });
+      setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
     } finally {
-      setActionLoading(null);
+      setSavingCheckNumbers(false);
     }
   };
 
@@ -406,7 +338,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
     );
   }
 
-  const unprintedCount = meta?.unprinted ?? 0;
   const isFirstHawaiian4Up = meta?.check_stock_type === 'first_hawaiian_4up';
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredChecks = normalizedSearch
@@ -493,16 +424,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           {batchAction && (
             <span className="text-sm text-blue-600 animate-pulse mr-2">{batchAction}</span>
           )}
-          {unprintedCount > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleMarkAllPrinted}
-              disabled={batchLoading}
-            >
-              Mark All Printed
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
@@ -519,21 +440,6 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
           >
             {selectedStubIds.length > 0 ? 'Download Selected Stubs' : 'Download All Stubs'}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handlePrintAll}
-            disabled={batchLoading || checks.length === 0}
-          >
-            Print All Checks
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleBatchDownload}
-            disabled={batchLoading || checks.length === 0}
-          >
-            Download All Checks PDF
-          </Button>
         </div>
       </div>
 
@@ -546,6 +452,24 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
         Before printing on live check stock, print one test page on plain paper or a photocopy of the real check and confirm the alignment.
       </div>
+
+      {checkNumberChanges.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-950">
+              {checkNumberChanges.length} unsaved check-number change{checkNumberChanges.length === 1 ? '' : 's'}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-800">Review the highlighted fields. Nothing changes until you save.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+              {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {checkNumberSaveError && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
 
       {/* Checks table */}
       {filteredChecks.length === 0 ? (
@@ -581,8 +505,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                     {checkStatusBadge(item)}
                   </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <MobileField label="Check #" value={item.check_number || '—'} />
+                  <div className="mt-4 grid grid-cols-1 gap-3">
                     <MobileField label="Net pay" value={formatCurrency(item.net_pay)} />
                   </div>
 
@@ -601,38 +524,19 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                     </div>
                   )}
 
-                  {editingCheckId === item.id ? (
-                    <div className="mt-4 space-y-2 rounded-xl border border-blue-100 bg-blue-50 p-3">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={draftCheckNumber}
-                        onChange={(e) => setDraftCheckNumber(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleSaveCheckNumber(item);
-                          if (e.key === 'Escape') cancelCheckNumberEdit();
-                        }}
-                        className="h-11 w-full rounded-xl border border-blue-300 px-3 font-mono text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                        autoFocus
+                  {!item.voided && item.check_number && (
+                    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="mb-2 text-xs font-medium text-slate-500">Check number</p>
+                      <InlineCheckNumberField
+                        value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
+                        ariaLabel={`Check number for ${item.employee_name}`}
+                        disabled={savingCheckNumbers}
+                        dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
+                        error={checkNumberErrors[item.id]}
+                        onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
+                        onReset={() => setCheckNumberDrafts((current) => ({ ...current, [item.id]: item.check_number || '' }))}
                       />
-                      {checkNumberError?.id === item.id && (
-                        <p className="text-xs font-normal text-red-600">{checkNumberError.message}</p>
-                      )}
-                      <MobileCardActions className="mt-0 grid grid-cols-2">
-                        <Button size="sm" onClick={() => handleSaveCheckNumber(item)} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Save</Button>
-                        <Button size="sm" variant="outline" onClick={cancelCheckNumberEdit} disabled={isActionLoading(item.id, 'saveCheckNumber')}>Cancel</Button>
-                      </MobileCardActions>
                     </div>
-                  ) : (
-                    !item.voided && item.check_number && (
-                      <button
-                        type="button"
-                        onClick={() => startCheckNumberEdit(item)}
-                        className="mt-3 text-sm font-semibold text-blue-700"
-                      >
-                        Edit check number
-                      </button>
-                    )
                   )}
 
                   <MobileCardActions className="grid grid-cols-2">
@@ -710,62 +614,26 @@ export function ChecksPanel({ payPeriod, searchTerm = '' }: ChecksPanelProps) {
                     />
                   </td>
                   <td className="px-3 py-2 text-gray-800">
-                    {editingCheckId === item.id ? (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            value={draftCheckNumber}
-                            onChange={(e) => setDraftCheckNumber(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveCheckNumber(item);
-                              if (e.key === 'Escape') cancelCheckNumberEdit();
-                            }}
-                            className="h-8 w-24 rounded border border-blue-300 px-2 font-mono text-sm text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                            autoFocus
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleSaveCheckNumber(item)}
-                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
-                            className="h-8 px-2 text-xs"
-                          >
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={cancelCheckNumberEdit}
-                            disabled={isActionLoading(item.id, 'saveCheckNumber')}
-                            className="h-8 px-2 text-xs"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                        {checkNumberError?.id === item.id && (
-                          <p className="max-w-xs text-xs font-normal text-red-600">{checkNumberError.message}</p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      {item.voided || !item.check_number ? (
                         <span className="font-mono">{item.check_number || '—'}</span>
-                        {item.reprint_of_check_number && (
-                          <span className="text-xs text-orange-700" title={`Reissued replacement for #${item.reprint_of_check_number}`}>
-                            replaces #{item.reprint_of_check_number}
-                          </span>
-                        )}
-                        {!item.voided && item.check_number && (
-                          <button
-                            type="button"
-                            onClick={() => startCheckNumberEdit(item)}
-                            className="text-xs font-medium text-blue-600 hover:text-blue-800"
-                          >
-                            Edit
-                          </button>
-                        )}
-                      </div>
-                    )}
+                      ) : (
+                        <InlineCheckNumberField
+                          value={checkNumberDrafts[item.id] ?? item.check_number ?? ''}
+                          ariaLabel={`Check number for ${item.employee_name}`}
+                          disabled={savingCheckNumbers}
+                          dirty={checkNumberChanges.some((changed) => changed.id === item.id)}
+                          error={checkNumberErrors[item.id]}
+                          onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [item.id]: value }))}
+                          onReset={() => setCheckNumberDrafts((current) => ({ ...current, [item.id]: item.check_number || '' }))}
+                        />
+                      )}
+                      {item.reprint_of_check_number && (
+                        <span className="text-xs text-orange-700" title={`Reissued replacement for #${item.reprint_of_check_number}`}>
+                          replaces #{item.reprint_of_check_number}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2 text-gray-900">
                     <div className="space-y-0.5">
