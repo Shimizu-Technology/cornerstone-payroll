@@ -37,8 +37,9 @@ class CheckPrintRunGenerationService
       # Keep rendering and storage inside this lock boundary intentionally. The immutable manifest must describe the
       # exact rows used by the PDF; releasing the locks before upload would allow a correction to make them diverge.
       pdf_bytes = render_pdf(payroll_items, non_employee_checks, manifest)
-      key = storage_key
-      filename = print_run_filename
+      artifact_id = SecureRandom.uuid
+      key = storage_key(artifact_id)
+      filename = print_run_filename(artifact_id)
       storage.upload(key, StringIO.new(pdf_bytes), content_type: "application/pdf")
 
       run = CheckPrintRun.create!(
@@ -197,13 +198,13 @@ class CheckPrintRunGenerationService
     value.match?(/\A\d+\z/) ? [ 0, value.to_i, value, fallback ] : [ 1, 0, value.downcase, fallback ]
   end
 
-  def storage_key
-    "check-print-runs/company-#{pay_period.company_id}/pay-period-#{pay_period.id}/#{SecureRandom.uuid}.pdf"
+  def storage_key(artifact_id)
+    "check-print-runs/company-#{pay_period.company_id}/pay-period-#{pay_period.id}/#{artifact_id}.pdf"
   end
 
-  def print_run_filename
+  def print_run_filename(artifact_id)
     pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
-    "check_run_#{pay_date}.pdf"
+    "check_run_#{pay_date}_#{artifact_id}.pdf"
   end
 
   def record_generation_audit!(run, payroll_items, non_employee_checks)

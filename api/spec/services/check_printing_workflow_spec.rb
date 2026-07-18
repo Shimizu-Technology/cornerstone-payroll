@@ -98,6 +98,29 @@ RSpec.describe "Unified check printing workflow" do
     expect(non_employee_check.reload.print_count).to eq(1)
   end
 
+  it "uses a unique download filename for every generated package" do
+    first_run = CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [],
+      starting_slot: 1,
+      storage: storage
+    ).call
+    second_run = CheckPrintRunGenerationService.new(
+      pay_period: pay_period,
+      actor: actor,
+      payroll_item_ids: [ employee_check.id ],
+      non_employee_check_ids: [],
+      starting_slot: 1,
+      storage: storage
+    ).call
+
+    expect(first_run.filename).to match(/\Acheck_run_\d{4}-\d{2}-\d{2}_[0-9a-f-]{36}\.pdf\z/)
+    expect(second_run.filename).not_to eq(first_run.filename)
+    expect(second_run.storage_key).not_to eq(first_run.storage_key)
+  end
+
   it "rejects confirmation if a selected check changes after generation" do
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,

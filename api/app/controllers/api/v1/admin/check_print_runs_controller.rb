@@ -49,7 +49,7 @@ module Api
                     filename: @run.filename,
                     type: "application/pdf",
                     disposition: params[:disposition] == "attachment" ? "attachment" : "inline"
-        rescue R2StorageService::DownloadError => e
+        rescue StandardError => e
           Rails.logger.error(
             "[check_print_runs#pdf] run=#{@run&.id} request_id=#{request.request_id} " \
             "#{e.class}: #{e.message}"
