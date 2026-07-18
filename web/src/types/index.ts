@@ -899,6 +899,59 @@ export interface CheckListResponse {
   meta: CheckListMeta;
 }
 
+export type CheckPrintSourceType = 'payroll_item' | 'non_employee_check';
+
+export interface CheckPrintQueueItem {
+  key: string;
+  source_type: CheckPrintSourceType;
+  source_id: number;
+  check_number: string;
+  payee: string;
+  amount: number;
+  kind: 'employee' | 'non_employee';
+  kind_label: string;
+  status: 'unprinted' | 'printed' | 'voided' | 'pending';
+  print_count: number;
+  printed_at: string | null;
+  eligible: boolean;
+  disabled_reason: string | null;
+}
+
+export interface CheckPrintQueueResponse {
+  items: CheckPrintQueueItem[];
+  meta: {
+    total: number;
+    eligible: number;
+    unprinted: number;
+    printed: number;
+    voided: number;
+    check_stock_type: CheckStockType;
+    slot_count: number;
+  };
+}
+
+export interface CheckPrintRun {
+  id: number;
+  pay_period_id: number;
+  status: 'generated' | 'confirmed';
+  check_stock_type: CheckStockType;
+  starting_slot: number;
+  selected_count: number;
+  manifest: Array<{
+    key: string;
+    source_type: CheckPrintSourceType;
+    source_id: number;
+    check_number: string;
+    payee: string;
+    amount: string;
+  }>;
+  filename: string;
+  sha256: string;
+  byte_size: number;
+  generated_at: string;
+  confirmed_at: string | null;
+}
+
 export type CheckStockType = 'bottom_check' | 'top_check' | 'first_hawaiian_4up';
 
 export interface CheckSettings {

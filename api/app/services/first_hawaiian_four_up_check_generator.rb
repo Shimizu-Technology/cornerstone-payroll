@@ -86,6 +86,7 @@ class FirstHawaiianFourUpCheckGenerator
     @company = company
     @entries = payroll_items.map { |item| entry_from_payroll_item(item) } +
       non_employee_checks.map { |check| entry_from_non_employee_check(check) }
+    @entries.sort_by! { |entry| check_number_sort_key(entry.check_number) }
     @starting_slot = normalize_starting_slot(starting_slot)
   end
 
@@ -118,6 +119,11 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   private
+
+  def check_number_sort_key(value)
+    number = value.to_s
+    number.match?(/\A\d+\z/) ? [ 0, number.to_i, number ] : [ 1, number.downcase ]
+  end
 
   def normalize_starting_slot(value)
     value.to_i.clamp(1, SLOT_COUNT)

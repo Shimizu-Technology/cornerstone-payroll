@@ -365,6 +365,22 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(event.reason).to include("3000")
     end
 
+    it "records the exact before and after check numbers in the organization audit log" do
+      expect {
+        patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
+          params: { check_number: "3010", reason: "Actual physical check stock used" }
+      }.to change { AuditLog.where(action: "checks#check_number_updated").count }.by(1)
+
+      log = AuditLog.where(action: "checks#check_number_updated").last
+      expect(log.subject_name).to eq("Alice Reyes")
+      expect(log.metadata).to include(
+        "changed_fields" => [ "check_number" ],
+        "before_values" => { "check_number" => "3000" },
+        "after_values" => { "check_number" => "3010" },
+        "reason" => "Actual physical check stock used"
+      )
+    end
+
     it "advances next_check_number when the corrected number is ahead of the sequence" do
       patch "/api/v1/admin/payroll_items/#{item_a.id}/check_number",
         params: { check_number: "4000", reason: "Loaded a higher-numbered check sheet" }

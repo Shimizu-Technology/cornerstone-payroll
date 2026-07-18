@@ -153,6 +153,58 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_periods/:id/generate_fit_check" do
+    before do
+      pay_period.update!(status: "committed", committed_at: Time.current)
+      company.update!(next_check_number: 8100)
+    end
+
+    it "creates a numbered FIT check that is immediately available to print" do
+      create(:payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        withholding_tax: 43.13,
+        additional_withholding: 0,
+        voided: false)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+
+      expect(response).to have_http_status(:ok)
+      fit_check = pay_period.non_employee_checks.find_by!(auto_generated_type: "fit_deposit")
+      expect(fit_check).to have_attributes(check_number: "8100", check_status: "unprinted")
+      expect(company.reload.next_check_number).to eq(8101)
+      expect(response.parsed_body).to include(
+        "check_number" => "8100",
+        "created" => true,
+        "number_assigned" => true
+      )
+    end
+
+    it "repairs an existing unnumbered FIT check when generation is requested again" do
+      fit_check = create(:non_employee_check,
+        company: company,
+        pay_period: pay_period,
+        payment_period_type: "pay_period",
+        tax_year: nil,
+        tax_month: nil,
+        auto_generated_type: "fit_deposit",
+        check_type: "tax_deposit",
+        check_number: nil)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/generate_fit_check"
+
+      expect(response).to have_http_status(:ok)
+      expect(fit_check.reload.check_number).to eq("8100")
+      expect(response.parsed_body).to include(
+        "check_number" => "8100",
+        "created" => false,
+        "number_assigned" => true
+      )
+    end
+  end
+
   describe "GET /api/v1/admin/pay_periods/:id" do
     it "returns the pay period with payroll items" do
       get "/api/v1/admin/pay_periods/#{pay_period.id}"

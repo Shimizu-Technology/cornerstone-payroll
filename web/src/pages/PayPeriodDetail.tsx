@@ -41,6 +41,7 @@ import { TimeTrackingImportModal } from '@/components/payroll/TimeTrackingImport
 import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPanel';
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
+import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation } from '@/types';
 
 interface HoursEntry {
@@ -254,6 +255,8 @@ export function PayPeriodDetail() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
+  const [checkPrintOpen, setCheckPrintOpen] = useState(false);
+  const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [payDateCorrectionOpen, setPayDateCorrectionOpen] = useState(false);
   const [payDateCorrectionDate, setPayDateCorrectionDate] = useState('');
   const [payDateCorrectionReason, setPayDateCorrectionReason] = useState('');
@@ -2480,17 +2483,15 @@ export function PayPeriodDetail() {
         {/* CPR-66: Checks Panel — only for committed pay periods */}
         {isCommitted && (
           <Card>
-            <div className="p-4 border-b flex items-center justify-between">
+            <div className="p-4 border-b flex items-center justify-between gap-3">
               <h3 className="font-semibold text-gray-900">Checks</h3>
-              <Link
-                to="/check-settings"
-                className="text-xs text-blue-600 hover:underline"
-              >
-                Check Settings ›
-              </Link>
+              <div className="flex items-center gap-3">
+                <Link to="/check-settings" className="text-xs text-blue-600 hover:underline">Check Settings ›</Link>
+                <Button size="sm" onClick={() => setCheckPrintOpen(true)}>Print checks</Button>
+              </div>
             </div>
             <div className="p-4">
-              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} />
+              <ChecksPanel payPeriod={payPeriod} searchTerm={searchTerm} refreshToken={checkPrintRefreshToken} />
             </div>
           </Card>
         )}
@@ -2510,7 +2511,17 @@ export function PayPeriodDetail() {
             companyId={payPeriod.company_id}
             payPeriodStatus={payPeriod.status}
             payDate={payPeriod.pay_date}
+            refreshToken={checkPrintRefreshToken}
             onChecksLoaded={setNonEmployeeChecks}
+          />
+        )}
+
+        {isCommitted && (
+          <UnifiedCheckPrintDialog
+            open={checkPrintOpen}
+            payPeriodId={payPeriod.id}
+            onOpenChange={setCheckPrintOpen}
+            onConfirmed={() => setCheckPrintRefreshToken((value) => value + 1)}
           />
         )}
 

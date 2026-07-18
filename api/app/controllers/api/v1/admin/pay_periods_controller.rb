@@ -757,7 +757,14 @@ module Api
 
           existing = NonEmployeeCheck.find_by(fit_query)
           if existing
-            return render json: { message: "FIT tax deposit check already exists", check_id: existing.id, created: false }
+            number_assigned = assign_check_number_if_missing!(existing)
+            return render json: {
+              message: number_assigned ? "FIT tax deposit check numbered and ready to print" : "FIT tax deposit check already exists",
+              check_id: existing.id,
+              check_number: existing.reload.check_number,
+              created: false,
+              number_assigned: number_assigned
+            }
           end
 
           committed_items = @pay_period.payroll_items.not_voided.to_a
@@ -765,7 +772,13 @@ module Api
 
           fit_check = NonEmployeeCheck.find_by(fit_query)
           if fit_check
-            render json: { message: "FIT tax deposit check created", check_id: fit_check.id, created: true }
+            render json: {
+              message: "FIT tax deposit check created",
+              check_id: fit_check.id,
+              check_number: fit_check.check_number,
+              created: true,
+              number_assigned: true
+            }
           else
             render json: { error: "No FIT withholding to create a check for (total is $0)" }, status: :unprocessable_entity
           end
@@ -870,21 +883,41 @@ module Api
           total_fit = w2_items.sum(&:total_income_tax_withheld)
           return if total_fit <= 0
 
-          NonEmployeeCheck.create!(
-            pay_period: @pay_period,
-            company_id: @pay_period.company_id,
-            payable_to: "Treasurer of Guam",
-            amount: total_fit,
-            check_type: "tax_deposit",
-            auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
-            payment_period_type: "pay_period",
-            payment_date: @pay_period.pay_date,
-            memo: "FIT Withholding · PPE #{@pay_period.end_date.strftime('%m/%d/%Y')} · Form 500",
-            description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
-            created_by: current_user
-          )
+          NonEmployeeCheck.transaction do
+            NonEmployeeCheck.create!(
+              pay_period: @pay_period,
+              company_id: @pay_period.company_id,
+              payable_to: "Treasurer of Guam",
+              amount: total_fit,
+              check_number: @pay_period.company.next_check_number!,
+              check_type: "tax_deposit",
+              auto_generated_type: NonEmployeeCheck::AUTO_GENERATED_TYPES[:fit_deposit],
+              payment_period_type: "pay_period",
+              payment_date: @pay_period.pay_date,
+              memo: "FIT Withholding · PPE #{@pay_period.end_date.strftime('%m/%d/%Y')} · Form 500",
+              description: "Auto-generated Federal Income Tax deposit (remit to Guam DRT via Form 500)",
+              created_by: current_user
+            )
+          end
         rescue ActiveRecord::RecordNotUnique
           # Concurrent request already created the check — safe to ignore
+        end
+
+        # Older generated FIT checks may predate automatic numbering. Repair
+        # those records only when the operator explicitly asks to generate the
+        # FIT check again. Lock company first, then the check, matching the
+        # canonical numbering lock order used everywhere else.
+        def assign_check_number_if_missing!(check)
+          assigned = false
+          NonEmployeeCheck.transaction do
+            check.company.lock!
+            check.lock!
+            next if check.check_number.present?
+
+            check.update!(check_number: check.company.next_check_number!)
+            assigned = true
+          end
+          assigned
         end
 
         def pay_period_aggregates(pay_period)

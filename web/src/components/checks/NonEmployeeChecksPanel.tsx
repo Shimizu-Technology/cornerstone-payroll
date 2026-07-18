@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
-import { nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
+import { checksApi, nonEmployeeChecksApi, payPeriodsApi, companiesApi } from '@/services/api';
 import type { CompanyDetail } from '@/services/api';
 import type { NonEmployeeCheck, NonEmployeeCheckType } from '@/types';
 import { DRT } from '@/lib/constants';
@@ -13,12 +13,15 @@ import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
 import { formatCurrency } from '@/lib/utils';
+import { InlineCheckNumberField } from './InlineCheckNumberField';
+import { checkNumberValidationError } from './checkNumberDrafts';
 
 interface NonEmployeeChecksPanelProps {
   payPeriodId: number;
   companyId: number;
   payPeriodStatus?: string;
   payDate?: string;
+  refreshToken?: number;
   /**
    * Fired whenever the set of checks is (re)loaded or a single check is
    * updated locally. Lets parent pages observe non-employee-check state
@@ -82,7 +85,7 @@ const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   other: 'Other',
 };
 
-export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, onChecksLoaded }: NonEmployeeChecksPanelProps) {
+export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus, payDate, refreshToken = 0, onChecksLoaded }: NonEmployeeChecksPanelProps) {
   const [checks, setChecks] = useState<NonEmployeeCheck[]>([]);
   const [loading, setLoading] = useState(false);
   const [company, setCompany] = useState<CompanyDetail | null>(null);
@@ -102,8 +105,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewCheck, setPreviewCheck] = useState<NonEmployeeCheck | null>(null);
   const [pdfLoading, setPdfLoading] = useState<number | null>(null);
-  const [batchLoading, setBatchLoading] = useState(false);
-  const [batchAction, setBatchAction] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [voidConfirming, setVoidConfirming] = useState(false);
@@ -113,11 +114,10 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
   const [editingCheck, setEditingCheck] = useState<NonEmployeeCheck | null>(null);
   const [expandedHistoryIds, setExpandedHistoryIds] = useState<Set<number>>(new Set());
   const [form500Open, setForm500Open] = useState(false);
-  const [editingCheckNumberId, setEditingCheckNumberId] = useState<number | null>(null);
-  const [draftCheckNumber, setDraftCheckNumber] = useState('');
-  const [checkNumberError, setCheckNumberError] = useState<string | null>(null);
-  const [savingCheckNumberId, setSavingCheckNumberId] = useState<number | null>(null);
   const [startingSlot, setStartingSlot] = useState(1);
+  const [checkNumberDrafts, setCheckNumberDrafts] = useState<Record<number, string>>({});
+  const [savingCheckNumbers, setSavingCheckNumbers] = useState(false);
+  const [checkNumberSaveError, setCheckNumberSaveError] = useState<string | null>(null);
 
   const toggleHistory = (id: number) => {
     setExpandedHistoryIds(prev => {
@@ -139,6 +139,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     // and remounts the history component, which re-runs its fetch effect —
     // no fragile setTimeout(0) remount trick needed.
     setChecks(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+    setCheckNumberDrafts(prev => ({ ...prev, [updated.id]: updated.check_number || '' }));
     setPreviewCheck(prev => (prev?.id === updated.id ? updated : prev));
   };
 
@@ -155,6 +156,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     try {
       const res = await nonEmployeeChecksApi.list({ pay_period_id: payPeriodId });
       setChecks(res.non_employee_checks);
+      setCheckNumberDrafts(Object.fromEntries(res.non_employee_checks.map((check) => [check.id, check.check_number || ''])));
     } catch {
       // ignore
     } finally {
@@ -162,7 +164,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   }, [payPeriodId]);
 
-  useEffect(() => { loadChecks(); }, [loadChecks]);
+  useEffect(() => { loadChecks(); }, [loadChecks, refreshToken]);
 
   // Notify the parent whenever the local checks array changes (initial load,
   // reloads, or single-check updates). Done in an effect so it stays out of
@@ -179,7 +181,6 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
   const isFirstHawaiian4Up = company?.check_stock_type === 'first_hawaiian_4up';
   const printableChecks = checks.filter(check => !check.voided && Boolean(check.check_number));
-  const unprintedPrintableCount = printableChecks.filter(check => !check.printed_at).length;
 
   const handleCreate = async () => {
     setFormError(null);
@@ -319,135 +320,69 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
     }
   };
 
-  const handleBatchDownload = async () => {
-    if (printableChecks.length === 0) {
-      alert('No printable non-employee checks with check numbers were found.');
-      return;
-    }
+  const checkNumberChanges = useMemo(() => checks.filter((check) =>
+    !check.voided && (checkNumberDrafts[check.id] ?? check.check_number ?? '').trim() !== (check.check_number || '').trim()
+  ), [checkNumberDrafts, checks]);
+  const checkNumberErrors = useMemo(() => {
+    const errors: Record<number, string> = {};
+    const owners = new Map<string, number[]>();
+    checks.filter((check) => !check.voided).forEach((check) => {
+      const value = (checkNumberDrafts[check.id] ?? check.check_number ?? '').trim();
+      const validationError = checkNumberValidationError(value, true);
+      if (validationError) errors[check.id] = validationError;
+      if (value) owners.set(value, [...(owners.get(value) || []), check.id]);
+    });
+    owners.forEach((ids, number) => {
+      if (ids.length > 1) ids.forEach((id) => { errors[id] = `Check #${number} is entered more than once.`; });
+    });
+    return errors;
+  }, [checkNumberDrafts, checks]);
 
-    setBatchLoading(true);
-    setBatchAction('Generating non-employee checks...');
+  const discardCheckNumberChanges = () => {
+    setCheckNumberDrafts(Object.fromEntries(checks.map((check) => [check.id, check.check_number || ''])));
+    setCheckNumberSaveError(null);
+  };
+
+  const saveCheckNumberChanges = async () => {
+    if (checkNumberChanges.length === 0 || Object.keys(checkNumberErrors).length > 0) return;
+    setSavingCheckNumbers(true);
+    setCheckNumberSaveError(null);
     try {
-      const result = await nonEmployeeChecksApi.batchPdf({
+      await checksApi.updateCheckNumbers(
         payPeriodId,
-        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
-      });
-      setBatchAction('Downloading...');
-      const url = URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = result.filename || `non_employee_checks_${payDate ?? payPeriodId}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to download non-employee checks');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const handlePrintAll = async () => {
-    if (printableChecks.length === 0) {
-      alert('No printable non-employee checks with check numbers were found.');
-      return;
-    }
-
-    setBatchLoading(true);
-    setBatchAction('Generating non-employee checks...');
-    try {
-      const result = await nonEmployeeChecksApi.batchPdf({
-        payPeriodId,
-        startingSlot: isFirstHawaiian4Up ? startingSlot : undefined,
-      });
-      setBatchAction('Opening print dialog...');
-      openBlobForPrint(result.blob);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to print non-employee checks');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const handleMarkAllPrinted = async () => {
-    if (unprintedPrintableCount === 0) return;
-    if (!window.confirm(`Mark ${unprintedPrintableCount} non-employee check${unprintedPrintableCount === 1 ? '' : 's'} as printed?`)) return;
-
-    setBatchLoading(true);
-    setBatchAction('Marking as printed...');
-    try {
-      const result = await nonEmployeeChecksApi.markAllPrinted({ payPeriodId });
-      await loadChecks();
-      if (result.marked_printed > 0) {
-        alert(`${result.marked_printed} non-employee check${result.marked_printed === 1 ? '' : 's'} marked as printed.`);
-      }
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark non-employee checks as printed');
-    } finally {
-      setBatchLoading(false);
-      setBatchAction(null);
-    }
-  };
-
-  const startCheckNumberEdit = (check: NonEmployeeCheck) => {
-    setEditingCheckNumberId(check.id);
-    setDraftCheckNumber(check.check_number || '');
-    setCheckNumberError(null);
-  };
-
-  const cancelCheckNumberEdit = () => {
-    setEditingCheckNumberId(null);
-    setDraftCheckNumber('');
-    setCheckNumberError(null);
-  };
-
-  const handleSaveCheckNumber = async (check: NonEmployeeCheck) => {
-    const nextNumber = draftCheckNumber.trim();
-    const normalized = nextNumber === '' ? null : nextNumber;
-    if (normalized && !/^\d+$/.test(normalized)) {
-      setCheckNumberError('Check number must be numeric.');
-      return;
-    }
-    if ((check.check_number || null) === normalized) {
-      cancelCheckNumberEdit();
-      return;
-    }
-
-    setSavingCheckNumberId(check.id);
-    setCheckNumberError(null);
-    try {
-      const result = await nonEmployeeChecksApi.updateCheckNumber(
-        check.id,
-        normalized,
-        'Corrected from the non-employee Checks section'
+        checkNumberChanges.map((check) => ({
+          source_type: 'non_employee_check',
+          source_id: check.id,
+          check_number: (checkNumberDrafts[check.id] || '').trim() || null,
+        })),
+        'Saved from the non-employee Checks worksheet'
       );
-      handleSavedCheck(result.non_employee_check);
-      cancelCheckNumberEdit();
+      await loadChecks();
     } catch (err) {
-      setCheckNumberError(err instanceof Error ? err.message : 'Failed to update check number');
+      setCheckNumberSaveError(err instanceof Error ? err.message : 'Could not save check numbers. No changes were applied.');
     } finally {
-      setSavingCheckNumberId(null);
+      setSavingCheckNumbers(false);
     }
   };
 
   // Identify the auto-generated FIT deposit by its stable marker, falling back
   // to the legacy string match for any rows not yet caught by the data backfill.
-  const hasFitCheck = checks.some(
+  const fitCheck = checks.find(
     c =>
       !c.voided &&
       (c.auto_generated_type === 'fit_deposit' ||
         (c.check_type === 'tax_deposit' &&
           (c.payable_to === 'Treasurer of Guam' || c.payable_to === 'EFTPS - Federal Income Tax')))
   );
-  const showGenerateFit = payPeriodStatus === 'committed' && !hasFitCheck;
+  const fitCheckNeedsNumber = Boolean(fitCheck && !fitCheck.check_number);
+  const showGenerateFit = payPeriodStatus === 'committed' && (!fitCheck || fitCheckNeedsNumber);
 
   const handleGenerateFitCheck = async () => {
     setGeneratingFit(true);
     setFitError(null);
     try {
       await payPeriodsApi.generateFitCheck(payPeriodId);
-      loadChecks();
+      await loadChecks();
     } catch (err) {
       setFitError(err instanceof Error ? err.message : 'Failed to generate FIT check');
     } finally {
@@ -475,7 +410,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                   className="rounded border border-blue-200 bg-white px-2 py-1 text-sm text-gray-900"
                   value={startingSlot}
                   onChange={(e) => setStartingSlot(Number(e.target.value))}
-                  disabled={pdfLoading !== null || batchLoading}
+                  disabled={pdfLoading !== null}
                 >
                   <option value={1}>1</option>
                   <option value={2}>2</option>
@@ -484,52 +419,43 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                 </select>
               </label>
             )}
-            {batchAction && (
-              <span className="text-sm text-blue-700 animate-pulse">{batchAction}</span>
-            )}
-            {unprintedPrintableCount > 0 && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleMarkAllPrinted}
-                disabled={batchLoading}
-              >
-                Mark All Printed
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handlePrintAll}
-              disabled={batchLoading || printableChecks.length === 0}
-            >
-              Print All Checks
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleBatchDownload}
-              disabled={batchLoading || printableChecks.length === 0}
-            >
-              Download Checks PDF
-            </Button>
             {showGenerateFit && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={handleGenerateFitCheck}
-                disabled={generatingFit || batchLoading}
+                disabled={generatingFit}
                 className="border-amber-300 text-amber-700 hover:bg-amber-50"
               >
-                {generatingFit ? 'Generating...' : 'Generate FIT Check'}
+                {generatingFit
+                  ? fitCheckNeedsNumber ? 'Assigning...' : 'Generating...'
+                  : fitCheckNeedsNumber ? 'Assign FIT number' : 'Generate FIT Check'}
               </Button>
             )}
-            <Button size="sm" onClick={() => setShowForm(!showForm)} disabled={batchLoading}>
+            <Button size="sm" onClick={() => setShowForm(!showForm)}>
               {showForm ? 'Cancel' : '+ Add Check'}
             </Button>
           </div>
         </div>
       </div>
+
+      {checkNumberChanges.length > 0 && (
+        <div className="mx-4 mt-4 flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-amber-950">
+              {checkNumberChanges.length} unsaved check-number change{checkNumberChanges.length === 1 ? '' : 's'}
+            </p>
+            <p className="mt-0.5 text-xs text-amber-800">Review the highlighted fields. Nothing changes until you save.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={discardCheckNumberChanges} disabled={savingCheckNumbers}>Discard</Button>
+            <Button size="sm" onClick={() => void saveCheckNumberChanges()} disabled={savingCheckNumbers || Object.keys(checkNumberErrors).length > 0}>
+              {savingCheckNumbers ? 'Saving…' : 'Save check numbers'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {checkNumberSaveError && <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{checkNumberSaveError}</div>}
 
       {showForm && (
         <div className="p-4 border-b bg-blue-50/30">
@@ -710,57 +636,23 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
                         <span className="font-semibold text-gray-900">{fmt(check.amount)}</span>
-                        <span className="inline-flex items-center gap-1.5">
-                          {editingCheckNumberId === check.id ? (
-                            <span className="inline-flex items-center gap-1">
-                              <span>Check #</span>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                value={draftCheckNumber}
-                                onChange={(e) => setDraftCheckNumber(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveCheckNumber(check);
-                                  if (e.key === 'Escape') cancelCheckNumberEdit();
-                                }}
-                                className="h-7 w-20 rounded border border-blue-300 px-2 font-mono text-xs text-gray-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSaveCheckNumber(check)}
-                                disabled={savingCheckNumberId === check.id}
-                                className="font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-300"
-                              >
-                                Save
-                              </button>
-                              <button
-                                type="button"
-                                onClick={cancelCheckNumberEdit}
-                                disabled={savingCheckNumberId === check.id}
-                                className="text-gray-500 hover:text-gray-700 disabled:text-gray-300"
-                              >
-                                Cancel
-                              </button>
-                            </span>
+                        <div className="inline-flex items-center gap-1.5">
+                          <span>Check #</span>
+                          {check.voided ? (
+                            <span className="font-mono">{check.check_number || '—'}</span>
                           ) : (
-                            <>
-                              <span>Check #{check.check_number || '—'}</span>
-                              {!check.voided && (
-                                <button
-                                  type="button"
-                                  onClick={() => startCheckNumberEdit(check)}
-                                  className="font-medium text-blue-600 hover:text-blue-800"
-                                >
-                                  Edit
-                                </button>
-                              )}
-                            </>
+                            <InlineCheckNumberField
+                              value={checkNumberDrafts[check.id] ?? check.check_number ?? ''}
+                              ariaLabel={`Check number for ${check.payable_to}`}
+                              allowBlank
+                              disabled={savingCheckNumbers}
+                              dirty={checkNumberChanges.some((changed) => changed.id === check.id)}
+                              error={checkNumberErrors[check.id]}
+                              onChange={(value) => setCheckNumberDrafts((current) => ({ ...current, [check.id]: value }))}
+                              onReset={() => setCheckNumberDrafts((current) => ({ ...current, [check.id]: check.check_number || '' }))}
+                            />
                           )}
-                        </span>
-                        {editingCheckNumberId === check.id && checkNumberError && (
-                          <span className="basis-full text-xs text-red-600">{checkNumberError}</span>
-                        )}
+                        </div>
                         {check.memo && <span>{check.memo}</span>}
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
                         <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{new Date(check.created_at).toLocaleDateString()}</span>

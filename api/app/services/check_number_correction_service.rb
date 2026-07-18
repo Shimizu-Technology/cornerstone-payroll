@@ -38,6 +38,7 @@ class CheckNumberCorrectionService
 
       sync_transmittal!(old_check_number)
       sync_signoff_sheet!(old_check_number)
+      record_audit!(old_check_number)
     end
 
     payroll_item.reload
@@ -118,7 +119,7 @@ class CheckNumberCorrectionService
   end
 
   def sorted_check_numbers(numbers)
-    numbers.sort_by { |number| [number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number] }
+    numbers.sort_by { |number| [ number.match?(/\A\d+\z/) ? 0 : 1, number.to_i, number ] }
   end
 
   def payroll_check_numbers
@@ -150,6 +151,26 @@ class CheckNumberCorrectionService
   def audit_reason(old_check_number)
     base = "Check number changed from #{old_check_number} to #{new_check_number}"
     reason.present? ? "#{base}: #{reason}" : base
+  end
+
+  def record_audit!(old_check_number)
+    AuditLog.record!(
+      user: actor,
+      organization_id: company.organization_id,
+      company_id: company.id,
+      action: "checks#check_number_updated",
+      record_type: "checks",
+      record_id: payroll_item.id,
+      subject_name: payroll_item.employee&.full_name,
+      metadata: {
+        changed_fields: [ "check_number" ],
+        before_values: { "check_number" => old_check_number },
+        after_values: { "check_number" => new_check_number },
+        reason: reason
+      }.compact,
+      ip_address: ip_address,
+      event_category: "activity"
+    )
   end
 
   def normalize_check_number(value)
