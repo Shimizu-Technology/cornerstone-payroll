@@ -937,6 +937,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response.parsed_body.dig("results", "errors")).to be_empty
       entry = item.reload.payroll_item_field_entries.find_by!(payroll_field_definition: field)
       expect(entry).to have_attributes(source: "employee_default", amount: 25.to_d)
+      expect(item.gross_pay).to eq(150.to_d)
+      expect(item.net_pay).to eq((item.gross_pay - item.total_deductions + 25).round(2))
     end
 
     it "rejects a payroll field that is not assigned to the employee" do

@@ -655,8 +655,13 @@ export function PayPeriodDetail() {
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
       setSalaryOverrideMap((previous) => ({ ...previous, ...salary_overrides }));
       setAdditionalEmployeeIds(new Set());
-      const updatedPayrollFieldResponse = await payPeriodsApi.payrollFieldInputs(payPeriod.id);
-      syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
+      await payPeriodsApi.payrollFieldInputs(payPeriod.id)
+        .then((updatedPayrollFieldResponse) => {
+          syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
+        })
+        .catch((refreshError) => {
+          console.warn('Payroll ran successfully, but the payroll field worksheet could not be refreshed.', refreshError);
+        });
 
       if (response.results.errors.length > 0) {
         setError(

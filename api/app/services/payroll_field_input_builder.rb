@@ -24,6 +24,7 @@ class PayrollFieldInputBuilder
       .sort_by { |field| [ field.sort_order, field.name.downcase ] }
     entries = PayrollItemFieldEntry
       .joins(:payroll_item)
+      .includes(:payroll_item)
       .where(payroll_items: { pay_period_id: pay_period.id, company_id: company_id })
       .where(payroll_field_definition_id: fields.map(&:id))
       .index_by { |entry| [ entry.payroll_item.employee_id, entry.payroll_field_definition_id ] }
