@@ -27,7 +27,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
-import { payPeriodsApi, employeesApi, payrollFieldsApi } from '@/services/api';
+import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -42,12 +42,17 @@ import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPane
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs } from '@/types';
 
 interface HoursEntry {
   regular: number;
   overtime: number;
   wage_rates?: PayrollItemWageRateHours[];
+}
+
+interface PayrollFieldDraftEntry {
+  mode: 'default' | 'override';
+  amount: number | null;
 }
 
 const TABLE_STICKY_TOP_CLASS = 'top-0';
@@ -242,6 +247,8 @@ export function PayPeriodDetail() {
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
+  const [payrollFieldAssignments, setPayrollFieldAssignments] = useState<PayPeriodPayrollFieldAssignment[]>([]);
+  const [payrollFieldDrafts, setPayrollFieldDrafts] = useState<Record<string, PayrollFieldDraftEntry>>({});
   // Mirrors the non-employee checks loaded by NonEmployeeChecksPanel so we
   // can detect when the FIT auto-deposit amount has been overridden away
   // from the calculated total. Updated via the panel's onChecksLoaded prop.
@@ -286,6 +293,7 @@ export function PayPeriodDetail() {
   const tipsPaidOutMapRef = useRef<Record<string, number>>({});
   const [loansMap, setLoansMap] = useState<Record<string, number>>({});
   const [showTipsLoans, setShowTipsLoans] = useState(false);
+  const [showPayrollFields, setShowPayrollFields] = useState(false);
   const tipsLoansVisibilityModeRef = useRef<'auto' | 'manual'>('auto');
 
   useEffect(() => {
@@ -302,6 +310,19 @@ export function PayPeriodDetail() {
     setShowTipsLoans((previous) => (
       tipsLoansVisibilityModeRef.current === 'manual' ? previous : derivedState.showTipsLoans
     ));
+  }, []);
+
+  const syncPayrollFieldInputs = useCallback((worksheet: PayPeriodPayrollFieldInputs) => {
+    setPayrollFields(worksheet.fields);
+    setPayrollFieldAssignments(worksheet.assignments);
+    setShowPayrollFields(worksheet.assignments.length > 0);
+    setPayrollFieldDrafts(Object.fromEntries(worksheet.assignments.map((assignment) => {
+      const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
+      return [key, {
+        mode: assignment.overridden ? 'override' : 'default',
+        amount: assignment.current_amount ?? assignment.suggested_amount ?? null,
+      } satisfies PayrollFieldDraftEntry];
+    })));
   }, []);
 
   const loadAllActiveEmployees = useCallback(async () => {
@@ -331,24 +352,23 @@ export function PayPeriodDetail() {
 
       setLiabilityLoading(true);
       setLiabilityError(null);
-      const [ppResponse, empResponse, liabilityResponse] = await Promise.all([
+      const [ppResponse, empResponse, liabilityResponse, payrollFieldResponse] = await Promise.all([
         payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
         payPeriodsApi.liabilities(periodId).catch((err) => {
           setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
           return null;
         }),
+        payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
+          console.warn('Failed to load payroll field worksheet', err);
+          return { payroll_field_inputs: { fields: [], assignments: [] } };
+        }),
       ]);
-
-      const fieldsResponse = await payrollFieldsApi.list().catch((err) => {
-        console.warn('Failed to load payroll fields for pay period grid', err);
-        return { payroll_fields: [] };
-      });
 
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
-      setPayrollFields(fieldsResponse.payroll_fields);
+      syncPayrollFieldInputs(payrollFieldResponse.payroll_field_inputs);
       setLiabilityReconciliation(liabilityResponse?.payroll_liability_reconciliation || null);
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
       syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
@@ -358,7 +378,7 @@ export function PayPeriodDetail() {
       setLiabilityLoading(false);
       if (!silent) setLoading(false);
     }
-  }, [loadAllActiveEmployees, syncDerivedPayrollState]);
+  }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect(() => {
     if (id) {
@@ -491,6 +511,32 @@ export function PayPeriodDetail() {
     });
   };
 
+  const updatePayrollFieldDraft = (employeeId: number, fieldId: number, amount: number | null) => {
+    const key = `${employeeId}:${fieldId}`;
+    setPayrollFieldDrafts((previous) => ({
+      ...previous,
+      [key]: { mode: 'override', amount: amount == null ? null : Math.max(0, amount) },
+    }));
+  };
+
+  const resetPayrollFieldDraft = (employeeId: number, fieldId: number) => {
+    const assignment = payrollFieldAssignments.find((candidate) => (
+      candidate.employee_id === employeeId && candidate.payroll_field_definition_id === fieldId
+    ));
+    if (!assignment) return;
+
+    const key = `${employeeId}:${fieldId}`;
+    setPayrollFieldDrafts((previous) => ({
+      ...previous,
+      [key]: {
+        mode: 'default',
+        amount: assignment.amount_type === 'percentage'
+          ? null
+          : assignment.assigned_amount ?? assignment.default_amount ?? 0,
+      },
+    }));
+  };
+
   const handleRunPayroll = async () => {
     if (!payPeriod) return;
     try {
@@ -576,6 +622,19 @@ export function PayPeriodDetail() {
         loan_deductions[empId] = Math.max(0, toNumber(amount));
       });
 
+      const payroll_field_inputs: Record<string, Record<string, { mode: 'default' | 'override'; amount?: number }>> = {};
+      payrollFieldAssignments.forEach((assignment) => {
+        if (!assignment.editable) return;
+        const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
+        const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
+        if (draft.mode === 'override' && draft.amount == null) return;
+
+        payroll_field_inputs[String(assignment.employee_id)] ||= {};
+        payroll_field_inputs[String(assignment.employee_id)][String(assignment.payroll_field_definition_id)] = draft.mode === 'override'
+          ? { mode: 'override', amount: Math.max(0, toNumber(draft.amount)) }
+          : { mode: 'default' };
+      });
+
       // Include any manually-added employees who were missing from the import
       const employee_ids = additionalEmployeeIds.size > 0
         ? [...new Set([...payrollItems.map(pi => pi.employee_id), ...additionalEmployeeIds])]
@@ -587,6 +646,7 @@ export function PayPeriodDetail() {
         ...(Object.keys(tips).length > 0 ? { tips } : {}),
         ...(Object.keys(tips_paid_out).length > 0 ? { tips_paid_out } : {}),
         ...(Object.keys(loan_deductions).length > 0 ? { loan_deductions } : {}),
+        ...(Object.keys(payroll_field_inputs).length > 0 ? { payroll_field_inputs } : {}),
         ...(employee_ids ? { employee_ids } : {}),
       });
       setPayPeriod(response.pay_period);
@@ -595,6 +655,8 @@ export function PayPeriodDetail() {
       syncDerivedPayrollState(response.pay_period.payroll_items || []);
       setSalaryOverrideMap((previous) => ({ ...previous, ...salary_overrides }));
       setAdditionalEmployeeIds(new Set());
+      const updatedPayrollFieldResponse = await payPeriodsApi.payrollFieldInputs(payPeriod.id);
+      syncPayrollFieldInputs(updatedPayrollFieldResponse.payroll_field_inputs);
 
       if (response.results.errors.length > 0) {
         setError(
@@ -842,6 +904,35 @@ export function PayPeriodDetail() {
     .filter((field) => field.show_in_payroll_grid)
     .filter((field) => payrollItems.some((item) => (item.payroll_field_entries || []).some((entry) => entry.active !== false && entry.payroll_field_definition_id === field.id)))
     .sort((left, right) => (left.sort_order - right.sort_order) || left.name.localeCompare(right.name));
+  const worksheetPayrollFields = payrollFields
+    .filter((field) => field.show_in_payroll_grid)
+    .filter((field) => payrollFieldAssignments.some((assignment) => assignment.payroll_field_definition_id === field.id))
+    .sort((left, right) => (left.sort_order - right.sort_order) || left.name.localeCompare(right.name));
+  const payrollFieldAssignmentLookup = new Map(
+    payrollFieldAssignments.map((assignment) => [
+      `${assignment.employee_id}:${assignment.payroll_field_definition_id}`,
+      assignment,
+    ])
+  );
+  const estimatedTaxablePayrollFieldAdditions = (employeeId: number, grossBeforeFields: number) => (
+    worksheetPayrollFields.reduce((total, field) => {
+      if (field.tax_treatment !== 'taxable_addition') return total;
+
+      const key = `${employeeId}:${field.id}`;
+      const assignment = payrollFieldAssignmentLookup.get(key);
+      if (!assignment || !assignment.editable) return total;
+
+      const draft = payrollFieldDrafts[key];
+      if (draft?.mode === 'override') return total + Math.max(0, toNumber(draft.amount));
+
+      if (assignment.amount_type === 'percentage') {
+        const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
+        return total + (grossBeforeFields * percentage / 100);
+      }
+
+      return total + Math.max(0, toNumber(assignment.assigned_amount ?? assignment.default_amount));
+    }, 0)
+  );
 
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
@@ -1482,6 +1573,23 @@ export function PayPeriodDetail() {
                     >
                       {showTipsLoans ? 'Tips & Deductions ✓' : '+ Tips & Deductions'}
                     </button>
+                    {worksheetPayrollFields.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setShowPayrollFields((previous) => !previous);
+                        }}
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          showPayrollFields
+                            ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+                            : 'border-gray-200 bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}
+                      >
+                        {showPayrollFields ? `Payroll Fields (${worksheetPayrollFields.length}) ✓` : `+ Payroll Fields (${worksheetPayrollFields.length})`}
+                      </button>
+                    )}
                         <div className="relative">
                           <input
                             type="text"
@@ -1503,7 +1611,7 @@ export function PayPeriodDetail() {
               <Table
                 stickyHeader
                 containerClassName="max-h-[32rem]"
-                style={{ minWidth: 1380 + (showTipsLoans ? 420 : 0) }}
+                style={{ minWidth: 1380 + (showTipsLoans ? 420 : 0) + (showPayrollFields ? worksheetPayrollFields.length * 180 : 0) }}
               >
                 <TableHeader>
                   <TableRow>
@@ -1514,13 +1622,30 @@ export function PayPeriodDetail() {
                     {showTipsLoans && <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
                     {showTipsLoans && <TableHead className={`w-[150px] min-w-[150px] bg-gray-50 text-center ${TABLE_STICKY_TOP_CLASS}`}>Loan Ded.</TableHead>}
+                    {showPayrollFields && worksheetPayrollFields.map((field) => (
+                      <TableHead
+                        key={`worksheet-field-${field.id}`}
+                        className={`w-[180px] min-w-[180px] text-center ${TABLE_STICKY_TOP_CLASS} ${
+                          field.kind === 'addition'
+                            ? 'bg-emerald-50 text-emerald-900'
+                            : field.kind === 'deduction'
+                              ? 'bg-amber-50 text-amber-900'
+                              : 'bg-indigo-50 text-indigo-900'
+                        }`}
+                      >
+                        <span className="block text-xs font-semibold leading-tight">{field.name}</span>
+                        <span className="mt-1 block text-[10px] font-normal uppercase tracking-wide opacity-70">
+                          {field.amount_type === 'percentage' ? 'Automatic %' : field.amount_type}
+                        </span>
+                      </TableHead>
+                    ))}
                     <TableHead className={`w-[160px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Est. Gross</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {(() => {
                     const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
-                    const draftDividerCols = 5 + (showTipsLoans ? 3 : 0);
+                    const draftDividerCols = 5 + (showTipsLoans ? 3 : 0) + (showPayrollFields ? worksheetPayrollFields.length : 0);
                     const filtered = isCalculated
                       ? employees.filter((emp) => payrollEmployeeIds.has(emp.id) || additionalEmployeeIds.has(emp.id))
                       : employees;
@@ -1579,7 +1704,8 @@ export function PayPeriodDetail() {
                               ? 0
                               : Math.max(toNumber(tipsMap[String(employee.id)]?.amount), toNumber(tipsPaidOutMap[String(employee.id)]));
 
-                            return baseGross + tipGross;
+                            const grossBeforeFields = baseGross + tipGross;
+                            return grossBeforeFields + estimatedTaxablePayrollFieldAdditions(employee.id, grossBeforeFields);
                           };
 
                           return compareDirectional(estimateGross(a), estimateGross(b), hoursSortDirection) || nameTieBreak();
@@ -1625,7 +1751,8 @@ export function PayPeriodDetail() {
                       const reportedTipGross = emp.employment_type === 'contractor'
                         ? 0
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
-                      const estGross = baseEstGross + reportedTipGross;
+                      const grossBeforeFields = baseEstGross + reportedTipGross;
+                      const estGross = grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
                       return (
                       <Fragment key={emp.id}>
                       {showDivider && (() => {
@@ -1808,6 +1935,69 @@ export function PayPeriodDetail() {
                           </div>
                         </TableCell>
                         )}
+                        {showPayrollFields && worksheetPayrollFields.map((field) => {
+                          const key = `${emp.id}:${field.id}`;
+                          const assignment = payrollFieldAssignmentLookup.get(key);
+                          const draft = payrollFieldDrafts[key];
+                          if (!assignment) {
+                            return (
+                              <TableCell key={key} className={`min-w-[180px] text-center text-gray-300 ${rowTone}`}>
+                                —
+                              </TableCell>
+                            );
+                          }
+
+                          const percentage = assignment.assigned_percentage ?? assignment.default_percentage ?? 0;
+                          const defaultLabel = field.amount_type === 'percentage'
+                            ? `${percentage}% automatic`
+                            : field.amount_type === 'manual'
+                              ? 'enter for this payroll'
+                              : `${formatCurrency(assignment.assigned_amount ?? assignment.default_amount ?? 0)} default`;
+
+                          return (
+                            <TableCell key={key} className={`min-w-[180px] align-top ${rowTone}`}>
+                              <div className="flex flex-col items-center gap-1">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <span className="text-xs text-gray-400">$</span>
+                                  <NumericInput
+                                    value={draft?.amount ?? null}
+                                    onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)}
+                                    placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'}
+                                    className={`w-24 rounded-md border px-2 py-1.5 text-center text-sm focus:ring-2 disabled:cursor-not-allowed disabled:bg-gray-100 ${
+                                      field.kind === 'addition'
+                                        ? 'border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500'
+                                        : field.kind === 'deduction'
+                                          ? 'border-amber-300 focus:border-amber-500 focus:ring-amber-500'
+                                          : 'border-indigo-300 focus:border-indigo-500 focus:ring-indigo-500'
+                                    }`}
+                                    min={0}
+                                    fixedDecimalsOnBlur={2}
+                                    disabled={!assignment.editable}
+                                  />
+                                </div>
+                                {assignment.editable ? (
+                                  draft?.mode === 'override' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
+                                      className="text-[10px] font-medium text-blue-700 hover:text-blue-900 hover:underline"
+                                    >
+                                      Override · use {defaultLabel}
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-500">
+                                      {field.amount_type === 'manual' ? 'Enter for this payroll' : `Using ${defaultLabel}`}
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="max-w-[160px] text-center text-[10px] leading-tight text-amber-700" title={assignment.skipped_reason || undefined}>
+                                    {assignment.skipped_reason}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                          );
+                        })}
                         <TableCell className={`text-right font-medium text-gray-700 ${rowTone}`}>
                           {formatCurrency(estGross)}
                         </TableCell>

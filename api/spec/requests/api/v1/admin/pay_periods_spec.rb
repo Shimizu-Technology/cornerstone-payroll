@@ -821,6 +821,148 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.overtime_hours).to eq(10)
     end
 
+    it "applies a worksheet payroll-field override on the first calculation" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "MoSa Incentive",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 25,
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 25)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { employee.id.to_s => { regular: 10, overtime: 0 } },
+        payroll_field_inputs: {
+          employee.id.to_s => { field.id.to_s => { mode: "override", amount: 40 } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      item = pay_period.reload.payroll_items.find_by!(employee: employee)
+      entry = item.payroll_item_field_entries.find_by!(payroll_field_definition: field)
+      expect(entry).to have_attributes(source: "manual", amount: 40.to_d)
+      expect(item.gross_pay.to_f).to eq(190.0)
+    end
+
+    it "does not add an omitted hourly employee to an imported payroll just because worksheet defaults were submitted" do
+      omitted_employee = Employee.create!(
+        company: company,
+        department: department,
+        first_name: "Import",
+        last_name: "Omitted",
+        email: "import-omitted@example.com",
+        employment_type: "hourly",
+        pay_rate: 15,
+        pay_frequency: "biweekly",
+        filing_status: "single",
+        allowances: 0,
+        status: "active",
+        hire_date: 1.year.ago
+      )
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Company Allowance",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 25,
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: omitted_employee, payroll_field_definition: field, amount: 25)
+      pay_period.payroll_items.create!(
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15,
+        hours_worked: 10,
+        import_source: "mosa_revel"
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: { omitted_employee.id.to_s => { regular: 0, overtime: 0 } },
+        payroll_field_inputs: {
+          omitted_employee.id.to_s => { field.id.to_s => { mode: "default" } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      expect(pay_period.reload.payroll_items.where(employee: omitted_employee)).not_to exist
+    end
+
+    it "can return a prior override to the employee default" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Phone Allowance",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "phone",
+        amount_type: "fixed",
+        default_amount: 25,
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field, amount: 25)
+      item = pay_period.payroll_items.create!(
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15,
+        hours_worked: 10
+      )
+      item.payroll_item_field_entries.create!(
+        payroll_field_definition: field,
+        label: field.name,
+        kind: field.kind,
+        tax_treatment: field.tax_treatment,
+        category: field.category,
+        amount: 40,
+        source: "manual",
+        employee_paid: false,
+        employer_paid: false,
+        active: true
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        payroll_field_inputs: {
+          employee.id.to_s => { field.id.to_s => { mode: "default" } }
+        }
+      }
+
+      expect(response.parsed_body.dig("results", "errors")).to be_empty
+      entry = item.reload.payroll_item_field_entries.find_by!(payroll_field_definition: field)
+      expect(entry).to have_attributes(source: "employee_default", amount: 25.to_d)
+    end
+
+    it "rejects a payroll field that is not assigned to the employee" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Unassigned Field",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "other",
+        amount_type: "manual",
+        show_in_payroll_grid: true
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        payroll_field_inputs: {
+          employee.id.to_s => { field.id.to_s => { mode: "override", amount: 20 } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors", 0, "error")).to eq(
+        "Payroll field is not assigned to this employee for this pay date"
+      )
+      expect(pay_period.reload).to be_draft
+    end
+
     it "does not recreate employees excluded from this pay period during recalculation" do
       contractor = Employee.create!(
         company: company,
@@ -902,6 +1044,74 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.ytd_withholding_tax.to_f).to eq(item.withholding_tax.to_f)
       expect(item.ytd_social_security_tax.to_f).to eq(item.social_security_tax.to_f)
       expect(item.ytd_medicare_tax.to_f).to eq(item.medicare_tax.to_f)
+    end
+  end
+
+  describe "GET /api/v1/admin/pay_periods/:id/payroll_field_inputs" do
+    it "returns only active, effective, visible employee assignments for the pay date" do
+      visible = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Company Rent",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "rent",
+        amount_type: "fixed",
+        default_amount: 80,
+        show_in_payroll_grid: true,
+        sort_order: 2
+      )
+      hidden = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Hidden Field",
+        kind: "addition",
+        tax_treatment: "non_taxable_addition",
+        category: "other",
+        amount_type: "fixed",
+        default_amount: 10,
+        show_in_payroll_grid: false
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: visible, amount: 95)
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: hidden, amount: 10)
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_field_inputs"
+
+      expect(response).to have_http_status(:ok)
+      worksheet = response.parsed_body.fetch("payroll_field_inputs")
+      expect(worksheet.fetch("fields").pluck("name")).to eq([ "Company Rent" ])
+      expect(worksheet.fetch("assignments").first).to include(
+        "employee_id" => employee.id,
+        "payroll_field_definition_id" => visible.id,
+        "suggested_amount" => 95.0,
+        "editable" => true,
+        "overridden" => false
+      )
+    end
+
+    it "marks an imported direct-loan field as non-editable to prevent double deduction" do
+      loan_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "MoSa Loan",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "loan",
+        amount_type: "manual",
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: loan_field)
+      pay_period.payroll_items.create!(
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        pay_rate: 15,
+        loan_deduction: 50,
+        import_source: "mosa_revel"
+      )
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_field_inputs"
+
+      assignment = response.parsed_body.dig("payroll_field_inputs", "assignments", 0)
+      expect(assignment).to include("editable" => false)
+      expect(assignment.fetch("skipped_reason")).to match(/already supplied/i)
     end
   end
 
