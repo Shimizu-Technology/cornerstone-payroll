@@ -73,15 +73,20 @@ class PayrollFieldInputApplier
       mode = (data["mode"] || data[:mode]).to_s
       raise ArgumentError, "Payroll field input mode must be default or override" unless mode.in?(MODES)
 
-      parsed_id = Integer(field_id, 10)
-      raise ArgumentError, "Payroll field ID must be positive" unless parsed_id.positive?
+      result[parsed_field_id!(field_id)] = { mode: mode, amount: data["amount"] || data[:amount] }
+    end
+  end
 
-      result[parsed_id] = { mode: mode, amount: data["amount"] || data[:amount] }
-    rescue ArgumentError => e
-      raise e if e.message.include?("mode") || e.message.include?("positive")
-
+  def parsed_field_id!(field_id)
+    parsed_id = begin
+      Integer(field_id, 10)
+    rescue ArgumentError, TypeError
       raise ArgumentError, "Payroll field ID is invalid"
     end
+
+    raise ArgumentError, "Payroll field ID must be positive" unless parsed_id.positive?
+
+    parsed_id
   end
 
   def decimal_amount!(value, field_name)

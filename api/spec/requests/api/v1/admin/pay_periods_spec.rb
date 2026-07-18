@@ -965,6 +965,43 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload).to be_draft
     end
 
+    it "returns a stable validation error for an invalid payroll field ID" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        payroll_field_inputs: {
+          employee.id.to_s => { "not-an-id" => { mode: "override", amount: 20 } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors", 0, "error")).to eq("Payroll field ID is invalid")
+      expect(pay_period.reload).to be_draft
+    end
+
+    it "rejects a cleared override instead of silently retaining an earlier amount" do
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Manual Uniform Deduction",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "other",
+        amount_type: "manual",
+        show_in_payroll_grid: true
+      )
+      EmployeePayrollField.create!(employee: employee, payroll_field_definition: field)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        payroll_field_inputs: {
+          employee.id.to_s => { field.id.to_s => { mode: "override", amount: nil } }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "errors", 0, "error")).to eq(
+        "Manual Uniform Deduction must be a valid amount"
+      )
+      expect(pay_period.reload).to be_draft
+    end
+
     it "does not recreate employees excluded from this pay period during recalculation" do
       contractor = Employee.create!(
         company: company,

@@ -301,12 +301,112 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   );
 }
 
-export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegister }) {
-  if (report.simple_payroll_register_enabled && report.simple_register) {
-    return <SimpleRegisterPreview report={report} simple={report.simple_register} />;
-  }
+const payrollFieldTreatmentLabels: Record<string, string> = {
+  taxable_addition: 'Taxable addition',
+  non_taxable_addition: 'Non-taxable addition',
+  pre_tax_deduction: 'Pre-tax deduction',
+  post_tax_deduction: 'Post-tax deduction',
+  employer_contribution: 'Employer contribution',
+};
 
-  return <DetailedRegisterPreview report={report} />;
+const payrollFieldSourceLabels: Record<string, string> = {
+  employee_default: 'Employee default',
+  manual: 'Payroll override',
+  import: 'Imported',
+  system: 'System',
+};
+
+function PayrollFieldsDisclosure({ report }: { report: PayrollRegister }) {
+  const workers = [...report.employees, ...report.contractors];
+  const rows = workers.flatMap((worker) => (
+    (worker.payroll_field_entries || [])
+      .filter((entry) => entry.active !== false)
+      .map((entry) => ({
+        worker: worker.employee_name,
+        label: entry.label,
+        treatment: payrollFieldTreatmentLabels[entry.tax_treatment] || entry.tax_treatment,
+        source: payrollFieldSourceLabels[entry.source || ''] || entry.source || 'Calculated',
+        effect: entry.employer_paid && !entry.employee_paid
+          ? 'Employer expense'
+          : entry.kind === 'deduction'
+            ? 'Employee deduction'
+            : 'Employee earnings',
+        amount: Number(entry.amount || 0),
+      }))
+  ));
+
+  if (rows.length === 0) return null;
+
+  const totals = Array.from(rows.reduce((summary, row) => {
+    const key = `${row.label}:${row.treatment}:${row.effect}`;
+    const existing = summary.get(key);
+    summary.set(key, existing
+      ? { ...existing, amount: existing.amount + row.amount }
+      : { label: row.label, treatment: row.treatment, effect: row.effect, amount: row.amount });
+    return summary;
+  }, new Map<string, { label: string; treatment: string; effect: string; amount: number }>()).values());
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+      <div className="border-b border-neutral-200 px-5 py-4">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-700">Company payroll fields</p>
+        <h3 className="mt-1 font-bold text-neutral-950">Additions, deductions, and employer benefits</h3>
+        <p className="mt-1 max-w-4xl text-sm leading-6 text-neutral-600">
+          These snapshotted values are already reflected in gross pay, deductions, net pay, and taxable wages according to each field&apos;s treatment. This section keeps every client-wide field visible for review and reconciliation.
+        </p>
+      </div>
+
+      <div className="grid gap-3 border-b border-neutral-200 bg-neutral-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
+        {totals.map((total) => (
+          <div key={`${total.label}:${total.treatment}:${total.effect}`} className="rounded-xl border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+            <p className="truncate text-sm font-bold text-neutral-950" title={total.label}>{total.label}</p>
+            <p className="mt-1 text-xs text-neutral-500">{total.treatment} · {total.effect}</p>
+            <p className="mt-2 text-lg font-bold tabular-nums text-neutral-950">{currency(total.amount)}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="max-h-[45vh] overflow-auto">
+        <table className="min-w-[920px] w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+            <tr>
+              <th className="border-b border-r border-slate-200 px-4 py-2.5">Worker</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2.5">Payroll field</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2.5">Treatment</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2.5">Payroll effect</th>
+              <th className="border-b border-r border-slate-200 px-4 py-2.5">Source</th>
+              <th className="border-b border-slate-200 px-4 py-2.5 text-right">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={`${row.worker}:${row.label}:${index}`} className="hover:bg-blue-50/50">
+                <td className="border-b border-r border-slate-100 px-4 py-2.5 font-semibold text-neutral-950">{row.worker}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.label}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.treatment}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.effect}</td>
+                <td className="border-b border-r border-slate-100 px-4 py-2.5">{row.source}</td>
+                <td className="border-b border-slate-100 px-4 py-2.5 text-right font-bold tabular-nums">{currency(row.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegister }) {
+  const register = report.simple_payroll_register_enabled && report.simple_register
+    ? <SimpleRegisterPreview report={report} simple={report.simple_register} />
+    : <DetailedRegisterPreview report={report} />;
+
+  return (
+    <div className="space-y-5">
+      {register}
+      <PayrollFieldsDisclosure report={report} />
+    </div>
+  );
 }
 
 interface PayrollRegisterPreviewModalProps {

@@ -7,6 +7,7 @@ export interface NumericInputProps extends BaseProps {
   value: number | string | null | undefined;
   onValueChange: (value: number | null) => void;
   emptyValue?: number | null;
+  notifyEmptyOnChange?: boolean;
   min?: number;
   max?: number;
   fixedDecimalsOnBlur?: number;
@@ -42,6 +43,7 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
       value,
       onValueChange,
       emptyValue = 0,
+      notifyEmptyOnChange = false,
       min,
       max,
       fixedDecimalsOnBlur,
@@ -114,6 +116,11 @@ export const NumericInput = forwardRef<HTMLInputElement, NumericInputProps>(
           if (!pattern.test(next)) return;
 
           setDraft(next);
+
+          if (next === '') {
+            if (notifyEmptyOnChange) onValueChange(emptyValue);
+            return;
+          }
 
           const parsed = Number(next);
           if (next !== '' && next !== '-' && next !== '.' && next !== '-.' && Number.isFinite(parsed)) {

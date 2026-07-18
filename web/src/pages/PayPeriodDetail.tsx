@@ -69,6 +69,11 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const payrollFieldAmountsEqual = (left: number | null, right: number | null) => {
+  if (left == null || right == null) return left == null && right == null;
+  return Math.abs(left - right) < 0.005;
+};
+
 const effectiveLoanDeduction = (item: PayrollItem): number => {
   const calculatedLoanPayment = toNumber(item.loan_payment);
   return calculatedLoanPayment > 0 ? calculatedLoanPayment : toNumber(item.loan_deduction);
@@ -512,11 +517,29 @@ export function PayPeriodDetail() {
   };
 
   const updatePayrollFieldDraft = (employeeId: number, fieldId: number, amount: number | null) => {
+    const assignment = payrollFieldAssignments.find((candidate) => (
+      candidate.employee_id === employeeId && candidate.payroll_field_definition_id === fieldId
+    ));
+    if (!assignment) return;
+
     const key = `${employeeId}:${fieldId}`;
-    setPayrollFieldDrafts((previous) => ({
-      ...previous,
-      [key]: { mode: 'override', amount: amount == null ? null : Math.max(0, amount) },
-    }));
+    const normalizedAmount = amount == null ? null : Math.max(0, amount);
+    const defaultAmount = assignment.current_amount ?? assignment.suggested_amount ?? null;
+
+    setPayrollFieldDrafts((previous) => {
+      const current = previous[key];
+      if (current && payrollFieldAmountsEqual(current.amount, normalizedAmount)) return previous;
+
+      const returnedToDefault = !assignment.overridden
+        && payrollFieldAmountsEqual(normalizedAmount, defaultAmount);
+
+      return {
+        ...previous,
+        [key]: returnedToDefault
+          ? { mode: 'default', amount: defaultAmount }
+          : { mode: 'override', amount: normalizedAmount },
+      };
+    });
   };
 
   const resetPayrollFieldDraft = (employeeId: number, fieldId: number) => {
@@ -627,7 +650,18 @@ export function PayPeriodDetail() {
         if (!assignment.editable) return;
         const key = `${assignment.employee_id}:${assignment.payroll_field_definition_id}`;
         const draft = payrollFieldDrafts[key] || { mode: 'default' as const, amount: null };
-        if (draft.mode === 'override' && draft.amount == null) return;
+        if (draft.mode === 'override' && draft.amount == null) {
+          const fieldName = worksheetPayrollFields.find(
+            (field) => field.id === assignment.payroll_field_definition_id,
+          )?.name || 'payroll field';
+          const employee = employees.find((candidate) => candidate.id === assignment.employee_id);
+          const employeeName = employee
+            ? `${employee.first_name} ${employee.last_name}`
+            : `employee #${assignment.employee_id}`;
+          throw new Error(
+            `Enter an amount for ${fieldName} for ${employeeName}, or use the employee default.`,
+          );
+        }
 
         payroll_field_inputs[String(assignment.employee_id)] ||= {};
         payroll_field_inputs[String(assignment.employee_id)][String(assignment.payroll_field_definition_id)] = draft.mode === 'override'
@@ -1967,6 +2001,8 @@ export function PayPeriodDetail() {
                                   <NumericInput
                                     value={draft?.amount ?? null}
                                     onValueChange={(value) => updatePayrollFieldDraft(emp.id, field.id, value)}
+                                    emptyValue={null}
+                                    notifyEmptyOnChange
                                     placeholder={field.amount_type === 'percentage' ? 'Auto' : '0.00'}
                                     className={`w-24 rounded-md border px-2 py-1.5 text-center text-sm focus:ring-2 disabled:cursor-not-allowed disabled:bg-gray-100 ${
                                       field.kind === 'addition'
@@ -1978,10 +2014,19 @@ export function PayPeriodDetail() {
                                     min={0}
                                     fixedDecimalsOnBlur={2}
                                     disabled={!assignment.editable}
+                                    aria-invalid={draft?.mode === 'override' && draft.amount == null}
                                   />
                                 </div>
                                 {assignment.editable ? (
-                                  draft?.mode === 'override' ? (
+                                  draft?.mode === 'override' && draft.amount == null ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
+                                      className="text-center text-[10px] font-semibold leading-tight text-red-600 transition-colors hover:text-red-700 hover:underline"
+                                    >
+                                      Enter an amount or use the employee default
+                                    </button>
+                                  ) : draft?.mode === 'override' ? (
                                     <button
                                       type="button"
                                       onClick={() => resetPayrollFieldDraft(emp.id, field.id)}
