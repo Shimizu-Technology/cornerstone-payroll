@@ -103,20 +103,14 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          items = employee.payroll_items
-                         .includes(:pay_period, :payroll_item_field_entries)
-                         .not_voided
-                         .where(pay_periods: {
-                           id: PayPeriod.reportable_committed
-                                        .where(company_id: employee.company_id)
-                                        .select(:id)
-                         })
-                         .order("pay_periods.pay_date DESC")
-                         .limit(params[:limit] || 12)
+          period = payroll_reporting_period
+          items = employee_pay_history_items(employee, period)
 
           render json: {
-            report: employee_pay_history_report(employee, items)
+            report: employee_pay_history_report(employee, items, period: period)
           }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def employee_pay_history_xlsx
@@ -126,21 +120,15 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          items = employee.payroll_items
-                         .includes(:pay_period, :payroll_item_field_entries)
-                         .not_voided
-                         .where(pay_periods: {
-                           id: PayPeriod.reportable_committed
-                                        .where(company_id: employee.company_id)
-                                        .select(:id)
-                         })
-                         .order("pay_periods.pay_date DESC")
-                         .limit(params[:limit] || 12)
+          period = payroll_reporting_period
+          items = employee_pay_history_items(employee, period)
 
           send_spreadsheet!(
-            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}.xlsx",
-            sheets: employee_pay_history_sheets(employee_pay_history_report(employee, items))
+            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.xlsx",
+            sheets: employee_pay_history_sheets(employee_pay_history_report(employee, items, period: period))
           )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/reports/tax_summary
@@ -897,40 +885,25 @@ module Api
         end
 
         # GET /api/v1/admin/reports/ytd_summary
-        # Year-to-date summary for all employees
+        # Payroll summary for all employees. The legacy route name remains for
+        # compatibility; callers may request either a calendar year or an exact
+        # pay-date range.
         def ytd_summary
-          year = params[:year]&.to_i || Date.current.year
-
-          employees = filtered_ytd_employees
-          custom_totals_by_employee = ytd_custom_totals_by_employee(year)
-
-          render json: {
-            report: {
-              type: "ytd_summary",
-              meta: report_meta(Company.find(current_company_id), :ytd_summary),
-              year: year,
-              employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year, custom_totals_by_employee[emp.id]) }),
-              company_totals: ytd_company_totals(year)
-            }
-          }
+          render json: { report: build_period_summary_report(payroll_reporting_period) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def ytd_summary_xlsx
-          year = params[:year]&.to_i || Date.current.year
-          employees = filtered_ytd_employees
-          custom_totals_by_employee = ytd_custom_totals_by_employee(year)
-          report = {
-            type: "ytd_summary",
-            meta: report_meta(Company.find(current_company_id), :ytd_summary),
-            year: year,
-            employees: sort_ytd_rows(employees.map { |emp| employee_ytd_row(emp, year, custom_totals_by_employee[emp.id]) }),
-            company_totals: ytd_company_totals(year)
-          }
+          period = payroll_reporting_period
+          report = build_period_summary_report(period)
 
           send_spreadsheet!(
-            filename: "ytd_summary_#{year}.xlsx",
+            filename: "payroll_summary_#{period.filename_token}.xlsx",
             sheets: ytd_summary_sheets(report)
           )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -1165,7 +1138,8 @@ module Api
 
         # Shared data builder for tax summary (JSON + CSV + PDF).
         # Returns [report_data, nil] on success or [nil, rendered_response] on error.
-        # year defaults to current year; quarter is optional (1-4).
+        # year defaults to current year; quarter is optional (1-4). Exact
+        # start_date/end_date parameters override the calendar selectors.
         def build_tax_summary_data
           year    = params[:year]&.to_i || Date.current.year
           quarter = params[:quarter].present? ? params[:quarter].to_i : nil
@@ -1174,38 +1148,41 @@ module Api
             return [ nil, render(json: { error: "quarter must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
           end
 
-          # Get committed pay periods in range
-          pay_periods = PayPeriod.reportable_committed
-                                 .where(company_id: current_company_id)
-                                 .for_year(year)
-
-          if quarter
+          period = if params[:start_date].present? || params[:end_date].present?
+            payroll_reporting_period
+          elsif quarter
             start_month = ((quarter - 1) * 3) + 1
             end_month   = start_month + 2
             start_date  = Date.new(year, start_month, 1)
             end_date    = Date.new(year, end_month, -1)
-            pay_periods = pay_periods.where(pay_date: start_date..end_date)
+            PayrollReportingPeriod.new(start_date: start_date, end_date: end_date)
+          else
+            PayrollReportingPeriod.from_params(params, default_year: year)
           end
 
-          items                   = PayrollItem.joins(:pay_period).where(pay_periods: { id: pay_periods.pluck(:id) }).not_voided.where.not(employment_type: "contractor")
-          employee_ss_total       = items.sum(:social_security_tax)
-          employee_medicare_total = items.sum(:medicare_tax)
-          employer_ss_total       = items.sum(:employer_social_security_tax)
-          employer_medicare_total = items.sum(:employer_medicare_tax)
-          withholding_total       = items.sum(:withholding_tax)
+          pay_periods = reportable_pay_periods(period)
+
+          items                   = reportable_payroll_items(period).where.not(employment_type: "contractor")
+          item_rows               = items.to_a
+          field_disclosure        = PayrollFieldDisclosure.new(item_rows)
+          employee_ss_total       = item_rows.sum { |item| item.social_security_tax.to_f }
+          employee_medicare_total = item_rows.sum { |item| item.medicare_tax.to_f }
+          employer_ss_total       = item_rows.sum { |item| item.employer_social_security_tax.to_f }
+          employer_medicare_total = item_rows.sum { |item| item.employer_medicare_tax.to_f }
+          withholding_total       = item_rows.sum { |item| item.withholding_tax.to_f }
 
           company = Company.find(current_company_id)
           report_data = {
             type: "tax_summary",
             meta: report_meta(company, :tax_summary),
-            period: {
-              year:       year,
-              quarter:    quarter,
-              start_date: pay_periods.minimum("pay_periods.pay_date"),
-              end_date:   pay_periods.maximum("pay_periods.pay_date")
-            },
+            period: period.payload.merge(
+              year: period.year || year,
+              quarter: params[:start_date].present? ? nil : quarter,
+              custom: params[:start_date].present?,
+              label: quarter ? "Q#{quarter} #{year}" : period.label
+            ),
             totals: {
-              gross_wages:               items.sum(:gross_pay),
+              gross_wages:               item_rows.sum { |item| item.gross_pay.to_f },
               withholding_tax:           withholding_total,
               social_security_employee:  employee_ss_total,
               social_security_employer:  employer_ss_total,
@@ -1213,8 +1190,12 @@ module Api
               medicare_employer:         employer_medicare_total,
               total_employment_taxes:    employee_ss_total + employer_ss_total + employee_medicare_total + employer_medicare_total + withholding_total
             },
+            payroll_fields: {
+              totals: field_disclosure.totals,
+              treatment_totals: field_disclosure.treatment_totals
+            },
             pay_periods_included: pay_periods.count,
-            employee_count:       items.distinct.count(:employee_id)
+            employee_count:       item_rows.map(&:employee_id).uniq.length
           }
 
           [ report_data, nil ]
@@ -1447,6 +1428,120 @@ module Api
           }
         end
 
+        def payroll_reporting_period
+          PayrollReportingPeriod.from_params(params)
+        end
+
+        def reportable_pay_periods(period)
+          PayPeriod.reportable_committed
+                   .where(company_id: current_company_id, pay_date: period.range)
+        end
+
+        def reportable_payroll_items(period)
+          PayrollItem.joins(:pay_period)
+                     .includes(:employee, :pay_period, :payroll_item_field_entries)
+                     .not_voided
+                     .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
+        end
+
+        def employee_pay_history_items(employee, period)
+          scope = employee.payroll_items
+                          .joins(:pay_period)
+                          .includes(:pay_period, :payroll_item_field_entries)
+                          .not_voided
+                          .where(pay_periods: { id: reportable_pay_periods(period).select(:id) })
+                          .order("pay_periods.pay_date DESC, payroll_items.id DESC")
+
+          return scope if params[:start_date].present? || params[:end_date].present? || params[:year].present?
+
+          limit = Integer(params[:limit].presence || 12, exception: false)
+          raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
+
+          scope.limit(limit)
+        end
+
+        def build_period_summary_report(period)
+          employees = filtered_ytd_employees
+          items = reportable_payroll_items(period).to_a
+          items_by_employee = items.group_by(&:employee_id)
+          disclosure = PayrollFieldDisclosure.new(items)
+
+          {
+            type: "ytd_summary",
+            meta: report_meta(Company.find(current_company_id), :ytd_summary),
+            year: period.year,
+            period: period.payload,
+            employees: sort_ytd_rows(employees.map { |employee| payroll_period_employee_row(employee, items_by_employee[employee.id] || []) }),
+            company_totals: payroll_period_company_totals(items, period),
+            payroll_fields: {
+              totals: disclosure.totals,
+              entries: disclosure.rows,
+              treatment_totals: disclosure.treatment_totals
+            }
+          }
+        end
+
+        def payroll_period_employee_row(employee, items)
+          custom_totals = custom_ytd_totals_for_items(items)
+          treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+
+          {
+            employee_id: employee.id,
+            first_name: employee.first_name,
+            last_name: employee.last_name,
+            name: employee.full_name,
+            employment_type: employee.employment_type,
+            status: employee.status,
+            payroll_count: items.map(&:pay_period_id).uniq.length,
+            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            custom_earnings_total: custom_totals[:custom_earnings_total],
+            payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
+            payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
+            payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
+            payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
+            payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
+            withholding_tax: items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
+            retirement: items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: items.sum { |item| item.roth_retirement_payment.to_f },
+            tips: items.sum { |item| item.reported_tips.to_f },
+            tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
+            bonus: items.sum { |item| item.bonus.to_f },
+            total_deductions: custom_totals[:total_deductions],
+            custom_deductions_total: custom_totals[:custom_deductions_total],
+            net_pay: items.sum { |item| item.net_pay.to_f }
+          }
+        end
+
+        def payroll_period_company_totals(items, period)
+          treatment_totals = PayrollFieldDisclosure.new(items).treatment_totals
+
+          {
+            year: period.year,
+            start_date: period.start_date,
+            end_date: period.end_date,
+            period_basis: "pay_date",
+            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            custom_earnings_total: items.sum { |item| custom_earnings_total(item) },
+            payroll_field_taxable_additions_total: treatment_totals["taxable_addition"],
+            payroll_field_non_taxable_additions_total: treatment_totals["non_taxable_addition"],
+            payroll_field_pre_tax_deductions_total: treatment_totals["pre_tax_deduction"],
+            payroll_field_post_tax_deductions_total: treatment_totals["post_tax_deduction"],
+            payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
+            withholding_tax: items.sum { |item| item.withholding_tax.to_f },
+            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
+            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
+            retirement: items.sum { |item| item.retirement_payment.to_f },
+            roth_retirement: items.sum { |item| item.roth_retirement_payment.to_f },
+            total_deductions: items.sum { |item| item.total_deductions.to_f },
+            custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
+            net_pay: items.sum { |item| item.net_pay.to_f },
+            payroll_count: items.map(&:pay_period_id).uniq.length,
+            employee_count: items.map(&:employee_id).uniq.length
+          }
+        end
+
         def ytd_company_totals(year = Date.current.year)
           reportable_period_ids = PayPeriod.reportable_committed
                                            .where(company_id: current_company_id)
@@ -1642,10 +1737,15 @@ module Api
           }
         end
 
-        def employee_pay_history_report(employee, items)
+        def employee_pay_history_report(employee, items, period:)
+          item_rows = items.to_a
+          disclosure = PayrollFieldDisclosure.new(item_rows)
+          summary = payroll_period_employee_row(employee, item_rows)
+
           {
             type: "employee_pay_history",
             meta: report_meta(employee.company, :employee_pay_history),
+            period: period.payload,
             employee: {
               id: employee.id,
               name: employee.full_name,
@@ -1654,8 +1754,16 @@ module Api
               employment_type: employee.employment_type,
               pay_rate: employee.pay_rate
             },
-            history: items.map { |item| pay_history_item(item) },
-            ytd: employee_ytd_summary(employee)
+            history: item_rows.map { |item| pay_history_item(item) },
+            summary: summary,
+            # Kept for older clients while they move from the YTD label to the
+            # exact pay-date period summary.
+            ytd: summary.merge(year: period.year),
+            payroll_fields: {
+              totals: disclosure.totals,
+              entries: disclosure.rows,
+              treatment_totals: disclosure.treatment_totals
+            }
           }
         end
 
@@ -2756,9 +2864,39 @@ module Api
           end
           [
             { name: "Pay History", rows: rows },
-            { name: "YTD", rows: employee_ytd_summary_rows(report[:ytd]) },
+            { name: "Period Summary", rows: employee_period_summary_rows(report) },
             employee_pay_history_field_breakdown_sheet(report),
             report_info_sheet(report, title: "Employee Pay History")
+          ]
+        end
+
+        def employee_period_summary_rows(report)
+          summary = report[:summary] || report[:ytd] || {}
+          period = report[:period] || {}
+          [
+            [ "Metric", "Amount" ],
+            [ "Basis", "Pay date" ],
+            [ "Start Date", period[:start_date] ],
+            [ "End Date", period[:end_date] ],
+            [ "Payroll Count", summary[:payroll_count] ],
+            [ "Gross Pay", summary[:gross_pay] ],
+            [ "Custom Earnings", summary[:custom_earnings_total] ],
+            [ "Payroll Field Taxable Additions", summary[:payroll_field_taxable_additions_total] ],
+            [ "Payroll Field Non-Taxable Additions", summary[:payroll_field_non_taxable_additions_total] ],
+            [ "Payroll Field Pre-Tax Deductions", summary[:payroll_field_pre_tax_deductions_total] ],
+            [ "Payroll Field Post-Tax Deductions", summary[:payroll_field_post_tax_deductions_total] ],
+            [ "Payroll Field Employer Contributions", summary[:payroll_field_employer_contributions_total] ],
+            [ "FIT", summary[:withholding_tax] ],
+            [ "SS Tax", summary[:social_security_tax] ],
+            [ "Medicare Tax", summary[:medicare_tax] ],
+            [ "401(k)", summary[:retirement] ],
+            [ "Roth 401(k)", summary[:roth_retirement] ],
+            [ "Tips", summary[:tips] ],
+            [ "Tips Paid Out", summary[:tips_paid_out] ],
+            [ "Bonus", summary[:bonus] ],
+            [ "Total Deductions", summary[:total_deductions] ],
+            [ "Custom Deductions", summary[:custom_deductions_total] ],
+            [ "Net Pay", summary[:net_pay] ]
           ]
         end
 
@@ -2795,6 +2933,7 @@ module Api
           [
             { name: "Summary", rows: rows },
             { name: "Meta", rows: meta },
+            payroll_field_totals_for_report_sheet(report),
             report_info_sheet(report, title: "Tax Summary")
           ]
         end
@@ -2818,10 +2957,38 @@ module Api
             ]
           end
           [
-            { name: "YTD Summary", rows: rows },
+            { name: "Payroll Summary", rows: rows },
             { name: "Company Totals", rows: (report[:company_totals] || {}).to_a },
-            report_info_sheet(report, title: "YTD Summary")
+            payroll_field_totals_for_report_sheet(report),
+            payroll_field_activity_for_report_sheet(report),
+            report_info_sheet(report, title: "Payroll Summary by Period")
           ]
+        end
+
+        def payroll_field_totals_for_report_sheet(report)
+          rows = [ [ "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Employees", "Pay Periods", "Amount" ] ]
+          Array(report.dig(:payroll_fields, :totals)).each do |entry|
+            paid_by = entry[:employer_paid] ? "Employer" : "Employee"
+            rows << [
+              entry[:label], entry[:kind], entry[:tax_treatment], entry[:category],
+              report_group_label(entry[:reporting_group]), paid_by, entry[:employee_count],
+              entry[:pay_period_count], entry[:amount]
+            ]
+          end
+          { name: "Payroll Field Totals", rows: rows }
+        end
+
+        def payroll_field_activity_for_report_sheet(report)
+          rows = [ [ "Pay Date", "Period", "Employee", "Type", "Field", "Kind", "Tax Treatment", "Category", "Report Group", "Paid By", "Source", "Amount" ] ]
+          Array(report.dig(:payroll_fields, :entries)).each do |entry|
+            rows << [
+              entry[:pay_date], entry[:period_description], entry[:employee_name], entry[:employment_type],
+              entry[:label], entry[:kind], entry[:tax_treatment], entry[:category],
+              report_group_label(entry[:reporting_group]), entry[:employer_paid] ? "Employer" : "Employee",
+              entry[:source], entry[:amount]
+            ]
+          end
+          { name: "Payroll Field Activity", rows: rows }
         end
 
         def form_941_gu_sheets(report)

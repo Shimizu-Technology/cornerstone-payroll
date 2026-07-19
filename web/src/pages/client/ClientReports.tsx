@@ -10,12 +10,15 @@ import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
 
 export function ClientReports() {
+  const currentYear = new Date().getFullYear();
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPayPeriodId, setSelectedPayPeriodId] = useState<string>('');
   const [payrollRegister, setPayrollRegister] = useState<Awaited<ReturnType<typeof clientReportsApi.payrollRegister>>['report'] | null>(null);
   const [ytdSummary, setYtdSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.ytdSummary>>['report'] | null>(null);
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
 
   const payPeriodOptions = useMemo(
     () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: payPeriod.period_description || `${payPeriod.start_date} - ${payPeriod.end_date}` })),
@@ -50,12 +53,12 @@ export function ClientReports() {
 
   const loadYtdSummary = useCallback(async () => {
     try {
-      const response = await clientReportsApi.ytdSummary();
+      const response = await clientReportsApi.ytdSummary({ start_date: startDate, end_date: endDate });
       setYtdSummary(response.report);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load report data');
     }
-  }, []);
+  }, [startDate, endDate]);
 
   useEffect(() => {
     void loadBaseData();
@@ -131,9 +134,16 @@ export function ClientReports() {
 
             <Card>
             <CardHeader>
-              <CardTitle>Year-to-Date Employee Summary</CardTitle>
+              <CardTitle>Employee Payroll Summary by Period</CardTitle>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="space-y-4 p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Pay dates</span>
+                <input aria-label="Client report start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
+                <span className="text-sm text-gray-500">to</span>
+                <input aria-label="Client report end date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
+                <Button variant="outline" onClick={() => void loadYtdSummary()}>Refresh</Button>
+              </div>
               <Table stickyHeader containerClassName="max-h-[26rem]">
                 <TableHeader>
                   <TableRow>
@@ -160,6 +170,12 @@ export function ClientReports() {
                   ))}
                 </TableBody>
               </Table>
+              {(ytdSummary?.payroll_fields?.totals.length ?? 0) > 0 && (
+                <div className="rounded-xl border border-gray-200">
+                  <div className="border-b bg-gray-50 px-4 py-3"><p className="font-semibold text-gray-900">Payroll field reconciliation</p><p className="text-sm text-gray-500">Historical field values for payrolls paid in this period.</p></div>
+                  <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3 text-sm"><span><span className="font-medium text-gray-900">{field.label}</span><span className="ml-2 text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>
+                </div>
+              )}
             </CardContent>
             </Card>
           </>

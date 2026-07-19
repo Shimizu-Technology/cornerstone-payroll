@@ -9,17 +9,9 @@ module Api
         before_action :ensure_client_reportable_pay_period!, only: [ :payroll_register, :payroll_register_pdf ]
 
         def ytd_summary
-          year = params[:year]&.to_i || Date.current.year
-          employees = Employee.where(company_id: current_company_id).order(:last_name, :first_name)
-
-          render json: {
-            report: {
-              type: "ytd_summary",
-              year: year,
-              employees: employees.map { |employee| client_employee_ytd_row(employee, year) },
-              company_totals: ytd_company_totals(year)
-            }
-          }
+          render json: { report: build_period_summary_report(payroll_reporting_period) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
