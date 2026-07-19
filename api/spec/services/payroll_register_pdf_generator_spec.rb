@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "pdf/reader"
 
 RSpec.describe PayrollRegisterPdfGenerator do
   let(:report_data) do
@@ -39,7 +40,25 @@ RSpec.describe PayrollRegisterPdfGenerator do
           retirement_payment: 80.00,
           total_deductions: 383.00,
           net_pay: 1617.00,
-          check_number: "10001"
+          check_number: "10001",
+          payroll_field_entries: [
+            {
+              label: "Shift Bonus",
+              kind: "addition",
+              tax_treatment: "taxable_addition",
+              amount: 25.00,
+              employee_paid: false,
+              employer_paid: false
+            },
+            {
+              label: "Employer Benefit",
+              kind: "employer_contribution",
+              tax_treatment: "employer_contribution",
+              amount: 50.00,
+              employee_paid: false,
+              employer_paid: true
+            }
+          ]
         }
       ]
     }
@@ -90,6 +109,13 @@ RSpec.describe PayrollRegisterPdfGenerator do
       labels = generator.send(:employee_table_columns).map { |column| column[:label] }
 
       expect(labels).to include("Custom Earn", "Custom Ded")
+    end
+
+    it "renders payroll field treatment totals for reconciliation" do
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Payroll Fields", "Shift Bonus", "Taxable addition", "$25.00")
+      expect(text).to include("Employer Benefit", "Employer contribution", "$50.00")
     end
   end
 

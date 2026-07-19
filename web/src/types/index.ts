@@ -143,6 +143,27 @@ export interface EmployeePayrollField {
   payroll_field: Pick<PayrollFieldDefinition, 'id' | 'name' | 'kind' | 'tax_treatment' | 'category' | 'reporting_group' | 'amount_type' | 'default_amount' | 'default_percentage' | 'show_in_payroll_grid' | 'active'>;
 }
 
+export interface PayPeriodPayrollFieldAssignment {
+  employee_id: number;
+  payroll_field_definition_id: number;
+  amount_type: PayrollFieldAmountType;
+  assigned_amount?: number | null;
+  assigned_percentage?: number | null;
+  default_amount?: number | null;
+  default_percentage?: number | null;
+  suggested_amount?: number | null;
+  current_amount?: number | null;
+  current_source?: PayrollItemFieldEntry['source'] | null;
+  overridden: boolean;
+  editable: boolean;
+  skipped_reason?: string | null;
+}
+
+export interface PayPeriodPayrollFieldInputs {
+  fields: PayrollFieldDefinition[];
+  assignments: PayPeriodPayrollFieldAssignment[];
+}
+
 export interface PayrollItemFieldEntry {
   id?: number;
   payroll_item_id?: number;

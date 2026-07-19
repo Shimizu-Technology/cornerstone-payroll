@@ -342,6 +342,7 @@ import type {
   PayPeriodComparisonResponse,
   PayrollFieldDefinition,
   EmployeePayrollField,
+  PayPeriodPayrollFieldInputs,
   PayrollLiabilityReconciliation,
 } from '@/types';
 
@@ -910,11 +911,18 @@ export interface RunPayrollAdjustmentEntry {
   active?: boolean;
 }
 
+export interface RunPayrollFieldInputEntry {
+  mode: 'default' | 'override';
+  amount?: number;
+}
+
 export const payPeriodsApi = {
   list: (params?: { status?: string; year?: number }) =>
     api.get<PayPeriodListResponse>('/admin/pay_periods', params),
   get: (id: number) =>
     api.get<PayPeriodResponse>(`/admin/pay_periods/${id}`),
+  payrollFieldInputs: (id: number) =>
+    api.get<{ payroll_field_inputs: PayPeriodPayrollFieldInputs }>(`/admin/pay_periods/${id}/payroll_field_inputs`),
   comparison: (id: number) =>
     api.get<PayPeriodComparisonResponse>(`/admin/pay_periods/${id}/comparison`),
   liabilities: (id: number) =>
@@ -927,7 +935,7 @@ export const payPeriodsApi = {
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
-  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]> }) =>
+  runPayroll: (id: number, data?: { employee_ids?: number[]; hours?: Record<string, RunPayrollHoursEntry>; salary_overrides?: Record<string, number>; tips?: Record<string, { amount: number; pool: string }>; tips_paid_out?: Record<string, number>; service_charge_wages?: Record<string, number>; loan_deductions?: Record<string, number>; custom_earnings?: Record<string, RunPayrollCustomEarningEntry[]>; custom_deductions?: Record<string, RunPayrollCustomEarningEntry[]>; payroll_adjustments?: Record<string, RunPayrollAdjustmentEntry[]>; payroll_field_inputs?: Record<string, Record<string, RunPayrollFieldInputEntry>> }) =>
     api.post<RunPayrollResponse>(`/admin/pay_periods/${id}/run_payroll`, data),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),

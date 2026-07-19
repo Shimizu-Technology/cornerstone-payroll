@@ -145,6 +145,7 @@ Rails.application.routes.draw do
           resources :payroll_liabilities, only: [ :index ]
           member do
             post :run_payroll
+            get :payroll_field_inputs
             get :comparison
             post :approve
             post :unapprove

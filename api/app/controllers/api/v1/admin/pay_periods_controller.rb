@@ -18,7 +18,7 @@ module Api
           :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
           :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
-          :comparison
+          :comparison, :payroll_field_inputs
         ]
 
         # GET /api/v1/admin/pay_periods
@@ -51,6 +51,18 @@ module Api
         def show
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true)
+          }
+        end
+
+        # GET /api/v1/admin/pay_periods/:id/payroll_field_inputs
+        # Returns the employee-specific payroll fields that are active and
+        # effective for this pay date, including any saved per-period override.
+        def payroll_field_inputs
+          render json: {
+            payroll_field_inputs: PayrollFieldInputBuilder.new(
+              pay_period: @pay_period,
+              company_id: current_company_id
+            ).call
           }
         end
 
@@ -248,6 +260,10 @@ module Api
                                      .index_by(&:id)
 
           preload_ytd_caches!(employees_by_id.values, @pay_period)
+          payroll_field_input_applier = PayrollFieldInputApplier.new(
+            pay_period: @pay_period,
+            company_id: current_company_id
+          )
 
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
@@ -329,6 +345,14 @@ module Api
               if params[:payroll_adjustments] && params[:payroll_adjustments][employee_id.to_s]
                 payroll_item.payroll_adjustments = PayrollItem.normalize_payroll_adjustments(params[:payroll_adjustments][employee_id.to_s])
                 payroll_item.mark_payroll_adjustments_overridden!
+              end
+
+              if params[:payroll_field_inputs] && params[:payroll_field_inputs][employee_id.to_s]
+                payroll_field_input_applier.apply!(
+                  payroll_item: payroll_item,
+                  employee: employee,
+                  inputs: params[:payroll_field_inputs][employee_id.to_s]
+                )
               end
 
               if employee.variable_salary? && payroll_item.salary_override.to_f <= 0
