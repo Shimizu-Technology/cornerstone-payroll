@@ -116,5 +116,13 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(report.fetch("employees").first.fetch("custom_earnings_total").to_f).to eq(50.0)
     expect(report.fetch("employees").first.fetch("custom_deductions_total").to_f).to eq(30.0)
     expect(report.fetch("employees").first.fetch("payroll_field_post_tax_deductions_total").to_f).to eq(75.0)
+    expect(report.dig("payroll_fields", "totals", 0, "label")).to eq("Rent Deduction")
+    expect(report.dig("payroll_fields", "entries", 0)).to include(
+      "employee_name" => "Ana Perez",
+      "label" => "Rent Deduction",
+      "tax_treatment" => "post_tax_deduction",
+      "source" => "manual"
+    )
+    expect(report.dig("payroll_fields", "entries", 0, "amount").to_f).to eq(75.0)
   end
 end

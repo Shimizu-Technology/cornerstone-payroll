@@ -171,9 +171,40 @@ export function ClientReports() {
                 </TableBody>
               </Table>
               {(ytdSummary?.payroll_fields?.totals.length ?? 0) > 0 && (
-                <div className="rounded-xl border border-gray-200">
-                  <div className="border-b bg-gray-50 px-4 py-3"><p className="font-semibold text-gray-900">Payroll field reconciliation</p><p className="text-sm text-gray-500">Historical field values for payrolls paid in this period.</p></div>
-                  <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3 text-sm"><span><span className="font-medium text-gray-900">{field.label}</span><span className="ml-2 text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>
+                <div className="space-y-4 rounded-xl border border-gray-200 p-4">
+                  <div>
+                    <p className="font-semibold text-gray-900">Payroll field reconciliation</p>
+                    <p className="text-sm text-gray-500">Historical field values for payrolls paid in this period, shown from each finalized payroll snapshot.</p>
+                  </div>
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <div className="divide-y">{ytdSummary!.payroll_fields.totals.map((field, index) => <div key={`${field.label}-${index}`} className="flex items-center justify-between gap-4 px-4 py-3 text-sm"><span><span className="font-medium text-gray-900">{field.label}</span><span className="ml-2 text-gray-500">{field.tax_treatment.replaceAll('_', ' ')} · {field.employer_paid ? 'employer' : 'employee'} · {field.employee_count ?? 0} employee{field.employee_count === 1 ? '' : 's'}</span></span><span className="font-semibold tabular-nums">{formatCurrency(field.amount)}</span></div>)}</div>
+                  </div>
+                  {(ytdSummary?.payroll_fields?.entries?.length ?? 0) > 0 && (
+                    <Table stickyHeader containerClassName="max-h-[22rem] rounded-lg border border-gray-200">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Pay date</TableHead>
+                          <TableHead>Employee</TableHead>
+                          <TableHead>Payroll field</TableHead>
+                          <TableHead>Treatment</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody striped>
+                        {ytdSummary!.payroll_fields.entries!.map((entry, index) => (
+                          <TableRow key={`${entry.payroll_item_id}-${entry.label}-${index}`}>
+                            <TableCell>{entry.pay_date || '—'}</TableCell>
+                            <TableCell className="font-medium text-gray-900">{entry.employee_name || '—'}</TableCell>
+                            <TableCell>{entry.label}</TableCell>
+                            <TableCell className="capitalize">{entry.tax_treatment.replaceAll('_', ' ')}</TableCell>
+                            <TableCell className="capitalize">{entry.source?.replaceAll('_', ' ') || '—'}</TableCell>
+                            <TableCell className="text-right font-medium tabular-nums">{formatCurrency(entry.amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
                 </div>
               )}
             </CardContent>
