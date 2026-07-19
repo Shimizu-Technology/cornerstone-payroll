@@ -1482,6 +1482,11 @@ export interface PayrollRegisterReport {
       total_reported_tips?: number;
       total_tips_paid_out?: number;
       total_custom_earnings?: number;
+      total_payroll_field_taxable_additions?: number;
+      total_payroll_field_non_taxable_additions?: number;
+      total_payroll_field_pre_tax_deductions?: number;
+      total_payroll_field_post_tax_deductions?: number;
+      total_payroll_field_employer_contributions?: number;
       total_withholding: number;
       total_additional_withholding?: number;
       total_social_security: number;
@@ -1494,6 +1499,7 @@ export interface PayrollRegisterReport {
       contractor_total_gross?: number;
       contractor_total_net?: number;
     };
+    payroll_fields?: PayrollFieldsDisclosure;
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
     contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
     simple_register?: {
@@ -1596,6 +1602,11 @@ export interface YtdSummaryReport {
       payroll_count?: number;
       gross_pay: number;
       custom_earnings_total?: number;
+      payroll_field_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      payroll_field_pre_tax_deductions_total?: number;
+      payroll_field_post_tax_deductions_total?: number;
+      payroll_field_employer_contributions_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;
@@ -1608,6 +1619,11 @@ export interface YtdSummaryReport {
       year: number;
       gross_pay: number;
       custom_earnings_total?: number;
+      payroll_field_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      payroll_field_pre_tax_deductions_total?: number;
+      payroll_field_post_tax_deductions_total?: number;
+      payroll_field_employer_contributions_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;

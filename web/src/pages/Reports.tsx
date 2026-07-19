@@ -1350,12 +1350,15 @@ function YtdSummaryPanel() {
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
-                  <TotalBox label="Custom Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                  <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                  <TotalBox label="Payroll Field Additions" value={(report.company_totals.payroll_field_taxable_additions_total ?? 0) + (report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
                   <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
                   <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
                   <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
                   <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
-                  <TotalBox label="Custom Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                  <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                  <TotalBox label="Payroll Field Deductions" value={(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + (report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
+                  <TotalBox label="Employer Contributions" value={report.company_totals.payroll_field_employer_contributions_total ?? 0} />
                   <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
                   <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
                 </div>
@@ -1376,12 +1379,15 @@ function YtdSummaryPanel() {
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
-                    <SortableTh label="Custom Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
+                    <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
+                    <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
                     <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
                     <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
                     <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
                     <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
-                    <SortableTh label="Custom Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
+                    <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
+                    <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                   </tr>
@@ -1398,18 +1404,21 @@ function YtdSummaryPanel() {
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_taxable_additions_total ?? 0) + (emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_pre_tax_deductions_total ?? 0) + (emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.payroll_field_employer_contributions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="py-6 text-center text-gray-400">
+                      <td colSpan={15} className="py-6 text-center text-gray-400">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
