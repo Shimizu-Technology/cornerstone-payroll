@@ -1660,6 +1660,65 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(workbook.sheets).to include("Employees", "Earnings Detail", "Deductions Detail", "Register Review", "Report Info")
     end
 
+    it "discloses every payroll-field treatment in the register payload and Excel detail sheets" do
+      item = PayrollItem.find_by!(pay_period: pay_period, employee: hourly_employee)
+      treatments = {
+        "Shift Bonus" => [ "addition", "taxable_addition", 10.0 ],
+        "Phone Allowance" => [ "addition", "non_taxable_addition", 20.0 ],
+        "Insurance Premium" => [ "deduction", "pre_tax_deduction", 30.0 ],
+        "Uniform Deduction" => [ "deduction", "post_tax_deduction", 40.0 ],
+        "Employer Benefit" => [ "employer_contribution", "employer_contribution", 50.0 ]
+      }
+      treatments.each do |label, (kind, treatment, amount)|
+        field = PayrollFieldDefinition.create!(
+          company: company,
+          name: label,
+          kind: kind,
+          tax_treatment: treatment,
+          category: "other"
+        )
+        item.payroll_item_field_entries.create!(
+          payroll_field_definition: field,
+          label: label,
+          kind: kind,
+          tax_treatment: treatment,
+          category: "other",
+          amount: amount,
+          source: "manual",
+          employee_paid: kind == "deduction",
+          employer_paid: kind == "employer_contribution"
+        )
+      end
+
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
+
+      entries = response.parsed_body.dig("report", "employees").find do |row|
+        row.fetch("employee_id") == hourly_employee.id
+      end.fetch("payroll_field_entries")
+      expect(entries.map { |entry| [ entry.fetch("label"), entry.fetch("tax_treatment"), entry.fetch("amount").to_f ] }).to contain_exactly(
+        [ "Shift Bonus", "taxable_addition", 10.0 ],
+        [ "Phone Allowance", "non_taxable_addition", 20.0 ],
+        [ "Insurance Premium", "pre_tax_deduction", 30.0 ],
+        [ "Uniform Deduction", "post_tax_deduction", 40.0 ],
+        [ "Employer Benefit", "employer_contribution", 50.0 ]
+      )
+
+      get "/api/v1/admin/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+
+      workbook = workbook_from_response
+      expect(workbook.sheets).to include("Payroll Fields Detail", "Payroll Fields Totals")
+      detail_rows = (1..workbook.sheet("Payroll Fields Detail").last_row).map do |row_number|
+        workbook.sheet("Payroll Fields Detail").row(row_number)
+      end
+      totals_rows = (1..workbook.sheet("Payroll Fields Totals").last_row).map do |row_number|
+        workbook.sheet("Payroll Fields Totals").row(row_number)
+      end
+      treatments.each do |label, (_kind, treatment, amount)|
+        expect(detail_rows).to include(include(hourly_employee.full_name, treatment, label, amount))
+        expect(totals_rows).to include(include(treatment, label, amount))
+      end
+    end
+
     it "returns the canonical simple register payload used by the browser preview and workbook" do
       get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: pay_period.id }
 
