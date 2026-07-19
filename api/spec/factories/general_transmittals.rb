@@ -27,4 +27,18 @@ FactoryBot.define do
     details { [ "Q2 2026 return payment" ] }
     position { 0 }
   end
+
+  factory :general_transmittal_artifact do
+    general_transmittal
+    company { general_transmittal.company }
+    association :created_by, factory: :user
+    sequence(:version_number)
+    sequence(:storage_key) { |n| "general-transmittals/test/#{n}.pdf" }
+    sequence(:filename) { |n| "transmittal_v#{n}.pdf" }
+    content_type { "application/pdf" }
+    byte_size { 1_024 }
+    sha256 { "a" * 64 }
+    template_version { GeneralTransmittalPdfGenerator::TEMPLATE_VERSION }
+    snapshot { {} }
+  end
 end

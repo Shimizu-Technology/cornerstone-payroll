@@ -2699,7 +2699,8 @@ export const form500Api = {
 // General Transmittals API
 // ============================================================
 export type GeneralTransmittalStatus = 'draft' | 'generated';
-export type GeneralTransmittalItemType = 'check' | 'payment' | 'document' | 'manual' | 'other';
+export type GeneralTransmittalSourceKind = 'standalone' | 'pay_period';
+export type GeneralTransmittalItemType = 'check' | 'payment' | 'document' | 'report' | 'tax_obligation' | 'manual' | 'other';
 
 export interface GeneralTransmittalItem {
   id?: number;
@@ -2712,6 +2713,9 @@ export interface GeneralTransmittalItem {
   amount?: number | null;
   details: string[];
   position: number;
+  included: boolean;
+  source_key?: string | null;
+  metadata?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }
@@ -2719,6 +2723,8 @@ export interface GeneralTransmittalItem {
 export interface GeneralTransmittal {
   id: number;
   company_id: number;
+  pay_period_id?: number | null;
+  source_kind: GeneralTransmittalSourceKind;
   title: string;
   transmittal_date: string;
   preparer_name?: string | null;
@@ -2732,9 +2738,31 @@ export interface GeneralTransmittal {
   updated_by_name?: string | null;
   item_count: number;
   total_amount: number;
+  artifact_count: number;
+  pay_period?: {
+    id: number;
+    start_date: string;
+    end_date: string;
+    pay_date: string;
+    status: string;
+  } | null;
   items?: GeneralTransmittalItem[];
+  artifacts?: GeneralTransmittalArtifact[];
   created_at: string;
   updated_at: string;
+}
+
+export interface GeneralTransmittalArtifact {
+  id: number;
+  version_number: number;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  template_version: string;
+  created_by_id?: number | null;
+  created_by_name?: string | null;
+  created_at: string;
 }
 
 export interface GeneralTransmittalPayload {
@@ -2767,6 +2795,12 @@ export const generalTransmittalsApi = {
     api.postBlob(`/admin/general_transmittals/${id}/preview_pdf`, {}),
   generatePdf: (id: number) =>
     api.postBlob(`/admin/general_transmittals/${id}/generate_pdf`, {}),
+  fromPayPeriod: (payPeriodId: number) =>
+    api.post<{ general_transmittal: GeneralTransmittal }>('/admin/general_transmittals/from_pay_period', { pay_period_id: payPeriodId }),
+  refreshFromPayPeriod: (id: number) =>
+    api.post<{ general_transmittal: GeneralTransmittal }>(`/admin/general_transmittals/${id}/refresh_from_pay_period`, {}),
+  artifactPdf: (id: number, artifactId: number, download = false) =>
+    api.getBlobWithParams(`/admin/general_transmittals/${id}/artifacts/${artifactId}`, download ? { download: 'true' } : undefined),
 };
 
 // ============================================================

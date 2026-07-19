@@ -4,12 +4,12 @@ module Api
   module V1
     module Admin
       class GeneralTransmittalsController < BaseController
-        before_action :set_transmittal, only: [ :show, :update, :destroy, :preview_pdf, :generate_pdf ]
+        before_action :set_transmittal, only: [ :show, :update, :destroy, :preview_pdf, :generate_pdf, :refresh_from_pay_period, :artifact_pdf ]
 
         def index
           transmittals = GeneralTransmittal
             .where(company_id: current_company_id)
-            .includes(:items, :created_by, :updated_by)
+            .includes(:items, :artifacts, :pay_period, :created_by, :updated_by)
             .recent
 
           render json: {
@@ -21,14 +21,44 @@ module Api
           render json: { general_transmittal: transmittal_payload(@transmittal, detailed: true) }
         end
 
+        def from_pay_period
+          pay_period = PayPeriod.find_by(id: params[:pay_period_id], company_id: current_company_id)
+          unless pay_period
+            render json: { error: "Pay period not found" }, status: :not_found
+            return
+          end
+
+          transmittal = UnifiedTransmittalBootstrapService.new(pay_period: pay_period, actor: current_user).call
+          render json: { general_transmittal: transmittal_payload(load_detailed(transmittal.id), detailed: true) }
+        rescue ArgumentError => error
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
+        def refresh_from_pay_period
+          unless @transmittal.pay_period_source?
+            render json: { error: "Only pay-period transmittals can be refreshed" }, status: :unprocessable_entity
+            return
+          end
+          unless @transmittal.pay_period
+            render json: { error: "The source pay period is no longer available" }, status: :unprocessable_entity
+            return
+          end
+
+          transmittal = UnifiedTransmittalBootstrapService.new(pay_period: @transmittal.pay_period, actor: current_user).call
+          render json: { general_transmittal: transmittal_payload(load_detailed(transmittal.id), detailed: true) }
+        end
+
         def create
           transmittal = GeneralTransmittal.new(transmittal_attributes)
           transmittal.company_id = current_company_id
           transmittal.created_by = current_user
           transmittal.updated_by = current_user
-          apply_items!(transmittal)
+          saved = GeneralTransmittal.transaction do
+            apply_items!(transmittal)
+            transmittal.save
+          end
 
-          if transmittal.save
+          if saved
             render json: { general_transmittal: transmittal_payload(transmittal.reload, detailed: true) }, status: :created
           else
             render json: { errors: transmittal.errors.full_messages }, status: :unprocessable_entity
@@ -36,7 +66,7 @@ module Api
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
-          render json: { errors: ["Source item has already been added to this transmittal"] }, status: :unprocessable_entity
+          render json: { errors: [ "Source item has already been added to this transmittal" ] }, status: :unprocessable_entity
         end
 
         def update
@@ -47,13 +77,17 @@ module Api
             return
           end
 
-          @transmittal.assign_attributes(transmittal_attributes)
-          @transmittal.updated_by = current_user
-          @transmittal.status = "draft" if @transmittal.generated? && params[:mark_draft] == "true"
-          @transmittal.generated_at = nil if @transmittal.status == "draft"
-          apply_items!(@transmittal)
+          saved = GeneralTransmittal.transaction do
+            @transmittal.lock!
+            @transmittal.assign_attributes(transmittal_attributes)
+            @transmittal.updated_by = current_user
+            @transmittal.status = "draft" if @transmittal.generated? && params[:mark_draft] == "true"
+            @transmittal.generated_at = nil if @transmittal.status == "draft"
+            apply_items!(@transmittal)
+            @transmittal.save
+          end
 
-          if @transmittal.save
+          if saved
             render json: { general_transmittal: transmittal_payload(@transmittal.reload, detailed: true) }
           else
             render json: { errors: @transmittal.errors.full_messages }, status: :unprocessable_entity
@@ -61,12 +95,16 @@ module Api
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotUnique
-          render json: { errors: ["Source item has already been added to this transmittal"] }, status: :unprocessable_entity
+          render json: { errors: [ "Source item has already been added to this transmittal" ] }, status: :unprocessable_entity
         end
 
         def destroy
           if @transmittal.generated?
             render json: { error: "Generated transmittals cannot be deleted" }, status: :unprocessable_entity
+            return
+          end
+          if @transmittal.artifacts.exists?
+            render json: { error: "Transmittals with generated versions cannot be deleted" }, status: :unprocessable_entity
             return
           end
 
@@ -87,25 +125,43 @@ module Api
         def generate_pdf
           return unless ensure_items_for_generation!
 
-          generator = GeneralTransmittalPdfGenerator.new(@transmittal)
-          pdf_content = generator.generate
-
-          @transmittal.mark_generated!(actor: current_user)
-          send_data pdf_content,
-            filename: generator.filename,
+          result = GeneralTransmittalArtifactService.new(transmittal: @transmittal, actor: current_user).generate!
+          send_data result.pdf_bytes,
+            filename: result.artifact.filename,
             type: "application/pdf",
             disposition: "attachment"
         rescue ActiveRecord::RecordInvalid => e
-          render json: { errors: e.record.errors.full_messages.presence || [e.message] }, status: :unprocessable_entity
+          render json: { errors: e.record.errors.full_messages.presence || [ e.message ] }, status: :unprocessable_entity
         rescue Prawn::Errors::CannotFit => e
           render_pdf_generation_error(e)
+        rescue R2StorageService::UploadError => error
+          Rails.logger.error("Transmittal artifact upload failed: #{error.class}: #{error.message}")
+          render json: { error: "Unable to preserve the generated transmittal" }, status: :service_unavailable
+        rescue ActiveRecord::RecordNotUnique
+          render json: {
+            error: "Another transmittal version was generated at the same time. Refresh and try again."
+          }, status: :conflict
+        end
+
+        def artifact_pdf
+          artifact = @transmittal.artifacts.find(params[:artifact_id])
+          bytes = GeneralTransmittalArtifactService.new(transmittal: @transmittal, actor: current_user).download!(artifact)
+          send_data bytes,
+            filename: artifact.filename,
+            type: artifact.content_type,
+            disposition: params[:download] == "true" ? "attachment" : "inline"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Generated transmittal version not found" }, status: :not_found
+        rescue R2StorageService::DownloadError => error
+          Rails.logger.error("Transmittal artifact download failed: #{error.class}: #{error.message}")
+          render json: { error: "Unable to load the generated transmittal version" }, status: :service_unavailable
         end
 
         private
 
         def set_transmittal
           @transmittal = GeneralTransmittal
-            .includes(:items, :created_by, :updated_by)
+            .includes(:items, :artifacts, :pay_period, :created_by, :updated_by)
             .find_by(id: params[:id], company_id: current_company_id)
           return if @transmittal
 
@@ -137,6 +193,7 @@ module Api
               :check_number,
               :amount,
               :position,
+              :included,
               :_destroy,
               details: []
             )
@@ -149,7 +206,7 @@ module Api
         end
 
         def ensure_items_for_generation!
-          return true if @transmittal.items.any?
+          return true if @transmittal.included_items.any?
 
           render json: { errors: [ "Items must include at least one item" ] }, status: :unprocessable_entity
           false
@@ -194,6 +251,18 @@ module Api
         end
 
         def hydrate_item!(item, attrs, index)
+          if item.persisted? && item.source_key.present?
+            assign_item_attributes!(
+              item,
+              attrs,
+              index,
+              source_type: item.source_type,
+              source_id: item.source_id,
+              item_type: item.item_type
+            )
+            return
+          end
+
           if attrs[:source_type] == "NonEmployeeCheck" && attrs[:source_id].present?
             check = standalone_check!(attrs[:source_id])
             if resnapshot_item?(item, check)
@@ -246,7 +315,8 @@ module Api
             check_number: attrs[:check_number].presence,
             amount: attrs[:amount].presence,
             details: Array(attrs[:details]).map(&:to_s),
-            position: item_position(attrs, index)
+            position: item_position(attrs, index),
+            included: attrs.key?(:included) ? ActiveModel::Type::Boolean.new.cast(attrs[:included]) : item.included
           )
         end
 
@@ -258,6 +328,8 @@ module Api
           payload = {
             id: transmittal.id,
             company_id: transmittal.company_id,
+            pay_period_id: transmittal.pay_period_id,
+            source_kind: transmittal.source_kind,
             title: transmittal.title,
             transmittal_date: transmittal.transmittal_date,
             preparer_name: transmittal.preparer_name,
@@ -269,13 +341,26 @@ module Api
             created_by_name: transmittal.created_by&.name,
             updated_by_id: transmittal.updated_by_id,
             updated_by_name: transmittal.updated_by&.name,
-            item_count: transmittal.items.size,
-            total_amount: transmittal.items.sum { |item| (item.amount || 0).to_d }.to_f,
+            item_count: transmittal.included_items.size,
+            total_amount: transmittal.included_items.sum { |item| (item.amount || 0).to_d }.to_f,
+            artifact_count: transmittal.artifacts.size,
             created_at: transmittal.created_at,
             updated_at: transmittal.updated_at
           }
 
-          payload[:items] = transmittal.items.map { |item| item_payload(item) } if detailed
+          if transmittal.pay_period
+            payload[:pay_period] = {
+              id: transmittal.pay_period.id,
+              start_date: transmittal.pay_period.start_date,
+              end_date: transmittal.pay_period.end_date,
+              pay_date: transmittal.pay_period.pay_date,
+              status: transmittal.pay_period.status
+            }
+          end
+          if detailed
+            payload[:items] = transmittal.items.map { |item| item_payload(item) }
+            payload[:artifacts] = transmittal.artifacts.map { |artifact| artifact_payload(artifact) }
+          end
           payload
         end
 
@@ -291,9 +376,31 @@ module Api
             amount: item.amount&.to_f,
             details: item.details || [],
             position: item.position,
+            included: item.included,
+            source_key: item.source_key,
+            metadata: item.metadata || {},
             created_at: item.created_at,
             updated_at: item.updated_at
           }
+        end
+
+        def artifact_payload(artifact)
+          {
+            id: artifact.id,
+            version_number: artifact.version_number,
+            filename: artifact.filename,
+            content_type: artifact.content_type,
+            byte_size: artifact.byte_size,
+            sha256: artifact.sha256,
+            template_version: artifact.template_version,
+            created_by_id: artifact.created_by_id,
+            created_by_name: artifact.created_by&.name,
+            created_at: artifact.created_at
+          }
+        end
+
+        def load_detailed(id)
+          GeneralTransmittal.includes(:items, :artifacts, :pay_period, :created_by, :updated_by).find(id)
         end
       end
     end

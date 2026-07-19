@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class GeneralTransmittalItem < ApplicationRecord
-  ITEM_TYPES = %w[check payment document manual other].freeze
+  ITEM_TYPES = %w[check payment document report tax_obligation manual other].freeze
 
   belongs_to :general_transmittal, inverse_of: :items
 
@@ -12,6 +12,9 @@ class GeneralTransmittalItem < ApplicationRecord
   validates :title, presence: true
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :amount, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  validates :source_key,
+    uniqueness: { scope: :general_transmittal_id },
+    allow_nil: true
   validates :source_id,
     uniqueness: {
       scope: [ :general_transmittal_id, :source_type ],
@@ -35,6 +38,10 @@ class GeneralTransmittalItem < ApplicationRecord
 
   def linked_non_employee_check?
     source_type == "NonEmployeeCheck" && source_id.present?
+  end
+
+  def calculated_obligation?
+    item_type == "tax_obligation"
   end
 
   private_class_method def self.check_title(check)

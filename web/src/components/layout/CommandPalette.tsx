@@ -182,8 +182,8 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
 
       add({
         id: 'transmittals',
-        label: 'General Transmittals',
-        description: 'Prepare and manage transmittal documents.',
+        label: 'Transmittal Builder',
+        description: 'Build pay-period or standalone transmittals with preserved versions.',
         group: 'Tools',
         keywords: ['transmittal', 'documents'],
         icon: <ClipboardCheck className="h-4 w-4" />,

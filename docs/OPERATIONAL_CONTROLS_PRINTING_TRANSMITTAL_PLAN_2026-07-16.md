@@ -81,6 +81,8 @@ The existing `FirstHawaiianFourUpCheckGenerator` already accepts payroll items a
 
 ### PR 3 — Unified transmittal builder
 
+**Implementation status (July 19, 2026):** Implemented on `codex/unified-transmittal-builder`. A transmittal can now be started from a pay period or as a blank standalone delivery. Pay-period drafts are idempotently populated from the current payroll evidence, while operator choices remain editable and generated versions are stored as immutable, SHA-256-verified artifacts.
+
 Purpose: make the pay-period transmittal the authoritative starting point while preserving fully customizable standalone transmittals.
 
 Required behavior:
@@ -95,6 +97,25 @@ Required behavior:
 - Label payroll tax values as calculated obligations; do not represent them as paid before Phase 1B supplies settlement evidence.
 
 Phase 1B will then enrich this document with actual payment status, dates, confirmation numbers, methods, receipts, and calculated-versus-paid differences.
+
+### Unified transmittal architecture and operating rules
+
+- `UnifiedTransmittalBootstrapService` is the only pay-period population path. It adds missing source items by stable source key and never replaces operator labels, notes, order, or include/exclude choices.
+- Each pay period has at most one linked unified transmittal. Reopening or refreshing it is safe and does not duplicate checks, reports, or obligations.
+- The builder combines employee checks, non-employee checks, report references, calculated FIT/FICA obligations, and fully custom items in one ordered worksheet.
+- Only included items appear in the PDF. Excluded items remain in the editable draft so the operator can restore them later.
+- Calculated payroll obligations are visually separated and explicitly marked as calculation evidence rather than proof of payment.
+- Generating a version snapshots the document and included items, renders the shared PDF template, records its byte size and SHA-256 digest, and attributes it to the generating user.
+- Generated artifact rows are application-read-only. Editing the live transmittal creates a new draft and later generation produces the next version without rewriting prior evidence.
+- Artifact download verifies both stored size and SHA-256 before returning the PDF.
+- Legacy general-transmittal endpoints and saved records remain supported; the new source and artifact columns are additive.
+
+### Unified transmittal verification coverage
+
+- Request coverage verifies organization isolation, pay-period ownership, idempotent bootstrap, customization, generation, and immutable version history.
+- Service coverage verifies source refresh preservation, mixed source population, version sequencing, artifact integrity checks, and cleanup after storage failure.
+- PDF coverage verifies excluded-item omission and the calculated-obligation disclosure.
+- Frontend build and browser smoke coverage exercise both pay-period and standalone entry points, custom item editing, include/exclude and ordering controls, preview, version generation, and version download.
 
 ## Phase 1B after these foundations
 

@@ -27,6 +27,7 @@ class PayPeriod < ApplicationRecord
   has_many :check_print_runs, dependent: :restrict_with_error
   has_many :loan_transactions, dependent: :nullify
   has_one :transmittal, dependent: :destroy
+  has_one :general_transmittal, dependent: :restrict_with_error
   has_one :check_signoff_sheet, dependent: :destroy
   has_one :form500_filing, dependent: :destroy
   has_many :payroll_liability_postings, dependent: :restrict_with_error
