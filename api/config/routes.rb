@@ -305,9 +305,14 @@ Rails.application.routes.draw do
 
         # General Transmittals (standalone, non-pay-period delivery packets)
         resources :general_transmittals, except: [:new, :edit] do
+          collection do
+            post :from_pay_period
+          end
           member do
             post :preview_pdf
             post :generate_pdf
+            post :refresh_from_pay_period
+            get "artifacts/:artifact_id", action: :artifact_pdf, as: :artifact_pdf
           end
         end
 

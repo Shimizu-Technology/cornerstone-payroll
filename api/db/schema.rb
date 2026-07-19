@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -509,20 +509,47 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
     t.index ["updated_by_id"], name: "index_form500_filings_on_updated_by_id"
   end
 
+  create_table "general_transmittal_artifacts", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.bigint "company_id", null: false
+    t.string "content_type", default: "application/pdf", null: false
+    t.datetime "created_at", null: false
+    t.bigint "created_by_id"
+    t.string "filename", null: false
+    t.bigint "general_transmittal_id", null: false
+    t.string "sha256", null: false
+    t.jsonb "snapshot", default: {}, null: false
+    t.string "storage_key", null: false
+    t.string "template_version", null: false
+    t.datetime "updated_at", null: false
+    t.integer "version_number", null: false
+    t.index ["company_id"], name: "index_general_transmittal_artifacts_on_company_id"
+    t.index ["created_by_id"], name: "index_general_transmittal_artifacts_on_created_by_id"
+    t.index ["general_transmittal_id", "version_number"], name: "idx_transmittal_artifacts_on_transmittal_version", unique: true
+    t.index ["storage_key"], name: "index_general_transmittal_artifacts_on_storage_key", unique: true
+    t.check_constraint "byte_size > 0", name: "general_transmittal_artifacts_byte_size_positive"
+    t.check_constraint "char_length(sha256::text) = 64", name: "general_transmittal_artifacts_sha256_length"
+    t.check_constraint "version_number > 0", name: "general_transmittal_artifacts_version_positive"
+  end
+
   create_table "general_transmittal_items", force: :cascade do |t|
     t.decimal "amount", precision: 10, scale: 2
     t.string "check_number"
     t.datetime "created_at", null: false
     t.jsonb "details", default: [], null: false
     t.bigint "general_transmittal_id", null: false
+    t.boolean "included", default: true, null: false
     t.string "item_type", default: "manual", null: false
+    t.jsonb "metadata", default: {}, null: false
     t.string "payable_to"
     t.integer "position", default: 0, null: false
     t.bigint "source_id"
+    t.string "source_key"
     t.string "source_type"
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.index ["general_transmittal_id", "position"], name: "idx_general_transmittal_items_on_transmittal_position"
+    t.index ["general_transmittal_id", "source_key"], name: "idx_transmittal_items_on_transmittal_source_key", unique: true, where: "(source_key IS NOT NULL)"
     t.index ["general_transmittal_id"], name: "idx_general_transmittal_items_on_transmittal"
     t.index ["source_type", "source_id"], name: "idx_general_transmittal_items_on_source"
     t.check_constraint "amount IS NULL OR amount >= 0::numeric", name: "general_transmittal_items_amount_nonnegative"
@@ -534,8 +561,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
     t.bigint "created_by_id"
     t.datetime "generated_at"
     t.jsonb "notes", default: [], null: false
+    t.bigint "pay_period_id"
     t.string "preparer_name"
     t.string "recipient_name"
+    t.string "source_kind", default: "standalone", null: false
     t.string "status", default: "draft", null: false
     t.string "title", null: false
     t.date "transmittal_date", null: false
@@ -544,7 +573,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
     t.index ["company_id", "transmittal_date"], name: "idx_general_transmittals_on_company_date"
     t.index ["company_id"], name: "index_general_transmittals_on_company_id"
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
+    t.index ["pay_period_id"], name: "index_general_transmittals_on_pay_period_id", unique: true, where: "(pay_period_id IS NOT NULL)"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
+    t.check_constraint "source_kind::text = ANY (ARRAY['standalone'::character varying, 'pay_period'::character varying]::text[])", name: "general_transmittals_source_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
   end
 
@@ -1860,8 +1891,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_17_150000) do
   add_foreign_key "form500_filings", "pay_periods"
   add_foreign_key "form500_filings", "users", column: "created_by_id"
   add_foreign_key "form500_filings", "users", column: "updated_by_id"
+  add_foreign_key "general_transmittal_artifacts", "companies"
+  add_foreign_key "general_transmittal_artifacts", "general_transmittals"
+  add_foreign_key "general_transmittal_artifacts", "users", column: "created_by_id"
   add_foreign_key "general_transmittal_items", "general_transmittals", on_delete: :cascade
   add_foreign_key "general_transmittals", "companies"
+  add_foreign_key "general_transmittals", "pay_periods"
   add_foreign_key "general_transmittals", "users", column: "created_by_id"
   add_foreign_key "general_transmittals", "users", column: "updated_by_id"
   add_foreign_key "invoice_artifacts", "invoices"

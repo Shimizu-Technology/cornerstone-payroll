@@ -98,6 +98,45 @@ RSpec.describe "General Transmittals Admin API", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/general_transmittals/from_pay_period" do
+    it "creates one company-scoped unified draft and returns it again on repeat" do
+      pay_period = create(:pay_period, :calculated, company: company)
+
+      2.times do
+        post "/api/v1/admin/general_transmittals/from_pay_period", params: { pay_period_id: pay_period.id }
+        expect(response).to have_http_status(:ok)
+      end
+
+      body = response.parsed_body.fetch("general_transmittal")
+      expect(body).to include("source_kind" => "pay_period", "pay_period_id" => pay_period.id)
+      expect(GeneralTransmittal.where(pay_period_id: pay_period.id).count).to eq(1)
+    end
+
+    it "does not expose another company's pay period" do
+      other_period = create(:pay_period, company: create(:company))
+
+      post "/api/v1/admin/general_transmittals/from_pay_period", params: { pay_period_id: other_period.id }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe "POST /api/v1/admin/general_transmittals/:id/refresh_from_pay_period" do
+    it "returns a clean validation error when the source pay period is unavailable" do
+      pay_period = create(:pay_period, company: company)
+      transmittal = create(:general_transmittal,
+        company: company,
+        pay_period: pay_period,
+        source_kind: "pay_period")
+      allow_any_instance_of(GeneralTransmittal).to receive(:pay_period).and_return(nil)
+
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/refresh_from_pay_period"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("The source pay period is no longer available")
+    end
+  end
+
   describe "PATCH /api/v1/admin/general_transmittals/:id" do
     it "rejects item changes on generated transmittals without marking draft" do
       transmittal = create(:general_transmittal, :with_item,
@@ -261,6 +300,7 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(response.body).to start_with("%PDF")
       expect(transmittal.reload.status).to eq("generated")
       expect(transmittal.generated_at).to be_present
+      expect(transmittal.artifacts.count).to eq(1)
     end
 
     it "returns validation errors before rendering a PDF when there are no items" do
@@ -302,6 +342,18 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["errors"]).to include("Items must include at least one item")
       expect(transmittal.reload.status).to eq("draft")
+    end
+
+    it "returns a conflict when a concurrent version allocation collides" do
+      transmittal = create(:general_transmittal, :with_item, company: company)
+      allow_any_instance_of(GeneralTransmittalArtifactService)
+        .to receive(:generate!)
+        .and_raise(ActiveRecord::RecordNotUnique)
+
+      post "/api/v1/admin/general_transmittals/#{transmittal.id}/generate_pdf"
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["error"]).to include("generated at the same time")
     end
   end
 end
