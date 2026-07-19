@@ -39,6 +39,10 @@ module Api
             render json: { error: "Only pay-period transmittals can be refreshed" }, status: :unprocessable_entity
             return
           end
+          unless @transmittal.pay_period
+            render json: { error: "The source pay period is no longer available" }, status: :unprocessable_entity
+            return
+          end
 
           transmittal = UnifiedTransmittalBootstrapService.new(pay_period: @transmittal.pay_period, actor: current_user).call
           render json: { general_transmittal: transmittal_payload(load_detailed(transmittal.id), detailed: true) }
@@ -133,6 +137,10 @@ module Api
         rescue R2StorageService::UploadError => error
           Rails.logger.error("Transmittal artifact upload failed: #{error.class}: #{error.message}")
           render json: { error: "Unable to preserve the generated transmittal" }, status: :service_unavailable
+        rescue ActiveRecord::RecordNotUnique
+          render json: {
+            error: "Another transmittal version was generated at the same time. Refresh and try again."
+          }, status: :conflict
         end
 
         def artifact_pdf

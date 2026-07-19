@@ -21,7 +21,10 @@ RSpec.describe UnifiedTransmittalBootstrapService do
       withholding_tax: 42.00,
       additional_withholding: 8.00,
       social_security_tax: 74.40,
-      medicare_tax: 17.40)
+      employer_social_security_tax: 74.40,
+      medicare_tax: 26.40,
+      additional_medicare_tax: 9.00,
+      employer_medicare_tax: 17.40)
     create(:non_employee_check, :with_check_number,
       company: company,
       pay_period: pay_period,
@@ -47,6 +50,11 @@ RSpec.describe UnifiedTransmittalBootstrapService do
     expect(income_tax.amount).to eq(50.00)
     expect(income_tax.metadata).to include("calculated_only" => true)
     expect(income_tax.details.join(" ")).to include("Payment is not recorded")
+
+    employee_medicare = transmittal.items.find_by!(source_key: "tax_obligation:employee_medicare")
+    employer_medicare = transmittal.items.find_by!(source_key: "tax_obligation:employer_medicare")
+    expect(employee_medicare.amount).to eq(26.40)
+    expect(employer_medicare.amount).to eq(17.40)
   end
 
   it "is idempotent and preserves operator edits while appending new source rows" do

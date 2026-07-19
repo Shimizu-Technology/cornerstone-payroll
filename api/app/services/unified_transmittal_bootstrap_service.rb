@@ -135,9 +135,9 @@ class UnifiedTransmittalBootstrapService
     totals = {
       income_tax: items.sum { |item| item.total_income_tax_withheld.to_d },
       employee_social_security: items.sum { |item| item.social_security_tax.to_d },
-      employer_social_security: items.sum { |item| item.social_security_tax.to_d },
+      employer_social_security: items.sum { |item| item.employer_social_security_tax.to_d },
       employee_medicare: items.sum { |item| item.medicare_tax.to_d },
-      employer_medicare: items.sum { |item| item.medicare_tax.to_d }
+      employer_medicare: items.sum { |item| item.employer_medicare_tax.to_d }
     }
 
     labels = {
