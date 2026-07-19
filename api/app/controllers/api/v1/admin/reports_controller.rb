@@ -1199,6 +1199,8 @@ module Api
           }
 
           [ report_data, nil ]
+        rescue ArgumentError => e
+          [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
         end
 
         def build_quarterly_compliance_packet_data

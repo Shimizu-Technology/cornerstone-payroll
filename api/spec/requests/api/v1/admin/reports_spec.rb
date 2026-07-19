@@ -1490,6 +1490,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/ytd_summary", params: { start_date: "2026-06-01", end_date: "2026-05-01" }
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "returns 422 for malformed custom ranges across every tax summary format" do
+      %w[tax_summary tax_summary_csv tax_summary_pdf tax_summary_xlsx].each do |action|
+        get "/api/v1/admin/reports/#{action}", params: { start_date: "2026-05-01" }
+
+        expect(response).to have_http_status(:unprocessable_entity), "expected #{action} to reject an incomplete range"
+        expect(response.parsed_body.fetch("error")).to match(/start_date and end_date/)
+      end
+    end
   end
 
   # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
