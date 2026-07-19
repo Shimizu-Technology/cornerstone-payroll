@@ -1179,6 +1179,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   }, []);
 
   const handlePreview = async (reportKey: ReportKey, label: string, transmittalOpts?: TransmittalOptions) => {
+    if (reportKey === 'transmittalLog' && !transmittalOpts) {
+      window.location.assign(`/tools/transmittals?pay_period_id=${payPeriodId}`);
+      return;
+    }
     if (reportKey === 'payrollRegister') {
       const key = loadingKey(reportKey, 'preview');
       setLoading(prev => ({ ...prev, [key]: true }));
@@ -1224,6 +1228,10 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
   };
 
   const handleDownload = async (reportKey: ReportKey, transmittalOpts?: TransmittalOptions) => {
+    if (reportKey === 'transmittalLog' && !transmittalOpts) {
+      window.location.assign(`/tools/transmittals?pay_period_id=${payPeriodId}`);
+      return;
+    }
     if (needsTransmittalEditor(reportKey) && !transmittalOpts) {
       setTransmittalEditor({ open: true, key: reportKey, label: REPORTS.find(r => r.key === reportKey)?.label || '', mode: 'download' });
       return;

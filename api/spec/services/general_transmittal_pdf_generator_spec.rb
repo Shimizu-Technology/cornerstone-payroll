@@ -23,4 +23,22 @@ RSpec.describe GeneralTransmittalPdfGenerator do
     expect(text).to include("Guam DRT")
     expect(text).to include("5001")
   end
+
+  it "excludes unchecked rows and labels calculated obligations as calculations, not payments" do
+    transmittal.items.first.update!(included: false)
+    transmittal.items.create!(
+      item_type: "tax_obligation",
+      title: "Guam income tax withholding",
+      amount: 75.00,
+      position: 1,
+      included: true
+    )
+
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+    expect(text).not_to include("Quarterly return check")
+    expect(text).to include("Guam income tax withholding")
+    expect(text).to include("Calculated obligation")
+    expect(text).to include("not payment evidence")
+  end
 end

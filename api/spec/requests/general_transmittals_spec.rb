@@ -98,6 +98,29 @@ RSpec.describe "General Transmittals Admin API", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/general_transmittals/from_pay_period" do
+    it "creates one company-scoped unified draft and returns it again on repeat" do
+      pay_period = create(:pay_period, :calculated, company: company)
+
+      2.times do
+        post "/api/v1/admin/general_transmittals/from_pay_period", params: { pay_period_id: pay_period.id }
+        expect(response).to have_http_status(:ok)
+      end
+
+      body = response.parsed_body.fetch("general_transmittal")
+      expect(body).to include("source_kind" => "pay_period", "pay_period_id" => pay_period.id)
+      expect(GeneralTransmittal.where(pay_period_id: pay_period.id).count).to eq(1)
+    end
+
+    it "does not expose another company's pay period" do
+      other_period = create(:pay_period, company: create(:company))
+
+      post "/api/v1/admin/general_transmittals/from_pay_period", params: { pay_period_id: other_period.id }
+
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
   describe "PATCH /api/v1/admin/general_transmittals/:id" do
     it "rejects item changes on generated transmittals without marking draft" do
       transmittal = create(:general_transmittal, :with_item,
@@ -261,6 +284,7 @@ RSpec.describe "General Transmittals Admin API", type: :request do
       expect(response.body).to start_with("%PDF")
       expect(transmittal.reload.status).to eq("generated")
       expect(transmittal.generated_at).to be_present
+      expect(transmittal.artifacts.count).to eq(1)
     end
 
     it "returns validation errors before rendering a PDF when there are no items" do
