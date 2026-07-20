@@ -26,7 +26,7 @@ class PayrollLiabilityPayment < ApplicationRecord
   validates :payment_method, inclusion: { in: PAYMENT_METHODS }
   validates :category, inclusion: { in: PayrollLiabilityEntry::CATEGORIES }
   validates :authority, :payment_date, :recorded_at, :idempotency_key, presence: true
-  validates :idempotency_key, uniqueness: true
+  validates :idempotency_key, uniqueness: { scope: :company_id }
   validates :amount, numericality: { greater_than: 0 }, unless: :reversal?
   validates :amount, numericality: { less_than: 0 }, if: :reversal?
   validates :source_payment, presence: true, if: :reversal?

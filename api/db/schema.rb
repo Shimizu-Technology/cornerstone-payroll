@@ -1425,9 +1425,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_20_120000) do
     t.bigint "recorded_by_id"
     t.bigint "source_payment_id"
     t.datetime "updated_at", null: false
+    t.index ["company_id", "idempotency_key"], name: "idx_liability_payments_company_idempotency", unique: true
     t.index ["company_id", "payment_date"], name: "idx_liability_payments_company_date"
     t.index ["company_id"], name: "index_payroll_liability_payments_on_company_id"
-    t.index ["idempotency_key"], name: "idx_liability_payments_idempotency", unique: true
     t.index ["pay_period_id", "authority", "category"], name: "idx_liability_payments_obligation"
     t.index ["pay_period_id"], name: "index_payroll_liability_payments_on_pay_period_id"
     t.index ["recorded_by_id"], name: "index_payroll_liability_payments_on_recorded_by_id"

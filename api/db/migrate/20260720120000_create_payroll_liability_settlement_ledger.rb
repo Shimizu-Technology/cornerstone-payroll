@@ -39,7 +39,10 @@ class CreatePayrollLiabilitySettlementLedger < ActiveRecord::Migration[8.0]
       t.jsonb :metadata, null: false, default: {}
       t.timestamps
     end
-    add_index :payroll_liability_payments, :idempotency_key, unique: true, name: "idx_liability_payments_idempotency"
+    add_index :payroll_liability_payments,
+      [ :company_id, :idempotency_key ],
+      unique: true,
+      name: "idx_liability_payments_company_idempotency"
     add_index :payroll_liability_payments, :source_payment_id,
       unique: true,
       where: "source_payment_id IS NOT NULL",

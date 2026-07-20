@@ -92,6 +92,47 @@ RSpec.describe PayrollLiabilitySettlementService do
     }.to raise_error(described_class::InvalidStateError, /another payroll/)
   end
 
+  it "allows separate companies to use the same idempotency key without revealing each other's payments" do
+    other_company = create(:company)
+    other_actor = create(:user, company: other_company, organization: other_company.organization)
+    other_department = create(:department, company: other_company)
+    other_employee = create(:employee, company: other_company, department: other_department)
+    other_period = create(:pay_period, :committed, company: other_company)
+    create(:payroll_item,
+      pay_period: other_period,
+      employee: other_employee,
+      company: other_company,
+      withholding_tax: 50)
+    PayrollLiabilityPostingService.post!(pay_period: other_period, actor: other_actor)
+
+    shared_key = "tenant-scoped-payment-key"
+    other_payment = described_class.record!(
+      pay_period: other_period,
+      actor: other_actor,
+      authority: PayrollLiabilityPostingService::GUAM_DRT,
+      category: "guam_income_tax_withheld",
+      amount: 25,
+      payment_date: "2026-07-20",
+      payment_method: "ach",
+      idempotency_key: shared_key
+    )
+    payment = described_class.record!(
+      pay_period:,
+      actor:,
+      authority: PayrollLiabilityPostingService::GUAM_DRT,
+      category: "guam_income_tax_withheld",
+      amount: 25,
+      payment_date: "2026-07-20",
+      payment_method: "ach",
+      idempotency_key: shared_key
+    )
+
+    expect(payment.company_id).to eq(company.id)
+    expect(other_payment.company_id).to eq(other_company.id)
+    expect(PayrollLiabilityPayment.where(idempotency_key: shared_key).pluck(:company_id))
+      .to contain_exactly(company.id, other_company.id)
+  end
+
   it "rejects overpayment after netting signed credits in the obligation group" do
     posting = pay_period.payroll_liability_postings.find_by!(posting_type: "commit")
     posting.entries.create!(

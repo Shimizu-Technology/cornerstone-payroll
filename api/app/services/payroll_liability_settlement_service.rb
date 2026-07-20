@@ -168,9 +168,9 @@ class PayrollLiabilitySettlementService
   end
 
   def payment_for_idempotency_key(key, period)
-    existing = PayrollLiabilityPayment.find_by(idempotency_key: key)
+    existing = PayrollLiabilityPayment.find_by(company_id: period.company_id, idempotency_key: key)
     return unless existing
-    return existing if existing.company_id == period.company_id && existing.pay_period_id == period.id
+    return existing if existing.pay_period_id == period.id
 
     raise InvalidStateError, "Idempotency key has already been used for another payroll"
   end

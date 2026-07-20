@@ -204,8 +204,11 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error, onUpdate
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = filename;
+      anchor.style.display = 'none';
+      document.body.appendChild(anchor);
       anchor.click();
-      URL.revokeObjectURL(url);
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Unable to download the payment evidence');
     } finally {
