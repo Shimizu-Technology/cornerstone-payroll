@@ -429,6 +429,54 @@ export interface PayrollLiabilityUnclassifiedComponent {
   reason: string;
 }
 
+export type PayrollLiabilityObligationStatus =
+  | 'unpaid'
+  | 'due'
+  | 'overdue'
+  | 'partially_paid'
+  | 'paid'
+  | 'overpaid';
+
+export interface PayrollLiabilityObligation {
+  authority: string;
+  category: string;
+  calculated_amount: number;
+  settled_amount: number;
+  outstanding_amount: number;
+  due_date: string | null;
+  status: PayrollLiabilityObligationStatus;
+  entry_count: number;
+}
+
+export interface PayrollLiabilityEvidence {
+  id: number;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+  sha256: string;
+  created_at: string;
+  created_by_name?: string | null;
+}
+
+export interface PayrollLiabilityPayment {
+  id: number;
+  payment_type: 'settlement' | 'reversal';
+  source_payment_id?: number | null;
+  reversed: boolean;
+  authority: string;
+  category: string;
+  amount: number;
+  payment_date: string;
+  payment_method: string;
+  confirmation_number?: string | null;
+  notes?: string | null;
+  reason?: string | null;
+  recorded_at: string;
+  recorded_by_id?: number | null;
+  recorded_by_name?: string | null;
+  evidence: PayrollLiabilityEvidence[];
+}
+
 export interface PayrollLiabilityReconciliation {
   status: PayrollLiabilityReconciliationStatus;
   pay_period_id: number;
@@ -437,9 +485,15 @@ export interface PayrollLiabilityReconciliation {
   net_liability: number;
   totals_by_category: Record<string, number>;
   totals_by_authority: Record<string, number>;
+  active_liability: number;
+  settled_amount: number;
+  outstanding_amount: number;
+  overdue_amount: number;
+  obligations: PayrollLiabilityObligation[];
+  payments: PayrollLiabilityPayment[];
   postings: PayrollLiabilityPosting[];
   unclassified_components: PayrollLiabilityUnclassifiedComponent[];
-  payment_tracking_status: 'not_in_this_phase';
+  payment_tracking_status: 'not_applicable' | 'unpaid' | 'partially_paid' | 'paid' | 'overdue' | 'overpaid';
   historical_backfill_required: boolean;
 }
 

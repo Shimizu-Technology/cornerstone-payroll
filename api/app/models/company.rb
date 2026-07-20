@@ -33,6 +33,10 @@ class Company < ApplicationRecord
   has_many :pay_component_tax_rules, dependent: :restrict_with_error
   has_many :payroll_liability_postings, dependent: :restrict_with_error
   has_many :payroll_liability_entries, dependent: :restrict_with_error
+  has_many :payroll_liability_due_dates, dependent: :restrict_with_error
+  has_many :payroll_liability_payments, dependent: :restrict_with_error
+  has_many :payroll_liability_allocations, dependent: :restrict_with_error
+  has_many :payroll_liability_evidence, dependent: :restrict_with_error
   has_many :quarterly_compliance_packets, dependent: :destroy
   has_one :payroll_reminder_config, dependent: :destroy
   has_many :payroll_reminder_logs, dependent: :destroy

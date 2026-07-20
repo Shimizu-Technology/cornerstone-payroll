@@ -11,6 +11,14 @@ class PayrollLiabilityReconciliationService
       .chronological
       .to_a
     entries = postings.flat_map(&:entries)
+    payments = pay_period.payroll_liability_payments
+      .includes(:recorded_by, :source_payment, :reversal_payment, :allocations, evidence: :created_by)
+      .chronological
+      .to_a
+    obligations = obligation_rows(postings, payments)
+    settled_amount = payments.sum { |payment| payment.amount.to_d }.round(2)
+    active_liability = obligations.sum { |obligation| obligation.fetch(:calculated_amount).to_d }.round(2)
+    outstanding_amount = (active_liability - settled_amount).round(2)
 
     {
       status: reconciliation_status(postings),
@@ -20,9 +28,15 @@ class PayrollLiabilityReconciliationService
       net_liability: entries.sum { |entry| entry.amount.to_d }.round(2).to_f,
       totals_by_category: grouped_totals(entries, &:category),
       totals_by_authority: grouped_totals(entries, &:authority),
+      active_liability: active_liability.to_f,
+      settled_amount: settled_amount.to_f,
+      outstanding_amount: outstanding_amount.to_f,
+      overdue_amount: obligations.select { |row| row[:status] == "overdue" }.sum { |row| row[:outstanding_amount].to_d }.round(2).to_f,
+      obligations:,
+      payments: payments.reverse.map { |payment| payment_json(payment) },
       postings: postings.map { |posting| posting_json(posting) },
       unclassified_components: unclassified_components,
-      payment_tracking_status: "not_in_this_phase",
+      payment_tracking_status: payment_tracking_status(obligations, payments),
       historical_backfill_required: pay_period.committed? && postings.empty?
     }
   end
@@ -49,6 +63,93 @@ class PayrollLiabilityReconciliationService
       .transform_values { |group| group.sum { |entry| entry.amount.to_d }.round(2).to_f }
       .reject { |_key, amount| amount.zero? }
       .sort.to_h
+  end
+
+  def obligation_rows(postings, payments)
+    active_postings = postings.reject(&:reversal?).reject(&:reversed?)
+    groups = active_postings.flat_map(&:entries).group_by { |entry| [ entry.authority, entry.category ] }
+    allocated_by_group = payments.group_by { |payment| [ payment.authority, payment.category ] }
+      .transform_values { |group| group.sum { |payment| payment.amount.to_d }.round(2) }
+    group_keys = (groups.keys + allocated_by_group.keys).uniq
+
+    group_keys.map do |authority, category|
+      group = groups.fetch([ authority, category ], [])
+      calculated = group.sum { |entry| entry.amount.to_d }.round(2)
+      settled = allocated_by_group.fetch([ authority, category ], 0.to_d)
+      outstanding = (calculated - settled).round(2)
+      due_date = due_date_for(authority, category)
+      {
+        authority:,
+        category:,
+        calculated_amount: calculated.to_f,
+        settled_amount: settled.to_f,
+        outstanding_amount: outstanding.to_f,
+        due_date: due_date,
+        status: obligation_status(calculated:, settled:, outstanding:, due_date:),
+        entry_count: group.size
+      }
+    end.sort_by { |row| [ row[:due_date] || Date.new(9999, 12, 31), row[:authority], row[:category] ] }
+  end
+
+  def due_date_for(authority, category)
+    due_dates.fetch([ authority, category ], nil)
+  end
+
+  def due_dates
+    @due_dates ||= pay_period.payroll_liability_due_dates
+      .pluck(:authority, :category, :due_date)
+      .to_h { |authority, category, due_date| [ [ authority, category ], due_date ] }
+  end
+
+  def obligation_status(calculated:, settled:, outstanding:, due_date:)
+    return "overpaid" if outstanding.negative?
+    return "paid" if calculated.positive? && outstanding.zero?
+    return "overdue" if outstanding.positive? && due_date && due_date < Date.current
+    return "due" if outstanding.positive? && due_date && due_date == Date.current
+    return "partially_paid" if settled.positive?
+
+    "unpaid"
+  end
+
+  def payment_tracking_status(obligations, payments)
+    return "not_applicable" if obligations.empty?
+    return "unpaid" if payments.empty?
+    return "overpaid" if obligations.any? { |row| row[:status] == "overpaid" }
+    return "paid" if obligations.all? { |row| row[:status] == "paid" }
+    return "overdue" if obligations.any? { |row| row[:status] == "overdue" }
+
+    "partially_paid"
+  end
+
+  def payment_json(payment)
+    {
+      id: payment.id,
+      payment_type: payment.payment_type,
+      source_payment_id: payment.source_payment_id,
+      reversed: payment.reversed?,
+      authority: payment.authority,
+      category: payment.category,
+      amount: payment.amount.to_f,
+      payment_date: payment.payment_date,
+      payment_method: payment.payment_method,
+      confirmation_number: payment.confirmation_number,
+      notes: payment.notes,
+      reason: payment.reason,
+      recorded_at: payment.recorded_at,
+      recorded_by_id: payment.recorded_by_id,
+      recorded_by_name: payment.recorded_by&.name,
+      evidence: payment.evidence.sort_by(&:created_at).map do |record|
+        {
+          id: record.id,
+          filename: record.filename,
+          content_type: record.content_type,
+          byte_size: record.byte_size,
+          sha256: record.sha256,
+          created_at: record.created_at,
+          created_by_name: record.created_by&.name
+        }
+      end
+    }
   end
 
   def posting_json(posting)

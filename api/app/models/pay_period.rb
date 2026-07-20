@@ -31,6 +31,8 @@ class PayPeriod < ApplicationRecord
   has_one :check_signoff_sheet, dependent: :destroy
   has_one :form500_filing, dependent: :destroy
   has_many :payroll_liability_postings, dependent: :restrict_with_error
+  has_many :payroll_liability_payments, dependent: :restrict_with_error
+  has_many :payroll_liability_due_dates, dependent: :restrict_with_error
 
   # Corrective paycheck linkage — original ←──── supplemental
   # A regular period may have many supplementals (one per correction).

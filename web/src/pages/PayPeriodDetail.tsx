@@ -2629,6 +2629,7 @@ export function PayPeriodDetail() {
             reconciliation={liabilityReconciliation}
             loading={liabilityLoading}
             error={liabilityError}
+            onUpdated={setLiabilityReconciliation}
           />
         )}
 
