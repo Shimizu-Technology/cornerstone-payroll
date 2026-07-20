@@ -69,6 +69,8 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error, onUpdate
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [dueDrafts, setDueDrafts] = useState<Record<string, string>>({});
+  const [reverseTarget, setReverseTarget] = useState<PayrollLiabilityPayment | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
 
   const paymentGroups = useMemo(() => {
     if (!reconciliation) return [];
@@ -155,17 +157,24 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error, onUpdate
     }
   };
 
-  const reversePayment = async (payment: PayrollLiabilityPayment) => {
-    const reason = window.prompt('Why is this payment being reversed?');
-    if (!reason?.trim()) return;
+  const openReversal = (payment: PayrollLiabilityPayment) => {
+    setActionError(null);
+    setReverseTarget(payment);
+    setReverseReason('');
+  };
+
+  const reversePayment = async () => {
+    if (!reverseTarget || !reverseReason.trim()) return;
     setBusy(true);
     setActionError(null);
     try {
-      const response = await payPeriodsApi.reverseLiabilityPayment(reconciliation.pay_period_id, payment.id, {
-        reason: reason.trim(),
-        idempotency_key: uniqueKey(`liability-payment-${payment.id}-reversal`),
+      const response = await payPeriodsApi.reverseLiabilityPayment(reconciliation.pay_period_id, reverseTarget.id, {
+        reason: reverseReason.trim(),
+        idempotency_key: uniqueKey(`liability-payment-${reverseTarget.id}-reversal`),
       });
       applyUpdate(response);
+      setReverseTarget(null);
+      setReverseReason('');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Unable to reverse the payment');
     } finally {
@@ -258,7 +267,7 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error, onUpdate
                   <div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-gray-950">{formatCurrency(payment.amount)} to {payment.authority}</p>{payment.reversed && <Badge variant="default">Reversed</Badge>}</div><p className="mt-1 text-xs text-gray-500">{formatDate(payment.payment_date)} · {payment.payment_method.toUpperCase()}{payment.confirmation_number ? ` · Confirmation ${payment.confirmation_number}` : ''} · recorded {formatGuamDateTime(payment.recorded_at)}{payment.recorded_by_name ? ` by ${payment.recorded_by_name}` : ''}</p>{payment.notes && <p className="mt-1 text-sm text-gray-700">{payment.notes}</p>}</div>
                   <div className="flex flex-wrap gap-2">
                     {!payment.reversed && <label className="inline-flex cursor-pointer items-center rounded-full border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:border-primary-300 hover:bg-primary-50"><Paperclip className="mr-1.5 h-3.5 w-3.5" />Attach evidence<input type="file" className="sr-only" accept="application/pdf,image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { void uploadEvidence(payment, event.target.files?.[0]); event.currentTarget.value = ''; }} /></label>}
-                    {!payment.reversed && <Button size="sm" variant="ghost" disabled={busy} onClick={() => reversePayment(payment)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />Reverse</Button>}
+                    {!payment.reversed && <Button size="sm" variant="ghost" disabled={busy} onClick={() => openReversal(payment)}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />Reverse</Button>}
                   </div>
                 </div>
                 {payment.evidence.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{payment.evidence.map((record) => <button key={record.id} type="button" className="inline-flex items-center rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-700 transition hover:bg-gray-100" onClick={() => downloadEvidence(payment.id, record.id, record.filename)} disabled={busy}><Download className="mr-1.5 h-3.5 w-3.5" />{record.filename} · {fileSize(record.byte_size)}</button>)}</div>}
@@ -285,6 +294,27 @@ export function PayrollLiabilityPanel({ reconciliation, loading, error, onUpdate
             {actionError && <p className="text-sm text-red-700" role="alert">{actionError}</p>}
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setSelectedObligation(null)} disabled={busy}>Cancel</Button><Button onClick={recordPayment} disabled={busy || !paymentForm.amount || !paymentForm.payment_date}>{busy ? 'Recording…' : 'Record payment'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reverseTarget !== null} onOpenChange={(open) => { if (!open && !busy) { setReverseTarget(null); setReverseReason(''); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reverse liability payment?</DialogTitle>
+            <DialogDescription>
+              {reverseTarget ? `${formatCurrency(reverseTarget.amount)} to ${reverseTarget.authority}` : ''} will be offset by an immutable reversal entry. The original payment and its evidence will remain in the audit history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-5">
+            <label htmlFor="liability-payment-reversal-reason" className="mb-1.5 block text-sm font-medium text-neutral-700">Reason for reversal</label>
+            <Textarea id="liability-payment-reversal-reason" value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} placeholder="For example: bank rejected the transfer" autoFocus />
+            <p className="mt-2 text-xs text-gray-500">Required so the settlement history explains why the payment was reversed.</p>
+            {actionError && <p className="mt-3 text-sm text-red-700" role="alert">{actionError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setReverseTarget(null); setReverseReason(''); }} disabled={busy}>Cancel</Button>
+            <Button variant="destructive" onClick={reversePayment} disabled={busy || !reverseReason.trim()}>{busy ? 'Reversing…' : 'Reverse payment'}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>

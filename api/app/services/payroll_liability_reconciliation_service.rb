@@ -36,7 +36,7 @@ class PayrollLiabilityReconciliationService
       payments: payments.reverse.map { |payment| payment_json(payment) },
       postings: postings.map { |posting| posting_json(posting) },
       unclassified_components: unclassified_components,
-      payment_tracking_status: payment_tracking_status(obligations, payments),
+      payment_tracking_status: payment_tracking_status(obligations),
       historical_backfill_required: pay_period.committed? && postings.empty?
     }
   end
@@ -111,12 +111,12 @@ class PayrollLiabilityReconciliationService
     "unpaid"
   end
 
-  def payment_tracking_status(obligations, payments)
+  def payment_tracking_status(obligations)
     return "not_applicable" if obligations.empty?
-    return "unpaid" if payments.empty?
     return "overpaid" if obligations.any? { |row| row[:status] == "overpaid" }
     return "paid" if obligations.all? { |row| row[:status] == "paid" }
     return "overdue" if obligations.any? { |row| row[:status] == "overdue" }
+    return "unpaid" if obligations.none? { |row| %w[paid partially_paid overpaid].include?(row[:status]) }
 
     "partially_paid"
   end

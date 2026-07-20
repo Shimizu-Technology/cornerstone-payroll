@@ -81,6 +81,7 @@ RSpec.describe "Api::V1::Admin::PayrollLiabilities", type: :request do
 
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.dig("payroll_liability_reconciliation", "settled_amount")).to eq(0.0)
+    expect(response.parsed_body.dig("payroll_liability_reconciliation", "payment_tracking_status")).to eq("unpaid")
     expect(payment.reload.reversal_payment.reason).to eq("Bank rejected the transfer")
   end
 
