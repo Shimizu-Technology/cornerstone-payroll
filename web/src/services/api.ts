@@ -1482,6 +1482,11 @@ export interface PayrollRegisterReport {
       total_reported_tips?: number;
       total_tips_paid_out?: number;
       total_custom_earnings?: number;
+      total_payroll_field_taxable_additions?: number;
+      total_payroll_field_non_taxable_additions?: number;
+      total_payroll_field_pre_tax_deductions?: number;
+      total_payroll_field_post_tax_deductions?: number;
+      total_payroll_field_employer_contributions?: number;
       total_withholding: number;
       total_additional_withholding?: number;
       total_social_security: number;
@@ -1494,6 +1499,7 @@ export interface PayrollRegisterReport {
       contractor_total_gross?: number;
       contractor_total_net?: number;
     };
+    payroll_fields?: PayrollFieldsDisclosure;
     employees: Array<PayrollItem & { total_retirement_payment?: number }>;
     contractors: Array<PayrollItem & { total_retirement_payment?: number }>;
     simple_register?: {
@@ -1518,15 +1524,54 @@ export interface PayrollRegisterReport {
   };
 }
 
+export interface PayrollReportPeriod {
+  basis: 'pay_date';
+  start_date: string;
+  end_date: string;
+  year: number | null;
+  custom: boolean;
+  label: string;
+  quarter?: number | null;
+}
+
+export interface PayrollFieldDisclosureEntry {
+  payroll_item_id?: number;
+  pay_period_id?: number;
+  pay_date?: string;
+  period_description?: string;
+  employee_id?: number;
+  employee_name?: string;
+  employment_type?: string;
+  label: string;
+  kind: string;
+  tax_treatment: string;
+  category: string;
+  reporting_group: string;
+  source?: string;
+  employee_paid: boolean;
+  employer_paid: boolean;
+  amount: number;
+  employee_count?: number;
+  pay_period_count?: number;
+}
+
+export interface PayrollFieldsDisclosure {
+  totals: PayrollFieldDisclosureEntry[];
+  entries?: PayrollFieldDisclosureEntry[];
+  treatment_totals: Record<string, number>;
+}
+
+export interface PayrollReportPeriodParams {
+  [key: string]: string | number | boolean | undefined;
+  year?: number;
+  start_date?: string;
+  end_date?: string;
+}
+
 export interface TaxSummaryReport {
   report: {
     type: string;
-    period: {
-      year: number;
-      quarter?: number;
-      start_date: string | null;
-      end_date: string | null;
-    };
+    period: PayrollReportPeriod;
     totals: {
       gross_wages: number;
       withholding_tax: number;
@@ -1538,13 +1583,15 @@ export interface TaxSummaryReport {
     };
     pay_periods_included: number;
     employee_count: number;
+    payroll_fields: PayrollFieldsDisclosure;
   };
 }
 
 export interface YtdSummaryReport {
   report: {
     type: string;
-    year: number;
+    year: number | null;
+    period: PayrollReportPeriod;
     employees: {
       employee_id: number;
       first_name: string;
@@ -1552,8 +1599,14 @@ export interface YtdSummaryReport {
       name: string;
       employment_type: string;
       status: string;
+      payroll_count?: number;
       gross_pay: number;
       custom_earnings_total?: number;
+      payroll_field_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      payroll_field_pre_tax_deductions_total?: number;
+      payroll_field_post_tax_deductions_total?: number;
+      payroll_field_employer_contributions_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;
@@ -1566,6 +1619,11 @@ export interface YtdSummaryReport {
       year: number;
       gross_pay: number;
       custom_earnings_total?: number;
+      payroll_field_taxable_additions_total?: number;
+      payroll_field_non_taxable_additions_total?: number;
+      payroll_field_pre_tax_deductions_total?: number;
+      payroll_field_post_tax_deductions_total?: number;
+      payroll_field_employer_contributions_total?: number;
       withholding_tax: number;
       social_security_tax: number;
       medicare_tax: number;
@@ -1575,12 +1633,15 @@ export interface YtdSummaryReport {
       net_pay: number;
       payroll_count: number;
     };
+    payroll_fields: PayrollFieldsDisclosure;
   };
 }
 
 export interface YtdSummaryParams {
   [key: string]: string | number | boolean | undefined;
   year?: number;
+  start_date?: string;
+  end_date?: string;
   search?: string;
   employment_type?: string;
   status?: string;
@@ -1855,7 +1916,7 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   payrollRegisterXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/admin/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
-  employeePayHistory: (employeeId: number, limit?: number) =>
+  employeePayHistory: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
     api.get<{ report: {
       employee: { id: number; name: string; employment_type: string; pay_rate: number };
       history: {
@@ -1871,19 +1932,22 @@ export const reportsApi = {
         net_pay: number;
         check_number: string | null;
       }[];
+      period: PayrollReportPeriod;
+      summary: Record<string, number>;
       ytd: Record<string, number>;
-    } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, limit }),
-  employeePayHistoryXlsx: (employeeId: number, limit?: number) =>
-    api.getBlobWithParams('/admin/reports/employee_pay_history_xlsx', { employee_id: employeeId, limit }),
-  taxSummary: (year?: number, quarter?: number) =>
-    api.get<TaxSummaryReport>('/admin/reports/tax_summary', { year, quarter }),
+      payroll_fields: PayrollFieldsDisclosure;
+    } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
+  employeePayHistoryXlsx: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/admin/reports/employee_pay_history_xlsx', { employee_id: employeeId, ...period }),
+  taxSummary: (params: PayrollReportPeriodParams & { quarter?: number } = {}) =>
+    api.get<TaxSummaryReport>('/admin/reports/tax_summary', params),
   // CPR-70: Tax Summary exports
-  taxSummaryCsv: (year: number, quarter?: number) =>
-    api.getBlobWithParams('/admin/reports/tax_summary_csv', { year, quarter }),
-  taxSummaryPdf: (year: number, quarter?: number) =>
-    api.getBlobWithParams('/admin/reports/tax_summary_pdf', { year, quarter }),
-  taxSummaryXlsx: (year: number, quarter?: number) =>
-    api.getBlobWithParams('/admin/reports/tax_summary_xlsx', { year, quarter }),
+  taxSummaryCsv: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_csv', params),
+  taxSummaryPdf: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_pdf', params),
+  taxSummaryXlsx: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/tax_summary_xlsx', params),
   quarterlyCompliancePacket: (year: number, quarter: number) =>
     api.get<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet', { year, quarter }),
   quarterlyCompliancePacketXlsx: (year: number, quarter: number) =>
@@ -2019,8 +2083,8 @@ export const clientReportsApi = {
     api.get<PayrollRegisterReport>('/client/reports/payroll_register', { pay_period_id: payPeriodId }),
   payrollRegisterPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
-  ytdSummary: (year?: number) =>
-    api.get<YtdSummaryReport>('/client/reports/ytd_summary', { year }),
+  ytdSummary: (params: PayrollReportPeriodParams = {}) =>
+    api.get<YtdSummaryReport>('/client/reports/ytd_summary', params),
 };
 
 export interface TransmittalCustomEntry {

@@ -1421,6 +1421,86 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
   end
 
+  describe "custom pay-date reporting periods and payroll field disclosure" do
+    let!(:inside_period) do
+      create(:pay_period, :committed, company: company, start_date: Date.new(2026, 5, 1), end_date: Date.new(2026, 5, 14), pay_date: Date.new(2026, 5, 16))
+    end
+    let!(:outside_period) do
+      create(:pay_period, :committed, company: company, start_date: Date.new(2026, 6, 1), end_date: Date.new(2026, 6, 14), pay_date: Date.new(2026, 6, 16))
+    end
+    let!(:inside_item) do
+      create(:payroll_item, pay_period: inside_period, employee: employee, company: company, gross_pay: 525, net_pay: 450, withholding_tax: 20)
+    end
+
+    before do
+      create(:payroll_item, pay_period: outside_period, employee: employee, company: company, gross_pay: 9_999, net_pay: 9_000)
+      PayrollItemFieldEntry.create!(
+        payroll_item: inside_item,
+        label: "Archived Shift Bonus",
+        kind: "addition",
+        tax_treatment: "taxable_addition",
+        category: "other",
+        source: "manual",
+        employee_paid: true,
+        employer_paid: false,
+        amount: 25
+      )
+    end
+
+    it "summarizes only committed payrolls whose pay dates are in the exact range" do
+      get "/api/v1/admin/reports/ytd_summary", params: { start_date: "2026-05-01", end_date: "2026-05-31" }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+      expect(report.dig("period", "basis")).to eq("pay_date")
+      expect(report.dig("period", "custom")).to be(true)
+      expect(report.dig("company_totals", "gross_pay").to_f).to eq(525.0)
+      expect(report.dig("payroll_fields", "totals", 0, "label")).to eq("Archived Shift Bonus")
+      expect(report.dig("payroll_fields", "totals", 0, "amount").to_f).to eq(25.0)
+      expect(report.dig("payroll_fields", "entries", 0, "employee_name")).to eq(employee.full_name)
+    end
+
+    it "uses the same exact range and field snapshots for employee pay history" do
+      get "/api/v1/admin/reports/employee_pay_history", params: {
+        employee_id: employee.id,
+        start_date: "2026-05-01",
+        end_date: "2026-05-31"
+      }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+      expect(report.fetch("history").size).to eq(1)
+      expect(report.dig("summary", "gross_pay").to_f).to eq(525.0)
+      expect(report.dig("payroll_fields", "totals", 0, "label")).to eq("Archived Shift Bonus")
+    end
+
+    it "includes field reconciliation in a custom-range tax summary" do
+      get "/api/v1/admin/reports/tax_summary", params: { start_date: "2026-05-01", end_date: "2026-05-31" }
+
+      expect(response).to have_http_status(:ok)
+      report = response.parsed_body.fetch("report")
+      expect(report.dig("totals", "gross_wages").to_f).to eq(525.0)
+      expect(report.dig("payroll_fields", "treatment_totals", "taxable_addition").to_f).to eq(25.0)
+    end
+
+    it "rejects incomplete or reversed custom ranges" do
+      get "/api/v1/admin/reports/ytd_summary", params: { start_date: "2026-05-01" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      get "/api/v1/admin/reports/ytd_summary", params: { start_date: "2026-06-01", end_date: "2026-05-01" }
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "returns 422 for malformed custom ranges across every tax summary format" do
+      %w[tax_summary tax_summary_csv tax_summary_pdf tax_summary_xlsx].each do |action|
+        get "/api/v1/admin/reports/#{action}", params: { start_date: "2026-05-01" }
+
+        expect(response).to have_http_status(:unprocessable_entity), "expected #{action} to reject an incomplete range"
+        expect(response.parsed_body.fetch("error")).to match(/start_date and end_date/)
+      end
+    end
+  end
+
   # ─── CPR-70: Payroll Register CSV Export ────────────────────────────────────
 
   describe "GET /api/v1/admin/reports/payroll_register_csv" do
@@ -1524,7 +1604,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
 
       first_line = response.body.lines.first
-      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction)")
+      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction; in deductions)")
       expect(response.body).to include("75.00")
     end
 
@@ -1716,6 +1796,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       treatments.each do |label, (_kind, treatment, amount)|
         expect(detail_rows).to include(include(hourly_employee.full_name, treatment, label, amount))
         expect(totals_rows).to include(include(treatment, label, amount))
+      end
+
+
+      employee_sheet = workbook.sheet("Employees")
+      headers = employee_sheet.row(1)
+      hourly_row = employee_sheet.row(2)
+      salary_row = employee_sheet.row(3)
+      treatments.each do |label, (kind, treatment, amount)|
+        effect = case kind
+        when "deduction" then "in deductions"
+        when "employer_contribution" then "employer only"
+        else "in gross"
+        end
+        header = "Payroll Field - #{label} (#{treatment.humanize}; #{effect})"
+        column = headers.index(header)
+
+        expect(column).not_to be_nil
+        expect(hourly_row[column]).to eq(amount)
+        expect(salary_row[column]).to be_nil
       end
     end
 

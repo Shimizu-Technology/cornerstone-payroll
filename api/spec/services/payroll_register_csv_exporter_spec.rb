@@ -157,12 +157,32 @@ RSpec.describe PayrollRegisterCsvExporter do
 
       rows = CSV.parse(exporter.generate, headers: true)
 
-      expect(rows.headers).to include("Payroll Field - Contractor Rent (Post tax deduction)")
-      expect(rows.find { |row| row["Employee Name"] == "Carl Contractor" }["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
+      header = "Payroll Field - Contractor Rent (Post tax deduction; in deductions)"
+      expect(rows.headers).to include(header)
+      expect(rows.find { |row| row["Employee Name"] == "Carl Contractor" }[header]).to eq("25.00")
+      expect(rows.find { |row| row["Employee Name"] == "Alice Terlaje" }[header]).to eq("")
       expect(rows[-1]["Gross Pay"]).to eq("5600.00")
       expect(rows[-1]["Total Deductions"]).to eq("957.50")
       expect(rows[-1]["Net Pay"]).to eq("4642.50")
-      expect(rows[-1]["Payroll Field - Contractor Rent (Post tax deduction)"]).to eq("25.00")
+      expect(rows[-1][header]).to eq("25.00")
+    end
+
+    it "keeps assigned zero payroll fields distinct from fields that are not assigned" do
+      report_data[:employees].first[:payroll_field_entries] = [
+        {
+          label: "Shift Bonus",
+          kind: "addition",
+          tax_treatment: "taxable_addition",
+          amount: 0,
+          active: true
+        }
+      ]
+
+      rows = CSV.parse(exporter.generate, headers: true)
+      header = "Payroll Field - Shift Bonus (Taxable addition; in gross)"
+
+      expect(rows.find { |row| row["Employee Name"] == "Alice Terlaje" }[header]).to eq("0.00")
+      expect(rows.find { |row| row["Employee Name"] == "Bob Meno" }[header]).to eq("")
     end
 
     it "keeps the TOTALS row aligned with the headers" do

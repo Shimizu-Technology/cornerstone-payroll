@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { comparePayPeriodsByPeriod } from '@/lib/utils';
 import { PayrollRegisterPreviewContent } from '@/components/reports/PayrollRegisterPreview';
 import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
-import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams } from '@/services/api';
+import type { PayrollRegisterReport, TaxSummaryReport, YtdSummaryReport, Form941GuReport, QuarterlyCompliancePacketReport, QuarterlyComplianceTask, QuarterlyOfficialFormFields, QuarterlyOfficialFormType, YtdSummaryParams, PayrollFieldsDisclosure, PayrollReportPeriodParams } from '@/services/api';
 import type {
   PayPeriod,
   Employee,
@@ -304,6 +304,9 @@ function TaxSummaryPanel() {
   );
   const [year, setYear] = useState(currentYear);
   const [quarter, setQuarter] = useState<number | undefined>(undefined);
+  const [periodMode, setPeriodMode] = useState<'calendar' | 'custom'>('calendar');
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -312,13 +315,16 @@ function TaxSummaryPanel() {
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx;
+  const periodParams = periodMode === 'custom'
+    ? { start_date: startDate, end_date: endDate }
+    : { year, quarter };
 
   async function loadReport() {
     setLoading(true);
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.taxSummary(year, quarter);
+      const res = await reportsApi.taxSummary(periodParams);
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -332,7 +338,7 @@ function TaxSummaryPanel() {
     setExportingCsv(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryCsv(year, quarter);
+      const { blob, filename } = await reportsApi.taxSummaryCsv(periodParams);
       triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.csv`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -345,7 +351,7 @@ function TaxSummaryPanel() {
     setExportingPdf(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryPdf(year, quarter);
+      const { blob, filename } = await reportsApi.taxSummaryPdf(periodParams);
       triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -358,7 +364,7 @@ function TaxSummaryPanel() {
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryXlsx(year, quarter);
+      const { blob, filename } = await reportsApi.taxSummaryXlsx(periodParams);
       triggerDownload(blob, filename || `tax_summary_${year}${quarter ? `_q${quarter}` : ''}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -367,7 +373,7 @@ function TaxSummaryPanel() {
     }
   }
 
-  const periodLabel = quarter ? `Q${quarter} ${year}` : `${year} Full Year`;
+  const periodLabel = periodMode === 'custom' ? `${startDate} – ${endDate}` : (quarter ? `Q${quarter} ${year}` : `${year} Full Year`);
 
   return (
     <div className="space-y-6">
@@ -380,6 +386,20 @@ function TaxSummaryPanel() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
+            <div className="flex items-center gap-2">
+              <label htmlFor="ts-period-mode" className="text-sm font-medium text-gray-700">Period</label>
+              <select id="ts-period-mode" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'calendar' | 'custom'); setReport(null); setError(null); }} className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm">
+                <option value="calendar">Year / quarter</option>
+                <option value="custom">Custom pay dates</option>
+              </select>
+            </div>
+            {periodMode === 'custom' ? (
+              <>
+                <input aria-label="Tax summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+                <span className="text-sm text-gray-500">to</span>
+                <input aria-label="Tax summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+              </>
+            ) : <>
             <div className="flex items-center gap-2">
               <label htmlFor="ts-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -398,26 +418,29 @@ function TaxSummaryPanel() {
                 ))}
               </select>
             </div>
-            <div className="flex items-center gap-2">
-              <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
-              <select
-                id="ts-quarter"
-                value={quarter ?? ''}
-                onChange={(e) => {
-                  setQuarter(e.target.value ? Number(e.target.value) : undefined);
-                  setReport(null);
-                  setError(null);
-                }}
-                disabled={busy}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-              >
-                <option value="">Full Year</option>
-                <option value="1">Q1 (Jan–Mar)</option>
-                <option value="2">Q2 (Apr–Jun)</option>
-                <option value="3">Q3 (Jul–Sep)</option>
-                <option value="4">Q4 (Oct–Dec)</option>
-              </select>
-            </div>
+            </>}
+            {periodMode === 'calendar' && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+                <select
+                  id="ts-quarter"
+                  value={quarter ?? ''}
+                  onChange={(e) => {
+                    setQuarter(e.target.value ? Number(e.target.value) : undefined);
+                    setReport(null);
+                    setError(null);
+                  }}
+                  disabled={busy}
+                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                >
+                  <option value="">Full Year</option>
+                  <option value="1">Q1 (Jan–Mar)</option>
+                  <option value="2">Q2 (Apr–Jun)</option>
+                  <option value="3">Q3 (Jul–Sep)</option>
+                  <option value="4">Q4 (Oct–Dec)</option>
+                </select>
+              </div>
+            )}
             <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
@@ -462,7 +485,7 @@ function TaxSummaryPanel() {
               Tax Summary — {periodLabel}
             </CardTitle>
             <CardDescription>
-              {report.pay_periods_included} pay period{report.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
+              Pay-date basis &bull; {report.pay_periods_included} pay period{report.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
               {report.employee_count} employee{report.employee_count !== 1 ? 's' : ''}
               {report.period.start_date && (
                 <> &bull; {report.period.start_date} – {report.period.end_date}</>
@@ -479,6 +502,7 @@ function TaxSummaryPanel() {
               <TotalBox label="Medicare (Employer)" value={report.totals.medicare_employer} />
               <TotalBox label="Total Employment Taxes" value={report.totals.total_employment_taxes} />
             </div>
+            <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
           </CardContent>
         </Card>
       )}
@@ -930,6 +954,7 @@ function W2GuPanel() {
 // ─── Employee Pay History Panel ────────────────────────────────────────────
 
 function EmployeePayHistoryPanel() {
+  const currentYear = new Date().getFullYear();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
@@ -937,6 +962,7 @@ function EmployeePayHistoryPanel() {
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<{
+    period: { label: string; start_date: string; end_date: string };
     employee: { id: number; name: string; employment_type: string; pay_rate: number };
     history: {
       pay_period_id: number;
@@ -952,7 +978,12 @@ function EmployeePayHistoryPanel() {
       check_number: string | null;
     }[];
     ytd: Record<string, number>;
+    summary: Record<string, number>;
+    payroll_fields: PayrollFieldsDisclosure;
   } | null>(null);
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const periodParams: PayrollReportPeriodParams = { start_date: startDate, end_date: endDate };
 
   useEffect(() => {
     async function loadAllEmployees() {
@@ -985,7 +1016,7 @@ function EmployeePayHistoryPanel() {
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.employeePayHistory(selectedEmployeeId);
+      const res = await reportsApi.employeePayHistory(selectedEmployeeId, periodParams);
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -999,7 +1030,7 @@ function EmployeePayHistoryPanel() {
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.employeePayHistoryXlsx(selectedEmployeeId);
+      const { blob, filename } = await reportsApi.employeePayHistoryXlsx(selectedEmployeeId, periodParams);
       triggerDownload(blob, filename || `employee_pay_history_${selectedEmployeeId}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1014,7 +1045,7 @@ function EmployeePayHistoryPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Employee Pay History</CardTitle>
           <CardDescription>
-            Individual employee pay records across recent committed pay periods.
+            Individual employee pay records for an exact committed-payroll pay-date range.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1046,6 +1077,9 @@ function EmployeePayHistoryPanel() {
                 </select>
               )}
             </div>
+            <input aria-label="Employee history start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+            <span className="text-sm text-gray-500">to</span>
+            <input aria-label="Employee history end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
             <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
@@ -1063,21 +1097,22 @@ function EmployeePayHistoryPanel() {
             <CardHeader>
               <CardTitle>{report.employee.name}</CardTitle>
               <CardDescription>
-                {report.employee.employment_type} &bull; Rate: {fmt(report.employee.pay_rate)}
+                {report.employee.employment_type} &bull; Rate: {fmt(report.employee.pay_rate)} &bull; Pay dates {report.period.label}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-                <TotalBox label="YTD Gross Pay" value={report.ytd.gross_pay ?? 0} />
-                <TotalBox label="YTD Custom Earnings" value={report.ytd.custom_earnings_total ?? 0} />
-                <TotalBox label="YTD Withholding" value={report.ytd.withholding_tax ?? 0} />
-                <TotalBox label="YTD SS Tax" value={report.ytd.social_security_tax ?? 0} />
-                <TotalBox label="YTD Medicare" value={report.ytd.medicare_tax ?? 0} />
-                <TotalBox label="YTD Retirement" value={report.ytd.retirement ?? 0} />
-                <TotalBox label="YTD Custom Deductions" value={report.ytd.custom_deductions_total ?? 0} />
-                <TotalBox label="YTD Deductions" value={report.ytd.total_deductions ?? 0} />
-                <TotalBox label="YTD Net Pay" value={report.ytd.net_pay ?? 0} />
+                <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
+                <TotalBox label="Custom Earnings" value={report.summary.custom_earnings_total ?? 0} />
+                <TotalBox label="Withholding" value={report.summary.withholding_tax ?? 0} />
+                <TotalBox label="SS Tax" value={report.summary.social_security_tax ?? 0} />
+                <TotalBox label="Medicare" value={report.summary.medicare_tax ?? 0} />
+                <TotalBox label="Retirement" value={report.summary.retirement ?? 0} />
+                <TotalBox label="Custom Deductions" value={report.summary.custom_deductions_total ?? 0} />
+                <TotalBox label="Deductions" value={report.summary.total_deductions ?? 0} />
+                <TotalBox label="Net Pay" value={report.summary.net_pay ?? 0} />
               </div>
+              <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
             </CardContent>
           </Card>
 
@@ -1140,6 +1175,9 @@ function YtdSummaryPanel() {
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: currentYear - 2020 + 1 }, (_, i) => currentYear - i);
   const [year, setYear] = useState(currentYear);
+  const [periodMode, setPeriodMode] = useState<'year' | 'custom'>('year');
+  const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
+  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState('');
   const [employmentType, setEmploymentType] = useState('all');
   const [status, setStatus] = useState('all');
@@ -1152,7 +1190,7 @@ function YtdSummaryPanel() {
 
   function reportParams(overrides: Partial<YtdSummaryParams> = {}): YtdSummaryParams {
     return {
-      year,
+      ...(periodMode === 'custom' ? { start_date: startDate, end_date: endDate } : { year }),
       sort_by: sortBy,
       sort_direction: sortDirection,
       ...(search.trim() ? { search: search.trim() } : {}),
@@ -1206,7 +1244,7 @@ function YtdSummaryPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.ytdSummaryXlsx(reportParams());
-      triggerDownload(blob, filename || `ytd_summary_${year}.xlsx`);
+      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1218,13 +1256,22 @@ function YtdSummaryPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Year-to-Date Summary</CardTitle>
+          <CardTitle className="text-lg">Payroll Summary by Period</CardTitle>
           <CardDescription>
-            YTD payroll totals for all employees — gross, taxes, retirement, and net pay.
+            Payroll totals and field-level reconciliation for any pay-date period.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
+            <select aria-label="Payroll summary period type" value={periodMode} onChange={(e) => { setPeriodMode(e.target.value as 'year' | 'custom'); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm">
+              <option value="year">Calendar year</option>
+              <option value="custom">Custom pay dates</option>
+            </select>
+            {periodMode === 'custom' ? <>
+              <input aria-label="Payroll summary start date" type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+              <span className="text-sm text-gray-500">to</span>
+              <input aria-label="Payroll summary end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
+            </> : <>
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-year" className="text-sm font-medium text-gray-700">Year</label>
               <select
@@ -1239,6 +1286,7 @@ function YtdSummaryPanel() {
                 ))}
               </select>
             </div>
+            </>}
             <div className="flex items-center gap-2">
               <label htmlFor="ytd-search" className="text-sm font-medium text-gray-700">Search</label>
               <input
@@ -1292,9 +1340,9 @@ function YtdSummaryPanel() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>YTD Summary — {report.year}</CardTitle>
+              <CardTitle>Payroll Summary — {report.period.label}</CardTitle>
               <CardDescription>
-                {report.employees.length} employee{report.employees.length !== 1 ? 's' : ''}
+                Pay-date basis &bull; {report.employees.length} employee{report.employees.length !== 1 ? 's' : ''}
                 {report.company_totals?.payroll_count != null && (
                   <> &bull; {report.company_totals.payroll_count} payroll{report.company_totals.payroll_count !== 1 ? 's' : ''}</>
                 )}
@@ -1304,16 +1352,20 @@ function YtdSummaryPanel() {
               {report.company_totals && (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                   <TotalBox label="Total Gross Pay" value={report.company_totals.gross_pay} />
-                  <TotalBox label="Custom Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                  <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
+                  <TotalBox label="Payroll Field Additions" value={(report.company_totals.payroll_field_taxable_additions_total ?? 0) + (report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
                   <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
                   <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
                   <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
                   <TotalBox label="Total Retirement" value={report.company_totals.retirement} />
-                  <TotalBox label="Custom Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                  <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
+                  <TotalBox label="Payroll Field Deductions" value={(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + (report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
+                  <TotalBox label="Employer Contributions" value={report.company_totals.payroll_field_employer_contributions_total ?? 0} />
                   <TotalBox label="Total Deductions" value={report.company_totals.total_deductions ?? 0} />
                   <TotalBox label="Total Net Pay" value={report.company_totals.net_pay} />
                 </div>
               )}
+              <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
             </CardContent>
           </Card>
 
@@ -1329,12 +1381,15 @@ function YtdSummaryPanel() {
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
-                    <SortableTh label="Custom Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
+                    <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
+                    <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
                     <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
                     <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
                     <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
                     <SortableTh label="Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
-                    <SortableTh label="Custom Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
+                    <SortableTh label="Other Ded." activeLabel={sortLabel('custom_deductions_total')} align="right" onClick={() => updateSort('custom_deductions_total')} />
+                    <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
+                    <th className="py-2 pr-4 text-right font-medium">Employer Contrib.</th>
                     <SortableTh label="Total Ded." activeLabel={sortLabel('total_deductions')} align="right" onClick={() => updateSort('total_deductions')} />
                     <SortableTh label="Net Pay" activeLabel={sortLabel('net_pay')} align="right" onClick={() => updateSort('net_pay')} />
                   </tr>
@@ -1351,19 +1406,22 @@ function YtdSummaryPanel() {
                       </td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_earnings_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_taxable_additions_total ?? 0) + (emp.payroll_field_non_taxable_additions_total ?? 0))}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.withholding_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.social_security_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.medicare_tax)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.retirement)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.custom_deductions_total ?? 0)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt((emp.payroll_field_pre_tax_deductions_total ?? 0) + (emp.payroll_field_post_tax_deductions_total ?? 0))}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.payroll_field_employer_contributions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.total_deductions ?? 0)}</td>
                       <td className="py-2 text-right tabular-nums font-semibold">{fmt(emp.net_pay)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="py-6 text-center text-gray-400">
-                        No employee data found for {report.year}.
+                      <td colSpan={15} className="py-6 text-center text-gray-400">
+                        No employee data found for {report.period.label}.
                       </td>
                     </tr>
                   )}
@@ -1394,7 +1452,7 @@ function EmployerLiabilityPanel() {
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.taxSummary(year, quarter);
+      const res = await reportsApi.taxSummary({ year, quarter });
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1407,7 +1465,7 @@ function EmployerLiabilityPanel() {
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryXlsx(year, quarter);
+      const { blob, filename } = await reportsApi.taxSummaryXlsx({ year, quarter });
       triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -2491,6 +2549,26 @@ function TotalBox({ label, value }: { label: string; value: number }) {
   );
 }
 
+function PayrollFieldTotalsTable({ disclosure }: { disclosure?: PayrollFieldsDisclosure }) {
+  const rows = disclosure?.totals ?? [];
+  if (rows.length === 0) return null;
+
+  return (
+    <div className="mt-6 overflow-hidden rounded-xl border border-gray-200">
+      <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+        <h3 className="font-semibold text-gray-900">Payroll field reconciliation</h3>
+        <p className="text-sm text-gray-500">Historical field values saved on the payrolls in this period.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="border-b text-left text-xs uppercase tracking-wide text-gray-500"><th className="px-4 py-2">Field</th><th className="px-4 py-2">Treatment</th><th className="px-4 py-2">Paid by</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={`${row.label}-${row.tax_treatment}-${index}`} className="border-b last:border-0"><td className="px-4 py-2 font-medium">{row.label}</td><td className="px-4 py-2 text-gray-600">{row.tax_treatment.replaceAll('_', ' ')}</td><td className="px-4 py-2 text-gray-600">{row.employer_paid ? 'Employer' : 'Employee'}</td><td className="px-4 py-2 text-right font-medium tabular-nums">{fmt(row.amount)}</td></tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── 1099-NEC Panel ──────────────────────────────────────────────────────────
 
 interface NecContractor {
@@ -2773,23 +2851,23 @@ const reports: ReportDefinition[] = [
   },
   {
     id: 'ytd-summary',
-    title: 'Year-to-Date Summary',
-    description: 'Year-to-date wage, tax, and deduction totals across employees.',
+    title: 'Payroll Summary by Period',
+    description: 'Wage, tax, deduction, and payroll-field totals for any pay-date range.',
     category: 'payroll',
-    basis: 'Calendar year',
-    frequency: 'Year-to-date',
+    basis: 'Pay-date range',
+    frequency: 'Any period',
     outputs: ['Excel', 'On-screen'],
-    cta: 'Review YTD',
+    cta: 'Choose period',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />),
   },
   {
     id: 'tax-withholding-summary',
     title: 'Tax Withholding Summary',
-    description: 'Quarterly withholding totals for Guam filing and internal review.',
+    description: 'Withholding totals and payroll-field reconciliation for a quarter or custom pay-date range.',
     category: 'tax-compliance',
-    basis: 'Quarter',
-    frequency: 'Quarterly',
+    basis: 'Quarter or range',
+    frequency: 'Any period',
     outputs: ['PDF', 'CSV', 'Excel'],
     cta: 'Review taxes',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />),
