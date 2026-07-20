@@ -2148,13 +2148,16 @@ module Api
 
         def payroll_register_sheets(report)
           employees = Array(report[:employees])
-          employee_rows = employees.map { |emp| payroll_export_row(emp) }
-          contractor_rows = Array(report[:contractors]).map { |emp| payroll_export_row(emp) }
+          contractors = Array(report[:contractors])
+          field_columns = payroll_field_export_columns(employees + contractors)
+          detail_headers = PAYROLL_REGISTER_HEADERS + field_columns.map { |column| payroll_field_export_header(column) }
+          employee_rows = employees.map { |emp| payroll_export_row(emp) + payroll_field_export_values(emp, field_columns) }
+          contractor_rows = contractors.map { |emp| payroll_export_row(emp) + payroll_field_export_values(emp, field_columns) }
           simple_register = report[:simple_register]
           sheets = []
           sheets << cornerstone_payroll_register_sheet(simple_register) if simple_register
-          sheets << { name: "Employees", rows: [ PAYROLL_REGISTER_HEADERS ] + employee_rows }
-          sheets << { name: "Contractors", rows: [ PAYROLL_REGISTER_HEADERS ] + contractor_rows } if contractor_rows.any?
+          sheets << { name: "Employees", rows: [ detail_headers ] + employee_rows }
+          sheets << { name: "Contractors", rows: [ detail_headers ] + contractor_rows } if contractor_rows.any?
           sheets << earnings_breakdown_sheet(report)
           sheets << deductions_breakdown_sheet(report)
           sheets << payroll_field_breakdown_sheet(report)
@@ -2162,6 +2165,55 @@ module Api
           sheets << payroll_register_review_sheet(simple_register) if simple_register
           sheets << report_info_sheet(report, title: "Payroll Register")
           sheets
+        end
+
+        def payroll_field_export_columns(workers)
+          workers.flat_map { |worker| active_payroll_field_snapshot_entries(worker) }
+            .group_by { |entry| payroll_field_export_key(entry) }
+            .map do |key, entries|
+              entry = entries.first
+              {
+                key: key,
+                label: entry[:label].to_s,
+                treatment: entry[:tax_treatment].to_s,
+                group: payroll_field_export_group(entry)
+              }
+            end
+            .sort_by { |column| [ payroll_field_export_group_order(column[:group]), column[:treatment], column[:label] ] }
+        end
+
+        def active_payroll_field_snapshot_entries(worker)
+          Array(worker[:payroll_field_entries]).reject { |entry| entry[:active] == false }
+        end
+
+        def payroll_field_export_key(entry)
+          [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+        end
+
+        def payroll_field_export_group(entry)
+          treatment = entry[:tax_treatment].to_s
+          return :employer if treatment == "employer_contribution" || (entry[:employer_paid] == true && entry[:employee_paid] != true)
+          return :deduction if entry[:kind].to_s == "deduction" || %w[pre_tax_deduction post_tax_deduction].include?(treatment)
+
+          :addition
+        end
+
+        def payroll_field_export_group_order(group)
+          { addition: 0, deduction: 1, employer: 2 }.fetch(group, 3)
+        end
+
+        def payroll_field_export_header(column)
+          effect = { addition: "in gross", deduction: "in deductions", employer: "employer only" }.fetch(column[:group])
+          "Payroll Field - #{column[:label]} (#{column[:treatment].humanize}; #{effect})"
+        end
+
+        def payroll_field_export_values(worker, columns)
+          columns.map do |column|
+            matching = active_payroll_field_snapshot_entries(worker).select do |entry|
+              payroll_field_export_key(entry) == column[:key]
+            end
+            matching.empty? ? nil : matching.sum { |entry| entry[:amount].to_f }
+          end
         end
 
         def cornerstone_payroll_register_sheet(simple_register)

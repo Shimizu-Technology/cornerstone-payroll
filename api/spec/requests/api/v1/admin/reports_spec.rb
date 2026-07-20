@@ -1604,7 +1604,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
 
       first_line = response.body.lines.first
-      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction)")
+      expect(first_line).to include("Payroll Field - Rent Deduction (Post tax deduction; in deductions)")
       expect(response.body).to include("75.00")
     end
 
@@ -1796,6 +1796,25 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       treatments.each do |label, (_kind, treatment, amount)|
         expect(detail_rows).to include(include(hourly_employee.full_name, treatment, label, amount))
         expect(totals_rows).to include(include(treatment, label, amount))
+      end
+
+
+      employee_sheet = workbook.sheet("Employees")
+      headers = employee_sheet.row(1)
+      hourly_row = employee_sheet.row(2)
+      salary_row = employee_sheet.row(3)
+      treatments.each do |label, (kind, treatment, amount)|
+        effect = case kind
+        when "deduction" then "in deductions"
+        when "employer_contribution" then "employer only"
+        else "in gross"
+        end
+        header = "Payroll Field - #{label} (#{treatment.humanize}; #{effect})"
+        column = headers.index(header)
+
+        expect(column).not_to be_nil
+        expect(hourly_row[column]).to eq(amount)
+        expect(salary_row[column]).to be_nil
       end
     end
 
