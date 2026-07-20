@@ -50,8 +50,9 @@ class PayrollRegisterPdfGenerator
     render_header(pdf)
     render_pay_period_block(pdf)
     render_summary_block(pdf)
-    render_payroll_fields_summary(pdf)
     render_employee_table(pdf)
+    render_payroll_field_matrix(pdf)
+    render_payroll_fields_summary(pdf)
 
     pp = report[:pay_period] || {}
     company_name = report.dig(:meta, :company_name).presence
@@ -165,7 +166,7 @@ class PayrollRegisterPdfGenerator
     pdf.font_size(11) { pdf.text "Payroll Fields", style: :bold }
     pdf.move_down 4
 
-    table_data = [[ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ]] + rows
+    table_data = [ [ "Treatment", "Field", "Employee Paid", "Employer Paid", "Amount" ] ] + rows
     pdf.table(table_data, header: true, width: pdf.bounds.width) do
       row(0).font_style = :bold
       row(0).background_color = HEADER_BG
@@ -177,14 +178,109 @@ class PayrollRegisterPdfGenerator
     pdf.move_down 14
   end
 
+  def render_payroll_field_matrix(pdf)
+    columns = payroll_field_columns
+    return if columns.empty?
+
+    payroll_field_column_chunks(columns).each_with_index do |column_chunk, index|
+      pdf.start_new_page if pdf.cursor < 120
+      pdf.font_size(11) { pdf.text(index.zero? ? "Payroll Fields by Worker" : "Payroll Fields by Worker (continued)", style: :bold) }
+      if index.zero?
+        pdf.move_down 2
+        pdf.font_size(7) do
+          pdf.text "Named field amounts are already included in gross pay, deductions, net pay, or employer cost according to treatment. A dash means the field was not assigned; $0.00 means it was assigned with no amount.", color: TEXT_MUTED
+        end
+      end
+      pdf.move_down 5
+
+      header = [ "Worker" ] + column_chunk.map { |column| "#{column[:label]}\n#{column[:treatment]}" }
+      rows = payroll_workers.map do |worker|
+        [ worker[:employee_name].to_s ] + column_chunk.map do |column|
+          amount = payroll_field_amount(worker, column)
+          amount.nil? ? "—" : fmt(amount)
+        end
+      end
+      totals = [ "TOTALS" ] + column_chunk.map do |column|
+        fmt(payroll_workers.sum { |worker| payroll_field_amount(worker, column).to_f })
+      end
+
+      pdf.table([ header ] + rows + [ totals ], header: true, width: pdf.bounds.width) do
+        row(0).font_style = :bold
+        row(0).background_color = HEADER_BG
+        row(0).text_color = "FFFFFF"
+        row(-1).font_style = :bold
+        row(-1).background_color = SECTION_BG
+        cells.size = 7
+        cells.padding = [ 3, 5 ]
+        columns(1..column_chunk.length).align = :right
+      end
+      pdf.move_down 12
+    end
+  end
+
   def payroll_field_total_rows
-    entries = Array(report[:employees]).flat_map { |emp| Array(emp[:payroll_field_entries]) } +
-      Array(report[:contractors]).flat_map { |emp| Array(emp[:payroll_field_entries]) }
+    entries = payroll_workers.flat_map { |emp| active_payroll_field_entries(emp) }
     entries.group_by { |entry| [ entry[:tax_treatment], entry[:label], entry[:employee_paid], entry[:employer_paid] ] }
       .sort_by { |key, _| key.map(&:to_s) }
       .map do |(treatment, label, employee_paid, employer_paid), grouped|
         [ treatment.to_s.humanize, label, employee_paid ? "Yes" : "No", employer_paid ? "Yes" : "No", fmt(grouped.sum { |entry| entry[:amount].to_f }) ]
       end
+  end
+
+  def payroll_workers
+    @payroll_workers ||= Array(report[:employees]) + Array(report[:contractors])
+  end
+
+  def active_payroll_field_entries(worker)
+    Array(worker[:payroll_field_entries]).reject { |entry| entry[:active] == false }
+  end
+
+  def payroll_field_columns
+    @payroll_field_columns ||= active_payroll_field_entries_by_worker
+      .group_by { |entry| payroll_field_column_key(entry) }
+      .map do |key, entries|
+        entry = entries.first
+        {
+          key: key,
+          label: entry[:label].to_s,
+          treatment: entry[:tax_treatment].to_s.humanize,
+          group: payroll_field_group(entry)
+        }
+      end
+      .sort_by { |column| [ payroll_field_group_order(column[:group]), column[:treatment], column[:label] ] }
+  end
+
+  def active_payroll_field_entries_by_worker
+    payroll_workers.flat_map { |worker| active_payroll_field_entries(worker) }
+  end
+
+  def payroll_field_column_key(entry)
+    [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+  end
+
+  def payroll_field_group(entry)
+    treatment = entry[:tax_treatment].to_s
+    return :employer if treatment == "employer_contribution" || (entry[:employer_paid] == true && entry[:employee_paid] != true)
+    return :deduction if entry[:kind].to_s == "deduction" || %w[pre_tax_deduction post_tax_deduction].include?(treatment)
+
+    :addition
+  end
+
+  def payroll_field_group_order(group)
+    { addition: 0, deduction: 1, employer: 2 }.fetch(group, 3)
+  end
+
+  def payroll_field_amount(worker, column)
+    matching = active_payroll_field_entries(worker).select do |entry|
+      payroll_field_column_key(entry) == column[:key]
+    end
+    return nil if matching.empty?
+
+    matching.sum { |entry| entry[:amount].to_f }
+  end
+
+  def payroll_field_column_chunks(columns)
+    columns.each_slice(5).to_a
   end
 
   # ─── Employee Table ─────────────────────────────────────────────────────────

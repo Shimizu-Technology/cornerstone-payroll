@@ -9,17 +9,9 @@ module Api
         before_action :ensure_client_reportable_pay_period!, only: [ :payroll_register, :payroll_register_pdf ]
 
         def ytd_summary
-          year = params[:year]&.to_i || Date.current.year
-          employees = Employee.where(company_id: current_company_id).order(:last_name, :first_name)
-
-          render json: {
-            report: {
-              type: "ytd_summary",
-              year: year,
-              employees: employees.map { |employee| client_employee_ytd_row(employee, year) },
-              company_totals: ytd_company_totals(year)
-            }
-          }
+          render json: { report: build_period_summary_report(payroll_reporting_period) }
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
@@ -136,40 +128,6 @@ module Api
 
         def client_payroll_item_detail(item)
           payroll_item_detail(item).except(:check_number)
-        end
-
-        def client_employee_ytd_row(employee, year)
-          reportable_period_ids = PayPeriod.reportable_committed
-                                           .where(company_id: current_company_id)
-                                           .where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31))
-                                           .select(:id)
-          items = employee.payroll_items
-                          .joins(:pay_period)
-                          .includes(:payroll_item_field_entries)
-                          .not_voided
-                          .where(pay_periods: { id: reportable_period_ids })
-          ytd_items = items.to_a
-
-          {
-            employee_id: employee.id,
-            name: employee.full_name,
-            employment_type: employee.employment_type,
-            status: employee.status,
-            gross_pay: items.sum(:gross_pay),
-            custom_earnings_total: ytd_items.sum { |item| custom_earnings_total(item) },
-            payroll_field_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "taxable_addition") },
-            payroll_field_non_taxable_additions_total: ytd_items.sum { |item| payroll_field_total(item, "non_taxable_addition") },
-            payroll_field_pre_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "pre_tax_deduction") },
-            payroll_field_post_tax_deductions_total: ytd_items.sum { |item| payroll_field_total(item, "post_tax_deduction") },
-            payroll_field_employer_contributions_total: ytd_items.sum { |item| payroll_field_total(item, "employer_contribution") },
-            withholding_tax: items.sum(:withholding_tax),
-            social_security_tax: items.sum(:social_security_tax),
-            medicare_tax: items.sum(:medicare_tax),
-            retirement: items.sum(:retirement_payment),
-            total_deductions: items.sum(:total_deductions),
-            custom_deductions_total: ytd_items.sum { |item| custom_deductions_total(item) },
-            net_pay: items.sum(:net_pay)
-          }
         end
       end
     end

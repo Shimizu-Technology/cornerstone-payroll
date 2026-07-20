@@ -433,6 +433,26 @@ PR B acceptance criteria:
 - Employee-paid and employer-paid amounts are separate.
 - Reports remain readable for clients with many fields.
 
+#### PR B implementation contract (July 2026)
+
+The reporting work follows two non-negotiable accounting rules:
+
+1. Historical reports read `payroll_item_field_entries`, which are the immutable values and labels snapshotted when payroll was calculated. They never rebuild prior payroll from a field's current name, assignment, or employee default.
+2. Multi-period operational reports use **pay date** as their basis and include only committed, reportable, non-voided payroll rows. An exact start/end range is inclusive.
+
+Coverage:
+
+- Payroll Register: on-screen, PDF, CSV, and Excel retain the per-payroll itemized field disclosure and treatment totals.
+- Payroll Summary by Period (legacy YTD route): calendar-year or exact pay-date range, with field totals on screen and field-total/activity Excel sheets.
+- Employee Pay History: exact pay-date range, with field totals on screen and itemized field activity in Excel.
+- Tax Withholding Summary: year, quarter, or exact pay-date range, with supporting field reconciliation in the on-screen, PDF, CSV, and Excel outputs.
+- Payroll Summary by Employee, Deductions & Contributions, Retirement Plans, pay stubs, and check stubs continue to use the shared `QuickbooksPayrollReportData` classification of snapshotted field entries.
+- Paycheck History PDF includes a dedicated payroll-field detail appendix.
+
+Official filing forms (W-2GU, 941, W-1, SWICA, 1099-NEC, and Form 500) remain fixed to their legally defined boxes and filing periods. Arbitrary business fields are not added as invented form columns; the supporting payroll register and reconciliation reports explain the amounts feeding those forms.
+
+Custom-range selectors are intentionally provided on reports where an arbitrary period is meaningful. Statutory quarterly and annual filing forms remain constrained to their required quarter/tax-year selectors.
+
 ### PR C — MoSa loan ledger integration
 
 Goal: after Payroll Fields and reports are stable, map MoSa loan rows and loan-type payroll fields into true loan ledger tracking.

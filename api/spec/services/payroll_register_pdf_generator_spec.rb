@@ -117,6 +117,25 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).to include("Payroll Fields", "Shift Bonus", "Taxable addition", "$25.00")
       expect(text).to include("Employer Benefit", "Employer contribution", "$50.00")
     end
+
+    it "renders named payroll fields beside each worker before the reconciliation summary" do
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("Payroll Fields by Worker", "Alice Terlaje")
+    end
+
+    it "distinguishes an assigned zero amount from a field that was not assigned" do
+      report_data[:employees].first[:payroll_field_entries].first[:amount] = 0
+      report_data[:employees] << report_data[:employees].first.merge(
+        employee_id: 2,
+        employee_name: "Bob Meno",
+        payroll_field_entries: []
+      )
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+
+      expect(text).to include("$0.00", "Bob Meno", "—")
+    end
   end
 
   describe "#filename" do

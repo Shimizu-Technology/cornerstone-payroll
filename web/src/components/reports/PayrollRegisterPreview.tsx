@@ -8,6 +8,21 @@ import { ReportDownloadMenu, type ReportDownloadFormat } from './ReportDownloadM
 type PayrollRegister = PayrollRegisterReport['report'];
 type SimpleRegister = NonNullable<PayrollRegister['simple_register']>;
 type SimpleColumn = SimpleRegister['columns'][number];
+type PayrollWorker = PayrollRegister['employees'][number];
+type PayrollFieldEntry = NonNullable<PayrollWorker['payroll_field_entries']>[number];
+
+type PayrollFieldGroup = 'addition' | 'deduction' | 'employer';
+
+interface PayrollFieldColumn {
+  key: string;
+  label: string;
+  treatment: string;
+  group: PayrollFieldGroup;
+  kind: string;
+  taxTreatment: string;
+  employeePaid: boolean;
+  employerPaid: boolean;
+}
 
 function currency(value: unknown) {
   const amount = Number(value ?? 0);
@@ -35,6 +50,101 @@ function simpleCellClass(column: SimpleColumn, header = false) {
       ? `sticky left-12 z-20 ${header ? 'bg-slate-50' : calculated}`
       : calculated;
   return `${sticky} ${numeric ? 'text-right tabular-nums' : 'text-left'}`;
+}
+
+const payrollFieldTreatmentLabels: Record<string, string> = {
+  taxable_addition: 'Taxable addition',
+  non_taxable_addition: 'Non-taxable addition',
+  pre_tax_deduction: 'Pre-tax deduction',
+  post_tax_deduction: 'Post-tax deduction',
+  employer_contribution: 'Employer contribution',
+};
+
+const payrollFieldSourceLabels: Record<string, string> = {
+  employee_default: 'Employee default',
+  manual: 'Payroll override',
+  import: 'Imported',
+  system: 'System',
+};
+
+function payrollFieldGroup(entry: PayrollFieldEntry): PayrollFieldGroup {
+  if (entry.tax_treatment === 'employer_contribution' || (entry.employer_paid && !entry.employee_paid)) return 'employer';
+  if (entry.kind === 'deduction' || ['pre_tax_deduction', 'post_tax_deduction'].includes(entry.tax_treatment)) return 'deduction';
+  return 'addition';
+}
+
+function payrollFieldIdentity(entry: PayrollFieldEntry) {
+  return [
+    entry.label,
+    entry.kind,
+    entry.tax_treatment,
+    entry.employee_paid ? 'employee' : '',
+    entry.employer_paid ? 'employer' : '',
+  ].join(':');
+}
+
+function payrollFieldColumns(workers: PayrollWorker[]): PayrollFieldColumn[] {
+  const columns = new Map<string, PayrollFieldColumn>();
+  workers.forEach((worker) => {
+    (worker.payroll_field_entries || []).filter((entry) => entry.active !== false).forEach((entry) => {
+      const key = payrollFieldIdentity(entry);
+      if (columns.has(key)) return;
+      columns.set(key, {
+        key,
+        label: entry.label,
+        treatment: payrollFieldTreatmentLabels[entry.tax_treatment] || entry.tax_treatment,
+        group: payrollFieldGroup(entry),
+        kind: entry.kind,
+        taxTreatment: entry.tax_treatment,
+        employeePaid: Boolean(entry.employee_paid),
+        employerPaid: Boolean(entry.employer_paid),
+      });
+    });
+  });
+
+  const groupOrder: Record<PayrollFieldGroup, number> = { addition: 0, deduction: 1, employer: 2 };
+  return Array.from(columns.values()).sort((a, b) => (
+    groupOrder[a.group] - groupOrder[b.group]
+      || a.treatment.localeCompare(b.treatment)
+      || a.label.localeCompare(b.label)
+  ));
+}
+
+function payrollFieldAmount(worker: PayrollWorker, column: PayrollFieldColumn): number | null {
+  const matching = (worker.payroll_field_entries || []).filter((entry) => (
+    entry.active !== false && payrollFieldIdentity(entry) === column.key
+  ));
+  if (matching.length === 0) return null;
+  return matching.reduce((total, entry) => total + Number(entry.amount || 0), 0);
+}
+
+function payrollFieldHeaderClass(group: PayrollFieldGroup) {
+  if (group === 'addition') return 'bg-emerald-50 text-emerald-950';
+  if (group === 'deduction') return 'bg-amber-50 text-amber-950';
+  return 'bg-indigo-50 text-indigo-950';
+}
+
+function PayrollFieldHeader({ column }: { column: PayrollFieldColumn }) {
+  const inclusion = column.group === 'addition'
+    ? 'Included in gross'
+    : column.group === 'deduction'
+      ? 'Included in deductions'
+      : 'Employer only';
+  return (
+    <th className={`${payrollFieldHeaderClass(column.group)} min-w-36 border-b border-r border-slate-200 px-3 py-2 align-bottom`}>
+      <span className="block font-bold leading-4">{column.label}</span>
+      <span className="mt-1 block text-[10px] font-medium leading-3 opacity-70">{column.treatment} · {inclusion}</span>
+    </th>
+  );
+}
+
+function PayrollFieldCell({ worker, column }: { worker: PayrollWorker; column: PayrollFieldColumn }) {
+  const amount = payrollFieldAmount(worker, column);
+  return (
+    <td className="border-b border-r border-slate-100 bg-white px-3 py-2 text-right tabular-nums">
+      {amount === null ? <span className="text-slate-400">—</span> : currency(amount)}
+    </td>
+  );
 }
 
 function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; simple: SimpleRegister }) {
@@ -216,6 +326,16 @@ function SimpleRegisterPreview({ report, simple }: { report: PayrollRegister; si
 }
 
 function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
+  const workers = [...report.employees, ...report.contractors];
+  const fieldColumns = payrollFieldColumns(workers);
+  const additionColumns = fieldColumns.filter((column) => column.group === 'addition');
+  const deductionColumns = fieldColumns.filter((column) => column.group === 'deduction');
+  const employerColumns = fieldColumns.filter((column) => column.group === 'employer');
+  const columnCount = 14 + fieldColumns.length;
+  const total = (key: keyof PayrollWorker) => workers.reduce((sum, worker) => sum + Number(worker[key] || 0), 0);
+  const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
+    sum + (payrollFieldAmount(worker, column) || 0)
+  ), 0);
   const contractorCount = report.summary.contractor_count ?? report.contractors.length;
   const contractorGross = report.summary.contractor_total_gross
     ?? report.contractors.reduce((total, contractor) => total + Number(contractor.gross_pay ?? 0), 0);
@@ -253,68 +373,98 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-        <div className="border-b border-neutral-200 px-5 py-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-neutral-200 px-5 py-4">
           <h3 className="font-bold text-neutral-950">Payroll worker detail</h3>
+          {fieldColumns.length > 0 && (
+            <p className="max-w-2xl text-xs leading-5 text-neutral-500">
+              Named payroll fields appear beside the totals they affect. A dash means the field was not assigned; $0.00 means it was assigned with no amount this payroll.
+            </p>
+          )}
         </div>
         <div className="max-h-[60vh] overflow-auto">
-          <table className="min-w-[1450px] text-xs">
+          <table className="text-xs" style={{ minWidth: `${1450 + (fieldColumns.length * 144)}px` }}>
             <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
               <tr>
-                {['Employee', 'Type', 'Hours', 'OT Hours', 'Gross Pay', 'Reported Tips', 'Tips Out', 'Withholding', "Add'l W/H", 'Social Security', 'Medicare', 'Deductions', 'Net Pay', 'Check #'].map((label) => (
+                <th className="sticky left-0 z-20 min-w-52 border-b border-r border-slate-200 bg-slate-100 px-3 py-2.5 font-bold">Employee</th>
+                {['Type', 'Hours', 'OT Hours', 'Reported Tips', 'Tips Out'].map((label) => (
                   <th key={label} className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">{label}</th>
                 ))}
+                {additionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Gross Pay</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Withholding</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Add&apos;l W/H</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Social Security</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Medicare</th>
+                {deductionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Deductions</th>
+                <th className="border-b border-r border-slate-200 px-3 py-2.5 font-bold">Net Pay</th>
+                {employerColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
+                <th className="border-b border-slate-200 px-3 py-2.5 font-bold">Check #</th>
               </tr>
             </thead>
             <tbody>
               {workerSections.map((section) => (
                 <Fragment key={section.label}>
                   <tr className="bg-slate-50">
-                    <td colSpan={14} className="border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                    <td colSpan={columnCount} className="border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">
                       {section.label} · {section.workers.length}
                     </td>
                   </tr>
                   {section.workers.map((worker) => (
-                    <tr key={worker.employee_id} className="hover:bg-blue-50/50">
-                      <td className="border-b border-r border-slate-100 px-3 py-2 font-semibold">{worker.employee_name}</td>
+                    <tr key={worker.employee_id} className="group hover:bg-blue-50/50">
+                      <td className="sticky left-0 z-[1] border-b border-r border-slate-100 bg-white px-3 py-2 font-semibold group-hover:bg-blue-50">{worker.employee_name}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 capitalize">{worker.employment_type}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.hours_worked)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{decimal(worker.overtime_hours)}</td>
-                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.reported_tips)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.tips_paid_out)}</td>
+                      {additionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
+                      <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.gross_pay)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.withholding_tax)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.additional_withholding)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.social_security_tax)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.medicare_tax)}</td>
+                      {deductionColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right tabular-nums">{currency(worker.total_deductions)}</td>
                       <td className="border-b border-r border-slate-100 px-3 py-2 text-right font-bold tabular-nums">{currency(worker.net_pay)}</td>
+                      {employerColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-slate-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
                     </tr>
                   ))}
                 </Fragment>
               ))}
             </tbody>
+            <tfoot className="sticky bottom-0 z-10 bg-slate-100 text-slate-950">
+              <tr>
+                <td className="sticky left-0 z-20 border-t-2 border-r border-slate-300 bg-slate-100 px-3 py-2.5 font-bold">TOTALS</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5" />
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('hours_worked'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{decimal(total('overtime_hours'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('reported_tips'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('tips_paid_out'))}</td>
+                {additionColumns.map((column) => (
+                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                ))}
+                {(['gross_pay', 'withholding_tax', 'additional_withholding', 'social_security_tax', 'medicare_tax'] as Array<keyof PayrollWorker>).map((key) => (
+                  <td key={key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total(key))}</td>
+                ))}
+                {deductionColumns.map((column) => (
+                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                ))}
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('total_deductions'))}</td>
+                <td className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('net_pay'))}</td>
+                {employerColumns.map((column) => (
+                  <td key={column.key} className="border-t-2 border-r border-slate-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
+                ))}
+                <td className="border-t-2 border-slate-300 px-3 py-2.5" />
+              </tr>
+            </tfoot>
           </table>
         </div>
       </section>
     </div>
   );
 }
-
-const payrollFieldTreatmentLabels: Record<string, string> = {
-  taxable_addition: 'Taxable addition',
-  non_taxable_addition: 'Non-taxable addition',
-  pre_tax_deduction: 'Pre-tax deduction',
-  post_tax_deduction: 'Post-tax deduction',
-  employer_contribution: 'Employer contribution',
-};
-
-const payrollFieldSourceLabels: Record<string, string> = {
-  employee_default: 'Employee default',
-  manual: 'Payroll override',
-  import: 'Imported',
-  system: 'System',
-};
 
 function PayrollFieldsDisclosure({ report }: { report: PayrollRegister }) {
   const workers = [...report.employees, ...report.contractors];

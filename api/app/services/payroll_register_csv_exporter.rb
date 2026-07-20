@@ -82,7 +82,7 @@ class PayrollRegisterCsvExporter
   private
 
   def headers
-    HEADERS + payroll_field_columns.map { |column| "Payroll Field - #{column[:label]} (#{column[:tax_treatment].to_s.humanize})" }
+    HEADERS + payroll_field_columns.map { |column| payroll_field_header(column) }
   end
 
   def payroll_rows
@@ -90,17 +90,50 @@ class PayrollRegisterCsvExporter
   end
 
   def payroll_field_columns
-    @payroll_field_columns ||= payroll_rows.flat_map { |emp| Array(emp[:payroll_field_entries]) }
-      .group_by { |entry| [ entry[:label], entry[:tax_treatment] ] }
-      .keys
-      .sort_by { |label, treatment| [ treatment.to_s, label.to_s ] }
-      .map { |label, treatment| { label: label, tax_treatment: treatment } }
+    @payroll_field_columns ||= payroll_rows.flat_map { |employee| active_payroll_field_entries(employee) }
+      .group_by { |entry| payroll_field_key(entry) }
+      .map do |key, entries|
+        entry = entries.first
+        {
+          key: key,
+          label: entry[:label].to_s,
+          tax_treatment: entry[:tax_treatment].to_s,
+          group: payroll_field_group(entry)
+        }
+      end
+      .sort_by { |column| [ payroll_field_group_order(column[:group]), column[:tax_treatment], column[:label] ] }
   end
 
   def payroll_field_amount(emp, column)
-    Array(emp[:payroll_field_entries]).sum do |entry|
-      entry[:label].to_s == column[:label].to_s && entry[:tax_treatment].to_s == column[:tax_treatment].to_s ? entry[:amount].to_f : 0.0
-    end
+    matching = active_payroll_field_entries(emp).select { |entry| payroll_field_key(entry) == column[:key] }
+    return nil if matching.empty?
+
+    matching.sum { |entry| entry[:amount].to_f }
+  end
+
+  def active_payroll_field_entries(employee)
+    Array(employee[:payroll_field_entries]).reject { |entry| entry[:active] == false }
+  end
+
+  def payroll_field_key(entry)
+    [ entry[:label].to_s, entry[:kind].to_s, entry[:tax_treatment].to_s, entry[:employee_paid] == true, entry[:employer_paid] == true ]
+  end
+
+  def payroll_field_group(entry)
+    treatment = entry[:tax_treatment].to_s
+    return :employer if treatment == "employer_contribution" || (entry[:employer_paid] == true && entry[:employee_paid] != true)
+    return :deduction if entry[:kind].to_s == "deduction" || %w[pre_tax_deduction post_tax_deduction].include?(treatment)
+
+    :addition
+  end
+
+  def payroll_field_group_order(group)
+    { addition: 0, deduction: 1, employer: 2 }.fetch(group, 3)
+  end
+
+  def payroll_field_header(column)
+    effect = { addition: "in gross", deduction: "in deductions", employer: "employer only" }.fetch(column[:group])
+    "Payroll Field - #{column[:label]} (#{column[:tax_treatment].humanize}; #{effect})"
   end
 
   def employee_row(emp)
@@ -139,7 +172,10 @@ class PayrollRegisterCsvExporter
       format_currency(emp[:net_pay]),
       sanitize_csv_field(emp[:check_number])
     ]
-    base_row + payroll_field_columns.map { |column| format_currency(payroll_field_amount(emp, column)) }
+    base_row + payroll_field_columns.map do |column|
+      amount = payroll_field_amount(emp, column)
+      amount.nil? ? "" : format_currency(amount)
+    end
   end
 
   def summary_row
@@ -179,7 +215,7 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:total_deductions)),
       format_currency(total_for(:net_pay)),
       ""
-    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column) }) }
+    ] + payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
   end
 
   def summary_label(summary)

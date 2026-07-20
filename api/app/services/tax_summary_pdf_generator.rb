@@ -36,9 +36,12 @@ class TaxSummaryPdfGenerator
 
   def filename
     period  = report[:period] || {}
-    year    = period[:year] || "unknown"
-    quarter = period[:quarter] ? "_q#{period[:quarter]}" : ""
-    "tax_summary_#{year}#{quarter}.pdf"
+    token = if period[:custom]
+      "#{period[:start_date]}_to_#{period[:end_date]}"
+    else
+      [ period[:year] || "unknown", ("q#{period[:quarter]}" if period[:quarter]) ].compact.join("_")
+    end
+    "tax_summary_#{token}.pdf"
   end
 
   private
@@ -47,9 +50,10 @@ class TaxSummaryPdfGenerator
     render_header(pdf)
     render_period_block(pdf)
     render_totals_block(pdf)
+    render_payroll_fields_block(pdf)
 
     period = report[:period] || {}
-    quarter_label = period[:quarter] ? "Q#{period[:quarter]} #{period[:year]}" : "#{period[:year]} Full Year"
+    quarter_label = period_label(period)
     company_name = report.dig(:meta, :company_name).presence
     render_with_footer(pdf,
       [ company_name, "Tax Summary", quarter_label, "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
@@ -61,7 +65,7 @@ class TaxSummaryPdfGenerator
 
   def render_header(pdf)
     period = report[:period] || {}
-    quarter_label = period[:quarter] ? "Q#{period[:quarter]} #{period[:year]}" : "#{period[:year]} Full Year"
+    quarter_label = period_label(period)
 
     pdf.fill_color HEADER_BG
     pdf.fill_rectangle [ pdf.bounds.left, pdf.bounds.top ], pdf.bounds.width, 52
@@ -81,12 +85,14 @@ class TaxSummaryPdfGenerator
 
   def render_period_block(pdf)
     period = report[:period] || {}
-    quarter_label = period[:quarter] ? "Q#{period[:quarter]}" : "Full Year"
+    quarter_label = period[:quarter] ? "Q#{period[:quarter]}" : (period[:custom] ? "Custom range" : "Full Year")
 
     pdf.font_size(11) { pdf.text "Period Information", style: :bold }
     pdf.move_down 4
 
     rows = [
+      [ "Reporting Basis",         "Pay date" ],
+      [ "Period",                  period_label(period) ],
       [ "Tax Year",                period[:year].to_s ],
       [ "Quarter",                 quarter_label ],
       [ "Period Start",            period[:start_date].to_s ],
@@ -164,9 +170,44 @@ class TaxSummaryPdfGenerator
     pdf.fill_color TEXT_DARK
   end
 
+  def render_payroll_fields_block(pdf)
+    rows = Array(report.dig(:payroll_fields, :totals))
+    return if rows.empty?
+
+    pdf.start_new_page if pdf.cursor < 180
+    pdf.font_size(11) { pdf.text "Payroll Field Reconciliation", style: :bold }
+    pdf.move_down 3
+    pdf.fill_color TEXT_MUTED
+    pdf.font_size(8) { pdf.text "Historical amounts snapshotted on payroll items in this pay-date period." }
+    pdf.fill_color TEXT_DARK
+    pdf.move_down 6
+
+    table_data = [ [ "Field", "Treatment", "Paid by", "Amount" ] ] + rows.map do |entry|
+      [
+        entry[:label].to_s,
+        entry[:tax_treatment].to_s.humanize,
+        entry[:employer_paid] ? "Employer" : "Employee",
+        fmt(entry[:amount])
+      ]
+    end
+    pdf.table(table_data, width: pdf.bounds.width, header: true,
+      cell_style: { size: 8, padding: [ 4, 6 ], border_color: BORDER_GRAY }) do
+      row(0).background_color = SECTION_BG
+      row(0).font_style = :bold
+      column(3).align = :right
+    end
+  end
+
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   def fmt(value)
     format("$%.2f", value.to_f)
+  end
+
+  def period_label(period)
+    return period[:label] if period[:label].present?
+    return "Q#{period[:quarter]} #{period[:year]}" if period[:quarter]
+
+    "#{period[:year]} Full Year"
   end
 end

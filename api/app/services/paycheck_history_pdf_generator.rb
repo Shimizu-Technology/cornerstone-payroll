@@ -29,6 +29,7 @@ class PaycheckHistoryPdfGenerator
     else
       render_history_table(pdf, rows)
       render_detail_table(pdf, rows)
+      render_payroll_field_detail(pdf)
     end
 
     render_footer(pdf)
@@ -98,6 +99,35 @@ class PaycheckHistoryPdfGenerator
       row(0).background_color = QB_HEADER_BG
       row(-1).background_color = QB_TOTAL_BG
       columns(1..5).align = :right
+    end
+  end
+
+  def render_payroll_field_detail(pdf)
+    disclosure = PayrollFieldDisclosure.new(data.items(include_voided: false))
+    rows = disclosure.rows
+    return if rows.empty?
+
+    pdf.start_new_page
+    pdf.font_size(12) { pdf.text "Payroll field detail", style: :bold, color: TEXT }
+    pdf.move_down 3
+    pdf.fill_color MUTED
+    pdf.font_size(8) { pdf.text "Field-by-field amounts saved on each employee payroll record." }
+    pdf.fill_color TEXT
+    pdf.move_down 8
+
+    table_rows = [ [ "Employee", "Field", "Tax treatment", "Paid by", "Amount" ] ] + rows.map do |row|
+      [
+        row[:employee_name], row[:label], row[:tax_treatment].to_s.humanize,
+        row[:employer_paid] ? "Employer" : "Employee", money(row[:amount])
+      ]
+    end
+    pdf.table(table_rows, header: true, width: pdf.bounds.width) do
+      cells.border_color = QB_BORDER
+      cells.border_width = 0.5
+      cells.padding = [ 4, 5 ]
+      cells.size = 8
+      row(0).background_color = QB_HEADER_BG
+      column(4).align = :right
     end
   end
 
