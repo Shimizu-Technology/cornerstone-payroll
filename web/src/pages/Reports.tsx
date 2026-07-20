@@ -419,26 +419,28 @@ function TaxSummaryPanel() {
               </select>
             </div>
             </>}
-            <div className="flex items-center gap-2">
-              <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
-              <select
-                id="ts-quarter"
-                value={quarter ?? ''}
-                onChange={(e) => {
-                  setQuarter(e.target.value ? Number(e.target.value) : undefined);
-                  setReport(null);
-                  setError(null);
-                }}
-                disabled={busy}
-                className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-              >
-                <option value="">Full Year</option>
-                <option value="1">Q1 (Jan–Mar)</option>
-                <option value="2">Q2 (Apr–Jun)</option>
-                <option value="3">Q3 (Jul–Sep)</option>
-                <option value="4">Q4 (Oct–Dec)</option>
-              </select>
-            </div>
+            {periodMode === 'calendar' && (
+              <div className="flex items-center gap-2">
+                <label htmlFor="ts-quarter" className="text-sm font-medium text-gray-700">Quarter</label>
+                <select
+                  id="ts-quarter"
+                  value={quarter ?? ''}
+                  onChange={(e) => {
+                    setQuarter(e.target.value ? Number(e.target.value) : undefined);
+                    setReport(null);
+                    setError(null);
+                  }}
+                  disabled={busy}
+                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+                >
+                  <option value="">Full Year</option>
+                  <option value="1">Q1 (Jan–Mar)</option>
+                  <option value="2">Q2 (Apr–Jun)</option>
+                  <option value="3">Q3 (Jul–Sep)</option>
+                  <option value="4">Q4 (Oct–Dec)</option>
+                </select>
+              </div>
+            )}
             <Button onClick={loadReport} disabled={busy}>
               {loading ? 'Loading…' : 'Generate Report'}
             </Button>
