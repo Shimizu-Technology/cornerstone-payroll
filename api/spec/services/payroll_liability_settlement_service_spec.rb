@@ -228,6 +228,15 @@ RSpec.describe PayrollLiabilitySettlementService do
       reason: "The transfer was also canceled"
     )
     expect(reversal.amount).to eq(-100.00)
+
+    reconciliation = PayrollLiabilityReconciliationService.new(pay_period: pay_period.reload).call
+    expect(reconciliation).to include(
+      obligations: [],
+      settled_amount: 0.0,
+      outstanding_amount: 0.0,
+      payment_tracking_status: "not_applicable"
+    )
+    expect(reconciliation.fetch(:payments).size).to eq(2)
   end
 
   it "keeps an operator due date when liability postings are restated for a corrected pay date" do

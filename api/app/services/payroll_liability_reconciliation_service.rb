@@ -72,10 +72,12 @@ class PayrollLiabilityReconciliationService
       .transform_values { |group| group.sum { |payment| payment.amount.to_d }.round(2) }
     group_keys = (groups.keys + allocated_by_group.keys).uniq
 
-    group_keys.map do |authority, category|
+    group_keys.filter_map do |authority, category|
       group = groups.fetch([ authority, category ], [])
       calculated = group.sum { |entry| entry.amount.to_d }.round(2)
       settled = allocated_by_group.fetch([ authority, category ], 0.to_d)
+      next if calculated.zero? && settled.zero?
+
       outstanding = (calculated - settled).round(2)
       due_date = due_date_for(authority, category)
       {
