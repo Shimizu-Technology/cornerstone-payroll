@@ -71,4 +71,50 @@ RSpec.describe UnifiedTransmittalBootstrapService do
       included: false
     )
   end
+
+  it "adds evidence-backed settlement rows and refreshes proof and reversal state" do
+    pay_period.update!(status: "committed", committed_at: Time.current, committed_by_id: actor.id)
+    PayrollLiabilityPostingService.post!(pay_period:, actor:)
+    payment = PayrollLiabilitySettlementService.record!(
+      pay_period:,
+      actor:,
+      authority: PayrollLiabilityPostingService::GUAM_DRT,
+      category: "guam_income_tax_withheld",
+      amount: 25,
+      payment_date: "2026-07-20",
+      payment_method: "ach",
+      confirmation_number: "DRT-25"
+    )
+
+    transmittal = service.call
+    item = transmittal.items.find_by!(source_key: "payroll_liability_payment:#{payment.id}")
+    expect(item).to have_attributes(item_type: "payment", amount: 25.00, included: true)
+    expect(item.details.join(" ")).to include("Evidence not attached")
+
+    PayrollLiabilityEvidence.create!(
+      company:,
+      payroll_liability_payment: payment,
+      created_by: actor,
+      storage_key: "test/liability-receipt.pdf",
+      filename: "liability-receipt.pdf",
+      content_type: "application/pdf",
+      byte_size: 12,
+      sha256: "a" * 64
+    )
+    item.update!(included: false)
+
+    refreshed = service.call.items.find_by!(source_key: item.source_key)
+    expect(refreshed.included).to be(false)
+    expect(refreshed.details.join(" ")).to include("Evidence: liability-receipt.pdf")
+
+    PayrollLiabilitySettlementService.reverse!(
+      pay_period:,
+      actor:,
+      source_payment: payment,
+      reason: "Transfer rejected"
+    )
+    reversed = service.call.items.find_by!(source_key: item.source_key)
+    expect(reversed.included).to be(false)
+    expect(reversed.details.join(" ")).to include("Reversed", "Transfer rejected")
+  end
 end

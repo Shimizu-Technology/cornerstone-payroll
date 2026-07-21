@@ -142,7 +142,15 @@ Rails.application.routes.draw do
         end
 
         resources :pay_periods do
-          resources :payroll_liabilities, only: [ :index ]
+          resources :payroll_liabilities, only: [ :index ] do
+            collection do
+              post :payments, action: :create_payment
+              patch :due_date, action: :update_due_date
+              post "payments/:payment_id/reverse", action: :reverse_payment, as: :reverse_payment
+              post "payments/:payment_id/evidence", action: :create_evidence, as: :payment_evidence
+              get "payments/:payment_id/evidence/:evidence_id", action: :evidence, as: :evidence
+            end
+          end
           member do
             post :run_payroll
             get :payroll_field_inputs

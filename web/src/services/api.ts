@@ -929,6 +929,38 @@ export const payPeriodsApi = {
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`
     ),
+  recordLiabilityPayment: (id: number, data: {
+    authority: string;
+    category: string;
+    amount: number;
+    payment_date: string;
+    payment_method: string;
+    confirmation_number?: string;
+    notes?: string;
+    idempotency_key: string;
+  }) => api.post<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
+    `/admin/pay_periods/${id}/payroll_liabilities/payments`, data
+  ),
+  reverseLiabilityPayment: (id: number, paymentId: number, data: { reason: string; idempotency_key: string }) =>
+    api.post<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
+      `/admin/pay_periods/${id}/payroll_liabilities/payments/${paymentId}/reverse`, data
+    ),
+  updateLiabilityDueDate: (id: number, data: { authority: string; category: string; due_date: string }) =>
+    api.patch<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
+      `/admin/pay_periods/${id}/payroll_liabilities/due_date`, data
+    ),
+  uploadLiabilityEvidence: (id: number, paymentId: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.postForm<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
+      `/admin/pay_periods/${id}/payroll_liabilities/payments/${paymentId}/evidence`, form
+    );
+  },
+  liabilityEvidence: (id: number, paymentId: number, evidenceId: number, download = false) =>
+    api.getBlob(
+      `/admin/pay_periods/${id}/payroll_liabilities/payments/${paymentId}/evidence/${evidenceId}`,
+      { download }
+    ),
   create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string }) =>
     api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
   update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string }) =>

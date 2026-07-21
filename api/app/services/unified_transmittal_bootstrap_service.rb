@@ -22,7 +22,9 @@ class UnifiedTransmittalBootstrapService
       transmittal ||= create_transmittal!(locked_period)
       raise ArgumentError, "Pay period belongs to a different client" unless transmittal.company_id == locked_period.company_id
 
-      append_missing_sources!(transmittal, source_specs(locked_period))
+      specs = source_specs(locked_period)
+      refresh_linked_settlements!(transmittal, specs)
+      append_missing_sources!(transmittal, specs)
       transmittal.reload
     end
   rescue ActiveRecord::RecordNotUnique
@@ -70,6 +72,21 @@ class UnifiedTransmittalBootstrapService
     end
   end
 
+  # Settlement rows are evidence snapshots, so a deliberate source refresh must
+  # reflect newly attached proof or a later reversal. Operator ordering and an
+  # active row's include/exclude choice remain untouched.
+  def refresh_linked_settlements!(transmittal, specs)
+    settlement_specs = specs.index_by { |attributes| attributes.fetch(:source_key) }
+      .select { |key, _attributes| key.start_with?("payroll_liability_payment:") }
+
+    transmittal.items.where(source_key: settlement_specs.keys).find_each do |item|
+      attributes = settlement_specs.fetch(item.source_key)
+      refreshed = attributes.slice(:title, :payable_to, :amount, :details, :metadata)
+      refreshed[:included] = false if attributes.dig(:metadata, :reversed)
+      item.update!(refreshed)
+    end
+  end
+
   def source_specs(period)
     payroll_items = period.payroll_items.not_voided.includes(:employee).order(:id).to_a
     non_employee_checks = period.non_employee_checks.active.order(:id).to_a
@@ -77,7 +94,8 @@ class UnifiedTransmittalBootstrapService
     payroll_check_specs(payroll_items) +
       non_employee_check_specs(non_employee_checks) +
       report_specs(period) +
-      obligation_specs(payroll_items, period)
+      obligation_specs(payroll_items, period) +
+      settlement_specs(period)
   end
 
   def payroll_check_specs(items)
@@ -160,5 +178,42 @@ class UnifiedTransmittalBootstrapService
         metadata: { source_category: "tax_obligation", obligation_key: key, calculated_only: true }
       }
     end
+  end
+
+  def settlement_specs(period)
+    period.payroll_liability_payments
+      .includes(:reversal_payment, :evidence)
+      .where(payment_type: "settlement")
+      .chronological
+      .map do |payment|
+        evidence_names = payment.evidence.map(&:filename)
+        state = payment.reversed? ? "Reversed" : "Recorded payment"
+        details = [
+          "#{state} on #{payment.payment_date.strftime('%m/%d/%Y')} by #{payment.payment_method.upcase}",
+          payment.confirmation_number.present? ? "Confirmation: #{payment.confirmation_number}" : "Confirmation number not recorded",
+          evidence_names.any? ? "Evidence: #{evidence_names.join(', ')}" : "Evidence not attached"
+        ]
+        details << "Reversal reason: #{payment.reversal_payment.reason}" if payment.reversed?
+
+        {
+          source_key: "payroll_liability_payment:#{payment.id}",
+          source_type: "PayrollLiabilityPayment",
+          source_id: payment.id,
+          item_type: "payment",
+          title: "Liability payment — #{payment.category.humanize}",
+          payable_to: payment.authority,
+          amount: payment.amount,
+          details:,
+          included: !payment.reversed?,
+          metadata: {
+            source_category: "liability_settlement",
+            payment_id: payment.id,
+            category: payment.category,
+            confirmation_number: payment.confirmation_number,
+            evidence_ids: payment.evidence.map(&:id),
+            reversed: payment.reversed?
+          }
+        }
+      end
   end
 end
