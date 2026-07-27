@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
+import { Braces, ChevronDown, Download, FileCheck2, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface ReportDownloadFormat {
   key: string;
   label: string;
   description?: string;
-  kind: 'pdf' | 'spreadsheet';
+  kind: 'pdf' | 'spreadsheet' | 'data' | 'filing';
   loading?: boolean;
   onSelect: () => void | Promise<void>;
 }
@@ -16,13 +16,15 @@ interface ReportDownloadMenuProps {
   disabled?: boolean;
   buttonLabel?: string;
   className?: string;
+  ariaLabel?: string;
 }
 
 export function ReportDownloadMenu({
   formats,
   disabled = false,
-  buttonLabel = 'Download',
+  buttonLabel = 'Export',
   className,
+  ariaLabel,
 }: ReportDownloadMenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -63,7 +65,7 @@ export function ReportDownloadMenu({
         onClick={() => void runFormat(format)}
         disabled={disabled || busy}
         className={className}
-        aria-label={`${buttonLabel} ${format.label}`}
+        aria-label={ariaLabel || `${buttonLabel} ${format.label}`}
       >
         {format.loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
         {buttonLabel}
@@ -81,6 +83,7 @@ export function ReportDownloadMenu({
         disabled={disabled || busy}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={ariaLabel || buttonLabel}
       >
         {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
         {buttonLabel}
@@ -101,7 +104,10 @@ export function ReportDownloadMenu({
               className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300"
             >
               <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-neutral-100 text-neutral-600">
-                {format.kind === 'spreadsheet' ? <FileSpreadsheet className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                {format.kind === 'spreadsheet' && <FileSpreadsheet className="h-4 w-4" />}
+                {format.kind === 'pdf' && <FileText className="h-4 w-4" />}
+                {format.kind === 'data' && <Braces className="h-4 w-4" />}
+                {format.kind === 'filing' && <FileCheck2 className="h-4 w-4" />}
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-semibold text-neutral-900">{format.label}</span>

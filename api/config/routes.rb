@@ -45,8 +45,13 @@ Rails.application.routes.draw do
         namespace :reports do
           get :dashboard
           get :payroll_register
+          get :payroll_register_csv
           get :payroll_register_pdf
+          get :payroll_register_xlsx
           get :ytd_summary
+          get :ytd_summary_csv
+          get :ytd_summary_pdf
+          get :ytd_summary_xlsx
         end
       end
 
@@ -222,14 +227,19 @@ Rails.application.routes.draw do
         get "reports/payroll_register_pdf", to: "reports#payroll_register_pdf"
         get "reports/payroll_register_xlsx", to: "reports#payroll_register_xlsx"
         get "reports/employee_pay_history", to: "reports#employee_pay_history"
+        get "reports/employee_pay_history_csv", to: "reports#employee_pay_history_csv"
+        get "reports/employee_pay_history_pdf", to: "reports#employee_pay_history_pdf"
         get "reports/employee_pay_history_xlsx", to: "reports#employee_pay_history_xlsx"
         get "reports/tax_summary", to: "reports#tax_summary"
         get "reports/tax_summary_csv", to: "reports#tax_summary_csv"
         get "reports/tax_summary_pdf", to: "reports#tax_summary_pdf"
         get "reports/tax_summary_xlsx", to: "reports#tax_summary_xlsx"
         get "reports/ytd_summary", to: "reports#ytd_summary"
+        get "reports/ytd_summary_csv", to: "reports#ytd_summary_csv"
+        get "reports/ytd_summary_pdf", to: "reports#ytd_summary_pdf"
         get "reports/ytd_summary_xlsx", to: "reports#ytd_summary_xlsx"
         get "reports/quarterly_compliance_packet", to: "reports#quarterly_compliance_packet"
+        get "reports/quarterly_compliance_packet_pdf", to: "reports#quarterly_compliance_packet_pdf"
         get "reports/quarterly_compliance_packet_xlsx", to: "reports#quarterly_compliance_packet_xlsx"
         get "reports/quarterly_compliance_packet_form_941_pdf", to: "reports#quarterly_compliance_packet_form_941_pdf"
         get "reports/quarterly_compliance_packet_schedule_b_pdf", to: "reports#quarterly_compliance_packet_schedule_b_pdf"
@@ -241,6 +251,7 @@ Rails.application.routes.draw do
         post "reports/quarterly_compliance_packet_official_form_preview", to: "reports#quarterly_compliance_packet_official_form_preview"
         post "reports/quarterly_compliance_packet_official_form_download", to: "reports#quarterly_compliance_packet_official_form_download"
         get "reports/form_941_gu", to: "reports#form_941_gu"
+        get "reports/form_941_gu_pdf", to: "reports#form_941_gu_pdf"
         get "reports/form_941_gu_xlsx", to: "reports#form_941_gu_xlsx"
         get "reports/w2_gu", to: "reports#w2_gu"
         post "reports/w2_gu_preflight", to: "reports#w2_gu_preflight"
@@ -250,6 +261,7 @@ Rails.application.routes.draw do
         get "reports/w2_gu_pdf", to: "reports#w2_gu_pdf"
         get "reports/w2_gu_xlsx", to: "reports#w2_gu_xlsx"
         get "reports/form_1099_nec", to: "reports#form_1099_nec"
+        get "reports/form_1099_nec_csv", to: "reports#form_1099_nec_csv"
         get "reports/form_1099_nec_pdf", to: "reports#form_1099_nec_pdf"
         get "reports/form_1099_nec_xlsx", to: "reports#form_1099_nec_xlsx"
 

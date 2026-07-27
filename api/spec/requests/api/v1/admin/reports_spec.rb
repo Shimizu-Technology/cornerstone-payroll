@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "csv"
+require "pdf/reader"
 require "roo"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
@@ -552,6 +554,33 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.headers["Content-Disposition"]).to include(filename)
         expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
       end
+    end
+
+    it "combines a review cover and the official filing forms into one PDF packet" do
+      get "/api/v1/admin/reports/quarterly_compliance_packet_pdf", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("attachment")
+      expect(response.headers["Content-Disposition"]).to include("quarterly_compliance_packet_2026_q2.pdf")
+      expect(response.body).to start_with("%PDF")
+
+      reader = PDF::Reader.new(StringIO.new(response.body))
+      cover_text = reader.pages.first.text.gsub(/\s+/, " ")
+      expect(reader.page_count).to be >= 5
+      expect(cover_text).to include("Quarterly Compliance Packet")
+      expect(cover_text).to include(company.name)
+      expect(cover_text).to include("SWICA wages")
+      expect(cover_text).to include("$1200.00")
+    end
+
+    it "exports the standalone Form 941 official PDF from the report card" do
+      get "/api/v1/admin/reports/form_941_gu_pdf", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("federal_form_941_2026_q2.pdf")
+      expect(response.body).to start_with("%PDF")
     end
 
     it "exports a validated SWICA ASCII wage file" do

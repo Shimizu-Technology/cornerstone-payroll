@@ -114,18 +114,38 @@ module Api
         end
 
         def employee_pay_history_xlsx
-          employee = Employee.find(params[:employee_id])
-
-          unless employee.company_id == current_company_id
-            return render json: { error: "Employee not found" }, status: :not_found
-          end
-
-          period = payroll_reporting_period
-          items = employee_pay_history_items(employee, period)
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
 
           send_spreadsheet!(
             filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.xlsx",
-            sheets: employee_pay_history_sheets(employee_pay_history_report(employee, items, period: period))
+            sheets: employee_pay_history_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def employee_pay_history_pdf
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
+
+          send_tabular_pdf!(
+            title: "Employee Pay History",
+            subtitle: "#{employee.full_name} — #{period.label}",
+            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.pdf",
+            sheets: employee_pay_history_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def employee_pay_history_csv
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
+
+          send_tabular_csv!(
+            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.csv",
+            sheet: employee_pay_history_sheets(report).first
           )
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -243,6 +263,18 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        def form_941_gu_pdf
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data).generate,
+            filename: "federal_form_941_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def quarterly_compliance_packet
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
@@ -258,6 +290,19 @@ module Api
             filename: "quarterly_compliance_packet_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.xlsx",
             sheets: quarterly_compliance_packet_sheets(report_data)
           )
+        end
+
+        def quarterly_compliance_packet_pdf
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          generator = QuarterlyCompliancePacketPdfGenerator.new(report_data)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def quarterly_compliance_packet_form_941_pdf
@@ -434,6 +479,22 @@ module Api
             filename: "1099-NEC_#{company.name.parameterize}_#{year}.pdf",
             type: "application/pdf",
             disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def form_1099_nec_csv
+          year = parse_tax_year_param
+          return if performed?
+
+          company = Company.find(current_company_id)
+          report = Form1099NecAggregator.new(company, year).generate
+          send_tabular_csv!(
+            filename: "1099-NEC_#{company.name.parameterize}_#{year}.csv",
+            sheet: form_1099_nec_sheets(report).first
+          )
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
@@ -901,6 +962,30 @@ module Api
           send_spreadsheet!(
             filename: "payroll_summary_#{period.filename_token}.xlsx",
             sheets: ytd_summary_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def ytd_summary_pdf
+          period = payroll_reporting_period
+          report = build_period_summary_report(period)
+          send_tabular_pdf!(
+            title: "Payroll Summary by Period",
+            subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}",
+            filename: "payroll_summary_#{period.filename_token}.pdf",
+            sheets: ytd_summary_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def ytd_summary_csv
+          period = payroll_reporting_period
+          report = build_period_summary_report(period)
+          send_tabular_csv!(
+            filename: "payroll_summary_#{period.filename_token}.csv",
+            sheet: ytd_summary_sheets(report).first
           )
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -2015,6 +2100,39 @@ module Api
             filename: exporter.filename,
             type: SpreadsheetReportExporter::CONTENT_TYPE,
             disposition: "attachment"
+        end
+
+        def send_tabular_pdf!(title:, subtitle:, filename:, sheets:)
+          generator = TabularReportPdfGenerator.new(
+            title: title,
+            subtitle: subtitle,
+            filename: filename,
+            sheets: sheets
+          )
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        def send_tabular_csv!(filename:, sheet:)
+          exporter = TabularReportCsvExporter.new(filename: filename, sheet: sheet)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        end
+
+        def employee_pay_history_export_data
+          employee = Employee.find(params[:employee_id])
+          unless employee.company_id == current_company_id
+            render json: { error: "Employee not found" }, status: :not_found
+            return [ nil, nil, nil ]
+          end
+
+          period = payroll_reporting_period
+          items = employee_pay_history_items(employee, period)
+          [ employee, period, employee_pay_history_report(employee, items, period: period) ]
         end
 
         def report_meta(company, report_key)

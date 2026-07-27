@@ -134,7 +134,7 @@ function PayrollRegisterPanel() {
       key: 'xlsx',
       label: 'Excel register (.xlsx)',
       description: 'CEO-facing register with split tips and review details.',
-      kind: 'spreadsheet',
+      kind: 'data',
       loading: exportingXlsx,
       onSelect: downloadXlsx,
     },
@@ -256,7 +256,7 @@ function PayrollRegisterPanel() {
               {loading ? 'Loading…' : 'View Report'}
             </Button>
             <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
-              <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPeriodId} buttonLabel="Download" />
+              <ReportDownloadMenu formats={downloadFormats} disabled={busy || !selectedPeriodId} />
             </div>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -374,6 +374,32 @@ function TaxSummaryPanel() {
   }
 
   const periodLabel = periodMode === 'custom' ? `${startDate} – ${endDate}` : (quarter ? `Q${quarter} ${year}` : `${year} Full Year`);
+  const exportFormats: ReportDownloadFormat[] = [
+    {
+      key: 'pdf',
+      label: 'PDF',
+      description: 'Print-ready report for review or sharing',
+      kind: 'pdf',
+      loading: exportingPdf,
+      onSelect: downloadPdf,
+    },
+    {
+      key: 'xlsx',
+      label: 'Excel workbook',
+      description: 'Formatted workbook for analysis',
+      kind: 'spreadsheet',
+      loading: exportingXlsx,
+      onSelect: downloadXlsx,
+    },
+    {
+      key: 'csv',
+      label: 'CSV data',
+      description: 'Portable row data for other systems',
+      kind: 'data',
+      loading: exportingCsv,
+      onSelect: downloadCsv,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -442,36 +468,14 @@ function TaxSummaryPanel() {
               </div>
             )}
             <Button onClick={loadReport} disabled={busy}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Report'}
             </Button>
-            <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadCsv}
+            <div className="sm:ml-auto">
+              <ReportDownloadMenu
+                formats={exportFormats}
                 disabled={busy}
-                title={`Download Tax Summary CSV for ${periodLabel}`}
-              >
-                {exportingCsv ? 'Exporting…' : 'Download CSV'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadPdf}
-                disabled={busy}
-                title={`Download Tax Summary PDF for ${periodLabel}`}
-              >
-                {exportingPdf ? 'Exporting…' : 'Download PDF'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadXlsx}
-                disabled={busy}
-                title={`Download Tax Summary Excel for ${periodLabel}`}
-              >
-                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-              </Button>
+                ariaLabel={`Export Tax Summary for ${periodLabel}`}
+              />
             </div>
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
@@ -657,6 +661,32 @@ function W2GuPanel() {
   }
 
   const busy = loading || exportingCsv || exportingPdf || exportingXlsx || preflightLoading || markingReady;
+  const exportFormats: ReportDownloadFormat[] = [
+    {
+      key: 'pdf',
+      label: 'PDF',
+      description: 'Print-ready annual report',
+      kind: 'pdf',
+      loading: exportingPdf,
+      onSelect: downloadPdf,
+    },
+    {
+      key: 'xlsx',
+      label: 'Excel workbook',
+      description: 'Formatted annual workbook',
+      kind: 'spreadsheet',
+      loading: exportingXlsx,
+      onSelect: downloadXlsx,
+    },
+    {
+      key: 'csv',
+      label: 'CSV data',
+      description: 'Portable employee filing data',
+      kind: 'data',
+      loading: exportingCsv,
+      onSelect: downloadCsv,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -696,7 +726,7 @@ function W2GuPanel() {
               </select>
             </div>
             <Button onClick={loadReport} disabled={busy}>
-              {loading ? 'Loading…' : 'Generate W-2GU Report'}
+              {loading ? 'Loading…' : 'View W-2GU Report'}
             </Button>
 
             <Button variant="outline" onClick={runPreflight} disabled={busy}>
@@ -718,35 +748,12 @@ function W2GuPanel() {
               {markingReady ? 'Marking…' : 'Mark Filing Ready'}
             </Button>
 
-            {/* Export buttons */}
-            <div className="grid w-full grid-cols-1 gap-2 sm:ml-auto sm:flex sm:w-auto sm:items-center sm:gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadCsv}
+            <div className="sm:ml-auto">
+              <ReportDownloadMenu
+                formats={exportFormats}
                 disabled={busy}
-                title={`Download W-2GU CSV for ${year}`}
-              >
-                {exportingCsv ? 'Exporting…' : 'Download CSV'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadPdf}
-                disabled={busy}
-                title={`Download W-2GU PDF for ${year}`}
-              >
-                {exportingPdf ? 'Exporting…' : 'Download PDF'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={downloadXlsx}
-                disabled={busy}
-                title={`Download W-2GU Excel for ${year}`}
-              >
-                {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-              </Button>
+                ariaLabel={`Export W-2GU report for ${year}`}
+              />
             </div>
           </div>
           <div className="mt-3">
@@ -960,6 +967,8 @@ function EmployeePayHistoryPanel() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<{
     period: { label: string; start_date: string; end_date: string };
@@ -1039,6 +1048,40 @@ function EmployeePayHistoryPanel() {
     }
   }
 
+  async function downloadPdf() {
+    if (!selectedEmployeeId) return;
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.employeePayHistoryPdf(selectedEmployeeId, periodParams);
+      triggerDownload(blob, filename || `employee_pay_history_${selectedEmployeeId}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  async function downloadCsv() {
+    if (!selectedEmployeeId) return;
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.employeePayHistoryCsv(selectedEmployeeId, periodParams);
+      triggerDownload(blob, filename || `employee_pay_history_${selectedEmployeeId}.csv`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready report for printing or sharing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Multi-sheet workbook for reconciliation.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
+    { key: 'csv', label: 'History data (.csv)', description: 'Flat paycheck history for data workflows.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
+  ];
+
   return (
     <div className="space-y-6">
       <Card>
@@ -1081,11 +1124,12 @@ function EmployeePayHistoryPanel() {
             <span className="text-sm text-gray-500">to</span>
             <input aria-label="Employee history end date" type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setReport(null); }} className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm" />
             <Button onClick={loadReport} disabled={loading || !selectedEmployeeId}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Report'}
             </Button>
-            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx || !selectedEmployeeId}>
-              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-            </Button>
+            <ReportDownloadMenu
+              formats={exportFormats}
+              disabled={loading || exportingPdf || exportingXlsx || exportingCsv || !selectedEmployeeId}
+            />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -1185,6 +1229,8 @@ function YtdSummaryPanel() {
   const [sortDirection, setSortDirection] = useState<NonNullable<YtdSummaryParams['sort_direction']>>('asc');
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<YtdSummaryReport['report'] | null>(null);
 
@@ -1251,6 +1297,38 @@ function YtdSummaryPanel() {
       setExportingXlsx(false);
     }
   }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.ytdSummaryPdf(reportParams());
+      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  async function downloadCsv() {
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.ytdSummaryCsv(reportParams());
+      triggerDownload(blob, filename || `payroll_summary_${periodMode === 'custom' ? `${startDate}_to_${endDate}` : year}.csv`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready payroll summary.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Payroll detail and reconciliation sheets.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
+    { key: 'csv', label: 'Payroll data (.csv)', description: 'Flat employee totals for analysis.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
+  ];
 
   return (
     <div className="space-y-6">
@@ -1326,11 +1404,9 @@ function YtdSummaryPanel() {
               </select>
             </div>
             <Button onClick={() => loadReport()} disabled={loading}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Report'}
             </Button>
-            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
-              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-            </Button>
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -1444,6 +1520,8 @@ function EmployerLiabilityPanel() {
   const [quarter, setQuarter] = useState<number | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<TaxSummaryReport['report'] | null>(null);
 
@@ -1473,6 +1551,38 @@ function EmployerLiabilityPanel() {
       setExportingXlsx(false);
     }
   }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryPdf({ year, quarter });
+      triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  async function downloadCsv() {
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.taxSummaryCsv({ year, quarter });
+      triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.csv`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingCsv(false);
+    }
+  }
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Printable employer liability review.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Detailed reconciliation workbook.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
+    { key: 'csv', label: 'Liability data (.csv)', description: 'Flat liability totals for analysis.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
+  ];
 
   const periodLabel = quarter ? `Q${quarter} ${year}` : `${year} Full Year`;
 
@@ -1518,11 +1628,9 @@ function EmployerLiabilityPanel() {
               </select>
             </div>
             <Button onClick={loadReport} disabled={loading}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Report'}
             </Button>
-            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
-              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-            </Button>
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingCsv} />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -1606,6 +1714,7 @@ function QuarterlyCompliancePacketPanel() {
   const [year, setYear] = useState(currentYear);
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSwica, setExportingSwica] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
@@ -1637,6 +1746,19 @@ function QuarterlyCompliancePacketPanel() {
       setError(extractErrorMessage(err));
     } finally {
       setExportingXlsx(false);
+    }
+  }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.quarterlyCompliancePacketPdf(year, quarter);
+      triggerDownload(blob, filename || `quarterly_compliance_packet_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
     }
   }
 
@@ -1676,6 +1798,32 @@ function QuarterlyCompliancePacketPanel() {
   }
 
   const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
+  const exportFormats: ReportDownloadFormat[] = [
+    {
+      key: 'pdf',
+      label: 'Combined compliance packet (.pdf)',
+      description: 'Summary and official filing forms in one review-ready PDF.',
+      kind: 'pdf',
+      loading: exportingPdf,
+      onSelect: downloadPdf,
+    },
+    {
+      key: 'xlsx',
+      label: 'Reconciliation workbook (.xlsx)',
+      description: 'Detailed source schedules and tie-outs for accountants.',
+      kind: 'spreadsheet',
+      loading: exportingXlsx,
+      onSelect: downloadXlsx,
+    },
+    {
+      key: 'swica',
+      label: 'SWICA upload file (.txt)',
+      description: 'Fixed-width filing upload; available when validation passes.',
+      kind: 'filing',
+      loading: exportingSwica,
+      onSelect: downloadSwicaAscii,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -1716,11 +1864,9 @@ function QuarterlyCompliancePacketPanel() {
               </select>
             </div>
             <Button onClick={loadReport} disabled={loading}>
-              {loading ? 'Loading...' : 'Generate Packet'}
+              {loading ? 'Loading...' : 'View Packet'}
             </Button>
-            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
-              {exportingXlsx ? 'Exporting...' : 'Download Excel'}
-            </Button>
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx || exportingSwica} />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -2238,6 +2384,7 @@ function Form941GuPanel() {
   const [year, setYear] = useState(currentYear);
   const [quarter, setQuarter] = useState(currentQuarter);
   const [loading, setLoading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<Form941GuReport | null>(null);
@@ -2268,6 +2415,24 @@ function Form941GuPanel() {
       setExportingXlsx(false);
     }
   }
+
+  async function downloadPdf() {
+    setExportingPdf(true);
+    setError(null);
+    try {
+      const { blob, filename } = await reportsApi.form941GuPdf(year, quarter);
+      triggerDownload(blob, filename || `federal_form_941_${year}_q${quarter}.pdf`);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setExportingPdf(false);
+    }
+  }
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'Official Form 941 (.pdf)', description: 'Filled official federal form for review and filing.', kind: 'filing', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'xlsx', label: '941 worksheet (.xlsx)', description: 'Supporting calculations and liability schedules.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
+  ];
 
   const fmtOrPlaceholder = (v: number | null) => v != null ? fmt(v) : '—';
 
@@ -2312,11 +2477,9 @@ function Form941GuPanel() {
               </select>
             </div>
             <Button onClick={loadReport} disabled={loading}>
-              {loading ? 'Loading…' : 'Generate Report'}
+              {loading ? 'Loading…' : 'View Worksheet'}
             </Button>
-            <Button variant="outline" onClick={downloadXlsx} disabled={loading || exportingXlsx}>
-              {exportingXlsx ? 'Exporting…' : 'Download Excel'}
-            </Button>
+            <ReportDownloadMenu formats={exportFormats} disabled={loading || exportingPdf || exportingXlsx} />
           </div>
           {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         </CardContent>
@@ -2612,6 +2775,7 @@ function Form1099NecPanel() {
   const [loading, setLoading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadReport = async () => {
@@ -2657,6 +2821,25 @@ function Form1099NecPanel() {
     }
   };
 
+  const downloadCsv = async () => {
+    setExportingCsv(true);
+    setError(null);
+    try {
+      const blobData = await reportsApi.form1099NecCsv(year);
+      triggerDownload(blobData.blob, blobData.filename || `1099-NEC_${year}.csv`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export CSV');
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
+  const exportFormats: ReportDownloadFormat[] = [
+    { key: 'pdf', label: 'PDF report (.pdf)', description: 'Review-ready contractor summary.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Contractor detail and filing totals.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
+    { key: 'csv', label: 'Contractor data (.csv)', description: 'Flat contractor compensation data.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
+  ];
+
   return (
     <div className="space-y-6">
       <Card>
@@ -2681,17 +2864,10 @@ function Form1099NecPanel() {
               </select>
             </div>
             <Button onClick={loadReport} disabled={loading}>
-              {loading ? 'Loading...' : 'Generate 1099-NEC Report'}
+              {loading ? 'Loading...' : 'View 1099-NEC Report'}
             </Button>
             {report && (
-              <>
-                <Button variant="outline" onClick={downloadPdf} disabled={exportingPdf || exportingXlsx}>
-                  {exportingPdf ? 'Exporting...' : 'Download PDF'}
-                </Button>
-                <Button variant="outline" onClick={downloadXlsx} disabled={exportingPdf || exportingXlsx}>
-                  {exportingXlsx ? 'Exporting...' : 'Download Excel'}
-                </Button>
-              </>
+              <ReportDownloadMenu formats={exportFormats} disabled={exportingPdf || exportingXlsx || exportingCsv} />
             )}
           </div>
         </CardContent>
@@ -2832,7 +3008,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Pay date quarter',
     frequency: 'Quarterly',
-    outputs: ['Packet', 'Excel', 'Official PDFs'],
+    outputs: ['On-screen', 'Combined PDF', 'Excel', 'Official filing files'],
     cta: 'Open packet',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />),
@@ -2844,7 +3020,7 @@ const reports: ReportDefinition[] = [
     category: 'payroll',
     basis: 'Pay period',
     frequency: 'Each run',
-    outputs: ['PDF', 'CSV', 'Excel'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Select pay period',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />),
@@ -2856,7 +3032,7 @@ const reports: ReportDefinition[] = [
     category: 'payroll',
     basis: 'Pay-date range',
     frequency: 'Any period',
-    outputs: ['Excel', 'On-screen'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Choose period',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />),
@@ -2868,7 +3044,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Quarter or range',
     frequency: 'Any period',
-    outputs: ['PDF', 'CSV', 'Excel'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Review taxes',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />),
   },
@@ -2879,7 +3055,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Quarter',
     frequency: 'Quarterly',
-    outputs: ['Excel', 'On-screen'],
+    outputs: ['On-screen', 'Official PDF', 'Excel'],
     cta: 'Open 941',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />),
   },
@@ -2890,7 +3066,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Pay date',
     frequency: 'Monthly/Quarterly',
-    outputs: ['Excel', 'On-screen'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Open liability',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.7 0-3 .9-3 2s1.3 2 3 2 3 .9 3 2-1.3 2-3 2m0-8c1.1 0 2.1.4 2.6 1M12 8V7m0 1v8m0 0v1m0-1c-1.1 0-2.1-.4-2.6-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />),
   },
@@ -2901,7 +3077,7 @@ const reports: ReportDefinition[] = [
     category: 'people',
     basis: 'Employee',
     frequency: 'As needed',
-    outputs: ['Excel', 'On-screen'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Choose employee',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />),
   },
@@ -2912,7 +3088,7 @@ const reports: ReportDefinition[] = [
     category: 'checks',
     basis: 'Check date',
     frequency: 'As needed',
-    outputs: ['PDF', 'On-screen'],
+    outputs: ['On-screen', 'CSV'],
     cta: 'Review checks',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14h6m-7 4h8M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2zm2 4h6" />),
   },
@@ -2923,7 +3099,7 @@ const reports: ReportDefinition[] = [
     category: 'annual',
     basis: 'Calendar year',
     frequency: 'Annual',
-    outputs: ['PDF', 'CSV', 'Excel'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Prepare W-2GU',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />),
   },
@@ -2934,7 +3110,7 @@ const reports: ReportDefinition[] = [
     category: 'annual',
     basis: 'Calendar year',
     frequency: 'Annual',
-    outputs: ['PDF', 'Excel'],
+    outputs: ['On-screen', 'PDF', 'Excel', 'CSV'],
     cta: 'Prepare 1099s',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.4-1.9M17 20H7m10 0v-2c0-.7-.1-1.3-.4-1.9M7 20H2v-2a3 3 0 015.4-1.9M7 20v-2c0-.7.1-1.3.4-1.9m0 0a5 5 0 019.2 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />),
   },
@@ -3170,6 +3346,9 @@ export function Reports() {
                 <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-neutral-950 text-balance">Everything payroll teams need to file, reconcile, and review.</h2>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-600">
                   Search the report library, open a focused setup panel, and export packet-ready payroll records. Report basis and output formats are shown up front so operators know exactly what they are running.
+                </p>
+                <p className="mt-3 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-800">
+                  View reports in Cornerstone first. Export only when you need to share, print, file, or analyze.
                 </p>
               </div>
               <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm shadow-primary-100/70">
