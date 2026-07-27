@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider, usePostHog } from 'posthog-js/react';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 const POSTHOG_KEY = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
 const POSTHOG_HOST =
