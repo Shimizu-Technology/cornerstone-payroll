@@ -28,4 +28,26 @@ RSpec.describe TabularReportCsvExporter do
       [ "Grace Lee", "1973.4", "true" ]
     ])
   end
+
+  it "neutralizes formula-like text values before spreadsheet export" do
+    formula_like_values = [
+      "=1+1",
+      "+SUM(A1:A2)",
+      "-2+3",
+      "@cmd",
+      "\t=1+1",
+      "\r=1+1"
+    ]
+    exporter = described_class.new(
+      filename: "payroll-summary.csv",
+      sheet: {
+        name: "Employee Summary",
+        rows: [ formula_like_values + [ "Plain text" ] ]
+      }
+    )
+
+    expect(CSV.parse(exporter.generate).first).to eq(
+      formula_like_values.map { |value| "'#{value.sub(/\A[\t\r]+/, "")}" } + [ "Plain text" ]
+    )
+  end
 end

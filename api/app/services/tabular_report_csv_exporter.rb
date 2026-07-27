@@ -5,6 +5,8 @@ require "csv"
 # Produces a flat CSV from the same normalized sheet rows used by XLSX and PDF
 # report exports. Callers choose the sheet whose grain is appropriate for CSV.
 class TabularReportCsvExporter
+  FORMULA_PREFIXES = [ "=", "+", "-", "@", "\t", "\r" ].freeze
+
   attr_reader :filename
 
   def initialize(filename:, sheet:)
@@ -23,12 +25,14 @@ class TabularReportCsvExporter
   private
 
   # Report builders intentionally share their normalized rows across XLSX, PDF,
-  # and CSV. Aggregate arithmetic can leave Float values with binary transport
-  # noise such as 1973.3999999999999. Preserve useful precision while keeping
-  # the downloaded flat file clean.
+  # and CSV. Keep aggregate Floats readable and neutralize formula-like text so
+  # spreadsheet applications do not execute user-controlled report values.
   def normalize_value(value)
-    return value unless value.is_a?(Float) && value.finite?
+    return value.round(10) if value.is_a?(Float) && value.finite?
+    return value unless value.is_a?(String)
 
-    value.round(10)
+    return value unless value.start_with?(*FORMULA_PREFIXES)
+
+    "'#{value.sub(/\A[\t\r]+/, "")}"
   end
 end
