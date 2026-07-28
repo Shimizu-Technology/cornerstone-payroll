@@ -86,7 +86,8 @@ class QuarterlyCompliancePacketBuilder
       quarter_end: quarter_end.iso8601,
       period_basis: "pay_date",
       generated_at: Time.current.iso8601,
-      pay_periods_included: pay_periods.count
+      pay_periods_included: pay_periods.count,
+      document_status: "draft_not_filed"
     }
   end
 
@@ -221,13 +222,17 @@ class QuarterlyCompliancePacketBuilder
           total_wages: money(employees.sum { |row| row[:swica_wages].to_f }),
           total_tax_withheld: money(employees.sum { |row| row[:guam_withholding].to_f })
         },
-        upload_export_ready: swica_upload_validation[:ready],
-        upload_export_note: swica_upload_validation[:message],
-        upload_validation_errors: swica_upload_validation[:errors],
+        filing_upload_supported: false,
+        filing_upload_note: "Cornerstone does not yet generate the complete GuamTax SWICA upload sequence (A, B, W, T, and F records). Use the SW-2 review form or enter the return in GuamTax.",
+        wage_record_export_ready: swica_upload_validation[:ready],
+        wage_record_export_note: swica_upload_validation[:ready] ?
+          "Code W wage-detail records are available for accountant review. This draft is not a complete GuamTax filing upload." :
+          swica_upload_validation[:message],
+        wage_record_validation_errors: swica_upload_validation[:errors],
         filing_steps: [
           "Log in to GuamTax.com.",
           "Choose Quarterly, then SWICA (SW-2).",
-          "Use File SWICA for manual entry or Upload SWICA once an upload file is generated.",
+          "Use File SWICA for manual entry. Cornerstone's text export contains Code W wage-detail records only and is not a complete filing upload.",
           "Confirm employee count, total wages, and total tax withheld against this worksheet.",
           "Record the filing confirmation and attach proof in Cornerstone Payroll."
         ],
@@ -362,9 +367,9 @@ class QuarterlyCompliancePacketBuilder
       href: "/pay-periods"
     )
     checks << review_check(
-      "swica_upload_ready",
+      "swica_wage_records_ready",
       swica_upload_validation[:ready],
-      "SWICA upload export has the required employee identifiers and filing fields.",
+      "SWICA Code W wage-detail draft has the required employee identifiers and fields. It is not a complete filing upload.",
       details: { errors: swica_upload_validation[:errors].first(5).join("; ").presence || "none" },
       href: "/employees"
     )
@@ -421,7 +426,9 @@ class QuarterlyCompliancePacketBuilder
       {
         ready: errors.empty?,
         errors: errors,
-        message: errors.empty? ? "SWICA ASCII wage upload can be generated for GuamTax review." : "Fix employee SSN/address issues before generating the SWICA upload file."
+        message: errors.empty? ?
+          "SWICA Code W wage-detail records can be generated for accountant review. They are not a complete filing upload." :
+          "Fix employee SSN/address issues before generating the SWICA Code W wage-record draft."
       }
     end
   end

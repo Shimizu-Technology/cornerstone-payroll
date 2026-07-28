@@ -4,14 +4,14 @@ require "combine_pdf"
 require "prawn"
 require "prawn/table"
 
-# Builds one review-ready quarterly packet: a Cornerstone reconciliation cover
-# followed by the actual official filing forms generated from the same packet.
+# Builds one quarterly preparation packet: a Cornerstone reconciliation cover
+# followed by draft government forms generated from the same report.
 class QuarterlyCompliancePacketPdfGenerator
   attr_reader :filename
 
   def initialize(report)
     @report = report.to_h.deep_symbolize_keys
-    @filename = "quarterly_compliance_packet_#{meta[:year]}_q#{meta[:quarter]}.pdf"
+    @filename = "quarterly_compliance_review_packet_draft_#{meta[:year]}_q#{meta[:quarter]}.pdf"
   end
 
   def generate
@@ -44,6 +44,17 @@ class QuarterlyCompliancePacketPdfGenerator
     pdf.fill_color "172033"
     pdf.move_down 88
 
+    pdf.fill_color "B42318"
+    pdf.stroke_color "F04438"
+    pdf.fill_and_stroke_rounded_rectangle [ pdf.bounds.left, pdf.cursor ], pdf.bounds.width, 38, 6
+    pdf.fill_color "FFFFFF"
+    pdf.bounding_box([ pdf.bounds.left + 12, pdf.cursor - 9 ], width: pdf.bounds.width - 24, height: 24) do
+      pdf.font_size(12) { pdf.text "DRAFT — NOT FILED", style: :bold, align: :center }
+      pdf.font_size(7.5) { pdf.text "Preparation copy only. This packet is not proof of submission, payment, or agency acceptance.", align: :center }
+    end
+    pdf.move_down 52
+    pdf.fill_color "172033"
+
     pdf.font_size(12) { pdf.text "Packet overview", style: :bold }
     pdf.move_down 6
     overview = [
@@ -74,7 +85,7 @@ class QuarterlyCompliancePacketPdfGenerator
 
     pdf.fill_color "607089"
     pdf.font_size(8) do
-      pdf.text "The following pages are the official Form 941#{' and Schedule B' if @report.dig(:federal_941, :deposit_schedule, :schedule_b_required)}, Guam W-1, and Guam SW-2/SWICA forms generated from this same report snapshot."
+      pdf.text "The following pages are draft Form 941#{' and Schedule B' if @report.dig(:federal_941, :deposit_schedule, :schedule_b_required)}, Guam W-1, and Guam SW-2/SWICA preparation copies generated from the same committed payroll data. Review all fields and file through the appropriate agency channel."
     end
     pdf.render
   end

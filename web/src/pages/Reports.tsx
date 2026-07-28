@@ -134,7 +134,7 @@ function PayrollRegisterPanel() {
       key: 'xlsx',
       label: 'Excel register (.xlsx)',
       description: 'CEO-facing register with split tips and review details.',
-      kind: 'data',
+      kind: 'spreadsheet',
       loading: exportingXlsx,
       onSelect: downloadXlsx,
     },
@@ -150,7 +150,7 @@ function PayrollRegisterPanel() {
       key: 'csv',
       label: 'Data export (.csv)',
       description: 'Raw payroll register rows for data workflows.',
-      kind: 'spreadsheet',
+      kind: 'data',
       loading: exportingCsv,
       onSelect: downloadCsv,
     },
@@ -1530,7 +1530,7 @@ function EmployerLiabilityPanel() {
     setError(null);
     setReport(null);
     try {
-      const res = await reportsApi.taxSummary({ year, quarter });
+      const res = await reportsApi.employerLiability({ year, quarter });
       setReport(res.report);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1543,7 +1543,7 @@ function EmployerLiabilityPanel() {
     setExportingXlsx(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryXlsx({ year, quarter });
+      const { blob, filename } = await reportsApi.employerLiabilityXlsx({ year, quarter });
       triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.xlsx`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1556,7 +1556,7 @@ function EmployerLiabilityPanel() {
     setExportingPdf(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryPdf({ year, quarter });
+      const { blob, filename } = await reportsApi.employerLiabilityPdf({ year, quarter });
       triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1569,7 +1569,7 @@ function EmployerLiabilityPanel() {
     setExportingCsv(true);
     setError(null);
     try {
-      const { blob, filename } = await reportsApi.taxSummaryCsv({ year, quarter });
+      const { blob, filename } = await reportsApi.employerLiabilityCsv({ year, quarter });
       triggerDownload(blob, filename || `employer_liability_${year}${quarter ? `_q${quarter}` : ''}.csv`);
     } catch (err) {
       setError(extractErrorMessage(err));
@@ -1717,6 +1717,7 @@ function QuarterlyCompliancePacketPanel() {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingXlsx, setExportingXlsx] = useState(false);
   const [exportingSwica, setExportingSwica] = useState(false);
+  const [startingWorkflow, setStartingWorkflow] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [reviewFormType, setReviewFormType] = useState<QuarterlyOfficialFormType | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1754,7 +1755,7 @@ function QuarterlyCompliancePacketPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketPdf(year, quarter);
-      triggerDownload(blob, filename || `quarterly_compliance_packet_${year}_q${quarter}.pdf`);
+      triggerDownload(blob, filename || `quarterly_compliance_review_packet_draft_${year}_q${quarter}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1767,7 +1768,7 @@ function QuarterlyCompliancePacketPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.quarterlyCompliancePacketSwicaAscii(year, quarter);
-      triggerDownload(blob, filename || `swica_${year}_q${quarter}.txt`);
+      triggerDownload(blob, filename || `swica_wage_records_draft_${year}_q${quarter}.txt`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -1797,12 +1798,25 @@ function QuarterlyCompliancePacketPanel() {
     }
   }
 
+  async function startWorkflow() {
+    setStartingWorkflow(true);
+    setError(null);
+    try {
+      const res = await reportsApi.startQuarterlyCompliancePacketWorkflow(year, quarter);
+      setReport(res.report);
+    } catch (err) {
+      setError(extractErrorMessage(err));
+    } finally {
+      setStartingWorkflow(false);
+    }
+  }
+
   const reviewNeedsAttention = report?.review_checks.filter((check) => check.status !== 'ok').length ?? 0;
   const exportFormats: ReportDownloadFormat[] = [
     {
       key: 'pdf',
-      label: 'Combined compliance packet (.pdf)',
-      description: 'Summary and official filing forms in one review-ready PDF.',
+      label: 'Compliance review packet — draft (.pdf)',
+      description: 'Summary and draft forms marked not filed; not proof of submission.',
       kind: 'pdf',
       loading: exportingPdf,
       onSelect: downloadPdf,
@@ -1817,9 +1831,9 @@ function QuarterlyCompliancePacketPanel() {
     },
     {
       key: 'swica',
-      label: 'SWICA upload file (.txt)',
-      description: 'Fixed-width filing upload; available when validation passes.',
-      kind: 'filing',
+      label: 'SWICA Code W wage records — draft (.txt)',
+      description: 'Wage-detail review file only; not a complete GuamTax upload.',
+      kind: 'data',
       loading: exportingSwica,
       onSelect: downloadSwicaAscii,
     },
@@ -1831,7 +1845,7 @@ function QuarterlyCompliancePacketPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Quarterly Compliance Packet</CardTitle>
           <CardDescription>
-            Pay-date based Guam and federal filing packet for Form 500, W-1, SWICA, Federal Form 941, and tie-out review.
+            Pay-date based Guam and federal preparation packet for Form 500, W-1, SWICA, Federal Form 941, and tie-out review.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -1874,6 +1888,12 @@ function QuarterlyCompliancePacketPanel() {
 
       {report && (
         <>
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-900" role="status">
+            <p className="font-semibold">Draft — not filed</p>
+            <p className="mt-1 text-sm text-red-800">
+              Cornerstone prepares review copies from committed payroll. These reports do not prove agency submission, payment, or acceptance.
+            </p>
+          </div>
           <Card>
             <CardHeader>
               <CardTitle>{report.meta.company_name} - {report.meta.quarter_label}</CardTitle>
@@ -1957,11 +1977,27 @@ function QuarterlyCompliancePacketPanel() {
             </Card>
           )}
 
+          {!report.workflow && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Quarterly Filing Workflow</CardTitle>
+                <CardDescription>
+                  Viewing and exporting are read-only. Start a workflow only when you are ready to track filing and payment status for this quarter.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button onClick={startWorkflow} disabled={startingWorkflow}>
+                  {startingWorkflow ? 'Starting...' : 'Start Filing Workflow'}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Official Forms</CardTitle>
+              <CardTitle className="text-base">Draft Government Forms</CardTitle>
               <CardDescription>
-                Review editable values first, then preview the official PDF before printing or downloading. Guam W-1 and SWICA still need to be filed in GuamTax.
+                Review editable values first, then preview the draft PDF. Every generated form is marked not filed and still requires filing through the appropriate agency channel.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1993,19 +2029,23 @@ function QuarterlyCompliancePacketPanel() {
                 <Button
                   variant="outline"
                   onClick={downloadSwicaAscii}
-                  disabled={exportingSwica || !report.swica.upload_export_ready}
-                  title={report.swica.upload_export_note}
+                  disabled={exportingSwica || !report.swica.wage_record_export_ready}
+                  title={report.swica.wage_record_export_note}
                 >
-                  {exportingSwica ? 'Exporting...' : 'Download SWICA Upload'}
+                  {exportingSwica ? 'Exporting...' : 'Download Wage Records Draft'}
                 </Button>
               </div>
-              {!report.swica.upload_export_ready && (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <p className="font-semibold">SWICA text export is not a filing upload.</p>
+                <p className="mt-1">{report.swica.filing_upload_note}</p>
+              </div>
+              {!report.swica.wage_record_export_ready && (
                 <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  <p className="font-semibold">SWICA upload is not ready yet.</p>
-                  <p className="mt-1">{report.swica.upload_export_note}</p>
-                  {report.swica.upload_validation_errors?.length ? (
+                  <p className="font-semibold">SWICA wage-record draft is not ready yet.</p>
+                  <p className="mt-1">{report.swica.wage_record_export_note}</p>
+                  {report.swica.wage_record_validation_errors?.length ? (
                     <ul className="mt-2 list-disc space-y-1 pl-5">
-                      {report.swica.upload_validation_errors.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
+                      {report.swica.wage_record_validation_errors.slice(0, 5).map((issue) => <li key={issue}>{issue}</li>)}
                     </ul>
                   ) : null}
                 </div>
@@ -2267,8 +2307,8 @@ function QuarterlyOfficialFormModal({
         <div className="flex h-[94vh] max-h-[94vh] w-[min(1600px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
           <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-6">
             <div>
-              <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Official Form'}</h2>
-              <p className="mt-1 text-sm text-gray-500">Review and adjust the filing values, then preview the official PDF before downloading or printing.</p>
+              <h2 className="text-2xl font-semibold text-gray-900">{fields?.title || 'Government Form'} — Draft</h2>
+              <p className="mt-1 text-sm text-gray-500">Review and adjust the preparation values, then preview the PDF marked not filed before downloading or printing.</p>
             </div>
             <Button variant="outline" onClick={onClose}>Close</Button>
           </div>
@@ -2421,7 +2461,7 @@ function Form941GuPanel() {
     setError(null);
     try {
       const { blob, filename } = await reportsApi.form941GuPdf(year, quarter);
-      triggerDownload(blob, filename || `federal_form_941_${year}_q${quarter}.pdf`);
+      triggerDownload(blob, filename || `federal_form_941_draft_${year}_q${quarter}.pdf`);
     } catch (err) {
       setError(extractErrorMessage(err));
     } finally {
@@ -2430,7 +2470,7 @@ function Form941GuPanel() {
   }
 
   const exportFormats: ReportDownloadFormat[] = [
-    { key: 'pdf', label: 'Official Form 941 (.pdf)', description: 'Filled official federal form for review and filing.', kind: 'filing', loading: exportingPdf, onSelect: downloadPdf },
+    { key: 'pdf', label: 'Draft Form 941 (.pdf)', description: 'Preparation copy marked not filed; complete all blockers before filing.', kind: 'pdf', loading: exportingPdf, onSelect: downloadPdf },
     { key: 'xlsx', label: '941 worksheet (.xlsx)', description: 'Supporting calculations and liability schedules.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
   ];
 
@@ -2487,6 +2527,13 @@ function Form941GuPanel() {
 
       {report && (
         <>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950">
+            <p className="font-semibold">Preparation copy — not filing ready</p>
+            <p className="mt-1 text-sm">{report.filing_readiness.message}</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+              {report.filing_readiness.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+            </ul>
+          </div>
           <Card>
             <CardHeader>
               <CardTitle>Federal Form 941 — {report.meta.quarter_label}</CardTitle>
@@ -3008,7 +3055,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Pay date quarter',
     frequency: 'Quarterly',
-    outputs: ['On-screen', 'Combined PDF', 'Excel', 'Official filing files'],
+    outputs: ['On-screen', 'Draft review PDF', 'Excel', 'Draft forms', 'Code W wage draft'],
     cta: 'Open packet',
     featured: true,
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5h6m-6 4h6m-6 4h3m-6 8h12a2 2 0 002-2V7.5L14.5 3H6a2 2 0 00-2 2v14a2 2 0 002 2z" />),
@@ -3055,7 +3102,7 @@ const reports: ReportDefinition[] = [
     category: 'tax-compliance',
     basis: 'Quarter',
     frequency: 'Quarterly',
-    outputs: ['On-screen', 'Official PDF', 'Excel'],
+    outputs: ['On-screen', 'Draft PDF', 'Excel'],
     cta: 'Open 941',
     icon: reportIcon(<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />),
   },

@@ -52,6 +52,7 @@ class OfficialPdfOverlay
     page_count.times do |index|
       pdf.start_new_page(page_size: page_sizes.fetch(index, page_sizes.first), margin: 0) if index.positive?
       draw_page(pdf, index + 1)
+      draw_document_status(pdf, index + 1)
     end
 
     pdf.render
@@ -59,6 +60,10 @@ class OfficialPdfOverlay
 
   def draw_page(_pdf, _page_number)
     raise NotImplementedError
+  end
+
+  def draw_document_status(_pdf, _page_number)
+    # Optional hook for overlays that need a visible review/filing status.
   end
 
   def draw_text_box(pdf, rect, content, size: 9, align: :left, valign: :center, leading: 0, min_font_size: nil)

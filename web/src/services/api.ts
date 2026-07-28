@@ -1663,6 +1663,12 @@ export interface Form941GuReport {
     pay_periods_included: number;
     caveats: string[];
   };
+  filing_readiness: {
+    status: 'draft';
+    ready_to_file: false;
+    message: string;
+    blockers: string[];
+  };
   employer_info: {
     name: string;
     ein: string;
@@ -1739,6 +1745,7 @@ export interface QuarterlyCompliancePacketReport {
     quarter_end: string;
     period_basis: string;
     pay_periods_included: number;
+    document_status: 'draft_not_filed';
   };
   due_dates: {
     official_due_date: string;
@@ -1835,9 +1842,11 @@ export interface QuarterlyCompliancePacketReport {
       pay_dates: string[];
     }[];
     totals: { employee_count: number; total_wages: number; total_tax_withheld: number };
-    upload_export_ready: boolean;
-    upload_export_note: string;
-    upload_validation_errors?: string[];
+    filing_upload_supported: false;
+    filing_upload_note: string;
+    wage_record_export_ready: boolean;
+    wage_record_export_note: string;
+    wage_record_validation_errors?: string[];
     tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
     filing_steps: string[];
   };
@@ -1952,8 +1961,18 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/tax_summary_pdf', params),
   taxSummaryXlsx: (params: PayrollReportPeriodParams & { quarter?: number }) =>
     api.getBlobWithParams('/admin/reports/tax_summary_xlsx', params),
+  employerLiability: (params: PayrollReportPeriodParams & { quarter?: number } = {}) =>
+    api.get<TaxSummaryReport>('/admin/reports/employer_liability', params),
+  employerLiabilityCsv: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_csv', params),
+  employerLiabilityPdf: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_pdf', params),
+  employerLiabilityXlsx: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_xlsx', params),
   quarterlyCompliancePacket: (year: number, quarter: number) =>
     api.get<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet', { year, quarter }),
+  startQuarterlyCompliancePacketWorkflow: (year: number, quarter: number) =>
+    api.post<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet_workflow', { year, quarter }),
   quarterlyCompliancePacketXlsx: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_xlsx', { year, quarter }),
   quarterlyCompliancePacketPdf: (year: number, quarter: number) =>

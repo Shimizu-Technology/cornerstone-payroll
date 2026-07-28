@@ -112,6 +112,17 @@ RSpec.describe Form941GuAggregator do
       end
     end
 
+    describe "filing readiness" do
+      it "identifies the generated form as a draft with explicit blockers" do
+        readiness = report[:filing_readiness]
+
+        expect(readiness[:status]).to eq("draft")
+        expect(readiness[:ready_to_file]).to eq(false)
+        expect(readiness[:blockers]).to include(a_string_matching(/deposits/i))
+        expect(readiness[:blockers]).to include(a_string_matching(/signer/i))
+      end
+    end
+
     describe "lines section" do
       let(:lines) { report[:lines] }
 
