@@ -1516,7 +1516,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
                         </>
                       )}
                     </Button>
-                    <ReportDownloadMenu formats={downloadFormats} buttonLabel="Download" />
+                    <ReportDownloadMenu formats={downloadFormats} />
                   </div>
                 </div>
               );

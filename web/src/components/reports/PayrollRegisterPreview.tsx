@@ -598,7 +598,7 @@ export function PayrollRegisterPreviewModal({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <ReportDownloadMenu formats={downloadFormats} disabled={loading || !report} buttonLabel="Download" />
+            <ReportDownloadMenu formats={downloadFormats} disabled={loading || !report} />
             <Button type="button" variant="ghost" size="sm" onClick={onClose} className="px-2 text-white hover:bg-white/10 hover:text-white" aria-label="Close payroll register preview">
               <X className="h-4 w-4" />
             </Button>

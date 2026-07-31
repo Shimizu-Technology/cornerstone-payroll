@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider } from '@/contexts/CompanyContext';

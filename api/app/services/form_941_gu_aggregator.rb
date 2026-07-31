@@ -156,6 +156,16 @@ class Form941GuAggregator
           "Only 'committed' pay periods with pay_date in the quarter are included."
         ]
       },
+      filing_readiness: {
+        status: "draft",
+        ready_to_file: false,
+        message: "Preparation copy only. Complete and verify adjustments, credits, deposits, balance due or overpayment, and signer/preparer fields before filing.",
+        blockers: [
+          "Lines 8–9 adjustments require manual review.",
+          "Lines 11–14 credits, deposits, and balance require federal deposit records.",
+          "Signer and paid-preparer sections are not completed by Cornerstone."
+        ]
+      },
       employer_info: {
         name:    company.name,
         ein:     company.ein,

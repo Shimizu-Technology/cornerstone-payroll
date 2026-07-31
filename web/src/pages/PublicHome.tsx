@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   Users2,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 
 const runSteps = [

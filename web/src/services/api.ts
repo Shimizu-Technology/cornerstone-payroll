@@ -1663,6 +1663,12 @@ export interface Form941GuReport {
     pay_periods_included: number;
     caveats: string[];
   };
+  filing_readiness: {
+    status: 'draft';
+    ready_to_file: false;
+    message: string;
+    blockers: string[];
+  };
   employer_info: {
     name: string;
     ein: string;
@@ -1739,6 +1745,7 @@ export interface QuarterlyCompliancePacketReport {
     quarter_end: string;
     period_basis: string;
     pay_periods_included: number;
+    document_status: 'draft_not_filed';
   };
   due_dates: {
     official_due_date: string;
@@ -1835,9 +1842,11 @@ export interface QuarterlyCompliancePacketReport {
       pay_dates: string[];
     }[];
     totals: { employee_count: number; total_wages: number; total_tax_withheld: number };
-    upload_export_ready: boolean;
-    upload_export_note: string;
-    upload_validation_errors?: string[];
+    filing_upload_supported: false;
+    filing_upload_note: string;
+    wage_record_export_ready: boolean;
+    wage_record_export_note: string;
+    wage_record_validation_errors?: string[];
     tie_out: { label: string; expected: number; actual: number; difference: number; status: string };
     filing_steps: string[];
   };
@@ -1939,6 +1948,10 @@ export const reportsApi = {
     } }>('/admin/reports/employee_pay_history', { employee_id: employeeId, ...period }),
   employeePayHistoryXlsx: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
     api.getBlobWithParams('/admin/reports/employee_pay_history_xlsx', { employee_id: employeeId, ...period }),
+  employeePayHistoryPdf: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/admin/reports/employee_pay_history_pdf', { employee_id: employeeId, ...period }),
+  employeePayHistoryCsv: (employeeId: number, period: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/admin/reports/employee_pay_history_csv', { employee_id: employeeId, ...period }),
   taxSummary: (params: PayrollReportPeriodParams & { quarter?: number } = {}) =>
     api.get<TaxSummaryReport>('/admin/reports/tax_summary', params),
   // CPR-70: Tax Summary exports
@@ -1948,10 +1961,22 @@ export const reportsApi = {
     api.getBlobWithParams('/admin/reports/tax_summary_pdf', params),
   taxSummaryXlsx: (params: PayrollReportPeriodParams & { quarter?: number }) =>
     api.getBlobWithParams('/admin/reports/tax_summary_xlsx', params),
+  employerLiability: (params: PayrollReportPeriodParams & { quarter?: number } = {}) =>
+    api.get<TaxSummaryReport>('/admin/reports/employer_liability', params),
+  employerLiabilityCsv: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_csv', params),
+  employerLiabilityPdf: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_pdf', params),
+  employerLiabilityXlsx: (params: PayrollReportPeriodParams & { quarter?: number }) =>
+    api.getBlobWithParams('/admin/reports/employer_liability_xlsx', params),
   quarterlyCompliancePacket: (year: number, quarter: number) =>
     api.get<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet', { year, quarter }),
+  startQuarterlyCompliancePacketWorkflow: (year: number, quarter: number) =>
+    api.post<{ report: QuarterlyCompliancePacketReport }>('/admin/reports/quarterly_compliance_packet_workflow', { year, quarter }),
   quarterlyCompliancePacketXlsx: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_xlsx', { year, quarter }),
+  quarterlyCompliancePacketPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_pdf', { year, quarter }),
   quarterlyCompliancePacketForm941Pdf: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/quarterly_compliance_packet_form_941_pdf', { year, quarter }),
   quarterlyCompliancePacketScheduleBPdf: (year: number, quarter: number) =>
@@ -1974,6 +1999,10 @@ export const reportsApi = {
     api.get<YtdSummaryReport>('/admin/reports/ytd_summary', params),
   ytdSummaryXlsx: (params?: YtdSummaryParams) =>
     api.getBlobWithParams('/admin/reports/ytd_summary_xlsx', params),
+  ytdSummaryPdf: (params?: YtdSummaryParams) =>
+    api.getBlobWithParams('/admin/reports/ytd_summary_pdf', params),
+  ytdSummaryCsv: (params?: YtdSummaryParams) =>
+    api.getBlobWithParams('/admin/reports/ytd_summary_csv', params),
   // CPR-68: W-2GU Annual Report
   w2Gu: (year: number) =>
     api.get<W2GuReportResponse>('/admin/reports/w2_gu', { year }),
@@ -1995,11 +2024,15 @@ export const reportsApi = {
     api.get<{ report: Form941GuReport }>('/admin/reports/form_941_gu', { year, quarter }),
   form941GuXlsx: (year: number, quarter: number) =>
     api.getBlobWithParams('/admin/reports/form_941_gu_xlsx', { year, quarter }),
+  form941GuPdf: (year: number, quarter: number) =>
+    api.getBlobWithParams('/admin/reports/form_941_gu_pdf', { year, quarter }),
   // 1099-NEC Annual Report
   form1099Nec: (year: number) =>
     api.get('/admin/reports/form_1099_nec', { year }),
   form1099NecPdf: (year: number) =>
     api.getBlobWithParams('/admin/reports/form_1099_nec_pdf', { year }),
+  form1099NecCsv: (year: number) =>
+    api.getBlobWithParams('/admin/reports/form_1099_nec_csv', { year }),
   form1099NecXlsx: (year: number) =>
     api.getBlobWithParams('/admin/reports/form_1099_nec_xlsx', { year }),
   // Payroll parity reports
@@ -2081,10 +2114,20 @@ export const clientReportsApi = {
     api.get<DashboardResponse>('/client/reports/dashboard'),
   payrollRegister: (payPeriodId: number) =>
     api.get<PayrollRegisterReport>('/client/reports/payroll_register', { pay_period_id: payPeriodId }),
+  payrollRegisterCsv: (payPeriodId: number) =>
+    api.getBlobWithParams('/client/reports/payroll_register_csv', { pay_period_id: payPeriodId }),
   payrollRegisterPdf: (payPeriodId: number) =>
     api.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
+  payrollRegisterXlsx: (payPeriodId: number) =>
+    api.getBlobWithParams('/client/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
   ytdSummary: (params: PayrollReportPeriodParams = {}) =>
     api.get<YtdSummaryReport>('/client/reports/ytd_summary', params),
+  ytdSummaryCsv: (params: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/client/reports/ytd_summary_csv', params),
+  ytdSummaryPdf: (params: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/client/reports/ytd_summary_pdf', params),
+  ytdSummaryXlsx: (params: PayrollReportPeriodParams = {}) =>
+    api.getBlobWithParams('/client/reports/ytd_summary_xlsx', params),
 };
 
 export interface TransmittalCustomEntry {

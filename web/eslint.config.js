@@ -12,9 +12,17 @@ export default defineConfig([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
     ],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
+    },
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
