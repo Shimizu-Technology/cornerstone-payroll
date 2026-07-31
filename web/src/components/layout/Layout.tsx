@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Outlet, useOutlet } from 'react-router-dom';
+import { Outlet, useOutlet } from 'react-router';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';

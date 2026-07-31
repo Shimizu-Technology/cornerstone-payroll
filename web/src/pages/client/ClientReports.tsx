@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/reports/ReportDownloadMenu';
 import { clientPayPeriodsApi, clientReportsApi } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
@@ -19,6 +20,7 @@ export function ClientReports() {
   const [ytdSummary, setYtdSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.ytdSummary>>['report'] | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
   const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const payPeriodOptions = useMemo(
     () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: payPeriod.period_description || `${payPeriod.start_date} - ${payPeriod.end_date}` })),
@@ -73,11 +75,112 @@ export function ClientReports() {
     void loadYtdSummary();
   }, [loadYtdSummary]);
 
-  const previewBlob = (blob: Blob) => {
+  const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener,noreferrer');
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 100);
   };
+
+  const exportReport = async (
+    key: string,
+    fallbackFilename: string,
+    loader: () => Promise<{ blob: Blob; filename?: string }>
+  ) => {
+    try {
+      setExporting(key);
+      setError(null);
+      const file = await loader();
+      downloadBlob(file.blob, file.filename || fallbackFilename);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export report');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const payrollRegisterFormats: ReportDownloadFormat[] = selectedPayPeriodId ? [
+    {
+      key: 'register-pdf',
+      label: 'PDF',
+      description: 'Print-ready payroll register',
+      kind: 'pdf',
+      loading: exporting === 'register-pdf',
+      onSelect: () => exportReport(
+        'register-pdf',
+        `payroll_register_${selectedPayPeriodId}.pdf`,
+        () => clientReportsApi.payrollRegisterPdf(Number(selectedPayPeriodId))
+      ),
+    },
+    {
+      key: 'register-xlsx',
+      label: 'Excel workbook',
+      description: 'Formatted workbook for analysis',
+      kind: 'spreadsheet',
+      loading: exporting === 'register-xlsx',
+      onSelect: () => exportReport(
+        'register-xlsx',
+        `payroll_register_${selectedPayPeriodId}.xlsx`,
+        () => clientReportsApi.payrollRegisterXlsx(Number(selectedPayPeriodId))
+      ),
+    },
+    {
+      key: 'register-csv',
+      label: 'CSV data',
+      description: 'Portable payroll-register rows',
+      kind: 'data',
+      loading: exporting === 'register-csv',
+      onSelect: () => exportReport(
+        'register-csv',
+        `payroll_register_${selectedPayPeriodId}.csv`,
+        () => clientReportsApi.payrollRegisterCsv(Number(selectedPayPeriodId))
+      ),
+    },
+  ] : [];
+
+  const summaryPeriod = { start_date: startDate, end_date: endDate };
+  const summaryFormats: ReportDownloadFormat[] = [
+    {
+      key: 'summary-pdf',
+      label: 'PDF',
+      description: 'Print-ready payroll summary',
+      kind: 'pdf',
+      loading: exporting === 'summary-pdf',
+      onSelect: () => exportReport(
+        'summary-pdf',
+        `payroll_summary_${startDate}_${endDate}.pdf`,
+        () => clientReportsApi.ytdSummaryPdf(summaryPeriod)
+      ),
+    },
+    {
+      key: 'summary-xlsx',
+      label: 'Excel workbook',
+      description: 'Formatted period workbook',
+      kind: 'spreadsheet',
+      loading: exporting === 'summary-xlsx',
+      onSelect: () => exportReport(
+        'summary-xlsx',
+        `payroll_summary_${startDate}_${endDate}.xlsx`,
+        () => clientReportsApi.ytdSummaryXlsx(summaryPeriod)
+      ),
+    },
+    {
+      key: 'summary-csv',
+      label: 'CSV data',
+      description: 'Portable employee summary rows',
+      kind: 'data',
+      loading: exporting === 'summary-csv',
+      onSelect: () => exportReport(
+        'summary-csv',
+        `payroll_summary_${startDate}_${endDate}.csv`,
+        () => clientReportsApi.ytdSummaryCsv(summaryPeriod)
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -106,18 +209,13 @@ export function ClientReports() {
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" disabled={!selectedPayPeriodId} onClick={() => void loadPayrollRegister()}>
                   <Eye className="mr-2 h-4 w-4" />
-                  Refresh
+                  View Report
                 </Button>
-                <Button
-                  disabled={!selectedPayPeriodId}
-                  onClick={async () => {
-                    const file = await clientReportsApi.payrollRegisterPdf(Number(selectedPayPeriodId));
-                    previewBlob(file.blob);
-                  }}
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Preview PDF
-                </Button>
+                <ReportDownloadMenu
+                  formats={payrollRegisterFormats}
+                  disabled={!selectedPayPeriodId || exporting !== null}
+                  ariaLabel="Export payroll register"
+                />
               </div>
               {payrollRegister && (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -145,7 +243,12 @@ export function ClientReports() {
                 <input aria-label="Client report start date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
                 <span className="text-sm text-gray-500">to</span>
                 <input aria-label="Client report end date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-9 rounded-md border border-gray-300 px-3 text-sm" />
-                <Button variant="outline" onClick={() => void loadYtdSummary()}>Refresh</Button>
+                <Button variant="outline" onClick={() => void loadYtdSummary()}>View Report</Button>
+                <ReportDownloadMenu
+                  formats={summaryFormats}
+                  disabled={exporting !== null}
+                  ariaLabel="Export payroll summary"
+                />
               </div>
               <Table stickyHeader containerClassName="max-h-[26rem]">
                 <TableHeader>

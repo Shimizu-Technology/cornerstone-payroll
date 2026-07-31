@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';

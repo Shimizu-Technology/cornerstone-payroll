@@ -3,7 +3,9 @@
 class SwicaAsciiExporter
   RECORD_LENGTH = 275
 
-  # Guam DRT SWICA booklet, Code W wage record:
+  # Guam DRT SWICA booklet, Code W wage record only. This exporter intentionally
+  # does not claim to produce a filing upload because the prescribed file also
+  # requires A, B, T, and F records that Cornerstone does not yet generate.
   # - positions 78-112: "City and State or U.S. Possession" (single 35-char field)
   # - positions 113-117: Foreign Postal Code, blank for Guam/U.S. addresses
   # - positions 118-126: ZIP Code
@@ -22,7 +24,7 @@ class SwicaAsciiExporter
   end
 
   def filename
-    "swica_#{@year}_q#{@quarter}.txt"
+    "swica_wage_records_draft_#{@year}_q#{@quarter}.txt"
   end
 
   def generate

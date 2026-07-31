@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "csv"
+require "pdf/reader"
+require "roo"
 
 RSpec.describe "Api::V1::Client::Reports", type: :request do
   let!(:company) { create(:company, name: "Reports Co") }
@@ -103,6 +106,28 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response.body).to start_with("%PDF")
   end
 
+  it "exports the client payroll register in CSV and Excel from the same committed snapshot" do
+    get "/api/v1/client/reports/payroll_register_csv", params: { pay_period_id: pay_period.id }
+    expect(response).to have_http_status(:ok)
+    expect(response.content_type).to include("text/csv")
+    csv_rows = CSV.parse(response.body)
+    expect(csv_rows.flatten).to include("Ana Perez", "75.00")
+
+    get "/api/v1/client/reports/payroll_register_xlsx", params: { pay_period_id: pay_period.id }
+    expect(response).to have_http_status(:ok)
+    expect(response.content_type).to include("spreadsheetml")
+    workbook = Roo::Excelx.new(StringIO.new(response.body))
+    expect(workbook.sheets).to include("Employees", "Payroll Fields Detail", "Payroll Fields Totals")
+  end
+
+  it "does not export a draft payroll register to client users" do
+    %w[payroll_register_csv payroll_register_pdf payroll_register_xlsx].each do |action|
+      get "/api/v1/client/reports/#{action}", params: { pay_period_id: draft_pay_period.id }
+
+      expect(response).to have_http_status(:not_found), "expected #{action} to reject a draft pay period"
+    end
+  end
+
   it "limits ytd summary to committed pay periods" do
     get "/api/v1/client/reports/ytd_summary", params: { year: 2026 }
 
@@ -124,5 +149,26 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
       "source" => "manual"
     )
     expect(report.dig("payroll_fields", "entries", 0, "amount").to_f).to eq(75.0)
+  end
+
+  it "exports the client payroll summary as PDF, Excel, and CSV with matching totals" do
+    get "/api/v1/client/reports/ytd_summary_csv", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    csv_rows = CSV.parse(response.body)
+    ana_row = csv_rows.find { |row| row.include?("Ana Perez") }
+    expect(ana_row).to include("1450.0")
+
+    get "/api/v1/client/reports/ytd_summary_xlsx", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    workbook = Roo::Excelx.new(StringIO.new(response.body))
+    expect(workbook.sheets).to include("Payroll Summary", "Company Totals", "Payroll Field Activity")
+
+    get "/api/v1/client/reports/ytd_summary_pdf", params: { year: 2026 }
+    expect(response).to have_http_status(:ok)
+    reader = PDF::Reader.new(StringIO.new(response.body))
+    text = reader.pages.map(&:text).join("\n")
+    expect(text).to include("Payroll Summary by Period")
+    expect(text).to include("Ana Perez")
+    expect(text).to include("Rent Deduction")
   end
 end

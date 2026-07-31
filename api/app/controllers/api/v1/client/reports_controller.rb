@@ -6,7 +6,12 @@ module Api
       class ReportsController < Api::V1::Admin::ReportsController
         skip_before_action :require_staff_access!
         before_action :require_client_portal_access!
-        before_action :ensure_client_reportable_pay_period!, only: [ :payroll_register, :payroll_register_pdf ]
+        before_action :ensure_client_reportable_pay_period!, only: %i[
+          payroll_register
+          payroll_register_csv
+          payroll_register_pdf
+          payroll_register_xlsx
+        ]
 
         def ytd_summary
           render json: { report: build_period_summary_report(payroll_reporting_period) }

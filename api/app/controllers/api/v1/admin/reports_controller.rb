@@ -114,18 +114,38 @@ module Api
         end
 
         def employee_pay_history_xlsx
-          employee = Employee.find(params[:employee_id])
-
-          unless employee.company_id == current_company_id
-            return render json: { error: "Employee not found" }, status: :not_found
-          end
-
-          period = payroll_reporting_period
-          items = employee_pay_history_items(employee, period)
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
 
           send_spreadsheet!(
             filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.xlsx",
-            sheets: employee_pay_history_sheets(employee_pay_history_report(employee, items, period: period))
+            sheets: employee_pay_history_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def employee_pay_history_pdf
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
+
+          send_tabular_pdf!(
+            title: "Employee Pay History",
+            subtitle: "#{employee.full_name} — #{period.label}",
+            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.pdf",
+            sheets: employee_pay_history_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def employee_pay_history_csv
+          employee, period, report = employee_pay_history_export_data
+          return if performed?
+
+          send_tabular_csv!(
+            filename: "employee_pay_history_#{employee.last_name}_#{employee.first_name}_#{period.filename_token}.csv",
+            sheet: employee_pay_history_sheets(report).first
           )
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -175,6 +195,48 @@ module Api
           send_spreadsheet!(
             filename: TaxSummaryCsvExporter.new(report_data).filename.sub(/\.csv\z/, ".xlsx"),
             sheets: tax_summary_sheets(report_data)
+          )
+        end
+
+        # Employer-only FICA liability is a distinct report surface. It shares
+        # the tax-summary source data but exports only the employer obligations
+        # shown in the in-app preview.
+        def employer_liability
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
+
+          render json: { report: report_data.merge(type: "employer_liability") }
+        end
+
+        def employer_liability_csv
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
+
+          send_tabular_csv!(
+            filename: "employer_tax_liability_#{report_period_filename_token(report_data)}.csv",
+            sheet: employer_liability_sheets(report_data).first
+          )
+        end
+
+        def employer_liability_pdf
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
+
+          send_tabular_pdf!(
+            title: "Employer Tax Liability",
+            subtitle: "#{report_data.dig(:meta, :company_name)} — #{report_data.dig(:period, :label)}",
+            filename: "employer_tax_liability_#{report_period_filename_token(report_data)}.pdf",
+            sheets: employer_liability_sheets(report_data)
+          )
+        end
+
+        def employer_liability_xlsx
+          report_data, error_response = build_tax_summary_data
+          return error_response if error_response
+
+          send_spreadsheet!(
+            filename: "employer_tax_liability_#{report_period_filename_token(report_data)}.xlsx",
+            sheets: employer_liability_sheets(report_data)
           )
         end
 
@@ -243,11 +305,40 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        def form_941_gu_pdf
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data).generate,
+            filename: "federal_form_941_draft_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def quarterly_compliance_packet
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
 
           render json: { report: report_data }
+        end
+
+        def start_quarterly_compliance_packet_workflow
+          year, quarter, company, error_response = quarterly_compliance_packet_context
+          return error_response if error_response
+
+          QuarterlyCompliancePacket.find_or_create_for!(
+            company: company,
+            year: year,
+            quarter: quarter,
+            user: current_user
+          )
+          render json: { report: QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate }, status: :created
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def quarterly_compliance_packet_xlsx
@@ -260,31 +351,44 @@ module Api
           )
         end
 
+        def quarterly_compliance_packet_pdf
+          report_data, error_response = build_quarterly_compliance_packet_data
+          return error_response if error_response
+
+          generator = QuarterlyCompliancePacketPdfGenerator.new(report_data)
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        rescue OfficialPdfOverlay::TemplateUnavailableError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         def quarterly_compliance_packet_form_941_pdf
           send_quarterly_compliance_official_form!(
             generator: QuarterlyComplianceOfficialForms::Form941,
-            filename_prefix: "federal_form_941"
+            filename_prefix: "federal_form_941_draft"
           )
         end
 
         def quarterly_compliance_packet_schedule_b_pdf
           send_quarterly_compliance_official_form!(
             generator: QuarterlyComplianceOfficialForms::ScheduleB,
-            filename_prefix: "federal_form_941_schedule_b"
+            filename_prefix: "federal_form_941_schedule_b_draft"
           )
         end
 
         def quarterly_compliance_packet_w1_pdf
           send_quarterly_compliance_official_form!(
             generator: QuarterlyComplianceOfficialForms::W1,
-            filename_prefix: "guam_w1"
+            filename_prefix: "guam_w1_draft"
           )
         end
 
         def quarterly_compliance_packet_swica_pdf
           send_quarterly_compliance_official_form!(
             generator: QuarterlyComplianceOfficialForms::Sw2,
-            filename_prefix: "guam_sw2"
+            filename_prefix: "guam_sw2_draft"
           )
         end
 
@@ -292,10 +396,10 @@ module Api
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
 
-          unless report_data.dig(:swica, :upload_export_ready)
+          unless report_data.dig(:swica, :wage_record_export_ready)
             return render json: {
-              error: report_data.dig(:swica, :upload_export_note),
-              details: report_data.dig(:swica, :upload_validation_errors)
+              error: report_data.dig(:swica, :wage_record_export_note),
+              details: report_data.dig(:swica, :wage_record_validation_errors)
             }, status: :unprocessable_entity
           end
 
@@ -434,6 +538,22 @@ module Api
             filename: "1099-NEC_#{company.name.parameterize}_#{year}.pdf",
             type: "application/pdf",
             disposition: "attachment"
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Company not found" }, status: :not_found
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def form_1099_nec_csv
+          year = parse_tax_year_param
+          return if performed?
+
+          company = Company.find(current_company_id)
+          report = Form1099NecAggregator.new(company, year).generate
+          send_tabular_csv!(
+            filename: "1099-NEC_#{company.name.parameterize}_#{year}.csv",
+            sheet: form_1099_nec_sheets(report).first
+          )
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
@@ -906,6 +1026,30 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
+        def ytd_summary_pdf
+          period = payroll_reporting_period
+          report = build_period_summary_report(period)
+          send_tabular_pdf!(
+            title: "Payroll Summary by Period",
+            subtitle: "#{report.dig(:meta, :company_name)} — #{period.label}",
+            filename: "payroll_summary_#{period.filename_token}.pdf",
+            sheets: ytd_summary_sheets(report)
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        def ytd_summary_csv
+          period = payroll_reporting_period
+          report = build_period_summary_report(period)
+          send_tabular_csv!(
+            filename: "payroll_summary_#{period.filename_token}.csv",
+            sheet: ytd_summary_sheets(report).first
+          )
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        end
+
         private
 
         YTD_SORT_FIELDS = %w[
@@ -1217,7 +1361,6 @@ module Api
           end
 
           company = Company.find(current_company_id)
-          QuarterlyCompliancePacket.find_or_create_for!(company: company, year: year, quarter: quarter, user: current_user)
           [ QuarterlyCompliancePacketBuilder.new(company, year, quarter).generate, nil ]
         rescue ActiveRecord::RecordNotFound
           [ nil, render(json: { error: "Company not found" }, status: :not_found) ]
@@ -1239,6 +1382,22 @@ module Api
             :notes,
             data: {}
           )
+        end
+
+        def quarterly_compliance_packet_context
+          raw_year = params[:year]
+          year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
+          quarter = params[:quarter]&.to_i
+
+          unless year && year > 2000 && year <= Date.current.year + 1
+            return [ nil, nil, nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
+          end
+
+          unless quarter && (1..4).cover?(quarter)
+            return [ nil, nil, nil, render(json: { error: "quarter is required and must be 1, 2, 3, or 4" }, status: :unprocessable_entity) ]
+          end
+
+          [ year, quarter, Company.find(current_company_id), nil ]
         end
 
         def send_quarterly_compliance_official_form!(generator:, filename_prefix:)
@@ -1271,10 +1430,10 @@ module Api
 
         def quarterly_compliance_official_form_config(form_type)
           {
-            "form_941" => { generator: QuarterlyComplianceOfficialForms::Form941, filename_prefix: "federal_form_941" },
-            "schedule_b" => { generator: QuarterlyComplianceOfficialForms::ScheduleB, filename_prefix: "federal_form_941_schedule_b" },
-            "w1" => { generator: QuarterlyComplianceOfficialForms::W1, filename_prefix: "guam_w1" },
-            "swica" => { generator: QuarterlyComplianceOfficialForms::Sw2, filename_prefix: "guam_sw2" }
+            "form_941" => { generator: QuarterlyComplianceOfficialForms::Form941, filename_prefix: "federal_form_941_draft" },
+            "schedule_b" => { generator: QuarterlyComplianceOfficialForms::ScheduleB, filename_prefix: "federal_form_941_schedule_b_draft" },
+            "w1" => { generator: QuarterlyComplianceOfficialForms::W1, filename_prefix: "guam_w1_draft" },
+            "swica" => { generator: QuarterlyComplianceOfficialForms::Sw2, filename_prefix: "guam_sw2_draft" }
           }.fetch(form_type.to_s) { raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica" }
         end
 
@@ -2015,6 +2174,39 @@ module Api
             filename: exporter.filename,
             type: SpreadsheetReportExporter::CONTENT_TYPE,
             disposition: "attachment"
+        end
+
+        def send_tabular_pdf!(title:, subtitle:, filename:, sheets:)
+          generator = TabularReportPdfGenerator.new(
+            title: title,
+            subtitle: subtitle,
+            filename: filename,
+            sheets: sheets
+          )
+          send_data generator.generate,
+            filename: generator.filename,
+            type: "application/pdf",
+            disposition: "attachment"
+        end
+
+        def send_tabular_csv!(filename:, sheet:)
+          exporter = TabularReportCsvExporter.new(filename: filename, sheet: sheet)
+          send_data exporter.generate,
+            filename: exporter.filename,
+            type: "text/csv; charset=utf-8",
+            disposition: "attachment"
+        end
+
+        def employee_pay_history_export_data
+          employee = Employee.find(params[:employee_id])
+          unless employee.company_id == current_company_id
+            render json: { error: "Employee not found" }, status: :not_found
+            return [ nil, nil, nil ]
+          end
+
+          period = payroll_reporting_period
+          items = employee_pay_history_items(employee, period)
+          [ employee, period, employee_pay_history_report(employee, items, period: period) ]
         end
 
         def report_meta(company, report_key)
@@ -2990,6 +3182,53 @@ module Api
             payroll_field_totals_for_report_sheet(report),
             report_info_sheet(report, title: "Tax Summary")
           ]
+        end
+
+        def employer_liability_sheets(report)
+          totals = report[:totals] || {}
+          employer_total = totals[:social_security_employer].to_f + totals[:medicare_employer].to_f
+          [
+            {
+              name: "Employer Liability",
+              rows: [
+                [ "Category", "Amount" ],
+                [ "Gross Wages", totals[:gross_wages] ],
+                [ "Employer Social Security", totals[:social_security_employer] ],
+                [ "Employer Medicare", totals[:medicare_employer] ],
+                [ "Total Employer Tax Liability", employer_total ]
+              ]
+            },
+            {
+              name: "Report Details",
+              rows: [
+                [ "Field", "Value" ],
+                [ "Company", report.dig(:meta, :company_name) ],
+                [ "Period", report.dig(:period, :label) ],
+                [ "Pay-date start", report.dig(:period, :start_date) ],
+                [ "Pay-date end", report.dig(:period, :end_date) ],
+                [ "Pay periods included", report[:pay_periods_included] ],
+                [ "Employees included", report[:employee_count] ],
+                [ "Basis", "Committed payroll by pay date" ]
+              ]
+            },
+            report_info_sheet(
+              report,
+              title: "Employer Tax Liability",
+              description: "Employer-side Social Security and Medicare obligations for the selected pay-date period."
+            )
+          ]
+        end
+
+        def report_period_filename_token(report)
+          year = report.dig(:period, :year)
+          quarter = report.dig(:period, :quarter)
+          return "#{year}_q#{quarter}" if year.present? && quarter.present?
+
+          start_date = report.dig(:period, :start_date)
+          end_date = report.dig(:period, :end_date)
+          return "#{start_date}_to_#{end_date}" if start_date.present? && end_date.present?
+
+          year.presence || "report"
         end
 
         def ytd_summary_sheets(report)

@@ -1,5 +1,5 @@
 import { SignIn } from '@clerk/clerk-react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';

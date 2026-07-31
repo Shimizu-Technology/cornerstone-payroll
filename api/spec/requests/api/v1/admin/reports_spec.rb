@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "csv"
+require "pdf/reader"
 require "roo"
 
 RSpec.describe "Api::V1::Admin::Reports", type: :request do
@@ -340,10 +342,17 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("federal_941", "deposit_schedule", "firm_payment_policy")).to eq("pay_each_pay_period")
     end
 
-    it "creates a persistent workflow packet with default filing tasks" do
-      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+    it "keeps report viewing read-only until a workflow is explicitly started" do
+      expect {
+        get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      }.not_to change(QuarterlyCompliancePacket, :count)
 
       expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "workflow")).to be_nil
+
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:created)
       workflow = response.parsed_body.dig("report", "workflow")
       expect(workflow["tasks"].map { |task| task["task_type"] }).to contain_exactly("form_500", "w1", "swica", "federal_941", "schedule_b")
 
@@ -370,7 +379,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "downgrades filed_and_paid status when one completion date is cleared" do
-      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "form_500" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
@@ -404,7 +413,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "downgrades filed and paid terminal statuses when their completion date is cleared" do
-      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "w1" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
@@ -437,7 +446,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "promotes needs_review tasks when filing or payment dates are recorded" do
-      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
       task = response.parsed_body.dig("report", "workflow", "tasks").find { |row| row["task_type"] == "schedule_b" }
       patch "/api/v1/admin/reports/quarterly_compliance_packet_task/#{task["id"]}", params: {
@@ -466,9 +475,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       packet = QuarterlyCompliancePacket.create!(company: company, year: 2026, quarter: 2)
       allow(QuarterlyCompliancePacket).to receive(:create_with).and_raise(ActiveRecord::RecordNotUnique.new("duplicate packet"))
 
-      get "/api/v1/admin/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }
+      post "/api/v1/admin/reports/quarterly_compliance_packet_workflow", params: { year: 2026, quarter: 2 }
 
-      expect(response).to have_http_status(:ok)
+      expect(response).to have_http_status(:created)
       expect(response.parsed_body.dig("report", "workflow", "id")).to eq(packet.id)
     end
 
@@ -538,10 +547,10 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     {
-      "quarterly_compliance_packet_form_941_pdf" => "federal_form_941_2026_q2.pdf",
-      "quarterly_compliance_packet_schedule_b_pdf" => "federal_form_941_schedule_b_2026_q2.pdf",
-      "quarterly_compliance_packet_w1_pdf" => "guam_w1_2026_q2.pdf",
-      "quarterly_compliance_packet_swica_pdf" => "guam_sw2_2026_q2.pdf"
+      "quarterly_compliance_packet_form_941_pdf" => "federal_form_941_draft_2026_q2.pdf",
+      "quarterly_compliance_packet_schedule_b_pdf" => "federal_form_941_schedule_b_draft_2026_q2.pdf",
+      "quarterly_compliance_packet_w1_pdf" => "guam_w1_draft_2026_q2.pdf",
+      "quarterly_compliance_packet_swica_pdf" => "guam_sw2_draft_2026_q2.pdf"
     }.each do |endpoint, filename|
       it "returns a prefilled official PDF from #{endpoint}" do
         get "/api/v1/admin/reports/#{endpoint}", params: { year: 2026, quarter: 2 }
@@ -551,10 +560,44 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.headers["Content-Disposition"]).to include("attachment")
         expect(response.headers["Content-Disposition"]).to include(filename)
         expect(response.body.bytes.first(4)).to eq([ 0x25, 0x50, 0x44, 0x46 ])
+        pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.first.text.gsub(/\s+/, " ")
+        expect(pdf_text).to include("DRAFT")
+        expect(pdf_text).to include("NOT FILED")
       end
     end
 
-    it "exports a validated SWICA ASCII wage file" do
+    it "combines a visibly not-filed review cover and draft forms into one PDF packet" do
+      expect {
+        get "/api/v1/admin/reports/quarterly_compliance_packet_pdf", params: { year: 2026, quarter: 2 }
+      }.not_to change(QuarterlyCompliancePacket, :count)
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("attachment")
+      expect(response.headers["Content-Disposition"]).to include("quarterly_compliance_review_packet_draft_2026_q2.pdf")
+      expect(response.body).to start_with("%PDF")
+
+      reader = PDF::Reader.new(StringIO.new(response.body))
+      cover_text = reader.pages.first.text.gsub(/\s+/, " ")
+      expect(reader.page_count).to be >= 5
+      expect(cover_text).to include("Quarterly Compliance Packet")
+      expect(cover_text).to include("DRAFT")
+      expect(cover_text).to include("NOT FILED")
+      expect(cover_text).to include(company.name)
+      expect(cover_text).to include("SWICA wages")
+      expect(cover_text).to include("$1200.00")
+    end
+
+    it "exports the standalone Form 941 draft PDF from the report card" do
+      get "/api/v1/admin/reports/form_941_gu_pdf", params: { year: 2026, quarter: 2 }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.content_type).to include("application/pdf")
+      expect(response.headers["Content-Disposition"]).to include("federal_form_941_draft_2026_q2.pdf")
+      expect(response.body).to start_with("%PDF")
+    end
+
+    it "exports a validated SWICA Code W wage-record draft" do
       employee.update!(
         ssn_encrypted: "123-45-6789",
         address_line1: "123 Marine Dr",
@@ -566,7 +609,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
 
       expect(response).to have_http_status(:ok)
-      expect(response.headers["Content-Disposition"]).to include("swica_2026_q2.txt")
+      expect(response.headers["Content-Disposition"]).to include("swica_wage_records_draft_2026_q2.txt")
       first_record = response.body.lines.first.chomp
       expect(first_record.length).to eq(275)
       expect(first_record[0]).to eq("W")
@@ -585,7 +628,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       )
       exporter = instance_double(SwicaAsciiExporter)
       allow(SwicaAsciiExporter).to receive(:new).and_return(exporter)
-      allow(exporter).to receive(:filename).and_return("swica_2026_q2.txt")
+      allow(exporter).to receive(:filename).and_return("swica_wage_records_draft_2026_q2.txt")
       allow(exporter).to receive(:generate).and_raise(KeyError, "key not found: 123")
 
       get "/api/v1/admin/reports/quarterly_compliance_packet_swica_ascii", params: { year: 2026, quarter: 2 }
@@ -1355,6 +1398,35 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(totals["social_security_employer"].to_f).to eq(62.0)
       expect(totals["medicare_employer"].to_f).to eq(14.5)
       expect(totals["total_employment_taxes"].to_f).to eq(261.5)
+    end
+
+    it "serves dedicated employer-liability preview and export files" do
+      pay_period = create(:pay_period, company: company, status: "committed", pay_date: Date.new(2026, 2, 13))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        gross_pay: 1000.00,
+        social_security_tax: 62.00,
+        employer_social_security_tax: 62.00,
+        medicare_tax: 14.50,
+        employer_medicare_tax: 14.50
+      )
+
+      get "/api/v1/admin/reports/employer_liability", params: { year: 2026, quarter: 1 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "type")).to eq("employer_liability")
+
+      {
+        "employer_liability_csv" => [ "text/csv", ".csv" ],
+        "employer_liability_pdf" => [ "application/pdf", ".pdf" ],
+        "employer_liability_xlsx" => [ "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx" ]
+      }.each do |action, (content_type, extension)|
+        get "/api/v1/admin/reports/#{action}", params: { year: 2026, quarter: 1 }
+
+        expect(response).to have_http_status(:ok)
+        expect(response.content_type).to include(content_type)
+        expect(response.headers["Content-Disposition"]).to include("employer_tax_liability_2026_q1#{extension}")
+      end
     end
   end
 

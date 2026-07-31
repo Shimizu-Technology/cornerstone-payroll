@@ -14,6 +14,20 @@ module QuarterlyComplianceOfficialForms
 
     private
 
+    def draw_document_status(pdf, _page_number)
+      pdf.fill_color "B42318"
+      pdf.font("Helvetica-Bold") do
+        pdf.text_box(
+          "DRAFT — NOT FILED",
+          at: [ 18, 18 ],
+          width: pdf.bounds.width - 36,
+          height: 12,
+          size: 8,
+          align: :center
+        )
+      end
+    end
+
     def meta
       report.fetch(:meta)
     end
