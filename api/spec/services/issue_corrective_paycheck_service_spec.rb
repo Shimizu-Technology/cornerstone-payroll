@@ -97,6 +97,53 @@ RSpec.describe IssueCorrectivePaycheckService do
                                 corrected_inputs: { hours_worked: 12 })
       }.to raise_error(IssueCorrectivePaycheckService::UnsupportedEmployeeError)
     end
+
+    it "rejects an original contractor item even if the employee is now W-2" do
+      contractor = create(:employee, :contractor, company: company, department: department)
+      original_period.payroll_items.create!(
+        employee: contractor,
+        company_id: company.id,
+        employment_type: "contractor",
+        pay_rate: 175.00,
+        gross_pay: 175.00,
+        net_pay: 175.00
+      )
+      contractor.update!(
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hire_date: Date.new(2024, 1, 1),
+        ssn_encrypted: "900-70-0099",
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910"
+      )
+
+      expect {
+        described_class.preview(
+          original_pay_period: original_period,
+          employee: contractor,
+          corrected_inputs: { hours_worked: 12 }
+        )
+      }.to raise_error(IssueCorrectivePaycheckService::UnsupportedEmployeeError)
+    end
+
+    it "uses the original W-2 classification when the employee's current type changed" do
+      employee.update!(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+
+      _supplemental, corrective = described_class.issue!(
+        original_pay_period: original_period,
+        employee: employee,
+        corrected_inputs: { hours_worked: 80 },
+        pay_date: Date.new(2024, 1, 26),
+        reason: "Correct historical hourly wages",
+        actor: actor
+      )
+
+      expect(corrective.employment_type).to eq("hourly")
+      expect(corrective.gross_pay).to be_within(0.01).of(300.00)
+      expect(corrective.social_security_tax).to be_within(0.01).of(18.60)
+    end
   end
 
   describe ".issue!" do

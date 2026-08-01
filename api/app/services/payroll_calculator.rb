@@ -18,8 +18,8 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item)
-    case employee.employment_type
+  def self.for(employee, payroll_item, employment_type: employee.employment_type)
+    case employment_type
     when "hourly"
       HourlyPayrollCalculator.new(employee, payroll_item)
     when "salary"
@@ -27,7 +27,7 @@ class PayrollCalculator
     when "contractor"
       ContractorPayrollCalculator.new(employee, payroll_item)
     else
-      raise ArgumentError, "Unknown employment type: #{employee.employment_type}"
+      raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
