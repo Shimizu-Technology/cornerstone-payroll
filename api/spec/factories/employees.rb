@@ -6,6 +6,7 @@ FactoryBot.define do
     department
     first_name { Faker::Name.first_name }
     last_name { Faker::Name.last_name }
+    sequence(:ssn_encrypted) { |n| format("900-70-%04d", n % 10_000) }
     employment_type { "hourly" }
     pay_rate { 15.00 }
     pay_frequency { "biweekly" }

@@ -2,6 +2,8 @@
 
 class Employee < ApplicationRecord
   include PayrollAdjustable
+  attr_accessor :ssn_confirmation, :require_ssn_confirmation
+
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
@@ -95,6 +97,9 @@ class Employee < ApplicationRecord
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
   validates :contractor_pay_type, inclusion: { in: CONTRACTOR_PAY_TYPES }, if: :contractor?
+  validate :required_w2_onboarding_fields, if: :requires_w2_onboarding_fields?
+  validate :filing_ssn_format, if: :filing_ssn_validation_required?
+  validate :matching_ssn_confirmation, if: :ssn_confirmation_required?
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -336,6 +341,48 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def requires_w2_onboarding_fields?
+    return false unless w2_employee?
+
+    new_record? || (will_save_change_to_employment_type? && employment_type_in_database == "contractor")
+  end
+
+  def required_w2_onboarding_fields
+    {
+      hire_date: hire_date,
+      ssn: ssn_encrypted,
+      address_line1: address_line1,
+      city: city,
+      state: state,
+      zip: zip
+    }.each do |field, value|
+      errors.add(field, "can't be blank") if value.blank?
+    end
+  end
+
+  def filing_ssn_format
+    return if ssn_encrypted.blank?
+    return if valid_filing_ssn?
+
+    errors.add(:ssn, "must contain exactly 9 digits")
+  end
+
+  def filing_ssn_validation_required?
+    w2_employee? && (requires_w2_onboarding_fields? || will_save_change_to_ssn_encrypted?)
+  end
+
+  def ssn_confirmation_required?
+    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && w2_employee?
+  end
+
+  def matching_ssn_confirmation
+    if ssn_confirmation.blank?
+      errors.add(:ssn_confirmation, "can't be blank")
+    elsif ssn_digits != ssn_confirmation.to_s.gsub(/\D/, "")
+      errors.add(:ssn_confirmation, "does not match Social Security Number")
+    end
+  end
 
   def normalize_filing_status_value
     self.filing_status = normalized_filing_status if filing_status.present?

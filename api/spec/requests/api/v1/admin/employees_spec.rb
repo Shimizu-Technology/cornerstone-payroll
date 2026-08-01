@@ -211,6 +211,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           last_name: "Doe",
           email: "john.doe@example.com",
           ssn: "123-45-6789",
+          ssn_confirmation: "123-45-6789",
           hire_date: "2024-01-15",
           date_of_birth: "1990-05-20",
           employment_type: "hourly",
@@ -261,18 +262,18 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(log.record_id.to_s).to eq(Employee.last.id.to_s)
       end
 
-      it "creates a W-2 employee when address fields are not available yet" do
+      it "rejects a W-2 employee when filing address fields are missing" do
         params_without_address = valid_params.deep_dup
         params_without_address[:employee].merge!(address_line1: "", city: "", state: "", zip: "")
 
-        post "/api/v1/admin/employees", params: params_without_address
+        expect {
+          post "/api/v1/admin/employees", params: params_without_address
+        }.not_to change(Employee, :count)
 
-        expect(response).to have_http_status(:created)
-        employee = Employee.last
-        expect(employee.address_line1).to eq("")
-        expect(employee.city).to eq("")
-        expect(employee.state).to eq("")
-        expect(employee.zip).to eq("")
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("details").keys).to include(
+          "address_line1", "city", "state", "zip"
+        )
       end
 
       it "creates a salaried employee with a multi-million-dollar annual rate" do
@@ -292,6 +293,26 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "with invalid params" do
+      it "rejects a missing SSN confirmation" do
+        invalid_params = valid_params.deep_dup
+        invalid_params[:employee].delete(:ssn_confirmation)
+
+        post "/api/v1/admin/employees", params: invalid_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("can't be blank")
+      end
+
+      it "rejects an SSN confirmation that does not match" do
+        invalid_params = valid_params.deep_dup
+        invalid_params[:employee][:ssn_confirmation] = "987-65-4321"
+
+        post "/api/v1/admin/employees", params: invalid_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("does not match Social Security Number")
+      end
+
       it "returns errors for missing required fields" do
         post "/api/v1/admin/employees", params: { employee: { first_name: "" } }
 
@@ -407,6 +428,18 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "with invalid params" do
+      it "rejects an invalid replacement SSN even when its confirmation matches" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            ssn: "123-45-67",
+            ssn_confirmation: "123-45-67"
+          }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn")).to include("must contain exactly 9 digits")
+      end
+
       it "returns validation errors" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { pay_rate: -5 }

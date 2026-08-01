@@ -27,6 +27,7 @@ module Api
 
         def create
           employee = Employee.new
+          require_ssn_confirmation!(employee)
           result = ClientEmployeeUpdateService.new(
             employee: employee,
             attrs: employee_params.to_h,
@@ -52,6 +53,7 @@ module Api
         end
 
         def update
+          require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present?
           result = ClientEmployeeUpdateService.new(
             employee: @employee,
             attrs: employee_params.to_h,
@@ -145,6 +147,11 @@ module Api
               permitted.delete(:ssn)
             end
           end
+        end
+
+        def require_ssn_confirmation!(employee)
+          employee.require_ssn_confirmation = true
+          employee.ssn_confirmation = params.require(:employee).permit(:ssn_confirmation)[:ssn_confirmation]
         end
 
         def apply_filters(scope)
