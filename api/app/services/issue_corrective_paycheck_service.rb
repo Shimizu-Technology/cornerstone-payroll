@@ -229,9 +229,9 @@ class IssueCorrectivePaycheckService
   def validate_for_preview!
     raise OriginalNotFoundError, "Original payroll item not found for employee in this pay period" if original_item.nil?
 
-    if @employee.employment_type == "contractor"
+    if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
-            "Contractors don't have a tax surface to correct; edit the contractor item directly"
+            "Contractor payroll items don't have a tax surface to correct; edit the contractor item directly"
     end
   end
 
@@ -351,7 +351,15 @@ class IssueCorrectivePaycheckService
     # makes the recomputed taxes match what would have been withheld had
     # the corrected inputs been on the original run.
     with_ytd_excluding_original do
-      PayrollCalculator.for(@employee, temp).calculate
+      # A correction recomputes the historical item, so its calculator must
+      # follow the original payroll snapshot rather than the employee's current
+      # classification. This also keeps the supplemental row and its tax
+      # treatment on the same side of W-2/contractor reporting filters.
+      PayrollCalculator.for(
+        @employee,
+        temp,
+        employment_type: temp.employment_type
+      ).calculate
     end
 
     temp
