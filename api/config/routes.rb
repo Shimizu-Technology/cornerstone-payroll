@@ -126,6 +126,7 @@ Rails.application.routes.draw do
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
             post :reactivate
+            post :transition_tax_classification
           end
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do

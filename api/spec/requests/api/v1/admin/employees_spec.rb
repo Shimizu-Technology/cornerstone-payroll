@@ -395,6 +395,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.pay_rate).to eq(25.00)
       end
 
+      it "allows changing between hourly and salary within W-2 treatment" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { employment_type: "salary", salary_type: "annual", pay_rate: 52_000 }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload).to have_attributes(employment_type: "salary", pay_rate: 52_000.to_d)
+      end
+
       it "updates recurring custom earnings" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {
@@ -428,6 +437,22 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
     end
 
     context "with invalid params" do
+      it "rejects an in-place W-2 to 1099 change" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            employment_type: "contractor",
+            contractor_type: "individual",
+            contractor_pay_type: "flat_fee"
+          }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "employment_type")).to include(
+          "cannot change between W-2 and 1099 in place; create a new worker record"
+        )
+        expect(employee.reload.employment_type).to eq("hourly")
+      end
+
       it "rejects an invalid replacement SSN even when its confirmation matches" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {
@@ -460,6 +485,60 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(employee.reload.first_name).to eq("Accountant Updated")
+    end
+  end
+
+  describe "POST /api/v1/admin/employees/:id/transition_tax_classification" do
+    let!(:contractor) do
+      create(:employee, :contractor,
+        company: company,
+        first_name: "Transition",
+        last_name: "Worker",
+        ssn_encrypted: "123-45-6789",
+        hire_date: Date.new(2024, 1, 1),
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910")
+    end
+    let(:transition_params) do
+      {
+        transition: {
+          employment_type: "hourly",
+          effective_date: Date.current.iso8601,
+          reason: "Worker begins W-2 employment",
+          pay_rate: 9.25,
+          pay_frequency: "semimonthly",
+          filing_status: "single"
+        }
+      }
+    end
+
+    it "rejects non-super-admin users" do
+      post "/api/v1/admin/employees/#{contractor.id}/transition_tax_classification",
+        params: transition_params,
+        as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(contractor.reload).to be_active
+    end
+
+    it "creates a linked successor for a super admin" do
+      super_admin = create(:user, company: company, role: "super_admin")
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(super_admin)
+
+      expect {
+        post "/api/v1/admin/employees/#{contractor.id}/transition_tax_classification",
+          params: transition_params,
+          as: :json
+      }.to change(Employee, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      successor = Employee.order(:id).last
+      expect(response.parsed_body.dig("data", "id")).to eq(successor.id)
+      expect(response.parsed_body.dig("data", "classification_history", "previous_employee", "id")).to eq(contractor.id)
+      expect(contractor.reload.status).to eq("terminated")
+      expect(successor.previous_employee_id).to eq(contractor.id)
     end
   end
 

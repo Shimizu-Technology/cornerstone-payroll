@@ -214,6 +214,27 @@ RSpec.describe Employee, type: :model do
     end
   end
 
+  describe "tax classification immutability" do
+    it "allows hourly and salary changes within W-2 treatment" do
+      employee = create(:employee, employment_type: "hourly")
+
+      employee.assign_attributes(employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+
+      expect(employee).to be_valid
+    end
+
+    it "blocks changing between W-2 and 1099 on the same record" do
+      employee = create(:employee, employment_type: "hourly")
+
+      employee.employment_type = "contractor"
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:employment_type]).to include(
+        "cannot change between W-2 and 1099 in place; create a new worker record"
+      )
+    end
+  end
+
   describe "YTD cache usage" do
     let!(:company) { create(:company) }
     let!(:employee) { create(:employee, company: company) }

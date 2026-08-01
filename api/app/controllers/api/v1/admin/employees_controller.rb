@@ -6,7 +6,8 @@ module Api
       class EmployeesController < BaseController
         include Auditable
         audit_actions :reactivate
-        before_action :set_employee, only: [ :show, :update, :destroy, :reactivate ]
+        before_action :set_employee, only: [ :show, :update, :destroy, :reactivate, :transition_tax_classification ]
+        before_action :require_super_admin!, only: :transition_tax_classification
 
         # GET /api/v1/admin/employees
         def index
@@ -25,7 +26,12 @@ module Api
         # GET /api/v1/admin/employees/:id
         def show
           render json: {
-            data: serialize_employee(@employee, include_department: true, include_sensitive: true)
+            data: serialize_employee(
+              @employee,
+              include_department: true,
+              include_sensitive: true,
+              include_classification_history: true
+            )
           }
         end
 
@@ -72,6 +78,32 @@ module Api
 
           @employee.update!(status: "active", termination_date: nil)
           render json: { data: serialize_employee(@employee) }
+        end
+
+        # POST /api/v1/admin/employees/:id/transition_tax_classification
+        def transition_tax_classification
+          result = EmployeeClassificationTransitionService.new(
+            employee: @employee,
+            attributes: classification_transition_params,
+            actor: current_user
+          ).call
+
+          render json: {
+            data: serialize_employee(
+              result.new_employee,
+              include_sensitive: true,
+              include_classification_history: true
+            ),
+            previous_employee: employee_link_summary(result.previous_employee),
+            message: "New worker record created; historical payroll remains on the prior record"
+          }, status: :created
+        rescue EmployeeClassificationTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: {
+            error: "Validation failed",
+            details: e.record.errors.messages
+          }, status: :unprocessable_entity
         end
 
         private
@@ -147,6 +179,22 @@ module Api
           end
         end
 
+        def classification_transition_params
+          params.require(:transition).permit(
+            :employment_type,
+            :effective_date,
+            :reason,
+            :pay_rate,
+            :pay_frequency,
+            :salary_type,
+            :filing_status,
+            :contractor_type,
+            :contractor_pay_type,
+            :business_name,
+            :contractor_ein
+          )
+        end
+
         def require_ssn_confirmation!(employee)
           employee.require_ssn_confirmation = true
           employee.ssn_confirmation = params.require(:employee).permit(:ssn_confirmation)[:ssn_confirmation]
@@ -212,12 +260,18 @@ module Api
           }
         end
 
-        def serialize_employee(employee, include_department: false, include_sensitive: false)
+        def serialize_employee(
+          employee,
+          include_department: false,
+          include_sensitive: false,
+          include_classification_history: false
+        )
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive
+          data["tax_classification"] = employee.tax_classification
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {
               id: rate.id,
@@ -236,7 +290,28 @@ module Api
             }
           end
 
+          if include_classification_history
+            data["classification_history"] = {
+              previous_employee: employee_link_summary(employee.previous_employee),
+              next_employee: employee_link_summary(employee.next_employee)
+            }
+          end
+
           data
+        end
+
+        def employee_link_summary(employee)
+          return nil unless employee
+
+          {
+            id: employee.id,
+            name: employee.display_name,
+            employment_type: employee.employment_type,
+            tax_classification: employee.tax_classification,
+            status: employee.status,
+            hire_date: employee.hire_date,
+            termination_date: employee.termination_date
+          }
         end
 
         def normalize_custom_earnings(entries)

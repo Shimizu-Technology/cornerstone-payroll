@@ -108,6 +108,7 @@ RSpec.describe IssueCorrectivePaycheckService do
         gross_pay: 175.00,
         net_pay: 175.00
       )
+      contractor.allow_tax_classification_change = true
       contractor.update!(
         employment_type: "hourly",
         pay_rate: 15.00,

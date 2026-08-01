@@ -167,6 +167,23 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
       expect(employee.reload.department_id).to eq(department.id)
     end
+
+    it "rejects an in-place W-2 to 1099 change" do
+      patch "/api/v1/client/employees/#{employee.id}",
+        params: {
+          employee: {
+            employment_type: "contractor",
+            contractor_type: "individual",
+            contractor_pay_type: "flat_fee"
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "employment_type")).to include(
+        "cannot change between W-2 and 1099 in place; create a new worker record"
+      )
+      expect(employee.reload.employment_type).to eq("hourly")
+    end
   end
 
   describe "GET /api/v1/client/employees/:id" do

@@ -314,6 +314,7 @@ export const getApiBaseUrl = () => API_BASE_URL;
 import type {
   Department,
   Employee,
+  EmployeeClassificationTransition,
   EmployeeFormData,
   EmployeeWageRate,
   PayPeriod,
@@ -371,6 +372,11 @@ export const employeesApi = {
     api.delete<void>(`/admin/employees/${id}`),
   reactivate: (id: number) =>
     api.post<{ data: Employee }>(`/admin/employees/${id}/reactivate`),
+  transitionTaxClassification: (id: number, transition: EmployeeClassificationTransition) =>
+    api.post<{ data: Employee; previous_employee: { id: number; name: string }; message: string }>(
+      `/admin/employees/${id}/transition_tax_classification`,
+      { transition },
+    ),
 };
 
 // Employee Bulk Import
