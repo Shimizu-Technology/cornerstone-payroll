@@ -68,8 +68,7 @@ class Form1099NecAggregator
 
   def contractors
     @contractors ||= Employee
-      .where(company_id: company.id, employment_type: "contractor")
-      .where(id: aggregated_items.keys)
+      .where(company_id: company.id, id: aggregated_items.keys)
       .order(:last_name, :first_name)
   end
 

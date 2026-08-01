@@ -86,6 +86,7 @@ class W2GuAggregator
       .joins(:pay_period)
       .where(company_id: company.id)
       .not_voided
+      .where.not(employment_type: "contractor")
       .where(pay_periods: {
         id: PayPeriod.reportable_committed
           .where(company_id: company.id, pay_date: year_range)
@@ -118,7 +119,6 @@ class W2GuAggregator
   def employees
     @employees ||= Employee
       .where(company_id: company.id, id: aggregated_items.keys)
-      .where.not(employment_type: "contractor")
       .includes(:employee_tipped_occupations)
       .order(:last_name, :first_name)
   end

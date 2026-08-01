@@ -2,7 +2,7 @@
 
 class Employee < ApplicationRecord
   include PayrollAdjustable
-  attr_accessor :ssn_confirmation, :require_ssn_confirmation
+  attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
 
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
@@ -65,6 +65,15 @@ class Employee < ApplicationRecord
 
   belongs_to :company
   belongs_to :department, optional: true
+  belongs_to :previous_employee,
+             class_name: "Employee",
+             optional: true,
+             inverse_of: :next_employee
+  has_one :next_employee,
+          class_name: "Employee",
+          foreign_key: :previous_employee_id,
+          inverse_of: :previous_employee,
+          dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :employee_deductions, dependent: :destroy
@@ -100,6 +109,8 @@ class Employee < ApplicationRecord
   validate :required_w2_onboarding_fields, if: :requires_w2_onboarding_fields?
   validate :filing_ssn_format, if: :filing_ssn_validation_required?
   validate :matching_ssn_confirmation, if: :ssn_confirmation_required?
+  validate :tax_classification_cannot_change_in_place, on: :update
+  validate :previous_employee_transition_is_valid
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -182,6 +193,10 @@ class Employee < ApplicationRecord
 
   def w2_employee?
     hourly? || salary?
+  end
+
+  def tax_classification
+    contractor? ? "1099" : "w2"
   end
 
   def contractor_hourly?
@@ -341,6 +356,30 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def tax_classification_cannot_change_in_place
+    return unless will_save_change_to_employment_type?
+    return if ActiveModel::Type::Boolean.new.cast(allow_tax_classification_change)
+
+    prior_type = employment_type_in_database
+    return if prior_type.blank?
+    return if (prior_type == "contractor") == contractor?
+
+    errors.add(
+      :employment_type,
+      "cannot change between W-2 and 1099 in place; create a new worker record"
+    )
+  end
+
+  def previous_employee_transition_is_valid
+    return if previous_employee.blank?
+
+    errors.add(:previous_employee, "must belong to the same company") if previous_employee.company_id != company_id
+    errors.add(:previous_employee, "cannot reference itself") if persisted? && previous_employee_id == id
+    if previous_employee.tax_classification == tax_classification
+      errors.add(:previous_employee, "must use the opposite W-2/1099 classification")
+    end
+  end
 
   def requires_w2_onboarding_fields?
     return false unless w2_employee?

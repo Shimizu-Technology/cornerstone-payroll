@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -9,9 +9,10 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
+import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
+import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
@@ -196,12 +197,13 @@ export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
-  const { user, isClient } = useAuth();
+  const { user, isClient, isSuperAdmin } = useAuth();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
+  const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
   const [initialSsn, setInitialSsn] = useState('');
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -227,6 +229,7 @@ export function EmployeeForm() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
+  const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -241,6 +244,7 @@ export function EmployeeForm() {
         ? await clientEmployeesApi.get(parseInt(id, 10))
         : await employeesApi.get(parseInt(id, 10));
       const employee = response.data;
+      setLoadedEmployee(employee);
       
       const nextForm = {
         first_name: employee.first_name,
@@ -1014,10 +1018,17 @@ export function EmployeeForm() {
                 <Select
                   value={form.employment_type}
                   onChange={(e) => handleChange('employment_type', e.target.value as EmploymentType)}
+                  disabled={isEditing && initialEmploymentType === 'contractor'}
                 >
-                  <option value="hourly">Hourly</option>
-                  <option value="salary">Salary</option>
-                  <option value="contractor">1099 Contractor</option>
+                  {(!isEditing || initialEmploymentType !== 'contractor') && (
+                    <>
+                      <option value="hourly">Hourly</option>
+                      <option value="salary">Salary</option>
+                    </>
+                  )}
+                  {(!isEditing || initialEmploymentType === 'contractor') && (
+                    <option value="contractor">1099 Contractor</option>
+                  )}
                 </Select>
               </div>
               {form.employment_type === 'salary' && (
@@ -1093,6 +1104,52 @@ export function EmployeeForm() {
                 </Select>
               </div>
             </div>
+
+            {isEditing && (
+              <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-neutral-700 shadow-sm ring-1 ring-neutral-200">
+                    <LockKeyhole className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">W-2 / 1099 classification is locked</p>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-neutral-600">
+                      Hourly and salary may change within W-2 treatment. Moving across the W-2/1099 boundary requires a new linked worker record so prior payroll and tax reporting remain intact.
+                    </p>
+                    {loadedEmployee?.classification_history?.previous_employee && (
+                      <button
+                        type="button"
+                        className="mt-2 text-xs font-semibold text-primary-700 hover:text-primary-900"
+                        onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.previous_employee?.id}`)}
+                      >
+                        View prior {loadedEmployee.classification_history.previous_employee.tax_classification.toUpperCase()} record
+                      </button>
+                    )}
+                    {loadedEmployee?.classification_history?.next_employee && (
+                      <button
+                        type="button"
+                        className="mt-2 block text-xs font-semibold text-primary-700 hover:text-primary-900"
+                        onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.next_employee?.id}`)}
+                      >
+                        View successor {loadedEmployee.classification_history.next_employee.tax_classification.toUpperCase()} record
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {isSuperAdmin && employeeStatus === 'active' && !loadedEmployee?.classification_history?.next_employee && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setClassificationTransitionOpen(true)}
+                  >
+                    <ArrowRightLeft className="mr-2 h-4 w-4" />
+                    Create new classification record
+                  </Button>
+                )}
+              </div>
+            )}
 
             {supportsMultipleHourlyRates && (
               <div className="mt-6 pt-4 border-t border-gray-200">
@@ -1837,6 +1894,7 @@ export function EmployeeForm() {
                 </div>
               </div>
             </div>
+
           </CardContent>
         </Card>
 
@@ -1899,6 +1957,18 @@ export function EmployeeForm() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {isEditing && id && loadedEmployee && (
+        <EmployeeClassificationTransitionDialog
+          employee={loadedEmployee}
+          open={classificationTransitionOpen}
+          onOpenChange={setClassificationTransitionOpen}
+          onTransitioned={(newEmployee) => {
+            setLoadedEmployee(newEmployee);
+            navigate(`/employees/${newEmployee.id}`, { replace: true });
+          }}
+        />
       )}
 
       {isEditing && id && (

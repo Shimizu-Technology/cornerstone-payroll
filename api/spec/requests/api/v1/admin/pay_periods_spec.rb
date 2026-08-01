@@ -823,6 +823,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
 
     it "resynchronizes a stale contractor snapshot before recalculating a W-2 employee" do
+      employee.allow_tax_classification_change = true
       employee.update!(
         employment_type: "contractor",
         contractor_type: "individual",
@@ -837,6 +838,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         gross_pay: 175,
         net_pay: 175
       )
+      employee.allow_tax_classification_change = true
       employee.update!(employment_type: "hourly", pay_rate: 15)
 
       post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
