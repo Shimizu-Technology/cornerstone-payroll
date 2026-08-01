@@ -68,6 +68,17 @@ class QuarterlyCompliancePacketBuilder
                                   .to_a
   end
 
+  def excluded_contractor_items
+    @excluded_contractor_items ||= PayrollItem.includes(:employee, :pay_period)
+                                              .joins(:pay_period)
+                                              .merge(pay_periods)
+                                              .not_voided
+                                              .where(employment_type: "contractor")
+                                              .order("pay_periods.pay_date ASC", :id)
+                                              .references(:pay_periods)
+                                              .to_a
+  end
+
   def meta
     {
       report_type: "quarterly_compliance_packet",
@@ -222,6 +233,11 @@ class QuarterlyCompliancePacketBuilder
           total_wages: money(employees.sum { |row| row[:swica_wages].to_f }),
           total_tax_withheld: money(employees.sum { |row| row[:guam_withholding].to_f })
         },
+        excluded_contractor_summary: {
+          employee_count: excluded_contractor_items.map(&:employee_id).uniq.length,
+          item_count: excluded_contractor_items.length,
+          total_wages: money(excluded_contractor_items.sum(&:gross_pay))
+        },
         filing_upload_supported: false,
         filing_upload_note: "Cornerstone does not yet generate the complete GuamTax SWICA upload sequence (A, B, W, T, and F records). Use the SW-2 review form or enter the return in GuamTax.",
         wage_record_export_ready: swica_upload_validation[:ready],
@@ -355,6 +371,16 @@ class QuarterlyCompliancePacketBuilder
       href: "/employees"
     )
     checks << review_check(
+      "employment_tax_classification_consistent",
+      employment_tax_classification_issues.empty?,
+      "Contractor-tagged payroll rows must not contain W-2 withholding or FICA amounts.",
+      details: {
+        issue_count: employment_tax_classification_issues.length,
+        issues: employment_tax_classification_issues.first(10)
+      },
+      href: "/pay-periods"
+    )
+    checks << review_check(
       "form_500_payments_reconciled",
       form_500_section[:unreconciled_balance].to_f.zero? && form_500_section[:unconfirmed_amount_count].to_i.zero?,
       "Form 500 payment confirmations reconcile to quarterly Guam withholding.",
@@ -429,6 +455,24 @@ class QuarterlyCompliancePacketBuilder
         message: errors.empty? ?
           "SWICA Code W wage-detail records can be generated for accountant review. They are not a complete filing upload." :
           "Fix employee SSN/address issues before generating the SWICA Code W wage-record draft."
+      }
+    end
+  end
+
+  def employment_tax_classification_issues
+    @employment_tax_classification_issues ||= excluded_contractor_items.filter_map do |item|
+      employee_tax = item.total_income_tax_withheld.to_f + item.social_security_tax.to_f + item.medicare_tax.to_f
+      employer_tax = item.employer_social_security_tax.to_f + item.employer_medicare_tax.to_f
+      next unless employee_tax.nonzero? || employer_tax.nonzero?
+
+      {
+        payroll_item_id: item.id,
+        employee_id: item.employee_id,
+        employee_name: item.employee.full_name,
+        pay_date: item.pay_period.pay_date.iso8601,
+        gross_pay: money(item.gross_pay),
+        employee_tax: money(employee_tax),
+        employer_tax: money(employer_tax)
       }
     end
   end

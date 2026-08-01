@@ -246,6 +246,7 @@ export interface EmployeeFormData {
   last_name: string;
   email?: string;
   ssn?: string;
+  ssn_confirmation?: string;
   date_of_birth?: string;
   hire_date: string;
   employment_type: EmploymentType;

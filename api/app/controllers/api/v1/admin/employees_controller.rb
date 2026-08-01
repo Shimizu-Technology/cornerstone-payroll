@@ -32,6 +32,7 @@ module Api
         # POST /api/v1/admin/employees
         def create
           @employee = Employee.new(employee_params.merge(company_id: current_company_id))
+          require_ssn_confirmation!(@employee)
 
           if @employee.save
             render json: { data: serialize_employee(@employee, include_sensitive: true) }, status: :created
@@ -45,6 +46,8 @@ module Api
 
         # PATCH /api/v1/admin/employees/:id
         def update
+          require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present?
+
           if @employee.update(employee_params)
             render json: { data: serialize_employee(@employee, include_sensitive: true) }
           else
@@ -142,6 +145,11 @@ module Api
               permitted.delete(:ssn)
             end
           end
+        end
+
+        def require_ssn_confirmation!(employee)
+          employee.require_ssn_confirmation = true
+          employee.ssn_confirmation = params.require(:employee).permit(:ssn_confirmation)[:ssn_confirmation]
         end
 
         def apply_filters(scope)

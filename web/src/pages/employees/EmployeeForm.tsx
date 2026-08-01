@@ -18,6 +18,7 @@ const initialFormData: EmployeeFormData = {
   middle_name: '',
   last_name: '',
   ssn: '',
+  ssn_confirmation: '',
   date_of_birth: '',
   hire_date: '',
   employment_type: 'hourly',
@@ -201,6 +202,8 @@ export function EmployeeForm() {
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
+  const [initialSsn, setInitialSsn] = useState('');
+  const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
@@ -244,6 +247,7 @@ export function EmployeeForm() {
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
         ssn: employee.ssn || '',
+        ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
         hire_date: employee.hire_date,
         employment_type: employee.employment_type,
@@ -275,6 +279,8 @@ export function EmployeeForm() {
         default_payroll_adjustments: employee.default_payroll_adjustments || [],
       };
       setForm(normalizeEmployeeMonetaryFields(nextForm));
+      setInitialSsn(employee.ssn || '');
+      setInitialEmploymentType(employee.employment_type);
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -567,6 +573,9 @@ export function EmployeeForm() {
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
+    const isW2Employee = form.employment_type !== 'contractor';
+    const isW2Onboarding = isW2Employee && (!isEditing || initialEmploymentType === 'contractor');
+    const ssnChanged = (form.ssn || '') !== initialSsn;
 
     if (!form.first_name.trim()) {
       newErrors.first_name = ['First name is required'];
@@ -591,8 +600,32 @@ export function EmployeeForm() {
         }
       }
     }
-    if (form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
+    if (isW2Onboarding && !form.ssn?.trim()) {
+      newErrors.ssn = ['Social Security Number is required'];
+    } else if (form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
+    }
+    if (isW2Employee && (isW2Onboarding || ssnChanged)) {
+      if (!form.ssn_confirmation?.trim()) {
+        newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
+      } else if (form.ssn_confirmation !== form.ssn) {
+        newErrors.ssn_confirmation = ['Social Security Numbers do not match'];
+      }
+    }
+    if (isW2Onboarding && !form.hire_date) {
+      newErrors.hire_date = ['Hire date is required'];
+    }
+    if (isW2Onboarding && !form.address_line1?.trim()) {
+      newErrors.address_line1 = ['Address line 1 is required'];
+    }
+    if (isW2Onboarding && !form.city?.trim()) {
+      newErrors.city = ['City is required'];
+    }
+    if (isW2Onboarding && !form.state?.trim()) {
+      newErrors.state = ['State is required'];
+    }
+    if (isW2Onboarding && !form.zip?.trim()) {
+      newErrors.zip = ['ZIP code is required'];
     }
     if (form.date_of_birth) {
       const dob = new Date(form.date_of_birth);
@@ -660,6 +693,10 @@ export function EmployeeForm() {
         const updateData = { ...employeePayload };
         if (!updateData.ssn) {
           delete updateData.ssn;
+        }
+        if (updateData.ssn === initialSsn) {
+          delete updateData.ssn;
+          delete updateData.ssn_confirmation;
         }
         if (isClient) {
           const response = await clientEmployeesApi.update(parseInt(id, 10), updateData);
@@ -789,6 +826,9 @@ export function EmployeeForm() {
   };
 
   const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
+  const isW2Employee = form.employment_type !== 'contractor';
+  const ssnConfirmationRequired = isW2Employee
+    && (!isEditing || initialEmploymentType === 'contractor' || (form.ssn || '') !== initialSsn);
 
   if (isLoading) {
     return (
@@ -885,18 +925,37 @@ export function EmployeeForm() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className={`grid grid-cols-1 ${form.employment_type === 'contractor' ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-4 mt-4`}>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   {form.employment_type === 'contractor' ? 'SSN / TIN' : 'Social Security Number'}
+                  {form.employment_type !== 'contractor' && <span className="text-danger-600"> *</span>}
                 </label>
                 <Input
                   placeholder="XXX-XX-XXXX"
                   value={form.ssn || ''}
                   onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
                   error={getFieldError('ssn')}
+                  inputMode="numeric"
+                  autoComplete="off"
                 />
               </div>
+              {isW2Employee && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Re-enter Social Security Number
+                    {ssnConfirmationRequired && <span className="text-danger-600"> *</span>}
+                  </label>
+                  <Input
+                    placeholder="XXX-XX-XXXX"
+                    value={form.ssn_confirmation || ''}
+                    onChange={(e) => handleChange('ssn_confirmation', formatSSN(e.target.value))}
+                    error={getFieldError('ssn_confirmation')}
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Date of Birth
@@ -920,7 +979,7 @@ export function EmployeeForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Hire Date
+                  Hire Date {form.employment_type !== 'contractor' && <span className="text-danger-600">*</span>}
                 </label>
                 <Input
                   type="date"
@@ -1723,7 +1782,7 @@ export function EmployeeForm() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1 {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                  Address Line 1 {form.employment_type !== 'contractor' && <span className="text-danger-600">*</span>}
                 </label>
                 <Input
                   value={form.address_line1 || ''}
@@ -1745,7 +1804,7 @@ export function EmployeeForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    City {form.employment_type !== 'contractor' && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     value={form.city || ''}
@@ -1755,7 +1814,7 @@ export function EmployeeForm() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    State {form.employment_type !== 'contractor' && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     value={form.state || ''}
@@ -1767,7 +1826,7 @@ export function EmployeeForm() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    ZIP Code {form.employment_type !== 'contractor' && <span className="text-danger-600">*</span>}
                   </label>
                   <Input
                     value={form.zip || ''}
