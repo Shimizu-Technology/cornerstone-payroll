@@ -31,7 +31,7 @@ RSpec.describe "Api::V1::Admin::Checks#replace_check", type: :request do
                     .add_payroll_item!(item)
     CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024)
                    .add_payroll_item!(item)
-    company.assign_check_numbers!([item])
+    company.assign_check_numbers!([ item ])
     item.reload
   end
   let!(:admin_user) do
@@ -136,6 +136,20 @@ RSpec.describe "Api::V1::Admin::Checks#replace_check", type: :request do
       expect(JSON.parse(response.body)["error"]).to match(/No change/)
     end
 
+    it "returns 422 instead of recomputing a legacy row without historical settings" do
+      original_item.update_columns(calculation_context_snapshot: {})
+
+      post "/api/v1/admin/payroll_items/#{original_item.id}/replace_check",
+           params: {
+             corrected_inputs: { hours_worked: 80 },
+             reason: "Correct hours on a legacy payroll row"
+           },
+           as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(JSON.parse(response.body)["error"]).to match(/cannot be safely recomputed/)
+    end
+
     # Lock in that strong-params accepts a nested wage_rate_hours array,
     # passes it through to the service, and the change actually applies for
     # multi-rate employees. Mirrors Ma Cristina's real-world case (1h Admin
@@ -159,7 +173,7 @@ RSpec.describe "Api::V1::Admin::Checks#replace_check", type: :request do
       multirate_item.save!
       EmployeeYtdTotal.find_or_create_by!(employee_id: multirate_employee.id, year: 2024).add_payroll_item!(multirate_item)
       CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(multirate_item)
-      company.assign_check_numbers!([multirate_item])
+      company.assign_check_numbers!([ multirate_item ])
       multirate_item.reload
 
       expect(multirate_item.gross_pay).to be_within(0.01).of(10.00)

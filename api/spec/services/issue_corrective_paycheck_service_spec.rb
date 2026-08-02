@@ -145,6 +145,105 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(corrective.gross_pay).to be_within(0.01).of(300.00)
       expect(corrective.social_security_tax).to be_within(0.01).of(18.60)
     end
+
+    it "recomputes exclusively from committed employee, deduction, field, and tax snapshots" do
+      retirement_type = DeductionType.create!(
+        company: company,
+        name: "Historical insurance",
+        category: "pre_tax",
+        sub_category: "insurance"
+      )
+      employee.employee_deductions.create!(
+        deduction_type: retirement_type,
+        amount: 2.5,
+        is_percentage: true
+      )
+      field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Historical benefit",
+        kind: "deduction",
+        tax_treatment: "post_tax_deduction",
+        category: "benefit",
+        amount_type: "percentage",
+        default_percentage: 1.5,
+        active: true
+      )
+      assignment = EmployeePayrollField.create!(
+        employee: employee,
+        payroll_field_definition: field,
+        percentage: 1.5
+      )
+      employee.update!(
+        retirement_rate: 0.03,
+        roth_retirement_rate: 0.01,
+        employer_retirement_match_rate: 0.02,
+        employer_roth_match_rate: 0.005,
+        additional_withholding: 7.5
+      )
+
+      original_item.destroy!
+      refreshed_original = original_period.payroll_items.build(
+        employee: employee,
+        company_id: company.id,
+        employment_type: "hourly",
+        pay_rate: 15.00,
+        hours_worked: 60
+      )
+      PayrollCalculator.for(employee, refreshed_original).calculate
+      refreshed_original.save!
+      EmployeeYtdTotal.find_or_create_by!(employee_id: employee.id, year: 2024)
+                      .update!(gross_pay: refreshed_original.gross_pay)
+      company.assign_check_numbers!([ refreshed_original ])
+
+      expected = described_class.preview(
+        original_pay_period: original_period,
+        employee: employee,
+        corrected_inputs: { hours_worked: 80 }
+      )
+
+      employee.update!(
+        pay_frequency: "monthly",
+        filing_status: "married",
+        allowances: 5,
+        w4_step2_multiple_jobs: true,
+        w4_dependent_credit: 2_000,
+        w4_step4a_other_income: 12_000,
+        w4_step4b_deductions: 4_000,
+        additional_withholding: 100,
+        retirement_rate: 0.10,
+        roth_retirement_rate: 0.08,
+        employer_retirement_match_rate: 0.09,
+        employer_roth_match_rate: 0.07
+      )
+      employee.employee_deductions.find_by!(deduction_type: retirement_type).update!(amount: 25)
+      assignment.update!(percentage: 20)
+      field.update!(default_percentage: 30, active: false)
+      tax_table.update!(ss_rate: 0.01, medicare_rate: 0.01)
+
+      actual = described_class.preview(
+        original_pay_period: original_period,
+        employee: employee,
+        corrected_inputs: { hours_worked: 80 }
+      )
+
+      expect(actual[:corrected]).to eq(expected[:corrected])
+      expect(actual[:deltas]).to eq(expected[:deltas])
+    end
+
+    it "blocks legacy payroll rows that lack an immutable calculation context" do
+      original_item.update_columns(calculation_context_snapshot: {})
+
+      expect {
+        described_class.preview(
+          original_pay_period: original_period,
+          employee: employee,
+          corrected_inputs: { hours_worked: 80 }
+        )
+      }.to raise_error(
+        IssueCorrectivePaycheckService::MissingHistoricalContextError,
+        /cannot be safely recomputed/
+      )
+    end
   end
 
   describe ".issue!" do

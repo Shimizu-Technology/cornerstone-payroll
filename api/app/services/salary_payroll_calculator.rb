@@ -43,6 +43,7 @@ class SalaryPayrollCalculator < PayrollCalculator
     calculate_totals
     calculate_net_pay
     update_ytd_on_item
+    capture_calculation_context!
   end
 
   private
@@ -50,12 +51,12 @@ class SalaryPayrollCalculator < PayrollCalculator
   def calculate_gross_pay
     if payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
-    elsif employee.salary_type == "variable"
+    elsif employee_value(:salary_type) == "variable"
       @base_pay = 0.0
-    elsif employee.salary_type == "per_period"
+    elsif employee_value(:salary_type) == "per_period"
       @base_pay = payroll_item.pay_rate.to_f
     else
-      periods = PERIODS_PER_YEAR[employee.pay_frequency] || 26
+      periods = PERIODS_PER_YEAR[employee_value(:pay_frequency)] || 26
       @base_pay = payroll_item.pay_rate / periods.to_f
     end
 

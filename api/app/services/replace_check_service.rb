@@ -42,6 +42,7 @@ class ReplaceCheckService
   class InvalidStateError       < ReplaceError; end
   class UnsupportedEmployeeError < ReplaceError; end
   class InvalidInputError       < ReplaceError; end
+  class MissingHistoricalContextError < ReplaceError; end
 
   # Same set the corrective service accepts. Anything not provided falls
   # back to the existing payroll_item value.
@@ -226,6 +227,10 @@ class ReplaceCheckService
       raise InvalidStateError,
             "Cannot replace a corrective entry directly — replace the original payroll item instead"
     end
+    unless PayrollCalculationContext.valid_for_correction?(@payroll_item.calculation_context_snapshot)
+      raise MissingHistoricalContextError,
+            "This payroll item predates immutable calculation snapshots and cannot be safely recomputed automatically"
+    end
   end
 
   def validate_for_replace!
@@ -253,6 +258,10 @@ class ReplaceCheckService
     if @payroll_item.check_number.blank?
       raise InvalidStateError, "Payroll item has no check number — nothing to replace"
     end
+    unless PayrollCalculationContext.valid_for_correction?(@payroll_item.calculation_context_snapshot)
+      raise MissingHistoricalContextError,
+            "This payroll item predates immutable calculation snapshots and cannot be safely recomputed automatically"
+    end
   end
 
   # ---------------------------------------------------------------------
@@ -271,6 +280,7 @@ class ReplaceCheckService
       temp.id          = @payroll_item.id    # keep ID so YTD-excludes-self matches
       temp.pay_period  = @payroll_item.pay_period
       temp.employee    = @payroll_item.employee
+      clone_payroll_field_entries!(@payroll_item, temp)
       apply_corrected_inputs_to(temp)
       recompute_with_ytd_excluding_self(temp)
       temp
@@ -298,9 +308,34 @@ class ReplaceCheckService
       totals: cached_ytd_totals_excluding_self
     )
 
-    PayrollCalculator.for(employee, item).calculate
+    PayrollCalculator.for(
+      employee,
+      item,
+      employment_type: @payroll_item.employment_type,
+      calculation_context: @payroll_item.calculation_context_snapshot
+    ).calculate
   ensure
     employee.restore_cached_ytd_snapshot!(previous_snapshot)
+  end
+
+  def clone_payroll_field_entries!(source, target)
+    source.payroll_item_field_entries.each do |entry|
+      target.payroll_item_field_entries.build(
+        payroll_field_definition_id: entry.payroll_field_definition_id,
+        label: entry.label,
+        kind: entry.kind,
+        tax_treatment: entry.tax_treatment,
+        category: entry.category,
+        amount: entry.amount,
+        employee_paid: entry.employee_paid,
+        employer_paid: entry.employer_paid,
+        reporting_group: entry.reporting_group,
+        active: entry.active,
+        source: entry.source,
+        notes: entry.notes,
+        metadata: entry.metadata.deep_dup
+      )
+    end
   end
 
   # YTD across all reportable_committed periods *prior to* this item's
