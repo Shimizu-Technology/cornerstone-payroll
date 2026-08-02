@@ -761,7 +761,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "flags missing SSN as compliance issue" do
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
 
       get "/api/v1/admin/reports/w2_gu", params: { year: 2025 }
 
@@ -1077,7 +1077,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "flags missing SSN as blocking finding" do
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
 
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
 
@@ -1261,7 +1261,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "returns 422 when blocking findings exist" do
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
 
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
@@ -1271,7 +1271,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
     it "revalidates preflight at mark_ready time to prevent stale blocking_count" do
       # Initial preflight is clean in before block. Introduce a new blocking issue after that.
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
 
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
@@ -1304,7 +1304,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       persisted_findings = filing.findings
       persisted_warning_count = filing.warning_count
 
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2025 }
       expect(response).to have_http_status(:unprocessable_entity)
 
@@ -1353,7 +1353,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("filing", "notes")).to eq("Reviewed and approved by ops")
 
-      employee.update!(ssn_encrypted: nil)
+      employee.update_columns(ssn_encrypted: nil)
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2025 }
       expect(response).to have_http_status(:ok)
 

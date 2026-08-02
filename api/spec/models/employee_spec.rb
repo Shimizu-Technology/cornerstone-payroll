@@ -190,21 +190,49 @@ RSpec.describe Employee, type: :model do
       expect(employee.errors.attribute_names).to include(:address_line1, :city, :state, :zip)
     end
 
-    it "does not require mailing address fields for contractors" do
-      employee = build(:employee, :contractor, pay_rate: 50.0)
-
-      expect(employee).to be_valid
-    end
-
-    it "requires filing fields when a contractor becomes a W-2 employee" do
-      employee = create(:employee, :contractor, ssn_encrypted: nil, hire_date: nil)
-
-      employee.employment_type = "hourly"
+    it "requires mailing address fields for individual contractors" do
+      employee = build(:employee, :contractor, pay_rate: 50.0,
+        address_line1: nil, city: nil, state: nil, zip: nil)
 
       expect(employee).not_to be_valid
-      expect(employee.errors.attribute_names).to include(
-        :hire_date, :ssn, :address_line1, :city, :state, :zip
-      )
+      expect(employee.errors.attribute_names).to include(:address_line1, :city, :state, :zip)
+    end
+
+    it "requires legacy incomplete records to be completed when they are edited" do
+      employee = create(:employee)
+      employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+
+      employee.first_name = "Updated"
+
+      expect(employee).not_to be_valid
+      expect(employee.errors.attribute_names).to include(:hire_date, :address_line1, :city, :state, :zip)
+    end
+
+    it "still allows an incomplete legacy record to be terminated" do
+      employee = create(:employee)
+      employee.update_columns(hire_date: nil, address_line1: nil, city: nil, state: nil, zip: nil)
+
+      expect(employee.update(status: "terminated", termination_date: Date.current)).to be(true)
+    end
+
+    it "requires an SSN for individual contractors" do
+      employee = build(:employee, :contractor, ssn_encrypted: nil)
+
+      expect(employee).not_to be_valid
+      expect(employee.errors[:ssn]).to include("can't be blank")
+    end
+
+    it "uses legal business name and EIN instead of SSN for business contractors" do
+      employee = build(:employee, :business_contractor)
+
+      expect(employee).to be_valid
+
+      employee.business_name = nil
+      employee.contractor_ein = "12-345"
+
+      expect(employee).not_to be_valid
+      expect(employee.errors.attribute_names).to include(:business_name, :contractor_ein)
+      expect(employee.errors[:contractor_ein]).to include("must contain exactly 9 digits")
     end
 
     it "does not emit a malformed city/state/zip line when address parts are blank" do

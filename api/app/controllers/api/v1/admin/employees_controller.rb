@@ -188,6 +188,8 @@ module Api
             :pay_frequency,
             :salary_type,
             :filing_status,
+            :ssn,
+            :ssn_confirmation,
             :contractor_type,
             :contractor_pay_type,
             :business_name,

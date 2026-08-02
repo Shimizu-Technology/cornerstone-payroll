@@ -135,7 +135,7 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
       id,
       data: { ...EMPTY_EMPLOYEE },
       included: true,
-      errors: ['first_name is required', 'last_name is required', 'pay_rate is required'],
+      errors: validateRowData(EMPTY_EMPLOYEE),
       duplicate: false,
       new_department: false,
       isNew: true,
@@ -194,9 +194,10 @@ export function EmployeeBulkImportModal({ open, onClose, onComplete }: Props) {
         // - If _ssn_token exists: file-originated SSN, not user-edited -> send token
         //   so backend resolves the real SSN from server-side cache.
         // - If no token but user typed an SSN (new row or edited SSN field): send raw.
-        if (d._ssn_token) {
+        const businessContractor = d.employment_type === 'contractor' && d.contractor_type === 'business';
+        if (d._ssn_token && !businessContractor) {
           attrs._ssn_token = d._ssn_token;
-        } else if (d.ssn && !d.ssn.includes('*')) {
+        } else if (d.ssn && !d.ssn.includes('*') && !businessContractor) {
           attrs.ssn = d.ssn;
         }
         if (d.date_of_birth) attrs.date_of_birth = d.date_of_birth;
@@ -478,7 +479,24 @@ function validateRowData(data: BulkImportEmployeeData): string[] {
   if (data.employment_type && !['hourly', 'salary', 'contractor'].includes(data.employment_type)) {
     errors.push('employment_type must be hourly, salary, or contractor');
   }
-  if (data.ssn) {
+  if (!data.pay_frequency?.trim()) errors.push('pay_frequency is required');
+  if (!data.hire_date?.trim()) errors.push('hire_date is required');
+  if (!data.address_line1?.trim()) errors.push('address_line1 is required');
+  if (!data.city?.trim()) errors.push('city is required');
+  if (!data.state?.trim()) errors.push('state is required');
+  if (!data.zip?.trim()) errors.push('zip is required');
+
+  const businessContractor = data.employment_type === 'contractor' && data.contractor_type === 'business';
+  if (businessContractor) {
+    if (!data.business_name?.trim()) errors.push('business_name is required for business contractors');
+    const einDigits = data.contractor_ein?.replace(/\D/g, '') || '';
+    if (!einDigits) errors.push('contractor_ein is required for business contractors');
+    else if (einDigits.length !== 9) errors.push('contractor_ein must be exactly 9 digits');
+  } else if (!data.ssn && !data._ssn_token) {
+    errors.push('ssn is required for W-2 employees and individual contractors');
+  }
+
+  if (data.ssn && !businessContractor) {
     // Skip validation for file-originated rows where SSN is still the masked
     // display value (***-**-XXXX) backed by a server-side token.
     const isMasked = data.ssn.includes('*');
@@ -597,9 +615,11 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
               <Field label="Middle Name" value={row.data.middle_name} onChange={v => onUpdateField('middle_name', v)} />
               <Field label="Last Name *" value={row.data.last_name} onChange={v => onUpdateField('last_name', v)} />
               <Field label="Email" value={row.data.email} onChange={v => onUpdateField('email', v)} />
-              <Field label="SSN" value={row.data.ssn} onChange={v => onUpdateField('ssn', v)} placeholder="123-45-6789" />
+              {!(row.data.employment_type === 'contractor' && row.data.contractor_type === 'business') && (
+                <Field label="SSN *" value={row.data.ssn} onChange={v => onUpdateField('ssn', v)} placeholder="123-45-6789" />
+              )}
               <Field label="Date of Birth" value={row.data.date_of_birth} onChange={v => onUpdateField('date_of_birth', v)} type="date" />
-              <Field label="Hire Date" value={row.data.hire_date} onChange={v => onUpdateField('hire_date', v)} type="date" />
+              <Field label="Hire Date *" value={row.data.hire_date} onChange={v => onUpdateField('hire_date', v)} type="date" />
               <Field label="Phone" value={row.data.phone} onChange={v => onUpdateField('phone', v)} />
             </div>
           </FieldSection>
@@ -631,7 +651,7 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
               )}
               <Field label="Pay Rate *" value={row.data.pay_rate} onChange={v => onUpdateField('pay_rate', v)} prefix="$" />
               <SelectField
-                label="Pay Frequency"
+                label="Pay Frequency *"
                 value={row.data.pay_frequency}
                 onChange={v => onUpdateField('pay_frequency', v)}
                 options={[
@@ -696,7 +716,7 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
             <FieldSection title="Contractor Details">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <SelectField
-                  label="Contractor Type"
+                  label="Contractor Type *"
                   value={row.data.contractor_type}
                   onChange={v => onUpdateField('contractor_type', v)}
                   options={[
@@ -705,7 +725,7 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
                   ]}
                 />
                 <SelectField
-                  label="Pay Type"
+                  label="Pay Type *"
                   value={row.data.contractor_pay_type}
                   onChange={v => onUpdateField('contractor_pay_type', v)}
                   options={[
@@ -713,8 +733,12 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
                     { value: 'flat_fee', label: 'Flat Fee' },
                   ]}
                 />
-                <Field label="Business Name" value={row.data.business_name} onChange={v => onUpdateField('business_name', v)} />
-                <Field label="EIN" value={row.data.contractor_ein} onChange={v => onUpdateField('contractor_ein', v)} />
+                {row.data.contractor_type === 'business' && (
+                  <>
+                    <Field label="Legal Business Name *" value={row.data.business_name} onChange={v => onUpdateField('business_name', v)} />
+                    <Field label="EIN *" value={row.data.contractor_ein} onChange={v => onUpdateField('contractor_ein', v)} />
+                  </>
+                )}
                 <SelectField
                   label="W-9 On File"
                   value={row.data.w9_on_file}
@@ -729,14 +753,14 @@ function EmployeeRowEditor({ row, expanded, onToggleExpand, onToggleInclude, onU
           <FieldSection title="Address">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="sm:col-span-2">
-                <Field label="Address Line 1" value={row.data.address_line1} onChange={v => onUpdateField('address_line1', v)} />
+                <Field label="Address Line 1 *" value={row.data.address_line1} onChange={v => onUpdateField('address_line1', v)} />
               </div>
               <div className="sm:col-span-2">
                 <Field label="Address Line 2" value={row.data.address_line2} onChange={v => onUpdateField('address_line2', v)} />
               </div>
-              <Field label="City" value={row.data.city} onChange={v => onUpdateField('city', v)} />
-              <Field label="State" value={row.data.state} onChange={v => onUpdateField('state', v)} />
-              <Field label="ZIP" value={row.data.zip} onChange={v => onUpdateField('zip', v)} />
+              <Field label="City *" value={row.data.city} onChange={v => onUpdateField('city', v)} />
+              <Field label="State *" value={row.data.state} onChange={v => onUpdateField('state', v)} />
+              <Field label="ZIP *" value={row.data.zip} onChange={v => onUpdateField('zip', v)} />
             </div>
           </FieldSection>
 

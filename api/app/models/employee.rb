@@ -106,8 +106,9 @@ class Employee < ApplicationRecord
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
   validates :contractor_pay_type, inclusion: { in: CONTRACTOR_PAY_TYPES }, if: :contractor?
-  validate :required_w2_onboarding_fields, if: :requires_w2_onboarding_fields?
-  validate :filing_ssn_format, if: :filing_ssn_validation_required?
+  validate :required_filing_fields, if: :filing_data_validation_required?
+  validate :filing_ssn_format, if: -> { filing_data_validation_required? && filing_ssn_required? }
+  validate :business_ein_format, if: -> { filing_data_validation_required? && business_contractor? }
   validate :matching_ssn_confirmation, if: :ssn_confirmation_required?
   validate :tax_classification_cannot_change_in_place, on: :update
   validate :previous_employee_transition_is_valid
@@ -205,6 +206,14 @@ class Employee < ApplicationRecord
 
   def contractor_flat_fee?
     contractor? && contractor_pay_type == "flat_fee"
+  end
+
+  def business_contractor?
+    contractor? && contractor_type == "business"
+  end
+
+  def individual_filer?
+    !business_contractor?
   end
 
   def normalized_filing_status
@@ -381,16 +390,9 @@ class Employee < ApplicationRecord
     end
   end
 
-  def requires_w2_onboarding_fields?
-    return false unless w2_employee?
-
-    new_record? || (will_save_change_to_employment_type? && employment_type_in_database == "contractor")
-  end
-
-  def required_w2_onboarding_fields
+  def required_filing_fields
     {
       hire_date: hire_date,
-      ssn: ssn_encrypted,
       address_line1: address_line1,
       city: city,
       state: state,
@@ -398,6 +400,19 @@ class Employee < ApplicationRecord
     }.each do |field, value|
       errors.add(field, "can't be blank") if value.blank?
     end
+
+    if business_contractor?
+      errors.add(:business_name, "can't be blank") if business_name.blank?
+      errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank?
+    elsif ssn_encrypted.blank?
+      errors.add(:ssn, "can't be blank")
+    end
+  end
+
+  def filing_data_validation_required?
+    return true if new_record?
+
+    (changes_to_save.keys - %w[status termination_date updated_at]).any?
   end
 
   def filing_ssn_format
@@ -407,12 +422,19 @@ class Employee < ApplicationRecord
     errors.add(:ssn, "must contain exactly 9 digits")
   end
 
-  def filing_ssn_validation_required?
-    w2_employee? && (requires_w2_onboarding_fields? || will_save_change_to_ssn_encrypted?)
+  def filing_ssn_required?
+    individual_filer?
+  end
+
+  def business_ein_format
+    return if contractor_ein.blank?
+    return if contractor_ein.to_s.gsub(/\D/, "").length == 9
+
+    errors.add(:contractor_ein, "must contain exactly 9 digits")
   end
 
   def ssn_confirmation_required?
-    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && w2_employee?
+    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && individual_filer?
   end
 
   def matching_ssn_confirmation

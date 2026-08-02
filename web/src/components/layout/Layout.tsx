@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useOutlet } from 'react-router';
 import { Menu, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
@@ -134,7 +134,10 @@ export function Layout() {
   }, [activeCompanyId]);
 
   return (
-    <div className="flex h-screen bg-transparent text-neutral-950">
+    <div
+      className="flex h-screen bg-transparent text-neutral-950"
+      style={{ '--sidebar-width': collapsed ? '4rem' : '18rem' } as CSSProperties}
+    >
       <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => openCommandPalette('all')} />
 
       <div className="relative flex flex-1 flex-col overflow-hidden">

@@ -4,7 +4,10 @@ module EmployeeBulkImport
   class ImportService
     MAX_FILE_SIZE = 10.megabytes
 
-    REQUIRED_COLUMNS = %w[first_name last_name employment_type pay_rate].freeze
+    REQUIRED_COLUMNS = %w[
+      first_name last_name employment_type pay_rate pay_frequency hire_date
+      address_line1 city state zip
+    ].freeze
 
     VALID_COLUMNS = %w[
       first_name middle_name last_name email ssn
@@ -262,7 +265,21 @@ module EmployeeBulkImport
         end
       end
 
-      if data["ssn"].present?
+      contractor_type = data["contractor_type"].presence || "individual"
+      business_contractor = data["employment_type"] == "contractor" && contractor_type == "business"
+
+      if business_contractor
+        errors << "business_name is required for business contractors" if data["business_name"].blank?
+        if data["contractor_ein"].blank?
+          errors << "contractor_ein is required for business contractors"
+        elsif data["contractor_ein"].gsub(/\D/, "").length != 9
+          errors << "contractor_ein must be exactly 9 digits"
+        end
+      elsif data["ssn"].blank?
+        errors << "ssn is required for W-2 employees and individual contractors"
+      end
+
+      if data["ssn"].present? && !business_contractor
         digits = data["ssn"].gsub(/\D/, "")
         errors << "ssn must be exactly 9 digits" unless digits.length == 9
       end
