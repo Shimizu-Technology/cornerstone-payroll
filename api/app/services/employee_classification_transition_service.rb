@@ -151,9 +151,14 @@ class EmployeeClassificationTransitionService
         roth_retirement_rate: 0,
         employer_retirement_match_rate: 0,
         employer_roth_match_rate: 0
-      }
+      }.tap do |contractor_attributes|
+        contractor_attributes[:ssn_encrypted] = nil if contractor_attributes[:contractor_type] == "business"
+      end
     else
       {
+        ssn_encrypted: attributes[:ssn].presence,
+        ssn_confirmation: attributes[:ssn_confirmation],
+        require_ssn_confirmation: true,
         salary_type: target_employment_type == "salary" ? attributes[:salary_type].presence || "annual" : "annual",
         filing_status: attributes[:filing_status].presence || "single",
         allowances: 0,

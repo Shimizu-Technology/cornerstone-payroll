@@ -264,6 +264,8 @@ export interface EmployeeClassificationTransition {
   pay_frequency: PayFrequency;
   salary_type?: 'annual' | 'per_period' | 'variable';
   filing_status?: FilingStatus;
+  ssn?: string;
+  ssn_confirmation?: string;
   contractor_type?: ContractorType;
   contractor_pay_type?: ContractorPayType;
   business_name?: string;

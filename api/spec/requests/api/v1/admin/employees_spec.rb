@@ -290,6 +290,29 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(response).to have_http_status(:created)
         expect(Employee.last.pay_rate).to eq(5_460_000)
       end
+
+      it "creates a business contractor with legal name and EIN instead of SSN" do
+        contractor_params = valid_params.deep_dup
+        contractor_params[:employee].merge!(
+          employment_type: "contractor",
+          contractor_type: "business",
+          contractor_pay_type: "flat_fee",
+          business_name: "AIRE Services LLC",
+          contractor_ein: "12-3456789",
+          ssn: "",
+          ssn_confirmation: ""
+        )
+
+        post "/api/v1/admin/employees", params: contractor_params
+
+        expect(response).to have_http_status(:created)
+        expect(Employee.last).to have_attributes(
+          contractor_type: "business",
+          business_name: "AIRE Services LLC",
+          contractor_ein: "12-3456789",
+          ssn_encrypted: nil
+        )
+      end
     end
 
     context "with invalid params" do
@@ -423,15 +446,16 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         ])
       end
 
-      it "allows updating an employee while address fields remain blank" do
+      it "requires legacy incomplete filing data to be completed before saving edits" do
         employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
 
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { first_name: "No Address Yet" }
         }
 
-        expect(response).to have_http_status(:ok)
-        expect(employee.reload.first_name).to eq("No Address Yet")
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details").keys).to include("address_line1", "city", "state", "zip")
+        expect(employee.reload.first_name).not_to eq("No Address Yet")
         expect(employee.address_line1).to be_nil
       end
     end
@@ -509,7 +533,9 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           reason: "Worker begins W-2 employment",
           pay_rate: 9.25,
           pay_frequency: "semimonthly",
-          filing_status: "single"
+          filing_status: "single",
+          ssn: "123-45-6789",
+          ssn_confirmation: "123-45-6789"
         }
       }
     end

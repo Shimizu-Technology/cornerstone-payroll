@@ -1082,7 +1082,12 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         pay_rate: 175.00,
         pay_frequency: "biweekly",
         status: "active",
-        hire_date: Date.today - 1.year
+        hire_date: Date.today - 1.year,
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910"
       )
       pay_period.payroll_items.create!(
         employee: employee,

@@ -25,7 +25,9 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
       reason: "Worker begins W-2 employment",
       pay_rate: 9.25,
       pay_frequency: "semimonthly",
-      filing_status: "single"
+      filing_status: "single",
+      ssn: "123-45-6789",
+      ssn_confirmation: "123-45-6789"
     }
   end
 
@@ -76,6 +78,17 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect {
       described_class.new(employee: contractor, attributes: attributes, actor: admin).call
     }.to raise_error(described_class::Error, "Only a super admin can transition W-2/1099 classification")
+  end
+
+  it "requires the W-2 SSN to be entered twice and match" do
+    attributes[:ssn_confirmation] = "987-65-4321"
+
+    expect {
+      described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+    }.to raise_error(ActiveRecord::RecordInvalid, /does not match Social Security Number/)
+
+    expect(contractor.reload).to be_active
+    expect(contractor.next_employee).to be_nil
   end
 
   it "blocks a transition when payroll exists on or after the effective date" do
