@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1255,6 +1255,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_01_120000) do
     t.decimal "additional_withholding_override", precision: 10, scale: 2
     t.bigint "annual_tax_config_id"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
+    t.jsonb "calculation_context_snapshot", default: {}, null: false
     t.decimal "cash_tips_reported", precision: 14, scale: 2
     t.date "check_date"
     t.string "check_memo"

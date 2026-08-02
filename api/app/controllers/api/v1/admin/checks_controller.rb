@@ -415,7 +415,9 @@ module Api
           )
 
           render json: { payroll_item: check_item_json(updated_item) }, status: :ok
-        rescue ReplaceCheckService::InvalidStateError, ReplaceCheckService::UnsupportedEmployeeError => e
+        rescue ReplaceCheckService::InvalidStateError,
+               ReplaceCheckService::UnsupportedEmployeeError,
+               ReplaceCheckService::MissingHistoricalContextError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ReplaceCheckService::InvalidInputError => e
           render json: { error: e.message }, status: :unprocessable_entity

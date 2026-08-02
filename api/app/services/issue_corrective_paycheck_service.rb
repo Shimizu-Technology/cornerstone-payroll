@@ -56,6 +56,7 @@ class IssueCorrectivePaycheckService
   class InvalidStateError       < CorrectionError; end
   class OriginalNotFoundError   < CorrectionError; end
   class UnsupportedEmployeeError < CorrectionError; end
+  class MissingHistoricalContextError < CorrectionError; end
 
   # Fields the operator can override when issuing a correction. Anything
   # not provided falls back to the original item's value.
@@ -201,6 +202,7 @@ class IssueCorrectivePaycheckService
       # Force corrected_item to be rebuilt against the freshly-locked
       # original (its inputs are derived from `original_item.*`).
       @corrected_item = nil
+      @recalculated_original_item = nil
 
       assert_correctable!(locked_original)
 
@@ -232,6 +234,11 @@ class IssueCorrectivePaycheckService
     if original_item.employment_type == "contractor"
       raise UnsupportedEmployeeError,
             "Contractor payroll items don't have a tax surface to correct; edit the contractor item directly"
+    end
+
+    unless PayrollCalculationContext.valid_for_correction?(original_item.calculation_context_snapshot)
+      raise MissingHistoricalContextError,
+            "This payroll item predates immutable calculation snapshots and cannot be safely recomputed automatically"
     end
   end
 
@@ -345,6 +352,9 @@ class IssueCorrectivePaycheckService
       import_source:            original_item.import_source
     )
     temp.pay_period = @original_pay_period
+    temp.payroll_adjustments = original_item.payroll_adjustments.deep_dup
+    temp.tax_rule_snapshot = original_item.tax_rule_snapshot.deep_dup
+    clone_original_payroll_field_entries!(temp)
 
     # Stub YTD context to "as it was when the original was first calculated":
     # i.e. exclude the original item itself from the YTD aggregates. This
@@ -358,11 +368,32 @@ class IssueCorrectivePaycheckService
       PayrollCalculator.for(
         @employee,
         temp,
-        employment_type: temp.employment_type
+        employment_type: temp.employment_type,
+        calculation_context: original_item.calculation_context_snapshot
       ).calculate
     end
 
     temp
+  end
+
+  def clone_original_payroll_field_entries!(temp)
+    original_item.payroll_item_field_entries.each do |entry|
+      temp.payroll_item_field_entries.build(
+        payroll_field_definition_id: entry.payroll_field_definition_id,
+        label: entry.label,
+        kind: entry.kind,
+        tax_treatment: entry.tax_treatment,
+        category: entry.category,
+        amount: entry.amount,
+        employee_paid: entry.employee_paid,
+        employer_paid: entry.employer_paid,
+        reporting_group: entry.reporting_group,
+        active: entry.active,
+        source: entry.source,
+        notes: entry.notes,
+        metadata: entry.metadata.deep_dup
+      )
+    end
   end
 
   # Override the employee's cached pre-period YTD totals with figures that

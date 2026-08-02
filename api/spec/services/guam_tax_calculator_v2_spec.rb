@@ -80,6 +80,34 @@ RSpec.describe GuamTaxCalculatorV2 do
     expect(result[:social_security]).to eq(-18.60)
   end
 
+  it "replays a committed rule snapshot after the source tax configuration changes" do
+    original = described_class.new(
+      tax_year: 2030,
+      filing_status: "single",
+      pay_frequency: "biweekly"
+    )
+    snapshot = original.rule_snapshot
+    expected = original.calculate(gross_pay: 3_000, ytd_gross: 50_000)
+
+    annual_config.update!(
+      ss_rate: 0.01,
+      medicare_rate: 0.02,
+      additional_medicare_rate: 0.03
+    )
+    filing_status_config.update!(standard_deduction: 1)
+    filing_status_config.tax_brackets.first.update!(rate: 0.50)
+
+    replay = described_class.new(
+      tax_year: 2030,
+      filing_status: "single",
+      pay_frequency: "biweekly",
+      rule_snapshot: snapshot
+    )
+
+    expect(replay.calculate(gross_pay: 3_000, ytd_gross: 50_000)).to eq(expected)
+    expect(replay.rule_snapshot).to eq(snapshot)
+  end
+
   it "blocks pre-2020 W-4 forms instead of silently applying modern rules" do
     expect {
       described_class.new(
