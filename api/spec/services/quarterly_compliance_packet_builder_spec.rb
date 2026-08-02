@@ -103,5 +103,43 @@ RSpec.describe QuarterlyCompliancePacketBuilder do
       expect(report.dig(:w1, :total_guam_withholding)).to eq(125.0)
       expect(report.dig(:pay_periods, 0, :guam_withholding)).to eq(125.0)
     end
+
+    it "flags contractor-tagged payroll that contains W-2 tax amounts" do
+      period = create_committed_period(
+        start_date: Date.new(2026, 6, 16),
+        end_date: Date.new(2026, 6, 30),
+        pay_date: Date.new(2026, 6, 30)
+      )
+      item = create(:payroll_item,
+        company: company,
+        employee: employee,
+        pay_period: period,
+        employment_type: "contractor",
+        gross_pay: 72.52,
+        net_pay: 66.97,
+        withholding_tax: 0,
+        social_security_tax: 4.50,
+        employer_social_security_tax: 4.50,
+        medicare_tax: 1.05,
+        employer_medicare_tax: 1.05)
+
+      report = described_class.new(company, 2026, 2).generate
+      check = report[:review_checks].find { |row| row[:key] == "employment_tax_classification_consistent" }
+
+      expect(report.dig(:swica, :excluded_contractor_summary)).to eq(
+        employee_count: 1,
+        item_count: 1,
+        total_wages: 72.52
+      )
+      expect(check[:status]).to eq("needs_review")
+      expect(check.dig(:details, :issue_count)).to eq(1)
+      expect(check.dig(:details, :issues, 0)).to include(
+        payroll_item_id: item.id,
+        employee_id: employee.id,
+        gross_pay: 72.52,
+        employee_tax: 5.55,
+        employer_tax: 5.55
+      )
+    end
   end
 end

@@ -25,12 +25,17 @@ class GuamTaxCalculatorV2
 
   def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0,
                  w4_step2_multiple_jobs: false, w4_step4a_other_income: 0, w4_step4b_deductions: 0,
-                 w4_form_version: 2020)
-    @annual_config = AnnualTaxConfig.current(tax_year) ||
-                     raise(ArgumentError, "No tax configuration found for year #{tax_year}")
-    normalized_filing_status = FilingStatusConfig.normalize(filing_status)
-    @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
-                            raise(ArgumentError, "No filing status config found for #{filing_status}")
+                 w4_form_version: 2020, rule_snapshot: nil)
+    @source_rule_snapshot = rule_snapshot&.deep_stringify_keys
+    if @source_rule_snapshot.present?
+      build_config_from_snapshot!
+    else
+      @annual_config = AnnualTaxConfig.current(tax_year) ||
+                       raise(ArgumentError, "No tax configuration found for year #{tax_year}")
+      normalized_filing_status = FilingStatusConfig.normalize(filing_status)
+      @filing_status_config = @annual_config.config_for(normalized_filing_status) ||
+                              raise(ArgumentError, "No filing status config found for #{filing_status}")
+    end
     if w4_form_version.to_i < Employee::MIN_SUPPORTED_W4_FORM_VERSION
       raise ArgumentError, "Pre-2020 Form W-4 calculations are not supported by the annual tax configuration engine"
     end
@@ -80,6 +85,8 @@ class GuamTaxCalculatorV2
   end
 
   def rule_snapshot
+    return @source_rule_snapshot.deep_dup if @source_rule_snapshot.present?
+
     {
       "engine" => "annual_tax_config_v2",
       "annual_tax_config_id" => annual_config.id,
@@ -238,6 +245,56 @@ class GuamTaxCalculatorV2
   end
 
   private
+
+  SnapshotAnnualConfig = Struct.new(
+    :id,
+    :tax_year,
+    :ss_wage_base,
+    :ss_rate,
+    :medicare_rate,
+    :additional_medicare_rate,
+    :additional_medicare_threshold,
+    keyword_init: true
+  )
+  SnapshotFilingStatusConfig = Struct.new(:id, :filing_status, :standard_deduction, :tax_brackets, keyword_init: true)
+  SnapshotBracket = Struct.new(:id, :bracket_order, :min_income, :max_income, :rate, keyword_init: true)
+  class SnapshotBrackets < Array
+    def order(*)
+      self
+    end
+  end
+
+  def build_config_from_snapshot!
+    snapshot = @source_rule_snapshot
+    raise ArgumentError, "Invalid annual tax-rule snapshot" unless snapshot["engine"] == "annual_tax_config_v2"
+
+    @annual_config = SnapshotAnnualConfig.new(
+      id: snapshot["annual_tax_config_id"],
+      tax_year: snapshot["tax_year"],
+      ss_wage_base: snapshot.fetch("social_security_wage_base").to_d,
+      ss_rate: snapshot.fetch("social_security_rate").to_d,
+      medicare_rate: snapshot.fetch("medicare_rate").to_d,
+      additional_medicare_rate: snapshot.fetch("additional_medicare_rate").to_d,
+      additional_medicare_threshold: snapshot.fetch("additional_medicare_threshold").to_d
+    )
+    brackets = SnapshotBrackets.new(Array(snapshot["brackets"]).map do |bracket|
+      SnapshotBracket.new(
+        id: bracket["id"],
+        bracket_order: bracket["order"],
+        min_income: bracket.fetch("min_income").to_d,
+        max_income: bracket["max_income"]&.to_d,
+        rate: bracket.fetch("rate").to_d
+      )
+    end)
+    @filing_status_config = SnapshotFilingStatusConfig.new(
+      id: snapshot["filing_status_config_id"],
+      filing_status: snapshot["filing_status"],
+      standard_deduction: snapshot.fetch("standard_deduction").to_d,
+      tax_brackets: brackets
+    )
+  rescue KeyError, ArgumentError => e
+    raise ArgumentError, "Invalid annual tax-rule snapshot: #{e.message}"
+  end
 
   # Calculate progressive tax using the tax brackets
   # This applies each bracket's rate only to the income within that bracket

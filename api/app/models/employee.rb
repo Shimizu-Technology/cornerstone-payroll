@@ -2,6 +2,8 @@
 
 class Employee < ApplicationRecord
   include PayrollAdjustable
+  attr_accessor :ssn_confirmation, :require_ssn_confirmation, :allow_tax_classification_change
+
   EMPLOYMENT_TYPES = %w[hourly salary contractor].freeze
   SALARY_TYPES = %w[annual per_period variable].freeze
   CONTRACTOR_TYPES = %w[individual business].freeze
@@ -63,6 +65,15 @@ class Employee < ApplicationRecord
 
   belongs_to :company
   belongs_to :department, optional: true
+  belongs_to :previous_employee,
+             class_name: "Employee",
+             optional: true,
+             inverse_of: :next_employee
+  has_one :next_employee,
+          class_name: "Employee",
+          foreign_key: :previous_employee_id,
+          inverse_of: :previous_employee,
+          dependent: :restrict_with_error
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :employee_deductions, dependent: :destroy
@@ -95,6 +106,12 @@ class Employee < ApplicationRecord
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
   validates :contractor_pay_type, inclusion: { in: CONTRACTOR_PAY_TYPES }, if: :contractor?
+  validate :required_filing_fields, if: :filing_data_validation_required?
+  validate :filing_ssn_format, if: -> { filing_data_validation_required? && filing_ssn_required? }
+  validate :business_ein_format, if: -> { filing_data_validation_required? && business_contractor? }
+  validate :matching_ssn_confirmation, if: :ssn_confirmation_required?
+  validate :tax_classification_cannot_change_in_place, on: :update
+  validate :previous_employee_transition_is_valid
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -179,12 +196,24 @@ class Employee < ApplicationRecord
     hourly? || salary?
   end
 
+  def tax_classification
+    contractor? ? "1099" : "w2"
+  end
+
   def contractor_hourly?
     contractor? && contractor_pay_type == "hourly"
   end
 
   def contractor_flat_fee?
     contractor? && contractor_pay_type == "flat_fee"
+  end
+
+  def business_contractor?
+    contractor? && contractor_type == "business"
+  end
+
+  def individual_filer?
+    !business_contractor?
   end
 
   def normalized_filing_status
@@ -336,6 +365,85 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def tax_classification_cannot_change_in_place
+    return unless will_save_change_to_employment_type?
+    return if ActiveModel::Type::Boolean.new.cast(allow_tax_classification_change)
+
+    prior_type = employment_type_in_database
+    return if prior_type.blank?
+    return if (prior_type == "contractor") == contractor?
+
+    errors.add(
+      :employment_type,
+      "cannot change between W-2 and 1099 in place; create a new worker record"
+    )
+  end
+
+  def previous_employee_transition_is_valid
+    return if previous_employee.blank?
+
+    errors.add(:previous_employee, "must belong to the same company") if previous_employee.company_id != company_id
+    errors.add(:previous_employee, "cannot reference itself") if persisted? && previous_employee_id == id
+    if previous_employee.tax_classification == tax_classification
+      errors.add(:previous_employee, "must use the opposite W-2/1099 classification")
+    end
+  end
+
+  def required_filing_fields
+    {
+      hire_date: hire_date,
+      address_line1: address_line1,
+      city: city,
+      state: state,
+      zip: zip
+    }.each do |field, value|
+      errors.add(field, "can't be blank") if value.blank?
+    end
+
+    if business_contractor?
+      errors.add(:business_name, "can't be blank") if business_name.blank?
+      errors.add(:contractor_ein, "can't be blank") if contractor_ein.blank?
+    elsif ssn_encrypted.blank?
+      errors.add(:ssn, "can't be blank")
+    end
+  end
+
+  def filing_data_validation_required?
+    return true if new_record?
+
+    (changes_to_save.keys - %w[status termination_date updated_at]).any?
+  end
+
+  def filing_ssn_format
+    return if ssn_encrypted.blank?
+    return if valid_filing_ssn?
+
+    errors.add(:ssn, "must contain exactly 9 digits")
+  end
+
+  def filing_ssn_required?
+    individual_filer?
+  end
+
+  def business_ein_format
+    return if contractor_ein.blank?
+    return if contractor_ein.to_s.gsub(/\D/, "").length == 9
+
+    errors.add(:contractor_ein, "must contain exactly 9 digits")
+  end
+
+  def ssn_confirmation_required?
+    ActiveModel::Type::Boolean.new.cast(require_ssn_confirmation) && individual_filer?
+  end
+
+  def matching_ssn_confirmation
+    if ssn_confirmation.blank?
+      errors.add(:ssn_confirmation, "can't be blank")
+    elsif ssn_digits != ssn_confirmation.to_s.gsub(/\D/, "")
+      errors.add(:ssn_confirmation, "does not match Social Security Number")
+    end
+  end
 
   def normalize_filing_status_value
     self.filing_status = normalized_filing_status if filing_status.present?

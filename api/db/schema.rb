@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -455,6 +455,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
     t.string "pay_frequency", default: "biweekly"
     t.decimal "pay_rate", precision: 18, scale: 6, null: false
     t.string "phone"
+    t.bigint "previous_employee_id"
     t.decimal "retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "roth_retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.string "salary_type", default: "annual", null: false
@@ -475,6 +476,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
     t.index ["company_id"], name: "index_employees_on_company_id"
     t.index ["department_id"], name: "index_employees_on_department_id"
     t.index ["employment_type"], name: "index_employees_on_employment_type"
+    t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
   end
 
@@ -1253,6 +1255,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
     t.decimal "additional_withholding_override", precision: 10, scale: 2
     t.bigint "annual_tax_config_id"
     t.decimal "bonus", precision: 10, scale: 2, default: "0.0"
+    t.jsonb "calculation_context_snapshot", default: {}, null: false
     t.decimal "cash_tips_reported", precision: 14, scale: 2
     t.date "check_date"
     t.string "check_memo"
@@ -1886,6 +1889,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_120000) do
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
+  add_foreign_key "employees", "employees", column: "previous_employee_id"
   add_foreign_key "filing_status_configs", "annual_tax_configs"
   add_foreign_key "form500_filings", "companies"
   add_foreign_key "form500_filings", "pay_periods"

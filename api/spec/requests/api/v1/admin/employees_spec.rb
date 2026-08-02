@@ -211,6 +211,7 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
           last_name: "Doe",
           email: "john.doe@example.com",
           ssn: "123-45-6789",
+          ssn_confirmation: "123-45-6789",
           hire_date: "2024-01-15",
           date_of_birth: "1990-05-20",
           employment_type: "hourly",
@@ -261,18 +262,18 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(log.record_id.to_s).to eq(Employee.last.id.to_s)
       end
 
-      it "creates a W-2 employee when address fields are not available yet" do
+      it "rejects a W-2 employee when filing address fields are missing" do
         params_without_address = valid_params.deep_dup
         params_without_address[:employee].merge!(address_line1: "", city: "", state: "", zip: "")
 
-        post "/api/v1/admin/employees", params: params_without_address
+        expect {
+          post "/api/v1/admin/employees", params: params_without_address
+        }.not_to change(Employee, :count)
 
-        expect(response).to have_http_status(:created)
-        employee = Employee.last
-        expect(employee.address_line1).to eq("")
-        expect(employee.city).to eq("")
-        expect(employee.state).to eq("")
-        expect(employee.zip).to eq("")
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("details").keys).to include(
+          "address_line1", "city", "state", "zip"
+        )
       end
 
       it "creates a salaried employee with a multi-million-dollar annual rate" do
@@ -289,9 +290,52 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(response).to have_http_status(:created)
         expect(Employee.last.pay_rate).to eq(5_460_000)
       end
+
+      it "creates a business contractor with legal name and EIN instead of SSN" do
+        contractor_params = valid_params.deep_dup
+        contractor_params[:employee].merge!(
+          employment_type: "contractor",
+          contractor_type: "business",
+          contractor_pay_type: "flat_fee",
+          business_name: "AIRE Services LLC",
+          contractor_ein: "12-3456789",
+          ssn: "",
+          ssn_confirmation: ""
+        )
+
+        post "/api/v1/admin/employees", params: contractor_params
+
+        expect(response).to have_http_status(:created)
+        expect(Employee.last).to have_attributes(
+          contractor_type: "business",
+          business_name: "AIRE Services LLC",
+          contractor_ein: "12-3456789",
+          ssn_encrypted: nil
+        )
+      end
     end
 
     context "with invalid params" do
+      it "rejects a missing SSN confirmation" do
+        invalid_params = valid_params.deep_dup
+        invalid_params[:employee].delete(:ssn_confirmation)
+
+        post "/api/v1/admin/employees", params: invalid_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("can't be blank")
+      end
+
+      it "rejects an SSN confirmation that does not match" do
+        invalid_params = valid_params.deep_dup
+        invalid_params[:employee][:ssn_confirmation] = "987-65-4321"
+
+        post "/api/v1/admin/employees", params: invalid_params
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("does not match Social Security Number")
+      end
+
       it "returns errors for missing required fields" do
         post "/api/v1/admin/employees", params: { employee: { first_name: "" } }
 
@@ -374,6 +418,15 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         expect(employee.reload.pay_rate).to eq(25.00)
       end
 
+      it "allows changing between hourly and salary within W-2 treatment" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: { employment_type: "salary", salary_type: "annual", pay_rate: 52_000 }
+        }
+
+        expect(response).to have_http_status(:ok)
+        expect(employee.reload).to have_attributes(employment_type: "salary", pay_rate: 52_000.to_d)
+      end
+
       it "updates recurring custom earnings" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: {
@@ -393,20 +446,49 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         ])
       end
 
-      it "allows updating an employee while address fields remain blank" do
+      it "requires legacy incomplete filing data to be completed before saving edits" do
         employee.update_columns(address_line1: nil, city: nil, state: nil, zip: nil)
 
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { first_name: "No Address Yet" }
         }
 
-        expect(response).to have_http_status(:ok)
-        expect(employee.reload.first_name).to eq("No Address Yet")
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details").keys).to include("address_line1", "city", "state", "zip")
+        expect(employee.reload.first_name).not_to eq("No Address Yet")
         expect(employee.address_line1).to be_nil
       end
     end
 
     context "with invalid params" do
+      it "rejects an in-place W-2 to 1099 change" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            employment_type: "contractor",
+            contractor_type: "individual",
+            contractor_pay_type: "flat_fee"
+          }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "employment_type")).to include(
+          "cannot change between W-2 and 1099 in place; create a new worker record"
+        )
+        expect(employee.reload.employment_type).to eq("hourly")
+      end
+
+      it "rejects an invalid replacement SSN even when its confirmation matches" do
+        patch "/api/v1/admin/employees/#{employee.id}", params: {
+          employee: {
+            ssn: "123-45-67",
+            ssn_confirmation: "123-45-67"
+          }
+        }
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.dig("details", "ssn")).to include("must contain exactly 9 digits")
+      end
+
       it "returns validation errors" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {
           employee: { pay_rate: -5 }
@@ -427,6 +509,62 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(employee.reload.first_name).to eq("Accountant Updated")
+    end
+  end
+
+  describe "POST /api/v1/admin/employees/:id/transition_tax_classification" do
+    let!(:contractor) do
+      create(:employee, :contractor,
+        company: company,
+        first_name: "Transition",
+        last_name: "Worker",
+        ssn_encrypted: "123-45-6789",
+        hire_date: Date.new(2024, 1, 1),
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910")
+    end
+    let(:transition_params) do
+      {
+        transition: {
+          employment_type: "hourly",
+          effective_date: Date.current.iso8601,
+          reason: "Worker begins W-2 employment",
+          pay_rate: 9.25,
+          pay_frequency: "semimonthly",
+          filing_status: "single",
+          ssn: "123-45-6789",
+          ssn_confirmation: "123-45-6789"
+        }
+      }
+    end
+
+    it "rejects non-super-admin users" do
+      post "/api/v1/admin/employees/#{contractor.id}/transition_tax_classification",
+        params: transition_params,
+        as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(contractor.reload).to be_active
+    end
+
+    it "creates a linked successor for a super admin" do
+      super_admin = create(:user, company: company, role: "super_admin")
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(super_admin)
+
+      expect {
+        post "/api/v1/admin/employees/#{contractor.id}/transition_tax_classification",
+          params: transition_params,
+          as: :json
+      }.to change(Employee, :count).by(1)
+
+      expect(response).to have_http_status(:created)
+      successor = Employee.order(:id).last
+      expect(response.parsed_body.dig("data", "id")).to eq(successor.id)
+      expect(response.parsed_body.dig("data", "classification_history", "previous_employee", "id")).to eq(contractor.id)
+      expect(contractor.reload.status).to eq("terminated")
+      expect(successor.previous_employee_id).to eq(contractor.id)
     end
   end
 

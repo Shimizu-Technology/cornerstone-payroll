@@ -34,7 +34,7 @@ RSpec.describe ReplaceCheckService do
                     .add_payroll_item!(item)
     CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024)
                    .add_payroll_item!(item)
-    company.assign_check_numbers!([item])
+    company.assign_check_numbers!([ item ])
     item.reload
   end
   let(:actor) do
@@ -76,6 +76,45 @@ RSpec.describe ReplaceCheckService do
         corrected_inputs: { hours_worked: 60 }
       )
       expect(result[:meta][:is_zero_change]).to eq(true)
+    end
+
+    it "uses the committed calculation context after the employee's tax and benefit setup changes" do
+      expected = described_class.preview(
+        payroll_item: original_item,
+        corrected_inputs: { hours_worked: 80 }
+      )
+
+      employee.update!(
+        pay_frequency: "monthly",
+        filing_status: "married",
+        allowances: 5,
+        additional_withholding: 100,
+        retirement_rate: 0.10,
+        employer_retirement_match_rate: 0.10
+      )
+      tax_table.update!(ss_rate: 0.01, medicare_rate: 0.01)
+
+      actual = described_class.preview(
+        payroll_item: original_item,
+        corrected_inputs: { hours_worked: 80 }
+      )
+
+      expect(actual[:corrected]).to eq(expected[:corrected])
+      expect(actual[:deltas]).to eq(expected[:deltas])
+    end
+
+    it "blocks legacy payroll rows that lack an immutable calculation context" do
+      original_item.update_columns(calculation_context_snapshot: {})
+
+      expect {
+        described_class.preview(
+          payroll_item: original_item,
+          corrected_inputs: { hours_worked: 80 }
+        )
+      }.to raise_error(
+        ReplaceCheckService::MissingHistoricalContextError,
+        /cannot be safely recomputed/
+      )
     end
 
     it "rejects contractor checks" do
@@ -210,7 +249,7 @@ RSpec.describe ReplaceCheckService do
                       .add_payroll_item!(item)
       CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024)
                      .add_payroll_item!(item)
-      company.assign_check_numbers!([item])
+      company.assign_check_numbers!([ item ])
       item.reload
     end
 
@@ -345,7 +384,7 @@ RSpec.describe ReplaceCheckService do
         item.save!
         EmployeeYtdTotal.find_or_create_by!(employee_id: multirate_employee.id, year: 2024).add_payroll_item!(item)
         CompanyYtdTotal.find_or_create_by!(company_id: company.id, year: 2024).add_payroll_item!(item)
-        company.assign_check_numbers!([item])
+        company.assign_check_numbers!([ item ])
         item.reload
       end
 

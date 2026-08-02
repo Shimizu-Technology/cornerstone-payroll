@@ -6,6 +6,7 @@ FactoryBot.define do
     department
     first_name { Faker::Name.first_name }
     last_name { Faker::Name.last_name }
+    sequence(:ssn_encrypted) { |n| format("900-70-%04d", n % 10_000) }
     employment_type { "hourly" }
     pay_rate { 15.00 }
     pay_frequency { "biweekly" }
@@ -51,10 +52,14 @@ FactoryBot.define do
       employment_type { "contractor" }
       contractor_type { "individual" }
       contractor_pay_type { "flat_fee" }
-      address_line1 { nil }
-      city { nil }
-      state { nil }
-      zip { nil }
+    end
+
+    trait :business_contractor do
+      contractor
+      contractor_type { "business" }
+      business_name { "#{Faker::Company.name} LLC" }
+      sequence(:contractor_ein) { |n| format("98-%07d", n % 10_000_000) }
+      ssn_encrypted { nil }
     end
   end
 end

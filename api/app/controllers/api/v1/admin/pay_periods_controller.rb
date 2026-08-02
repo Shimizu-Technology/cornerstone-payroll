@@ -272,11 +272,14 @@ module Api
             begin
               # Find or create payroll item for this employee
               payroll_item = @pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+              # Draft/calculated rows must reflect the employee classification used by
+              # the calculator. Otherwise a contractor-to-W-2 change can calculate
+              # FICA while retaining a contractor snapshot that reporting excludes.
+              payroll_item.employment_type = employee.employment_type
 
               # Set defaults from employee if new record
               if payroll_item.new_record?
                 payroll_item.company_id = current_company_id
-                payroll_item.employment_type = employee.employment_type
                 payroll_item.hours_worked = 0
                 payroll_item.additional_withholding = employee.additional_withholding.to_f
                 payroll_item.custom_earnings = employee.default_custom_earnings
