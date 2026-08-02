@@ -49,6 +49,7 @@ module Api
 
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
+          attrs[:employment_type] = employee.employment_type
 
           @payroll_item = @pay_period.payroll_items.build(attrs)
           @payroll_item.employee = employee
@@ -75,6 +76,7 @@ module Api
 
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
+          attrs[:employment_type] = @payroll_item.employee.employment_type
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
@@ -118,6 +120,7 @@ module Api
           end
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
+          @payroll_item.employment_type = @payroll_item.employee.employment_type
           @payroll_item.apply_default_payroll_adjustments_if_unset!(@payroll_item.employee)
           @payroll_item.calculate!
           render json: { payroll_item: payroll_item_json(@payroll_item) }

@@ -204,6 +204,12 @@ export interface Employee {
   hire_date: string;
   termination_date?: string;
   employment_type: EmploymentType;
+  tax_classification?: 'w2' | '1099';
+  previous_employee_id?: number | null;
+  classification_history?: {
+    previous_employee?: EmployeeLinkSummary | null;
+    next_employee?: EmployeeLinkSummary | null;
+  };
   salary_type?: 'annual' | 'per_period' | 'variable';
   pay_rate: number;
   pay_frequency: PayFrequency;
@@ -240,12 +246,39 @@ export interface Employee {
   updated_at: string;
 }
 
+export interface EmployeeLinkSummary {
+  id: number;
+  name: string;
+  employment_type: EmploymentType;
+  tax_classification: 'w2' | '1099';
+  status: EmployeeStatus;
+  hire_date?: string | null;
+  termination_date?: string | null;
+}
+
+export interface EmployeeClassificationTransition {
+  employment_type: EmploymentType;
+  effective_date: string;
+  reason: string;
+  pay_rate: number;
+  pay_frequency: PayFrequency;
+  salary_type?: 'annual' | 'per_period' | 'variable';
+  filing_status?: FilingStatus;
+  ssn?: string;
+  ssn_confirmation?: string;
+  contractor_type?: ContractorType;
+  contractor_pay_type?: ContractorPayType;
+  business_name?: string;
+  contractor_ein?: string;
+}
+
 export interface EmployeeFormData {
   first_name: string;
   middle_name?: string;
   last_name: string;
   email?: string;
   ssn?: string;
+  ssn_confirmation?: string;
   date_of_birth?: string;
   hire_date: string;
   employment_type: EmploymentType;

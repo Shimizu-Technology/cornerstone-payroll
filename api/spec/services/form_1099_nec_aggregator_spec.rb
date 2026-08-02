@@ -63,4 +63,20 @@ RSpec.describe Form1099NecAggregator, type: :service do
     expect(report[:meta][:filing_threshold]).to eq(600.0)
     expect(report[:meta][:reportable_count]).to eq(1)
   end
+
+  it "uses the historical payroll-item classification after the worker is W-2" do
+    transitioned_worker = create(:employee, company: company, first_name: "Legacy", last_name: "Worker")
+    create(:payroll_item,
+      pay_period: pay_period,
+      employee: transitioned_worker,
+      company: company,
+      employment_type: "contractor",
+      gross_pay: 275.00,
+      net_pay: 275.00)
+
+    row = described_class.new(company, 2026).generate[:all_contractors].sole
+
+    expect(row[:employee_id]).to eq(transitioned_worker.id)
+    expect(row[:total_compensation]).to eq(275.00)
+  end
 end

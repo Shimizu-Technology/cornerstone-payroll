@@ -16,6 +16,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
       company: company, department: department,
       first_name: "Jane", last_name: "Doe", email: "jane@example.com",
       employment_type: "hourly", pay_rate: 15.00, pay_frequency: "biweekly",
+      ssn_encrypted: "900-70-0001",
       filing_status: "single", allowances: 0, status: "active",
       address_line1: "123 Correction Way", city: "Hagatna", state: "GU", zip: "96910",
       hire_date: Date.new(2024, 1, 1)
@@ -73,6 +74,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
         company: other_company, department: other_dept,
         first_name: "X", last_name: "Y", email: "x@y.com",
         employment_type: "hourly", pay_rate: 10, pay_frequency: "biweekly",
+        ssn_encrypted: "900-70-0002",
         filing_status: "single", allowances: 0, status: "active",
         address_line1: "456 Other Way", city: "Hagatna", state: "GU", zip: "96910",
         hire_date: Date.today
@@ -89,6 +91,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods corrective paychecks", type: :request
         company: company, department: department,
         first_name: "L", last_name: "Z", email: "l@z.com",
         employment_type: "hourly", pay_rate: 10, pay_frequency: "biweekly",
+        ssn_encrypted: "900-70-0003",
         filing_status: "single", allowances: 0, status: "active",
         address_line1: "789 Lone Way", city: "Hagatna", state: "GU", zip: "96910",
         hire_date: Date.today

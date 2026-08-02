@@ -23,6 +23,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       last_name: "Doe",
       email: "john@example.com",
       employment_type: "hourly",
+      ssn_encrypted: "900-70-0010",
       pay_rate: 15.00,
       pay_frequency: "biweekly",
       filing_status: "single",
@@ -821,6 +822,38 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(item.overtime_hours).to eq(10)
     end
 
+    it "resynchronizes a stale contractor snapshot before recalculating a W-2 employee" do
+      employee.allow_tax_classification_change = true
+      employee.update!(
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "flat_fee"
+      )
+      stale_item = pay_period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: "contractor",
+        pay_rate: 175,
+        hours_worked: 0,
+        gross_pay: 175,
+        net_pay: 175
+      )
+      employee.allow_tax_classification_change = true
+      employee.update!(employment_type: "hourly", pay_rate: 15)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll", params: {
+        hours: {
+          employee.id.to_s => { regular: 8, overtime: 0 }
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(stale_item.reload.employment_type).to eq("hourly")
+      expect(stale_item.gross_pay).to eq(120.to_d)
+      expect(stale_item.social_security_tax).to be_positive
+      expect(stale_item.medicare_tax).to be_positive
+    end
+
     it "applies a worksheet payroll-field override on the first calculation" do
       field = PayrollFieldDefinition.create!(
         company: company,
@@ -887,12 +920,17 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         last_name: "Omitted",
         email: "import-omitted@example.com",
         employment_type: "hourly",
+        ssn_encrypted: "900-70-0011",
         pay_rate: 15,
         pay_frequency: "biweekly",
         filing_status: "single",
         allowances: 0,
         status: "active",
-        hire_date: 1.year.ago
+        hire_date: 1.year.ago,
+        address_line1: "456 Payroll Way",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910"
       )
       field = PayrollFieldDefinition.create!(
         company: company,
@@ -1044,7 +1082,12 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         pay_rate: 175.00,
         pay_frequency: "biweekly",
         status: "active",
-        hire_date: Date.today - 1.year
+        hire_date: Date.today - 1.year,
+        ssn_encrypted: "123-45-6789",
+        address_line1: "123 Marine Corps Dr",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910"
       )
       pay_period.payroll_items.create!(
         employee: employee,

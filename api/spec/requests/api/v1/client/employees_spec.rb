@@ -51,6 +51,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
               first_name: "Taylor",
               last_name: "Cruz",
               email: "taylor@example.com",
+              ssn: "123-45-6789",
+              ssn_confirmation: "123-45-6789",
               employment_type: "hourly",
               salary_type: "hourly",
               pay_rate: 16.25,
@@ -73,6 +75,32 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(created.additional_withholding.to_f).to eq(15.0)
       expect(EmployeeChangeRequest.count).to eq(0)
       expect(response.parsed_body.dig("data", "ssn")).to be_nil
+      expect(response.parsed_body.dig("data", "ssn_last_four")).to eq("6789")
+    end
+
+    it "rejects mismatched SSN confirmation" do
+      expect do
+        post "/api/v1/client/employees",
+          params: {
+            employee: {
+              first_name: "Taylor",
+              last_name: "Cruz",
+              employment_type: "hourly",
+              pay_rate: 16.25,
+              filing_status: "single",
+              ssn: "123-45-6789",
+              ssn_confirmation: "987-65-4321",
+              hire_date: "2026-04-01",
+              address_line1: "234 Marine Dr",
+              city: "Hagatna",
+              state: "GU",
+              zip: "96910"
+            }
+          }
+      end.not_to change(Employee, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "ssn_confirmation")).to include("does not match Social Security Number")
     end
 
     it "rejects department ids outside the client company" do
@@ -104,7 +132,8 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
             city: "Tamuning",
             pay_rate: 21.75,
             additional_withholding: 25.0,
-            ssn: "123-45-6789"
+            ssn: "123-45-6789",
+            ssn_confirmation: "123-45-6789"
           }
         }
 
@@ -137,6 +166,23 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.dig("details", "department_id")).to include("does not belong to this company")
       expect(employee.reload.department_id).to eq(department.id)
+    end
+
+    it "rejects an in-place W-2 to 1099 change" do
+      patch "/api/v1/client/employees/#{employee.id}",
+        params: {
+          employee: {
+            employment_type: "contractor",
+            contractor_type: "individual",
+            contractor_pay_type: "flat_fee"
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "employment_type")).to include(
+        "cannot change between W-2 and 1099 in place; create a new worker record"
+      )
+      expect(employee.reload.employment_type).to eq("hourly")
     end
   end
 

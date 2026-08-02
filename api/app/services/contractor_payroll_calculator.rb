@@ -30,6 +30,7 @@ class ContractorPayrollCalculator < PayrollCalculator
     calculate_totals
     calculate_net_pay
     update_ytd_on_item
+    capture_calculation_context!
   end
 
   private

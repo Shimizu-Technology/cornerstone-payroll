@@ -22,12 +22,17 @@ class GuamTaxCalculator
 
   attr_reader :tax_table, :allowances, :pay_frequency, :periods_per_year
 
-  def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0)
-    @tax_table = TaxTable.find_table(
-      tax_year: tax_year,
-      filing_status: FilingStatusConfig.normalize(filing_status),
-      pay_frequency: pay_frequency
-    )
+  def initialize(tax_year:, filing_status:, pay_frequency:, allowances: 0, rule_snapshot: nil)
+    @source_rule_snapshot = rule_snapshot&.deep_stringify_keys
+    @tax_table = if @source_rule_snapshot.present?
+      SnapshotTaxTable.new(@source_rule_snapshot)
+    else
+      TaxTable.find_table(
+        tax_year: tax_year,
+        filing_status: FilingStatusConfig.normalize(filing_status),
+        pay_frequency: pay_frequency
+      )
+    end
     @allowances = allowances
     @pay_frequency = pay_frequency
     @periods_per_year = PAY_FREQUENCIES[pay_frequency]
@@ -67,6 +72,8 @@ class GuamTaxCalculator
   end
 
   def rule_snapshot
+    return @source_rule_snapshot.deep_dup if @source_rule_snapshot.present?
+
     {
       "engine" => "legacy_tax_table",
       "tax_table_id" => tax_table.id,
@@ -196,6 +203,53 @@ class GuamTaxCalculator
   end
 
   private
+
+  class SnapshotTaxTable
+    ATTRIBUTES = %w[
+      tax_table_id
+      tax_year
+      filing_status
+      pay_frequency
+      standard_deduction
+      allowance_amount
+      social_security_wage_base
+      social_security_rate
+      medicare_rate
+      additional_medicare_rate
+      additional_medicare_threshold
+      brackets
+    ].freeze
+
+    attr_reader :id, :tax_year, :filing_status, :pay_frequency, :standard_deduction,
+                :allowance_amount, :ss_wage_base, :ss_rate, :medicare_rate,
+                :additional_medicare_rate, :additional_medicare_threshold, :brackets
+
+    def initialize(snapshot)
+      missing = ATTRIBUTES.reject { |key| snapshot.key?(key) }
+      raise ArgumentError, "missing #{missing.join(', ')}" if missing.any?
+      raise ArgumentError, "wrong engine" unless snapshot["engine"] == "legacy_tax_table"
+
+      @id = snapshot["tax_table_id"]
+      @tax_year = snapshot["tax_year"]
+      @filing_status = snapshot["filing_status"]
+      @pay_frequency = snapshot["pay_frequency"]
+      @standard_deduction = snapshot["standard_deduction"].to_d
+      @allowance_amount = snapshot["allowance_amount"].to_d
+      @ss_wage_base = snapshot["social_security_wage_base"].to_d
+      @ss_rate = snapshot["social_security_rate"].to_d
+      @medicare_rate = snapshot["medicare_rate"].to_d
+      @additional_medicare_rate = snapshot["additional_medicare_rate"].to_d
+      @additional_medicare_threshold = snapshot["additional_medicare_threshold"].to_d
+      @brackets = Array(snapshot["brackets"]).map(&:deep_symbolize_keys)
+    end
+
+    def find_bracket(income)
+      brackets.find do |bracket|
+        income >= bracket[:min_income].to_d &&
+          (bracket[:max_income].nil? || income < bracket[:max_income].to_d)
+      end
+    end
+  end
 
   # Get allowance amount per pay period
   # This is the per-period allowance deduction from the tax table

@@ -18,22 +18,23 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item)
-    case employee.employment_type
+  def self.for(employee, payroll_item, employment_type: employee.employment_type, calculation_context: nil)
+    case employment_type
     when "hourly"
-      HourlyPayrollCalculator.new(employee, payroll_item)
+      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
     when "salary"
-      SalaryPayrollCalculator.new(employee, payroll_item)
+      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
     when "contractor"
-      ContractorPayrollCalculator.new(employee, payroll_item)
+      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context)
     else
-      raise ArgumentError, "Unknown employment type: #{employee.employment_type}"
+      raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
-  def initialize(employee, payroll_item)
+  def initialize(employee, payroll_item, calculation_context: nil)
     @employee = employee
     @payroll_item = payroll_item
+    @calculation_context = calculation_context&.deep_stringify_keys
   end
 
   def calculate
@@ -48,25 +49,29 @@ class PayrollCalculator
 
   def tax_calculator
     @tax_calculator ||= begin
+      if historical_calculation?
+        return snapshotted_tax_calculator
+      end
+
       config = AnnualTaxConfig.current(pay_period.pay_date.year)
 
       if config.present?
         GuamTaxCalculatorV2.new(
           tax_year: pay_period.pay_date.year,
-          filing_status: employee.filing_status,
-          pay_frequency: employee.pay_frequency,
-          allowances: employee.allowances,
-          w4_step2_multiple_jobs: employee.w4_step2_multiple_jobs,
-          w4_step4a_other_income: employee.w4_step4a_other_income.to_f,
-          w4_step4b_deductions: employee.w4_step4b_deductions.to_f,
-          w4_form_version: employee.w4_form_version
+          filing_status: employee_value(:filing_status),
+          pay_frequency: employee_value(:pay_frequency),
+          allowances: employee_value(:allowances),
+          w4_step2_multiple_jobs: employee_value(:w4_step2_multiple_jobs),
+          w4_step4a_other_income: employee_value(:w4_step4a_other_income).to_f,
+          w4_step4b_deductions: employee_value(:w4_step4b_deductions).to_f,
+          w4_form_version: employee_value(:w4_form_version)
         )
       else
         GuamTaxCalculator.new(
           tax_year: pay_period.pay_date.year,
-          filing_status: employee.filing_status,
-          pay_frequency: employee.pay_frequency,
-          allowances: employee.allowances
+          filing_status: employee_value(:filing_status),
+          pay_frequency: employee_value(:pay_frequency),
+          allowances: employee_value(:allowances)
         )
       end
     end
@@ -119,7 +124,7 @@ class PayrollCalculator
       ytd_medicare_wages: ytd_medicare_wages_before
     }
     if tax_calculator.method(:calculate).parameters.any? { |type, name| [ :key, :keyreq ].include?(type) && name == :w4_dependent_credit }
-      tax_args[:w4_dependent_credit] = employee.w4_dependent_credit.to_f
+      tax_args[:w4_dependent_credit] = employee_value(:w4_dependent_credit).to_f
     end
 
     taxes = tax_calculator.calculate(**tax_args)
@@ -141,9 +146,14 @@ class PayrollCalculator
     payroll_item.social_security_taxable_tips = taxes[:social_security_taxable_tips]
     payroll_item.medicare_taxable_wages = taxes[:medicare_taxable_wages]
     payroll_item.additional_medicare_taxable_wages = taxes[:additional_medicare_taxable_wages]
-    payroll_item.annual_tax_config = tax_calculator.respond_to?(:annual_config) ? tax_calculator.annual_config : nil
+    rule_snapshot = tax_calculator.rule_snapshot
+    if historical_calculation?
+      payroll_item.annual_tax_config_id = rule_snapshot["annual_tax_config_id"]
+    else
+      payroll_item.annual_tax_config = tax_calculator.respond_to?(:annual_config) ? tax_calculator.annual_config : nil
+    end
     sync_additional_withholding_from_employee!
-    payroll_item.tax_rule_snapshot = tax_calculator.rule_snapshot.merge(employee_w4_snapshot)
+    payroll_item.tax_rule_snapshot = rule_snapshot.merge(employee_w4_snapshot)
   end
 
   def capture_payroll_reporting_components!
@@ -151,18 +161,18 @@ class PayrollCalculator
   end
 
   def calculate_retirement
-    payroll_item.retirement_payment = (payroll_item.gross_pay * employee.retirement_rate.to_f).round(2)
+    payroll_item.retirement_payment = (payroll_item.gross_pay * employee_value(:retirement_rate).to_f).round(2)
   end
 
   def calculate_roth_retirement
-    payroll_item.roth_retirement_payment = (payroll_item.gross_pay * employee.roth_retirement_rate.to_f).round(2)
+    payroll_item.roth_retirement_payment = (payroll_item.gross_pay * employee_value(:roth_retirement_rate).to_f).round(2)
   end
 
   def calculate_employer_retirement_match
     payroll_item.employer_retirement_match =
-      (payroll_item.gross_pay * employee.employer_retirement_match_rate.to_f).round(2)
+      (payroll_item.gross_pay * employee_value(:employer_retirement_match_rate).to_f).round(2)
     payroll_item.employer_roth_retirement_match =
-      (payroll_item.gross_pay * employee.employer_roth_match_rate.to_f).round(2)
+      (payroll_item.gross_pay * employee_value(:employer_roth_match_rate).to_f).round(2)
   end
 
   # Sum of pre-tax EmployeeDeduction amounts (e.g., fixed-dollar 401k contributions).
@@ -184,7 +194,11 @@ class PayrollCalculator
   end
 
   def payroll_field_assignments_for_calculation
-    @payroll_field_assignments_for_calculation ||= payroll_item.active_payroll_field_assignments_for(employee).to_a
+    @payroll_field_assignments_for_calculation ||= if historical_calculation?
+      PayrollCalculationContext.payroll_field_assignments(@calculation_context)
+    else
+      payroll_item.active_payroll_field_assignments_for(employee).to_a
+    end
   end
 
   def restore_capped_payroll_field_entries!
@@ -200,7 +214,7 @@ class PayrollCalculator
   end
 
   def pre_tax_employee_deductions_total
-    employee.employee_deductions.active.includes(:deduction_type)
+    employee_deductions_for_calculation
       .reject { |ed| skip_employee_deduction?(ed.deduction_type) }
       .select { |ed| ed.deduction_type.active? && ed.deduction_type.pre_tax? }
       .sum { |ed| ed.calculate_amount(payroll_item.gross_pay) }
@@ -214,7 +228,7 @@ class PayrollCalculator
     aggregate_loan = 0.0
     aggregate_insurance = 0.0
 
-    active_deductions = employee.employee_deductions.active.includes(:deduction_type)
+    active_deductions = employee_deductions_for_calculation
     active_deductions.each do |ed|
       dt = ed.deduction_type
       next unless dt.active?
@@ -421,18 +435,18 @@ class PayrollCalculator
   def employee_w4_snapshot
     {
       "w4" => {
-        "form_version" => employee.w4_form_version,
-        "effective_on" => employee.w4_effective_on&.iso8601,
-        "filing_status_entered" => employee.filing_status,
-        "filing_status_normalized" => employee.normalized_filing_status,
-        "step2_multiple_jobs" => employee.w4_step2_multiple_jobs,
-        "step3_dependent_credit" => employee.w4_dependent_credit.to_f,
-        "step4a_other_income" => employee.w4_step4a_other_income.to_f,
-        "step4b_deductions" => employee.w4_step4b_deductions.to_f,
+        "form_version" => employee_value(:w4_form_version),
+        "effective_on" => employee_value(:w4_effective_on)&.to_date&.iso8601,
+        "filing_status_entered" => employee_value(:filing_status),
+        "filing_status_normalized" => FilingStatusConfig.normalize(employee_value(:filing_status)),
+        "step2_multiple_jobs" => employee_value(:w4_step2_multiple_jobs),
+        "step3_dependent_credit" => employee_value(:w4_dependent_credit).to_f,
+        "step4a_other_income" => employee_value(:w4_step4a_other_income).to_f,
+        "step4b_deductions" => employee_value(:w4_step4b_deductions).to_f,
         "step4c_extra_withholding" => payroll_item.additional_withholding.to_f,
-        "step4c_configured_extra_withholding" => employee.additional_withholding.to_f,
+        "step4c_configured_extra_withholding" => employee_value(:additional_withholding).to_f,
         "step4c_override" => payroll_item.additional_withholding_override&.to_f,
-        "legacy_allowances" => employee.allowances
+        "legacy_allowances" => employee_value(:allowances)
       }
     }
   end
@@ -538,9 +552,9 @@ class PayrollCalculator
   def skip_employee_deduction?(deduction_type)
     return true if payroll_item.loan_deduction.to_f.positive? && deduction_type&.loan?
     return false unless deduction_type&.sub_category == "retirement"
-    return employee.roth_retirement_rate.to_f.positive? if roth_retirement_deduction?(deduction_type)
+    return employee_value(:roth_retirement_rate).to_f.positive? if roth_retirement_deduction?(deduction_type)
 
-    employee.retirement_rate.to_f.positive?
+    employee_value(:retirement_rate).to_f.positive?
   end
 
   def find_active_loan_for_deduction(deduction_type_id)
@@ -705,8 +719,61 @@ class PayrollCalculator
       if payroll_item.additional_withholding_override.present?
         payroll_item.additional_withholding_override.to_f
       else
-        employee.additional_withholding.to_f
+        employee_value(:additional_withholding).to_f
       end
+  end
+
+  def employee_value(attribute)
+    return employee.public_send(attribute) unless historical_calculation?
+
+    PayrollCalculationContext.employee_value(@calculation_context, attribute)
+  end
+
+  def employee_deductions_for_calculation
+    @employee_deductions_for_calculation ||= if historical_calculation?
+      PayrollCalculationContext.employee_deductions(@calculation_context)
+    else
+      employee.employee_deductions.active.includes(:deduction_type).to_a
+    end
+  end
+
+  def historical_calculation?
+    @calculation_context.present?
+  end
+
+  def snapshotted_tax_calculator
+    snapshot = payroll_item.tax_rule_snapshot.deep_stringify_keys
+    args = {
+      tax_year: pay_period.pay_date.year,
+      filing_status: employee_value(:filing_status),
+      pay_frequency: employee_value(:pay_frequency),
+      allowances: employee_value(:allowances),
+      rule_snapshot: snapshot
+    }
+
+    if snapshot["engine"] == "annual_tax_config_v2"
+      GuamTaxCalculatorV2.new(
+        **args,
+        w4_step2_multiple_jobs: employee_value(:w4_step2_multiple_jobs),
+        w4_step4a_other_income: employee_value(:w4_step4a_other_income).to_f,
+        w4_step4b_deductions: employee_value(:w4_step4b_deductions).to_f,
+        w4_form_version: employee_value(:w4_form_version)
+      )
+    elsif snapshot["engine"] == "legacy_tax_table"
+      GuamTaxCalculator.new(**args)
+    else
+      raise ArgumentError, "Original payroll item does not contain a supported tax-rule snapshot"
+    end
+  end
+
+  def capture_calculation_context!
+    return if historical_calculation?
+
+    payroll_item.calculation_context_snapshot = PayrollCalculationContext.capture(
+      employee: employee,
+      employee_deductions: employee_deductions_for_calculation,
+      payroll_field_assignments: payroll_field_assignments_for_calculation
+    )
   end
 
   def ensure_employer_contribution_type!(deduction_type, reporting_group: nil)

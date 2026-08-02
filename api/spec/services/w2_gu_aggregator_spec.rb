@@ -6,6 +6,42 @@ RSpec.describe W2GuAggregator do
   let(:employee) { create(:employee, company: company, department: department, ssn_encrypted: "123-45-6789") }
 
   describe "#generate" do
+    it "uses historical payroll-item classification after the worker becomes a contractor" do
+      historical_employee = create(:employee, :contractor,
+        company: company,
+        department: department,
+        first_name: "Historical",
+        last_name: "Employee",
+        ssn_encrypted: "123-45-6789")
+      pay_period = create(:pay_period, :committed,
+        company: company,
+        start_date: Date.new(2026, 1, 1),
+        end_date: Date.new(2026, 1, 14),
+        pay_date: Date.new(2026, 1, 18))
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: historical_employee,
+        company: company,
+        employment_type: "hourly",
+        gross_pay: 500.0,
+        withholding_tax: 25.0,
+        social_security_tax: 31.0,
+        medicare_tax: 7.25)
+      create(:payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        employment_type: "contractor",
+        gross_pay: 250.0,
+        net_pay: 250.0)
+
+      report = described_class.new(company, 2026).generate
+      row = report[:employees].find { |candidate| candidate[:employee_id] == historical_employee.id }
+
+      expect(row[:box1_wages_tips_other_comp]).to eq(500.0)
+      expect(report[:employees].map { |candidate| candidate[:employee_id] }).not_to include(employee.id)
+    end
+
     it "logs a warning when reported tips exceed gross pay" do
       pay_period = create(:pay_period, :committed,
         company: company,

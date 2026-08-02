@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -9,15 +9,17 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
+import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import type { Department, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
+import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
   first_name: '',
   middle_name: '',
   last_name: '',
   ssn: '',
+  ssn_confirmation: '',
   date_of_birth: '',
   hire_date: '',
   employment_type: 'hourly',
@@ -195,12 +197,15 @@ export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
-  const { user, isClient } = useAuth();
+  const { user, isClient, isSuperAdmin } = useAuth();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
+  const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
+  const [initialSsn, setInitialSsn] = useState('');
+  const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
   const [employeePayrollFields, setEmployeePayrollFields] = useState<EmployeePayrollFieldFormRow[]>([]);
@@ -224,6 +229,7 @@ export function EmployeeForm() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReactivating, setIsReactivating] = useState(false);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
+  const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
 
   const supportsMultipleHourlyRates =
     form.employment_type === 'hourly' ||
@@ -238,12 +244,14 @@ export function EmployeeForm() {
         ? await clientEmployeesApi.get(parseInt(id, 10))
         : await employeesApi.get(parseInt(id, 10));
       const employee = response.data;
+      setLoadedEmployee(employee);
       
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
         ssn: employee.ssn || '',
+        ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
         hire_date: employee.hire_date,
         employment_type: employee.employment_type,
@@ -275,6 +283,8 @@ export function EmployeeForm() {
         default_payroll_adjustments: employee.default_payroll_adjustments || [],
       };
       setForm(normalizeEmployeeMonetaryFields(nextForm));
+      setInitialSsn(employee.ssn || '');
+      setInitialEmploymentType(employee.employment_type);
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -385,10 +395,12 @@ export function EmployeeForm() {
 
   const handleChange = (field: keyof EmployeeFormData, value: string | number | boolean | null): void => {
     setForm((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) {
+    const linkedSsnField = field === 'ssn' ? 'ssn_confirmation' : field === 'ssn_confirmation' ? 'ssn' : null;
+    if (errors[field] || (linkedSsnField && errors[linkedSsnField])) {
       setErrors((prev) => {
         const newErrors = { ...prev };
         delete newErrors[field];
+        if (linkedSsnField) delete newErrors[linkedSsnField];
         return newErrors;
       });
     }
@@ -565,8 +577,19 @@ export function EmployeeForm() {
     return activeRates.map((rate) => ({ ...rate, is_primary: rate.temp_id === primaryId }));
   };
 
+  const focusFirstInvalidField = (fieldName: string | undefined) => {
+    if (!fieldName) return;
+    requestAnimationFrame(() => {
+      const field = document.querySelector<HTMLElement>(`[name="${fieldName}"]`);
+      field?.focus();
+      field?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
+    const usesSsn = form.employment_type !== 'contractor' || form.contractor_type !== 'business';
+    const ssnChanged = (form.ssn || '') !== initialSsn;
 
     if (!form.first_name.trim()) {
       newErrors.first_name = ['First name is required'];
@@ -591,8 +614,40 @@ export function EmployeeForm() {
         }
       }
     }
-    if (form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
+    if (usesSsn && !form.ssn?.trim()) {
+      newErrors.ssn = ['Social Security Number is required'];
+    } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
+    }
+    if (usesSsn && (!isEditing || ssnChanged)) {
+      if (!form.ssn_confirmation?.trim()) {
+        newErrors.ssn_confirmation = ['Re-enter the Social Security Number'];
+      } else if (form.ssn_confirmation !== form.ssn) {
+        newErrors.ssn_confirmation = ['Social Security Numbers do not match'];
+      }
+    }
+    if (!form.hire_date) {
+      newErrors.hire_date = ['Hire date is required'];
+    }
+    if (!form.address_line1?.trim()) {
+      newErrors.address_line1 = ['Address line 1 is required'];
+    }
+    if (!form.city?.trim()) {
+      newErrors.city = ['City is required'];
+    }
+    if (!form.state?.trim()) {
+      newErrors.state = ['State is required'];
+    }
+    if (!form.zip?.trim()) {
+      newErrors.zip = ['ZIP code is required'];
+    }
+    if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
+      if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
+      if (!form.contractor_ein?.trim()) {
+        newErrors.contractor_ein = ['EIN is required'];
+      } else if (!/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
+        newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
+      }
     }
     if (form.date_of_birth) {
       const dob = new Date(form.date_of_birth);
@@ -616,7 +671,9 @@ export function EmployeeForm() {
       newErrors.employee_payroll_fields = ['Each assigned payroll field can only appear once per employee'];
     }
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const firstInvalidField = Object.keys(newErrors)[0];
+    focusFirstInvalidField(firstInvalidField);
+    return !firstInvalidField;
   };
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
@@ -638,6 +695,9 @@ export function EmployeeForm() {
       };
       const employeePayload = {
         ...normalizeEmployeeMonetaryFields({ ...form, ...normalizedW4Values }),
+        ...(form.employment_type === 'contractor' && form.contractor_type === 'business'
+          ? { ssn: undefined, ssn_confirmation: undefined }
+          : {}),
         pay_rate: supportsMultipleHourlyRates
           ? (primaryRate ? roundCurrencyValue(Number(primaryRate.rate) || 0) : roundCurrencyValue(form.pay_rate))
           : roundCurrencyValue(form.pay_rate),
@@ -660,6 +720,10 @@ export function EmployeeForm() {
         const updateData = { ...employeePayload };
         if (!updateData.ssn) {
           delete updateData.ssn;
+        }
+        if (updateData.ssn === initialSsn) {
+          delete updateData.ssn;
+          delete updateData.ssn_confirmation;
         }
         if (isClient) {
           const response = await clientEmployeesApi.update(parseInt(id, 10), updateData);
@@ -742,6 +806,7 @@ export function EmployeeForm() {
     } catch (err) {
       if (err instanceof ApiError && err.details) {
         setErrors(err.details);
+        focusFirstInvalidField(Object.keys(err.details)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
       }
@@ -789,6 +854,14 @@ export function EmployeeForm() {
   };
 
   const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
+  const isW2Employee = form.employment_type !== 'contractor';
+  const taxIdUsesSsn = isW2Employee || form.contractor_type !== 'business';
+  const ssnConfirmationRequired = taxIdUsesSsn
+    && (!isEditing || (form.ssn || '') !== initialSsn);
+  const ssnDigits = (form.ssn || '').replace(/\D/g, '');
+  const ssnConfirmationDigits = (form.ssn_confirmation || '').replace(/\D/g, '');
+  const ssnComparisonReady = ssnDigits.length === 9 && ssnConfirmationDigits.length === 9;
+  const ssnsMatch = ssnComparisonReady && ssnDigits === ssnConfirmationDigits;
 
   if (isLoading) {
     return (
@@ -799,7 +872,7 @@ export function EmployeeForm() {
   }
 
   return (
-    <div>
+    <div className="pb-28">
       <Header
         title={isEditing ? `Edit ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : 'Add Employee / Contractor'}
         description={isEditing ? `Update ${form.employment_type === 'contractor' ? 'contractor' : 'employee'} information` : 'Add a new employee or 1099 contractor'}
@@ -839,7 +912,7 @@ export function EmployeeForm() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="p-6 lg:p-8 max-w-4xl">
+      <form id="employee-form" noValidate onSubmit={handleSubmit} className="max-w-4xl p-6 pb-32 lg:p-8 lg:pb-32">
         {generalError && (
           <div className="mb-6 p-4 bg-danger-50 border border-danger-200 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
@@ -859,6 +932,8 @@ export function EmployeeForm() {
                   First Name <span className="text-danger-600">*</span>
                 </label>
                 <Input
+                  name="first_name"
+                  required
                   value={form.first_name}
                   onChange={(e) => handleChange('first_name', e.target.value)}
                   error={getFieldError('first_name')}
@@ -878,6 +953,8 @@ export function EmployeeForm() {
                   Last Name <span className="text-danger-600">*</span>
                 </label>
                 <Input
+                  name="last_name"
+                  required
                   value={form.last_name}
                   onChange={(e) => handleChange('last_name', e.target.value)}
                   error={getFieldError('last_name')}
@@ -885,18 +962,55 @@ export function EmployeeForm() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {form.employment_type === 'contractor' ? 'SSN / TIN' : 'Social Security Number'}
-                </label>
-                <Input
-                  placeholder="XXX-XX-XXXX"
-                  value={form.ssn || ''}
-                  onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
-                  error={getFieldError('ssn')}
-                />
-              </div>
+            <div className={`mt-4 grid grid-cols-1 gap-4 ${taxIdUsesSsn ? 'md:grid-cols-3' : ''}`}>
+              {taxIdUsesSsn && (
+                <>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Social Security Number <span className="text-danger-600">*</span>
+                    </label>
+                    <Input
+                      name="ssn"
+                      required
+                      placeholder="XXX-XX-XXXX"
+                      value={form.ssn || ''}
+                      onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
+                      error={getFieldError('ssn')}
+                      inputMode="numeric"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-700">
+                      Re-enter Social Security Number
+                      {ssnConfirmationRequired && <span className="text-danger-600"> *</span>}
+                    </label>
+                    <Input
+                      name="ssn_confirmation"
+                      required={ssnConfirmationRequired}
+                      placeholder="XXX-XX-XXXX"
+                      value={form.ssn_confirmation || ''}
+                      onChange={(e) => handleChange('ssn_confirmation', formatSSN(e.target.value))}
+                      error={getFieldError('ssn_confirmation') || (ssnComparisonReady && !ssnsMatch ? 'Social Security Numbers do not match' : undefined)}
+                      inputMode="numeric"
+                      autoComplete="off"
+                    />
+                    {form.ssn_confirmation && (
+                      <div
+                        className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${ssnsMatch ? 'text-emerald-700' : 'text-danger-700'}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {ssnsMatch ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                        {ssnsMatch ? 'Social Security Numbers match' : 'Social Security Numbers do not match yet'}
+                      </div>
+                    )}
+                    {isEditing && !ssnConfirmationRequired && !form.ssn_confirmation && (
+                      <p className="mt-1 text-xs text-gray-500">Re-enter only when changing the saved Social Security Number.</p>
+                    )}
+                  </div>
+                </>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Date of Birth
@@ -907,6 +1021,13 @@ export function EmployeeForm() {
                   onChange={(e) => handleChange('date_of_birth', e.target.value)}
                 />
               </div>
+              {!taxIdUsesSsn && (
+                <div>
+                  <p className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">
+                    This business contractor uses its legal business name and EIN as the filing identity. Those required fields appear in the 1099 section below.
+                  </p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -920,9 +1041,11 @@ export function EmployeeForm() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Hire Date
+                  Hire Date <span className="text-danger-600">*</span>
                 </label>
                 <Input
+                  name="hire_date"
+                  required
                   type="date"
                   value={form.hire_date}
                   onChange={(e) => handleChange('hire_date', e.target.value)}
@@ -953,20 +1076,31 @@ export function EmployeeForm() {
                   Employment Type <span className="text-danger-600">*</span>
                 </label>
                 <Select
+                  name="employment_type"
+                  required
                   value={form.employment_type}
                   onChange={(e) => handleChange('employment_type', e.target.value as EmploymentType)}
+                  disabled={isEditing && initialEmploymentType === 'contractor'}
                 >
-                  <option value="hourly">Hourly</option>
-                  <option value="salary">Salary</option>
-                  <option value="contractor">1099 Contractor</option>
+                  {(!isEditing || initialEmploymentType !== 'contractor') && (
+                    <>
+                      <option value="hourly">Hourly</option>
+                      <option value="salary">Salary</option>
+                    </>
+                  )}
+                  {(!isEditing || initialEmploymentType === 'contractor') && (
+                    <option value="contractor">1099 Contractor</option>
+                  )}
                 </Select>
               </div>
               {form.employment_type === 'salary' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Salary Type
+                    Salary Type <span className="text-danger-600">*</span>
                   </label>
                   <Select
+                    name="salary_type"
+                    required
                     value={form.salary_type || 'annual'}
                     onChange={(e) => handleChange('salary_type', e.target.value)}
                   >
@@ -982,6 +1116,8 @@ export function EmployeeForm() {
                     Pay Structure <span className="text-danger-600">*</span>
                   </label>
                   <Select
+                    name="contractor_pay_type"
+                    required
                     value={form.contractor_pay_type || 'flat_fee'}
                     onChange={(e) => handleChange('contractor_pay_type', e.target.value as ContractorPayType)}
                   >
@@ -998,6 +1134,9 @@ export function EmployeeForm() {
                       : 'Pay Rate'} <span className="text-danger-600">*</span>
                   </label>
                   <NumericInput
+                    name="pay_rate"
+                    required
+                    aria-invalid={Boolean(getFieldError('pay_rate'))}
                     value={form.pay_rate}
                     onValueChange={(value) => handleChange('pay_rate', value ?? 0)}
                     min={0}
@@ -1021,9 +1160,11 @@ export function EmployeeForm() {
               )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Pay Frequency
+                  Pay Frequency <span className="text-danger-600">*</span>
                 </label>
                 <Select
+                  name="pay_frequency"
+                  required
                   value={form.pay_frequency}
                   onChange={(e) => handleChange('pay_frequency', e.target.value as PayFrequency)}
                 >
@@ -1034,6 +1175,59 @@ export function EmployeeForm() {
                 </Select>
               </div>
             </div>
+
+            {isEditing && (
+              <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-neutral-700 shadow-sm ring-1 ring-neutral-200">
+                    <LockKeyhole className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-neutral-900">W-2 / 1099 classification is locked</p>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-neutral-600">
+                      Hourly and salary may change within W-2 treatment. Moving across the W-2/1099 boundary creates a second payroll record for the same person—not a second login—so prior payroll and tax reporting remain intact.
+                    </p>
+                    {(loadedEmployee?.classification_history?.previous_employee || loadedEmployee?.classification_history?.next_employee) && (
+                      <div className="mt-3 rounded-xl border border-neutral-200 bg-white p-3">
+                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                          <Link2 className="h-3.5 w-3.5" /> Classification history
+                        </div>
+                        <div className="space-y-2">
+                          {loadedEmployee.classification_history.previous_employee && (
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.previous_employee?.id}`)}>
+                              <span className="font-semibold text-primary-700">Prior {loadedEmployee.classification_history.previous_employee.tax_classification.toUpperCase()} record</span>
+                              <span className="ml-2 text-neutral-500">{loadedEmployee.classification_history.previous_employee.hire_date || 'Start unknown'} – {loadedEmployee.classification_history.previous_employee.termination_date || 'End unknown'}</span>
+                            </button>
+                          )}
+                          <div className="rounded-lg bg-neutral-100 px-2 py-1.5 text-xs text-neutral-700">
+                            <span className="font-semibold">Current {loadedEmployee.tax_classification?.toUpperCase()} record</span>
+                            <span className="ml-2">{loadedEmployee.hire_date || 'Start unknown'} – {loadedEmployee.termination_date || 'Present'}</span>
+                          </div>
+                          {loadedEmployee.classification_history.next_employee && (
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.next_employee?.id}`)}>
+                              <span className="font-semibold text-primary-700">Successor {loadedEmployee.classification_history.next_employee.tax_classification.toUpperCase()} record</span>
+                              <span className="ml-2 text-neutral-500">Starts {loadedEmployee.classification_history.next_employee.hire_date || 'unknown'}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {isSuperAdmin && employeeStatus === 'active' && !loadedEmployee?.classification_history?.next_employee && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setClassificationTransitionOpen(true)}
+                  >
+                    <ArrowRightLeft className="mr-2 h-4 w-4" />
+                    Create new classification record
+                  </Button>
+                )}
+              </div>
+            )}
 
             {supportsMultipleHourlyRates && (
               <div className="mt-6 pt-4 border-t border-gray-200">
@@ -1061,9 +1255,11 @@ export function EmployeeForm() {
                     <div key={rate.temp_id} className="grid grid-cols-1 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto_auto] gap-3 items-end rounded-lg border border-gray-200 p-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Rate Label
+                          Rate Label <span className="text-danger-600">*</span>
                         </label>
                         <Input
+                          name="wage_rates"
+                          required
                           value={rate.label}
                           onChange={(e) => updateWageRate(rate.temp_id, { label: e.target.value })}
                           placeholder={index === 0 ? 'Flight Time' : 'Office Time'}
@@ -1071,9 +1267,10 @@ export function EmployeeForm() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-600 mb-1">
-                          Hourly Rate
+                          Hourly Rate <span className="text-danger-600">*</span>
                         </label>
                         <NumericInput
+                          required
                           value={rate.rate}
                           onValueChange={(value) => updateWageRate(rate.temp_id, { rate: value ?? 0 })}
                           min={0}
@@ -1472,9 +1669,11 @@ export function EmployeeForm() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Contractor Type
+                    Contractor Type <span className="text-danger-600">*</span>
                   </label>
                   <Select
+                    name="contractor_type"
+                    required
                     value={form.contractor_type || 'individual'}
                     onChange={(e) => handleChange('contractor_type', e.target.value as ContractorType)}
                   >
@@ -1499,22 +1698,28 @@ export function EmployeeForm() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Business Name
+                      Legal Business Name <span className="text-danger-600">*</span>
                     </label>
                     <Input
+                      name="business_name"
+                      required
                       value={form.business_name || ''}
                       onChange={(e) => handleChange('business_name', e.target.value)}
                       placeholder="DBA or legal entity name"
+                      error={getFieldError('business_name')}
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      EIN (Employer Identification Number)
+                      EIN (Employer Identification Number) <span className="text-danger-600">*</span>
                     </label>
                     <Input
+                      name="contractor_ein"
+                      required
                       value={form.contractor_ein || ''}
                       onChange={(e) => handleChange('contractor_ein', formatEIN(e.target.value))}
                       placeholder="XX-XXXXXXX"
+                      error={getFieldError('contractor_ein')}
                     />
                   </div>
                 </div>
@@ -1546,9 +1751,10 @@ export function EmployeeForm() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Filing Status
+                      Filing Status <span className="text-danger-600">*</span>
                     </label>
                     <Select
+                      required
                       value={form.filing_status}
                       onChange={(e) => handleChange('filing_status', e.target.value as FilingStatus)}
                     >
@@ -1715,22 +1921,24 @@ export function EmployeeForm() {
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Address</CardTitle>
-            {form.employment_type !== 'contractor' && (
-              <CardDescription>Mailing address is recommended for W-2 employees and needed before check printing or SWICA/W-2 filing, but it will not block saving an employee record.</CardDescription>
-            )}
+            <CardDescription>
+              Required for payroll checks and W-2/1099 filing. Address line 2 remains optional.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Address Line 1 {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                  Address Line 1 <span className="text-danger-600">*</span>
                 </label>
                 <Input
+                  name="address_line1"
+                  required
                   value={form.address_line1 || ''}
                   onChange={(e) => handleChange('address_line1', e.target.value)}
                   placeholder="Street address"
+                  error={getFieldError('address_line1')}
                 />
-                {errors.address_line1 && <p className="mt-1 text-sm text-red-600">{errors.address_line1[0]}</p>}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1745,72 +1953,84 @@ export function EmployeeForm() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    City {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    City <span className="text-danger-600">*</span>
                   </label>
                   <Input
+                    name="city"
+                    required
                     value={form.city || ''}
                     onChange={(e) => handleChange('city', e.target.value)}
+                    error={getFieldError('city')}
                   />
-                  {errors.city && <p className="mt-1 text-sm text-red-600">{errors.city[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    State {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    State <span className="text-danger-600">*</span>
                   </label>
                   <Input
+                    name="state"
+                    required
                     value={form.state || ''}
                     onChange={(e) => handleChange('state', e.target.value)}
                     maxLength={2}
                     placeholder="GU"
+                    error={getFieldError('state')}
                   />
-                  {errors.state && <p className="mt-1 text-sm text-red-600">{errors.state[0]}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ZIP Code {form.employment_type !== 'contractor' ? <span className="text-xs font-normal text-amber-700">Recommended</span> : ''}
+                    ZIP Code <span className="text-danger-600">*</span>
                   </label>
                   <Input
+                    name="zip"
+                    required
                     value={form.zip || ''}
                     onChange={(e) => handleChange('zip', e.target.value)}
                     placeholder="96910"
+                    error={getFieldError('zip')}
                   />
-                  {errors.zip && <p className="mt-1 text-sm text-red-600">{errors.zip[0]}</p>}
                 </div>
               </div>
             </div>
+
           </CardContent>
         </Card>
 
-        {/* Actions */}
-        <div className="flex items-center justify-between">
-          <div>
-            {isEditing && employeeStatus !== 'terminated' && !isClient && (
-              <Button
-                type="button"
-                variant="danger"
-                onClick={handleDelete}
-                disabled={isDeleting}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                {isDeleting ? 'Terminating...' : `Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
-              </Button>
-            )}
-          </div>
-          <div className="flex gap-3">
+        {isEditing && employeeStatus !== 'terminated' && !isClient && (
+          <div className="flex justify-start">
             <Button
               type="button"
-              variant="outline"
-              onClick={() => navigate('/employees')}
+              variant="danger"
+              onClick={handleDelete}
+              disabled={isDeleting}
             >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {isDeleting ? 'Terminating...' : `Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
+            </Button>
+          </div>
+        )}
+      </form>
+
+      <div
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 shadow-[0_-12px_35px_rgba(15,23,42,0.12)] backdrop-blur-md lg:left-[var(--sidebar-width)]"
+        role="region"
+        aria-label="Employee form actions"
+      >
+        <div className="mx-auto flex max-w-4xl flex-col gap-3 px-4 pt-3 [padding-bottom:max(0.75rem,env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between lg:px-8">
+          <p className="hidden text-sm text-neutral-600 sm:block">
+            Required fields are marked <span className="font-semibold text-danger-600">*</span>
+          </p>
+          <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 sm:flex sm:justify-end">
+            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate('/employees')} disabled={isSaving}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving}>
-              <Save className="w-4 h-4 mr-2" />
+            <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving}>
+              <Save className="mr-2 h-4 w-4" />
               {isSaving ? 'Saving...' : isEditing ? `Update ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : `Create ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>
           </div>
         </div>
-      </form>
+      </div>
 
       {isEditing && id && (
         <div className="px-6 pb-8 lg:px-8">
@@ -1840,6 +2060,18 @@ export function EmployeeForm() {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {isEditing && id && loadedEmployee && (
+        <EmployeeClassificationTransitionDialog
+          employee={loadedEmployee}
+          open={classificationTransitionOpen}
+          onOpenChange={setClassificationTransitionOpen}
+          onTransitioned={(newEmployee) => {
+            setLoadedEmployee(newEmployee);
+            navigate(`/employees/${newEmployee.id}`, { replace: true });
+          }}
+        />
       )}
 
       {isEditing && id && (
