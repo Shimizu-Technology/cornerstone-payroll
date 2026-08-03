@@ -45,11 +45,15 @@ module Api
         end
 
         def current_schedule
-          current_company.company_pay_schedules.find_by(ends_on: nil)
+          CompanyPaySchedule.for_date(current_company_id, configuration_date)
         end
 
         def current_workweek
-          current_company.company_workweeks.find_by(ends_on: nil)
+          CompanyWorkweek.for_date(current_company_id, configuration_date)
+        end
+
+        def configuration_date
+          Time.find_zone!("Pacific/Guam").today
         end
 
         def payload(schedule, workweek)
@@ -69,7 +73,7 @@ module Api
             timezone: "Pacific/Guam",
             source: "legacy_system_default",
             confirmation_status: "needs_confirmation",
-            effective_on: Date.current
+            effective_on: configuration_date
           )
           schedule.as_json(only: [
             :id, :frequency, :period_rule, :period_start_weekday, :period_anchor_date, :pay_date_rule,
@@ -85,7 +89,7 @@ module Api
             timezone: "Pacific/Guam",
             source: "legacy_system_default",
             confirmation_status: "needs_confirmation",
-            effective_on: Date.current
+            effective_on: configuration_date
           )
           workweek.as_json(only: [
             :id, :starts_on_weekday, :starts_at_minutes, :timezone, :source,
