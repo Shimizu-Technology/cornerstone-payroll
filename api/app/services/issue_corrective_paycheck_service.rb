@@ -528,6 +528,9 @@ class IssueCorrectivePaycheckService
       pay_date:                @pay_date,
       status:                  "draft",
       cycle:                   "supplemental",
+      run_purpose:             "correction",
+      includes_base_salary:    false,
+      run_purpose_source:      "system_correction",
       corrects_pay_period_id:  original.id,
       notes:                   build_notes(original)
     )

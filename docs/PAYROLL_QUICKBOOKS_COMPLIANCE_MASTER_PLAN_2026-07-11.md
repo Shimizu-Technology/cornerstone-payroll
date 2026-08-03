@@ -675,6 +675,8 @@ Deliverables:
 12. QuickBooks-equivalent report catalog and customizable filters/exports.
 13. Guam wage-and-hour diagnostics for minimum wage, regular-rate overtime, workweek completeness, pay timing, final pay, and meal-period exceptions.
 
+The effective-dated pay schedule, salary timekeeping, pay-run purpose, production migration, and clean client-cloning design is documented in [Pay Schedules, Salary Timekeeping, and Client Cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md).
+
 Exit gate:
 
 - representative hourly, salary, tipped, multi-rate, contractor, and correction clients complete at least three parallel payroll cycles;

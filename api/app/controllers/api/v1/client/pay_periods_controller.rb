@@ -50,6 +50,8 @@ module Api
             end_date: pay_period.end_date,
             pay_date: pay_period.pay_date,
             status: pay_period.status,
+            run_purpose: pay_period.run_purpose,
+            includes_base_salary: pay_period.includes_base_salary,
             notes: pay_period.notes,
             period_description: pay_period.period_description,
             employee_count: items.size,

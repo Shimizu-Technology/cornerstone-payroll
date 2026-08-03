@@ -24,7 +24,7 @@ module Api
         # GET /api/v1/admin/pay_periods
         def index
           @pay_periods = PayPeriod.where(company_id: current_company_id)
-                                   .includes(:payroll_items, :voided_by, :correction_events,
+                                   .includes(:payroll_items, :voided_by, :correction_events, :company_workweek,
                                              :supplemental_pay_periods)
                                    .period_reverse_chronological
 
@@ -70,6 +70,10 @@ module Api
         def create
           attrs = pay_period_params.to_h
           starting_check_number = attrs.delete("starting_check_number")
+          intent_was_submitted = attrs["run_purpose"].present? || attrs.key?("includes_base_salary")
+          attrs["run_purpose"] ||= "regular"
+          attrs["run_purpose_source"] = "operator_selected" if intent_was_submitted
+          attrs["includes_base_salary"] = attrs["run_purpose"] == "regular" unless attrs.key?("includes_base_salary")
           @pay_period = PayPeriod.new(attrs)
           @pay_period.company_id = current_company_id
           @pay_period.status = "draft"
@@ -102,9 +106,20 @@ module Api
           end_date_was = @pay_period.end_date
           pay_date_was = @pay_period.pay_date
 
+          if !@pay_period.draft? && purpose_fields_submitted?
+            return render json: { error: "Run purpose and base-salary treatment can only change while the pay period is a draft" }, status: :unprocessable_entity
+          end
+
           begin
             @pay_period.transaction do
-              @pay_period.update!(pay_period_params)
+              update_attributes = pay_period_params.to_h
+              if purpose_fields_submitted?
+                update_attributes["run_purpose_source"] = "operator_selected"
+              end
+              if update_attributes["run_purpose"].present?
+                update_attributes["includes_base_salary"] = update_attributes["run_purpose"] == "regular" unless update_attributes.key?("includes_base_salary")
+              end
+              @pay_period.update!(update_attributes)
               dates_changed = start_date_was != @pay_period.start_date || end_date_was != @pay_period.end_date || pay_date_was != @pay_period.pay_date
 
               if dates_changed && !@pay_period.draft?
@@ -982,7 +997,7 @@ module Api
           # for the `supplemental_pay_periods_count` field without firing an
           # extra `SELECT COUNT(*)` query on every show/update/etc. request.
           @pay_period = PayPeriod
-            .includes(:payroll_items, :voided_by, :source_pay_period,
+            .includes(:payroll_items, :voided_by, :source_pay_period, :company_workweek,
                       :correction_events, :supplemental_pay_periods)
             .find(params[:id])
 
@@ -992,7 +1007,16 @@ module Api
         end
 
         def pay_period_params
-          params.require(:pay_period).permit(:start_date, :end_date, :pay_date, :notes, :starting_check_number)
+          params.require(:pay_period).permit(
+            :start_date, :end_date, :pay_date, :notes, :starting_check_number,
+            :run_purpose, :includes_base_salary
+          )
+        end
+
+        def purpose_fields_submitted?
+          submitted = params.fetch(:pay_period, {})
+          submitted.key?(:run_purpose) || submitted.key?("run_purpose") ||
+            submitted.key?(:includes_base_salary) || submitted.key?("includes_base_salary")
         end
 
         def apply_starting_check_number!(value)
@@ -1025,6 +1049,12 @@ module Api
             pay_date: pay_period.pay_date,
             status: pay_period.status,
             notes: pay_period.notes,
+            run_purpose: pay_period.run_purpose,
+            includes_base_salary: pay_period.includes_base_salary,
+            run_purpose_source: pay_period.run_purpose_source,
+            company_pay_schedule_id: pay_period.company_pay_schedule_id,
+            company_workweek_id: pay_period.company_workweek_id,
+            compliance_warnings: pay_period.compliance_warnings,
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
             employee_count: agg[:count],

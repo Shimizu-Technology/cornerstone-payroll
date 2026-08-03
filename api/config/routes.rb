@@ -56,6 +56,8 @@ Rails.application.routes.draw do
       end
 
       namespace :admin do
+        resource :pay_schedule_settings, only: [ :show, :update ]
+
         # CPR-66: Company check settings
         # These must appear before `resources :companies` so paths like
         # `/admin/companies/check_settings` do not get swallowed by `:id`.

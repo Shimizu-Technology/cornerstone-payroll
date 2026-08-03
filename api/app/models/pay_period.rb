@@ -16,8 +16,12 @@ class PayPeriod < ApplicationRecord
   # correction_status NULL — they are NOT part of CPR-71's void+redo
   # correction chain.
   CYCLES = %w[regular supplemental].freeze
+  RUN_PURPOSES = %w[regular off_cycle_tips bonus commission correction final adjustment].freeze
+  RUN_PURPOSE_SOURCES = %w[operator_selected system_correction production_migration legacy_system_default].freeze
 
   belongs_to :company
+  belongs_to :company_pay_schedule, optional: true
+  belongs_to :company_workweek, optional: true
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
@@ -84,12 +88,18 @@ class PayPeriod < ApplicationRecord
             presence: true,
             if: :correction_run?
   validates :cycle, inclusion: { in: CYCLES }
+  validates :run_purpose, inclusion: { in: RUN_PURPOSES }
+  validates :run_purpose_source, inclusion: { in: RUN_PURPOSE_SOURCES }
   validates :corrects_pay_period_id,
             presence: true,
             if: :supplemental?
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
   validate :supplemental_target_must_be_regular
+  validate :off_cycle_tips_excludes_base_salary
+  validate :purpose_fields_change_only_in_draft
+
+  before_validation :assign_schedule_foundation, if: :schedule_foundation_needs_refresh?
 
   scope :draft, -> { where(status: "draft") }
   scope :calculated, -> { where(status: "calculated") }
@@ -147,6 +157,25 @@ class PayPeriod < ApplicationRecord
 
   def regular_cycle?
     cycle == "regular"
+  end
+
+  def regular_run?
+    run_purpose == "regular"
+  end
+
+  def resolved_company_workweek
+    company_workweek || CompanyWorkweek.for_date(company_id, start_date)
+  end
+
+  def compliance_warnings
+    warnings = []
+    workweek = resolved_company_workweek
+    if workweek.nil?
+      warnings << "No legal overtime workweek is configured for this pay period. Confirm the employer's workweek before relying on overtime results."
+    elsif !workweek.confirmed?
+      warnings << "The legal overtime workweek is still a legacy or inferred default and has not been confirmed by the employer."
+    end
+    warnings
   end
 
   # Only regular, currently-committed, non-voided periods can be the
@@ -252,6 +281,31 @@ class PayPeriod < ApplicationRecord
   end
 
   private
+
+  def assign_schedule_foundation
+    return if company_id.blank? || start_date.blank?
+
+    self.company_pay_schedule = CompanyPaySchedule.for_date(company_id, start_date)
+    self.company_workweek = CompanyWorkweek.for_date(company_id, start_date)
+  end
+
+  def schedule_foundation_needs_refresh?
+    new_record? || will_save_change_to_start_date?
+  end
+
+  def off_cycle_tips_excludes_base_salary
+    return unless run_purpose == "off_cycle_tips" && includes_base_salary?
+
+    errors.add(:includes_base_salary, "must be disabled for an off-cycle tips run")
+  end
+
+  def purpose_fields_change_only_in_draft
+    return unless persisted?
+    return unless will_save_change_to_run_purpose? || will_save_change_to_includes_base_salary?
+    return if status_in_database == "draft"
+
+    errors.add(:run_purpose, "and base-salary treatment can only change while the pay period is a draft")
+  end
 
   def end_date_after_start_date
     return unless start_date && end_date
