@@ -28,8 +28,18 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
-import { companiesApi, payPeriodsApi } from '@/services/api';
-import type { PayPeriod } from '@/types';
+import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
+import type { PayPeriod, PayRunPurpose } from '@/types';
+
+const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
+  regular: 'Regular payroll',
+  off_cycle_tips: 'Off-cycle tips',
+  bonus: 'Bonus',
+  commission: 'Commission',
+  correction: 'Correction',
+  final: 'Final paycheck',
+  adjustment: 'Adjustment',
+};
 
 function PayPeriodMobileCard({
   period,
@@ -71,6 +81,12 @@ function PayPeriodMobileCard({
         >
           {period.correction_status === 'voided' ? 'Voided' : (statusConfig?.label || period.status)}
         </Badge>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge variant={period.run_purpose === 'regular' ? 'default' : 'warning'}>
+          {RUN_PURPOSE_LABELS[period.run_purpose] || period.run_purpose}
+        </Badge>
+        {!period.includes_base_salary && <Badge variant="info">No base salary</Badge>}
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MobileField label="Employees" value={period.employee_count || 0} />
@@ -131,6 +147,7 @@ export function PayPeriods() {
   const [currentNextCheckNumber, setCurrentNextCheckNumber] = useState<number | null>(null);
   const [loadingCheckSettings, setLoadingCheckSettings] = useState(false);
   const [checkSettingsError, setCheckSettingsError] = useState<string | null>(null);
+  const [scheduleContext, setScheduleContext] = useState<string>('Loading this client’s pay-schedule rules…');
   const [actionInFlight, setActionInFlight] = useState<string | null>(null);
   const [editingPayPeriod, setEditingPayPeriod] = useState<PayPeriod | null>(null);
   const [formData, setFormData] = useState({
@@ -139,12 +156,16 @@ export function PayPeriods() {
     pay_date: '',
     starting_check_number: '',
     notes: '',
+    run_purpose: 'regular' as PayRunPurpose,
+    includes_base_salary: true,
   });
   const [editFormData, setEditFormData] = useState({
     start_date: '',
     end_date: '',
     pay_date: '',
     notes: '',
+    run_purpose: 'regular' as PayRunPurpose,
+    includes_base_salary: true,
   });
 
   // Load pay periods
@@ -211,7 +232,7 @@ export function PayPeriods() {
       });
       setIsCreateOpen(false);
       setCurrentNextCheckNumber(null);
-      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '' });
+      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
       loadPayPeriods(true);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create pay period');
@@ -242,6 +263,8 @@ export function PayPeriods() {
       end_date: period.end_date,
       pay_date: period.pay_date,
       notes: period.notes || '',
+      run_purpose: period.run_purpose,
+      includes_base_salary: period.includes_base_salary,
     });
     setIsEditOpen(true);
   };
@@ -273,7 +296,17 @@ export function PayPeriods() {
       setIsEditSubmitting(true);
       setEditError(null);
       setError(null);
-      await payPeriodsApi.update(editingPayPeriod.id, editFormData);
+      await payPeriodsApi.update(
+        editingPayPeriod.id,
+        editingPayPeriod.status === 'draft'
+          ? editFormData
+          : {
+              start_date: editFormData.start_date,
+              end_date: editFormData.end_date,
+              pay_date: editFormData.pay_date,
+              notes: editFormData.notes,
+            }
+      );
       setIsEditOpen(false);
       setEditingPayPeriod(null);
       loadPayPeriods(true);
@@ -298,7 +331,11 @@ export function PayPeriods() {
   };
 
   const handleCommit = async (id: number) => {
-    if (!confirm('Are you sure you want to commit this pay period? This action cannot be undone.')) {
+    const period = payPeriods.find((candidate) => candidate.id === id);
+    const warningText = period?.compliance_warnings?.length
+      ? `\n\nAttention:\n${period.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
+      : '';
+    if (!confirm(`Are you sure you want to commit this pay period? This action cannot be undone.${warningText}`)) {
       return;
     }
     try {
@@ -330,25 +367,71 @@ export function PayPeriods() {
     }
   };
 
-  // Generate default dates for new pay period (biweekly)
-  const setDefaultDates = () => {
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - today.getDay() + 1); // Start of this week (Monday)
-    
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 13); // 2 weeks
-    
-    const payDate = new Date(endDate);
-    payDate.setDate(endDate.getDate() + 3); // 3 days after end
-    
-    setFormData({
-      start_date: startDate.toISOString().split('T')[0],
-      end_date: endDate.toISOString().split('T')[0],
-      pay_date: payDate.toISOString().split('T')[0],
-      starting_check_number: '',
-      notes: '',
-    });
+  const toDateInput = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+  // Suggest dates only when the client has an explicit boundary rule. Manual
+  // schedules intentionally start blank so a legacy assumption is never
+  // presented as a confirmed payroll calendar.
+  const setDefaultDates = async () => {
+    setScheduleContext('Loading this client’s pay-schedule rules…');
+    try {
+      const response = await payScheduleSettingsApi.get();
+      const schedule = response.pay_schedule_settings.pay_schedule;
+      const confirmation = schedule.confirmation_status === 'confirmed' ? 'Confirmed' : 'Needs confirmation';
+
+      if (schedule.period_rule === 'manual') {
+        setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        setScheduleContext(`${confirmation}: period and pay dates are manual for this client.`);
+        return;
+      }
+      if (schedule.period_rule === 'biweekly' && !schedule.period_anchor_date) {
+        setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+        setScheduleContext(`${confirmation}: this biweekly schedule has no anchor date. Enter and verify all dates manually, then confirm the schedule in Settings.`);
+        return;
+      }
+
+      const today = new Date();
+      let startDate: Date;
+      let endDate: Date;
+      if (schedule.period_rule === 'semimonthly') {
+        const firstHalf = today.getDate() <= 15;
+        startDate = new Date(today.getFullYear(), today.getMonth(), firstHalf ? 1 : 16);
+        endDate = firstHalf
+          ? new Date(today.getFullYear(), today.getMonth(), 15)
+          : new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      } else if (schedule.period_rule === 'biweekly') {
+        const anchorDate = new Date(`${schedule.period_anchor_date}T12:00:00`);
+        const elapsedDays = Math.floor((today.getTime() - anchorDate.getTime()) / 86_400_000);
+        const cycleOffset = Math.floor(elapsedDays / 14) * 14;
+        startDate = new Date(anchorDate);
+        startDate.setDate(anchorDate.getDate() + cycleOffset);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 13);
+      } else {
+        startDate = new Date(today);
+        const startWeekday = schedule.period_start_weekday ?? 0;
+        const daysSinceStart = (today.getDay() - startWeekday + 7) % 7;
+        startDate.setDate(today.getDate() - daysSinceStart);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+      }
+
+      const payDate = schedule.pay_date_rule === 'days_after_period_end'
+        ? new Date(endDate)
+        : null;
+      if (payDate) payDate.setDate(endDate.getDate() + (schedule.pay_date_offset_days ?? 0));
+
+      setFormData((current) => ({
+        ...current,
+        start_date: toDateInput(startDate),
+        end_date: toDateInput(endDate),
+        pay_date: payDate ? toDateInput(payDate) : '',
+      }));
+      setScheduleContext(`${confirmation}: ${schedule.frequency} boundary rule applied${payDate ? ' with the configured pay-date offset' : '; enter the pay date manually'}.`);
+    } catch {
+      setFormData((current) => ({ ...current, start_date: '', end_date: '', pay_date: '' }));
+      setScheduleContext('Schedule settings could not be loaded. Enter and verify all dates manually.');
+    }
   };
 
   const loadCurrentNextCheckNumber = async () => {
@@ -374,7 +457,8 @@ export function PayPeriods() {
   };
 
   const openCreateModal = () => {
-    setDefaultDates();
+    setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true });
+    void setDefaultDates();
     setCreateError(null);
     setError(null);
     setCurrentNextCheckNumber(null);
@@ -584,6 +668,7 @@ export function PayPeriods() {
                 <TableRow>
                   <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-gray-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
+                  <TableHead>Purpose</TableHead>
                   <TableHead>Employees</TableHead>
                   <TableHead>Gross Pay</TableHead>
                   <TableHead>Net Pay</TableHead>
@@ -611,6 +696,14 @@ export function PayPeriods() {
                             day: 'numeric',
                           })}
                         </span>
+                      </TableCell>
+                      <TableCell className={rowTone}>
+                        <div className="flex flex-col items-start gap-1">
+                          <Badge variant={period.run_purpose === 'regular' ? 'default' : 'warning'}>
+                            {RUN_PURPOSE_LABELS[period.run_purpose] || period.run_purpose}
+                          </Badge>
+                          {!period.includes_base_salary && <span className="text-xs font-medium text-primary-700">No base salary</span>}
+                        </div>
                       </TableCell>
                       <TableCell className={rowTone}>
                         <span className="text-sm text-gray-700">
@@ -795,7 +888,7 @@ export function PayPeriods() {
             <DialogHeader>
               <DialogTitle>New Pay Period</DialogTitle>
               <DialogDescription>
-                Create a new pay period. Default dates are set for a biweekly schedule.
+                Create a payroll run with an explicit purpose and verified dates.
               </DialogDescription>
             </DialogHeader>
             {createError && (
@@ -807,6 +900,36 @@ export function PayPeriods() {
               </div>
             )}
             <div className="grid gap-4 py-4">
+              <div className="rounded-lg border border-primary-100 bg-primary-50 px-3 py-2 text-xs font-medium leading-5 text-primary-800">{scheduleContext}</div>
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="run_purpose">Run purpose</Label>
+                    <Select
+                      id="run_purpose"
+                      value={formData.run_purpose}
+                      onChange={(event) => {
+                        const runPurpose = event.target.value as PayRunPurpose;
+                        setFormData({ ...formData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular' });
+                      }}
+                    >
+                      {Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </Select>
+                  </div>
+                  <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600"
+                      checked={formData.includes_base_salary}
+                      disabled={formData.run_purpose === 'off_cycle_tips'}
+                      onChange={(event) => setFormData({ ...formData, includes_base_salary: event.target.checked })}
+                    />
+                    <span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Regular payroll includes it by default. Non-regular runs do not.</span></span>
+                  </label>
+                </div>
+                {formData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs can never generate salary base pay.</p>}
+                {formData.run_purpose !== 'regular' && formData.run_purpose !== 'off_cycle_tips' && formData.includes_base_salary && <p className="mt-3 text-xs font-medium text-warning-800">You deliberately enabled base salary for a non-regular run. Verify this is intended before calculating payroll.</p>}
+              </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="start_date">Start Date</Label>
@@ -893,11 +1016,11 @@ export function PayPeriods() {
                 />
               </div>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => handleCreateOpenChange(false)}>
+            <DialogFooter className="sticky bottom-0 -mx-4 !flex-row gap-2 border-t border-neutral-200 bg-white px-4 pb-1 sm:-mx-6 sm:px-6">
+              <Button className="flex-1 sm:flex-none" type="button" variant="outline" onClick={() => handleCreateOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
+              <Button className="flex-1 sm:flex-none" type="submit" disabled={isSubmitting}>
                 {isSubmitting ? 'Creating...' : 'Create Pay Period'}
               </Button>
             </DialogFooter>
@@ -924,6 +1047,15 @@ export function PayPeriods() {
               </div>
             )}
             <div className="grid gap-4 py-4">
+              {editingPayPeriod?.status === 'draft' && (
+                <div className="rounded-xl border border-neutral-200 bg-neutral-50/80 p-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2"><Label htmlFor="edit_run_purpose">Run purpose</Label><Select id="edit_run_purpose" value={editFormData.run_purpose} onChange={(event) => { const runPurpose = event.target.value as PayRunPurpose; setEditFormData({ ...editFormData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular' }); }}>{Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div>
+                    <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3"><input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600" checked={editFormData.includes_base_salary} disabled={editFormData.run_purpose === 'off_cycle_tips'} onChange={(event) => setEditFormData({ ...editFormData, includes_base_salary: event.target.checked })} /><span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Locked after payroll is calculated.</span></span></label>
+                  </div>
+                  {editFormData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs can never generate salary base pay.</p>}
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="edit_start_date">Start Date</Label>
@@ -975,11 +1107,11 @@ export function PayPeriods() {
                 />
               </div>
             </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
+            <DialogFooter className="sticky bottom-0 -mx-4 !flex-row gap-2 border-t border-neutral-200 bg-white px-4 pb-1 sm:-mx-6 sm:px-6">
+              <Button className="flex-1 sm:flex-none" type="button" variant="outline" onClick={() => handleEditOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isEditSubmitting}>
+              <Button className="flex-1 sm:flex-none" type="submit" disabled={isEditSubmitting}>
                 {isEditSubmitting ? 'Saving...' : 'Save Changes'}
               </Button>
             </DialogFooter>
