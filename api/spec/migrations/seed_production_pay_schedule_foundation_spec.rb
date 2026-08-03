@@ -45,5 +45,21 @@ RSpec.describe SeedProductionPayScheduleFoundation do
     expect(regular_period.reload.company_pay_schedule).to be_present
     expect(regular_period.company_workweek).to be_present
     expect(item.reload).to have_attributes(gross_pay: 425.50, net_pay: 390.25)
+
+    described_class.new.down
+
+    expect(period.reload).to have_attributes(
+      company_pay_schedule_id: nil,
+      company_workweek_id: nil,
+      run_purpose: "regular",
+      includes_base_salary: true
+    )
+    expect(regular_period.reload).to have_attributes(
+      company_pay_schedule_id: nil,
+      company_workweek_id: nil
+    )
+    expect(company.company_pay_schedules.count).to eq(0)
+    expect(company.company_workweeks.count).to eq(0)
+    expect(item.reload).to have_attributes(gross_pay: 425.50, net_pay: 390.25)
   end
 end

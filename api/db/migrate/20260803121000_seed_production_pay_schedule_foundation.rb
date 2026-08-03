@@ -126,6 +126,10 @@ class SeedProductionPayScheduleFoundation < ActiveRecord::Migration[8.0]
       includes_base_salary: true,
       run_purpose_source: "legacy_system_default"
     )
+    MigrationPayPeriod.update_all(
+      company_pay_schedule_id: nil,
+      company_workweek_id: nil
+    )
     MigrationPaySchedule.delete_all
     MigrationWorkweek.delete_all
   end
