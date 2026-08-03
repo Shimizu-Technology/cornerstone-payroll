@@ -126,12 +126,19 @@ class SeedProductionPayScheduleFoundation < ActiveRecord::Migration[8.0]
       includes_base_salary: true,
       run_purpose_source: "legacy_system_default"
     )
-    MigrationPayPeriod.update_all(
-      company_pay_schedule_id: nil,
-      company_workweek_id: nil
-    )
-    MigrationPaySchedule.delete_all
-    MigrationWorkweek.delete_all
+    seeded_schedule_ids = MigrationPaySchedule.where(
+      source: %w[production_inferred legacy_system_default],
+      confirmation_status: "needs_confirmation"
+    ).pluck(:id)
+    seeded_workweek_ids = MigrationWorkweek.where(
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation"
+    ).pluck(:id)
+
+    MigrationPayPeriod.where(company_pay_schedule_id: seeded_schedule_ids).update_all(company_pay_schedule_id: nil)
+    MigrationPayPeriod.where(company_workweek_id: seeded_workweek_ids).update_all(company_workweek_id: nil)
+    MigrationPaySchedule.where(id: seeded_schedule_ids).delete_all
+    MigrationWorkweek.where(id: seeded_workweek_ids).delete_all
   end
 
   private
