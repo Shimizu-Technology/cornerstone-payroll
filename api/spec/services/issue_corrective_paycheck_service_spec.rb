@@ -74,6 +74,45 @@ RSpec.describe IssueCorrectivePaycheckService do
       expect(result[:deltas][:gross_pay]).to be_within(0.01).of(0.0)
     end
 
+    it "preserves and permits correction of a variable salary override" do
+      salary_employee = create(
+        :employee,
+        :salary,
+        company: company,
+        department: department,
+        salary_type: "variable",
+        pay_rate: 0,
+        pay_frequency: "biweekly"
+      )
+      salary_item = original_period.payroll_items.build(
+        employee: salary_employee,
+        company_id: company.id,
+        employment_type: "salary",
+        pay_rate: 0,
+        salary_override: 2_000,
+        hours_worked: 80
+      )
+      PayrollCalculator.for(salary_employee, salary_item).calculate
+      salary_item.save!
+
+      bonus_result = described_class.preview(
+        original_pay_period: original_period,
+        employee: salary_employee,
+        corrected_inputs: { bonus: 100 }
+      )
+      override_result = described_class.preview(
+        original_pay_period: original_period,
+        employee: salary_employee,
+        corrected_inputs: { salary_override: 2_500 }
+      )
+
+      expect(bonus_result[:original][:gross_pay]).to eq(2_000.0)
+      expect(bonus_result[:corrected][:gross_pay]).to eq(2_100.0)
+      expect(bonus_result[:deltas][:gross_pay]).to eq(100.0)
+      expect(override_result[:corrected][:gross_pay]).to eq(2_500.0)
+      expect(override_result[:deltas][:gross_pay]).to eq(500.0)
+    end
+
     it "raises if the employee has no item in the original period" do
       other_employee = create(:employee, company: company, department: department)
       expect {
