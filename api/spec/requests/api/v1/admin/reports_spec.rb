@@ -1785,6 +1785,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         pay_period: pay_period,
         employee: salary_employee,
         company: company,
+        scheduled_hours: 80,
+        hours_worked: 80,
         gross_pay: 2_000.00,
         withholding_tax: 200.00,
         social_security_tax: 124.00,

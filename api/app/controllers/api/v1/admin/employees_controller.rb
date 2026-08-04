@@ -5,16 +5,17 @@ module Api
     module Admin
       class EmployeesController < BaseController
         include Auditable
-        audit_actions :reactivate
-        before_action :set_employee, only: [ :show, :update, :destroy, :reactivate, :transition_tax_classification ]
+        audit_actions :terminate, :reactivate
+        before_action :set_employee, only: [ :show, :update, :destroy, :terminate, :reactivate, :transition_tax_classification ]
         before_action :require_super_admin!, only: :transition_tax_classification
+        before_action :require_manager_or_admin!, only: [ :terminate, :reactivate ]
 
         # GET /api/v1/admin/employees
         def index
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
           employees = apply_sort(employees)
-          employees = employees.includes(:department, :employee_wage_rates)
+          employees = employees.includes(:department, :employee_wage_rates, :employee_work_profiles)
           employees = employees.page(params[:page]).per(params[:per_page] || 25)
 
           render json: {
@@ -30,7 +31,8 @@ module Api
               @employee,
               include_department: true,
               include_sensitive: true,
-              include_classification_history: true
+              include_classification_history: true,
+              include_lifecycle: true
             )
           }
         end
@@ -66,18 +68,33 @@ module Api
 
         # DELETE /api/v1/admin/employees/:id
         def destroy
-          @employee.update!(status: "terminated", termination_date: Date.current)
-          head :no_content
+          render json: {
+            error: "Use the termination workflow so the effective date and audit history are recorded"
+          }, status: :unprocessable_entity
+        end
+
+        # POST /api/v1/admin/employees/:id/terminate
+        def terminate
+          EmployeeStatusTransitionService.terminate!(
+            employee: @employee,
+            actor: current_user,
+            attributes: termination_params
+          )
+          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/employees/:id/reactivate
         def reactivate
-          unless @employee.status == "terminated"
-            return render json: { error: "Only terminated employees can be reactivated" }, status: :unprocessable_entity
-          end
-
-          @employee.update!(status: "active", termination_date: nil)
-          render json: { data: serialize_employee(@employee) }
+          EmployeeStatusTransitionService.reactivate!(
+            employee: @employee,
+            actor: current_user,
+            attributes: reactivation_params
+          )
+          render json: { data: serialize_employee(@employee.reload, include_lifecycle: true) }
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/employees/:id/transition_tax_classification
@@ -128,7 +145,6 @@ module Api
             :ssn,
             :date_of_birth,
             :hire_date,
-            :termination_date,
             :department_id,
             :job_title,
             :employment_type,
@@ -159,7 +175,6 @@ module Api
             :state,
             :zip,
             :phone,
-            :status,
             default_custom_earnings: [ :label, :amount ],
             default_payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ]
           ).tap do |permitted|
@@ -195,6 +210,19 @@ module Api
             :business_name,
             :contractor_ein
           )
+        end
+
+        def termination_params
+          params.require(:termination).permit(
+            :effective_date,
+            :last_worked_on,
+            :reason_category,
+            :internal_notes
+          )
+        end
+
+        def reactivation_params
+          params.require(:reactivation).permit(:effective_date, :internal_notes)
         end
 
         def require_ssn_confirmation!(employee)
@@ -266,7 +294,8 @@ module Api
           employee,
           include_department: false,
           include_sensitive: false,
-          include_classification_history: false
+          include_classification_history: false,
+          include_lifecycle: false
         )
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
@@ -274,6 +303,12 @@ module Api
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
           data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["tax_classification"] = employee.tax_classification
+          current_profile = if employee.association(:employee_work_profiles).loaded?
+            employee.employee_work_profiles.find { |profile| profile.ends_on.nil? }
+          else
+            employee.employee_work_profiles.find_by(ends_on: nil)
+          end
+          data["current_work_profile"] = serialize_work_profile(current_profile)
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {
               id: rate.id,
@@ -299,7 +334,32 @@ module Api
             }
           end
 
+          if include_lifecycle
+            data["status_history"] = employee.employee_status_events.order(effective_date: :desc, id: :desc).map do |event|
+              serialize_status_event(event)
+            end
+          end
+
           data
+        end
+
+        def serialize_work_profile(profile)
+          return nil unless profile
+
+          profile.as_json(except: [ :notes ]).merge(
+            "notes" => can_view_restricted_lifecycle_notes? ? profile.notes : nil
+          )
+        end
+
+        def serialize_status_event(event)
+          event.as_json(except: [ :internal_notes ]).merge(
+            "actor_name" => event.actor&.name,
+            "internal_notes" => can_view_restricted_lifecycle_notes? ? event.internal_notes : nil
+          )
+        end
+
+        def can_view_restricted_lifecycle_notes?
+          current_user&.organization_admin? || current_user&.manager?
         end
 
         def employee_link_summary(employee)

@@ -59,7 +59,7 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if save_payroll_item_and_clear_exclusion(@payroll_item, employee)
-            @payroll_item.calculate! if params[:auto_calculate]
+            calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
             render json: { payroll_item: payroll_item_json(@payroll_item) }, status: :created
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
@@ -82,7 +82,7 @@ module Api
           @payroll_item.mark_payroll_adjustments_overridden! if params.dig(:payroll_item, :payroll_adjustments)
 
           if @payroll_item.update(attrs)
-            @payroll_item.calculate! if params[:auto_calculate]
+            calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
             render json: { payroll_item: payroll_item_json(@payroll_item) }
           else
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
@@ -122,13 +122,20 @@ module Api
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.employment_type = @payroll_item.employee.employment_type
           @payroll_item.apply_default_payroll_adjustments_if_unset!(@payroll_item.employee)
-          @payroll_item.calculate!
+          calculate_with_timekeeping!(@payroll_item)
           render json: { payroll_item: payroll_item_json(@payroll_item) }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
           render json: { errors: [e.message] }, status: :unprocessable_entity
         end
 
         private
+
+        def calculate_with_timekeeping!(payroll_item)
+          PayrollItem.transaction do
+            PayrollTimeAllocationService.call!(payroll_item: payroll_item)
+            payroll_item.calculate!
+          end
+        end
 
         def set_pay_period
           @pay_period = PayPeriod.find(params[:pay_period_id])
@@ -269,9 +276,12 @@ module Api
             salary_override: item.salary_override,
             non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
+            scheduled_hours: item.scheduled_hours,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
+            timekeeping_source: item.timekeeping_source,
+            timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             total_hours: item.total_hours,
             bonus: item.bonus,
             reported_tips: item.reported_tips,

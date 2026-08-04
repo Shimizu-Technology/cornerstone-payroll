@@ -84,6 +84,10 @@ class Employee < ApplicationRecord
   has_many :employee_loans, dependent: :destroy
   has_many :employee_wage_rates, dependent: :destroy
   has_many :employee_tipped_occupations, dependent: :destroy
+  has_many :employee_work_profiles, dependent: :restrict_with_error
+  has_many :employee_status_events, dependent: :restrict_with_error
+  has_many :daily_time_records, dependent: :restrict_with_error
+  has_many :payroll_time_allocations, dependent: :restrict_with_error
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
@@ -132,6 +136,32 @@ class Employee < ApplicationRecord
   scope :salary, -> { where(employment_type: "salary") }
   scope :contractor, -> { where(employment_type: "contractor") }
   scope :w2_employees, -> { where(employment_type: %w[hourly salary]) }
+  scope :eligible_for_period, ->(period_start, period_end) {
+    where("hire_date IS NULL OR hire_date <= ?", period_end)
+      .where("termination_date IS NULL OR termination_date >= ?", period_start)
+      .where(status: %w[active terminated])
+      .where(
+        <<~SQL.squish,
+          NOT EXISTS (
+            SELECT 1
+            FROM employee_status_events termination_events
+            WHERE termination_events.employee_id = employees.id
+              AND termination_events.event_type = 'terminated'
+              AND termination_events.effective_date < :period_start
+              AND NOT EXISTS (
+                SELECT 1
+                FROM employee_status_events reactivation_events
+                WHERE reactivation_events.employee_id = employees.id
+                  AND reactivation_events.event_type = 'reactivated'
+                  AND reactivation_events.effective_date > termination_events.effective_date
+                  AND reactivation_events.effective_date <= :period_end
+              )
+          )
+        SQL
+        period_start: period_start,
+        period_end: period_end
+      )
+  }
 
   def active_wage_rates
     if association(:employee_wage_rates).loaded?
@@ -174,6 +204,20 @@ class Employee < ApplicationRecord
 
   def active?
     status == "active"
+  end
+
+  def eligible_on?(date)
+    date = date.to_date
+    return false if hire_date.present? && date < hire_date
+
+    event = employee_status_events.where("effective_date <= ?", date).order(effective_date: :desc, id: :desc).first
+    return event.resulting_status == "active" if event
+
+    status != "inactive" && (termination_date.blank? || date <= termination_date)
+  end
+
+  def work_profile_on(date)
+    employee_work_profiles.effective_on(date).first
   end
 
   def hourly?

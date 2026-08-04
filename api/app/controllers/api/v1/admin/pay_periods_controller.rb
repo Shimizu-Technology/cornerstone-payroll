@@ -259,18 +259,26 @@ module Api
             Array(params[:employee_ids]) | submitted_employee_ids
           elsif @pay_period.payroll_items.where.not(import_source: [ nil, "" ]).exists?
             imported_ids = @pay_period.payroll_items.pluck(:employee_id)
-            salary_ids = Employee.active.where(company_id: current_company_id, employment_type: "salary").pluck(:id)
-            contractor_ids = Employee.active.where(company_id: current_company_id, employment_type: "contractor").pluck(:id)
+            eligible = Employee.where(company_id: current_company_id).eligible_for_period(@pay_period.start_date, @pay_period.end_date)
+            salary_ids = eligible.where(employment_type: "salary").pluck(:id)
+            contractor_ids = eligible.where(employment_type: "contractor").pluck(:id)
             (imported_ids + salary_ids + contractor_ids + submitted_employee_ids).uniq
           else
-            Employee.active.where(company_id: current_company_id).pluck(:id)
+            Employee.where(company_id: current_company_id)
+                    .eligible_for_period(@pay_period.start_date, @pay_period.end_date)
+                    .pluck(:id)
           end
           employee_ids = employee_ids.map(&:to_i).uniq - excluded_employee_ids
 
           results = { success: [], errors: [] }
 
-          employees_by_id = Employee.where(id: employee_ids, company_id: current_company_id)
-                                     .active
+          eligible_scope = Employee.where(id: employee_ids, company_id: current_company_id)
+          eligible_scope = if params[:employee_ids].present? && %w[final correction adjustment].include?(@pay_period.run_purpose)
+            eligible_scope.where(status: %w[active terminated])
+          else
+            eligible_scope.eligible_for_period(@pay_period.start_date, @pay_period.end_date)
+          end
+          employees_by_id = eligible_scope
                                      .includes(:employee_deductions, :deduction_types, :employee_loans, :employee_wage_rates, :employee_ytd_totals, employee_payroll_fields: :payroll_field_definition)
                                      .index_by(&:id)
 
@@ -382,7 +390,10 @@ module Api
               end
 
               # Calculate payroll
-              payroll_item.calculate!
+              PayrollItem.transaction do
+                PayrollTimeAllocationService.call!(payroll_item: payroll_item)
+                payroll_item.calculate!
+              end
               results[:success] << { employee_id: employee.id, name: employee.full_name }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, error: e.message }
@@ -1117,9 +1128,12 @@ module Api
             salary_override: item.salary_override,
             non_taxable_pay: item.non_taxable_pay,
             hours_worked: item.hours_worked,
+            scheduled_hours: item.scheduled_hours,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
             pto_hours: item.pto_hours,
+            timekeeping_source: item.timekeeping_source,
+            timekeeping_context_snapshot: item.timekeeping_context_snapshot,
             bonus: item.bonus,
             reported_tips: item.reported_tips,
             tips_paid_out: item.tips_paid_out,
