@@ -53,7 +53,7 @@
 | SS wage base cap ($176,100 for 2025, $184,500 for 2026) | ✅ | ✅ **Done** | `GuamTaxCalculatorV2` checks `ss_wage_base` from `AnnualTaxConfig`; stops withholding when YTD reaches cap | — |
 | Additional Medicare Tax (0.9% over $200K) | ✅ | ✅ **Done** | `GuamTaxCalculatorV2` applies `additional_medicare_rate` on wages exceeding threshold | — |
 | Employee status (active / inactive / terminated) | ✅ | ✅ **Done** | `status` field on `Employee` | — |
-| Hire date / termination date | ✅ | 🟡 **Partial** | `hired_on` exists; no termination date field | Add `terminated_on` to employees; use to auto-inactivate |
+| Hire date / termination date | ✅ | 🟡 **Partial** | `hire_date` and `termination_date` exist, but the current Terminate action stamps the click date and reactivation clears the current snapshot | Add immutable effective-dated terminate/reactivate events with recorded actor/time, optional reason/restricted notes, validation, and date-aware final-pay/report behavior |
 | Department assignment | ✅ | ✅ **Done** | `Department` → `Employee` belongs_to | — |
 | Multi-company (client payroll) | ✅ | ✅ **Done** | `company_id` scoping throughout; `current_company_id` in auth | — |
 | Employee bulk import | ❌ (manual) | ✅ **Done** | CSV/Excel upload with preview, validation, duplicate detection | — |
@@ -151,7 +151,7 @@
 
 ### 🟡 Lower — QoL / compliance completeness
 
-7. Hire/termination date tracking
+7. Effective-dated hire/termination/reactivation history and reporting
 8. MFA enforcement per company
 9. Employee self-service portal (Phase 3)
 10. Garnishment deduction type

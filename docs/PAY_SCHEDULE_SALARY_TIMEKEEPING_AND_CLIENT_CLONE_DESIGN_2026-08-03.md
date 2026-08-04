@@ -1,8 +1,8 @@
 # Pay Schedules, Salary Timekeeping, and Client Cloning
 
 **Decision date:** August 3, 2026
-**Status:** Approved staged design; PR 1 schedule and pay-run foundation implemented on the feature branch
-**Scope:** Cornerstone Payroll production clients, salary-hour recordkeeping, pay-run purpose, and clean client cutover/cloning
+**Status:** Approved staged design; consolidated into four implementation PRs, with PR 1 schedule/pay-run foundation and golden regression harness implemented on the feature branch
+**Scope:** Cornerstone Payroll production clients, employee lifecycle history, salary-hour recordkeeping, pay-run purpose, and clean client cutover/cloning
 **Related work:** PR #39 (zero-hour defaults), PR #105 (paid-out tip taxable gross), PR #121 (classification-history safeguards), and CPR-MP-016 in the payroll compliance master plan
 
 ## 1. Why this change exists
@@ -121,6 +121,19 @@ Each run also stores whether it includes ordinary base salary. A non-regular run
 
 Spike pay period #43 will be labeled as an off-cycle tips run without changing its existing financial totals. It will not generate salary, scheduled time, or additional work hours.
 
+### 2.8 Employment termination needs an effective-dated workflow
+
+The application already stores `employees.status` and `employees.termination_date`, but the current Terminate action automatically sets the termination date to the day the action is clicked. Reactivation clears that current date. This is not sufficient when an employee's actual last day differs from the date Cornerstone records the change, and it does not preserve a complete terminate/reactivate history.
+
+The replacement workflow will preserve both:
+
+- **effective date:** the actual date the employment termination or reactivation took effect; and
+- **recorded evidence:** when the action was entered, who entered it, and the optional business context.
+
+The termination effective date is required and defaults to today. An authorized operator may backdate it to the confirmed actual date, but not before the employee's hire date. An optional last-worked date records cases where the person stopped working before employment formally ended. Optional reason category and internal notes support operations without requiring sensitive narrative. Notes are permission-restricted and excluded from ordinary payroll, tax, SWICA, employee-facing, and client exports.
+
+Termination is a status transition, not deletion. It does not erase or recalculate payroll, automatically issue final pay, or prevent a dated final/correction payroll. Reactivation records another event rather than deleting the prior termination event. A W-2/1099 classification transition is a separate linked filing-record workflow and must never be treated as an employment termination.
+
 ## 3. Proposed data responsibilities
 
 The exact table names may change during implementation, but these responsibilities must remain separate.
@@ -154,6 +167,20 @@ The exact table names may change during implementation, but these responsibiliti
 - daily schedule;
 - timekeeping mode (`imported`, `manual`, or `schedule_with_exceptions`); and
 - effective dates and audit history.
+
+### Employee employment-status event
+
+- event type (`terminated` or `reactivated`);
+- prior and resulting status;
+- required effective date;
+- optional last day actually worked;
+- recorded timestamp and actor;
+- optional controlled reason category;
+- optional restricted internal notes;
+- source/audit metadata; and
+- immutable history retained after reactivation.
+
+`employees.status` and `employees.termination_date` remain the current-state snapshot used by existing screens and reports. The event history is the durable source for explaining how that snapshot changed.
 
 ### Daily/workweek time record
 
@@ -280,6 +307,11 @@ MoSa intends to process every pay period for the current year and the selected p
 10. Backfill, clone, workweek confirmation, and override actions create audit evidence.
 11. Filing and YTD reports must exclude test/parallel ledgers unless an explicit comparison view is requested.
 12. The rollout starts in warning/review mode and becomes a commit blocker only after the relevant client configuration is confirmed.
+13. Termination and reactivation require an effective date and create immutable status-transition evidence.
+14. A termination never deletes or recalculates historical payroll, and employee eligibility for final/correction payroll is date-aware.
+15. Restricted termination notes never enter tax filings, SWICA, paystubs, or ordinary exports.
+16. Future-dated termination is not silently treated as already effective; scheduled termination requires an explicit later design if Cornerstone needs it.
+17. Final-pay completion is derived from committed payroll records, not a manual status checkbox that can drift from payroll history.
 
 ## 7. Required tests before release
 
@@ -296,7 +328,13 @@ MoSa intends to process every pay period for the current year and the selected p
 - cloning copies approved setup and excludes every transactional table;
 - cloned sensitive data is permission-gated and never logged;
 - test/parallel ledger data is excluded from filing/YTD outputs; and
-- a full-history import cannot become authoritative until each included year reconciles.
+- a full-history import cannot become authoritative until each included year reconciles;
+- a backdated termination is accepted only on/after hire date and reports the effective date;
+- an optional last-worked date cannot be after the termination effective date;
+- reactivation retains the prior termination event and records a new actor/effective date;
+- terminated employees remain available for authorized dated final/correction payroll without entering later regular payroll by accident;
+- classification transitions do not create employment-termination events; and
+- optional termination notes are authorization-gated, redacted from logs, and excluded from tax/employee exports.
 
 ## 8. Confirmations still required before the relevant feature is activated
 
@@ -309,15 +347,11 @@ The implementation can begin without manual data entry, but these business facts
 5. The exact historical years MoSa will import and the authoritative source bundle available for each year.
 6. Whether the existing MoSa committed period was exclusively parallel/test data and never used for payout or filing.
 
-## 9. Proposed implementation sequence
+## 9. Consolidated implementation sequence
 
-1. Effective-dated company pay schedules, legal workweeks, run purposes, and production-derived migration.
-2. Employee overtime and schedule profiles.
-3. Company payroll-ledger lineage and Clone client setup/Start clean payroll ledger workflow.
-4. Schedule-with-exceptions daily time records, salary UI/import preservation, and workweek-aware validation.
-5. Idempotent AIRE schedule backfill and production schedule activation; Spike tips-run relabeling is delivered with the pay-run foundation.
-6. Authoritative historical-import batch foundation.
-7. MoSa 2025 pilot.
-8. Full-history reconstruction from the oldest selected year through the current year, followed by nonexempt salary and partial-period workflow expansion as needed.
+1. **PR 1 — Pay-run purpose, schedule foundation, and golden payroll regression harness:** effective-dated company pay schedules, legal workweeks, run purposes, production-derived migration, and a synthetic end-to-end payroll/report reconciliation scenario in CI.
+2. **PR 2 — Employee lifecycle, salary timekeeping, daily allocation, and AIRE activation:** employee overtime/schedule profiles, immutable terminate/reactivate history, schedule-with-exceptions daily records, salary UI/import preservation, workweek-aware validation, and idempotent AIRE activation/backfill.
+3. **PR 3 — Payroll ledgers, clean setup clone, and authoritative historical-import foundation:** ledger lineage/isolation, Clone client setup/Start clean payroll ledger, historical snapshot batches, mappings, idempotency, locking, and reconciliation workflow.
+4. **PR 4 — MoSa adapter and full historical reconstruction:** 2025 validation pilot followed by the selected prior/current years, with employee/check/period/quarter/year reconciliation and controlled promotion.
 
-Each step should be a bounded PR with focused backend, frontend, migration, reporting, and browser coverage. No production backfill or client clone should run merely because its code was deployed; the execution must be a separately reviewed operational action.
+Each PR includes its focused backend, frontend, migration, reporting, browser, and regression coverage. Production backfills, schedule confirmation, ledger promotion, or client clone execution do not run merely because code was deployed; each remains a separately reviewed operational action with dry-run evidence and approval.
