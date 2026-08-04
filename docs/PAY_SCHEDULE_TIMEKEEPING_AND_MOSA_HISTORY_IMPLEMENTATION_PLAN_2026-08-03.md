@@ -1,7 +1,7 @@
 # Pay Schedule, Timekeeping, and MoSa History Implementation Plan
 
 **Plan date:** August 3, 2026
-**Status:** In progress; consolidated into four implementation PRs, with PR 1 schedule/pay-run foundation and golden regression harness implemented on the feature branch
+**Status:** In progress; PR 1 is an unmerged draft foundation and PR 2 is implemented on a dependent feature branch pending local review
 **Design source:** [Pay Schedules, Salary Timekeeping, and Client Cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
 **Historical source:** [QuickBooks Historical Import Plan](QB_HISTORICAL_IMPORT_PLAN.md)
 
@@ -232,6 +232,21 @@ Deploying the code does not execute the backfill. Production execution requires:
 4. Leon approval;
 5. Cornerstone operational approval; and
 6. post-run report and audit verification.
+
+### PR 2 implementation record
+
+- `employee_work_profiles` separates effective-dated pay basis, overtime treatment, standard schedule, timekeeping mode, employer confirmation, and restricted setup notes from W-2/1099 classification.
+- `employee_status_events` preserves immutable termination/reactivation history while the existing employee status fields remain the current-state snapshot. Termination now requires an explicit effective date; last worked date, controlled reason, and restricted notes are optional.
+- `daily_time_records` retains schedule, actual worked, PTO, and holiday evidence by date and legal workweek. Corrections create a new revision and supersede the old record instead of editing or deleting history.
+- `payroll_time_allocations` links the dates represented by each payroll item. A full void-and-redo correction references the same current daily records; it does not create a second time ledger. Supplemental corrections without base salary do not invent time.
+- Regular salary payroll derives informational hours from actual period dates and the confirmed employee schedule. Semi-monthly periods allocate only their own dates while loading the complete intersecting legal workweeks for overtime.
+- Exempt salary hours remain informational and do not multiply base pay. Confirmed nonexempt salary profiles calculate overtime by fixed workweek. A `needs_review` profile cannot silently pay hours above 40 as though the worker were exempt.
+- Off-cycle tips, bonus, commission, adjustment, and supplemental correction runs do not create schedule time or base salary unless an already-defined controlled workflow explicitly includes it.
+- Payroll eligibility now uses the pay-period dates: an employee terminated inside a period remains eligible for that period, while later regular runs exclude them. Final/correction/adjustment workflows can include a terminated worker deliberately.
+- Payroll registers and report data use stored scheduled/worked salary hours rather than a hard-coded 80-hour value. Existing manually imported salary hours are preserved.
+- The AIRE task is exact-target, dry-run by default, idempotent, excludes voided originals, includes committed full correction replacements, and asserts that gross, tax, deduction, and net columns did not change. Deploying the code never executes it.
+- The employee screen exposes manager-only profile and lifecycle workflows, a revision-based daily-time review, plain-language consequences, restricted-note behavior, and responsive floating form actions.
+- Focused model, service, request, correction, reporting, golden-payroll, frontend compile/lint/build, and desktop/mobile browser checks are the PR release gate. The full verification record is maintained in `EMPLOYEE_LIFECYCLE_AND_SALARY_TIMEKEEPING_IMPLEMENTATION_2026-08-04.md`.
 
 ## PR 3 — Payroll ledgers, clean setup clone, and authoritative historical-import foundation
 

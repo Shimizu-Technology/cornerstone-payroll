@@ -203,6 +203,8 @@ export interface Employee {
   date_of_birth?: string;
   hire_date: string;
   termination_date?: string;
+  current_work_profile?: EmployeeWorkProfile | null;
+  status_history?: EmployeeStatusEvent[];
   employment_type: EmploymentType;
   tax_classification?: 'w2' | '1099';
   previous_employee_id?: number | null;
@@ -244,6 +246,95 @@ export interface Employee {
   employee_payroll_fields?: EmployeePayrollField[];
   created_at: string;
   updated_at: string;
+}
+
+export type EmployeeOvertimeStatus = 'exempt' | 'nonexempt' | 'needs_review';
+export type EmployeeTimekeepingMode = 'imported' | 'manual' | 'schedule_with_exceptions';
+
+export interface EmployeeWorkProfile {
+  id: number;
+  employee_id: number;
+  company_id: number;
+  effective_on: string;
+  ends_on?: string | null;
+  pay_basis: EmploymentType;
+  overtime_status: EmployeeOvertimeStatus;
+  exemption_category?: string | null;
+  exemption_reason?: string | null;
+  standard_weekly_hours?: number | null;
+  daily_schedule: Record<string, number>;
+  timekeeping_mode: EmployeeTimekeepingMode;
+  source: 'operator_confirmed' | 'production_migration' | 'imported' | 'legacy_system_default';
+  confirmation_status: 'confirmed' | 'needs_confirmation';
+  confirmed_at?: string | null;
+  confirmed_by_name?: string | null;
+  notes?: string | null;
+}
+
+export interface EmployeeWorkProfileInput {
+  effective_on: string;
+  pay_basis: EmploymentType;
+  overtime_status: EmployeeOvertimeStatus;
+  exemption_category?: string;
+  exemption_reason?: string;
+  standard_weekly_hours?: number;
+  daily_schedule: Record<string, number>;
+  timekeeping_mode: EmployeeTimekeepingMode;
+  source?: EmployeeWorkProfile['source'];
+  notes?: string;
+}
+
+export interface EmployeeStatusEvent {
+  id: number;
+  event_type: 'terminated' | 'reactivated';
+  previous_status: EmployeeStatus;
+  resulting_status: EmployeeStatus;
+  effective_date: string;
+  last_worked_on?: string | null;
+  reason_category?: string | null;
+  internal_notes?: string | null;
+  actor_name?: string | null;
+  created_at: string;
+}
+
+export interface DailyTimeRecord {
+  id: number;
+  employee_id: number;
+  employee_work_profile_id?: number | null;
+  work_date: string;
+  workweek_started_on: string;
+  scheduled_hours: number;
+  actual_worked_hours?: number | null;
+  pto_hours: number;
+  holiday_hours: number;
+  source: 'schedule' | 'import' | 'manual' | 'correction_reference' | 'production_backfill';
+  ledger_key: 'authoritative' | 'parallel' | 'test' | 'historical';
+  revision: number;
+  exception_reason?: string | null;
+  override_reason?: string | null;
+  created_at: string;
+}
+
+export interface DailyTimeRecordInput {
+  work_date?: string;
+  scheduled_hours: number;
+  actual_worked_hours?: number | null;
+  pto_hours: number;
+  holiday_hours: number;
+  exception_reason?: string;
+  override_reason?: string;
+}
+
+export interface EmployeeTerminationInput {
+  effective_date: string;
+  last_worked_on?: string;
+  reason_category?: 'voluntary' | 'involuntary' | 'layoff' | 'reduction_in_force' | 'end_of_contract' | 'retirement' | 'other';
+  internal_notes?: string;
+}
+
+export interface EmployeeReactivationInput {
+  effective_date: string;
+  internal_notes?: string;
 }
 
 export interface EmployeeLinkSummary {
@@ -566,10 +657,13 @@ export interface PayrollItem {
   pay_rate: number;
   // Hours (for hourly employees)
   hours_worked?: number;
+  scheduled_hours?: number;
   overtime_hours?: number;
   holiday_hours?: number;
   pto_hours?: number;
   total_hours?: number;
+  timekeeping_source?: 'schedule' | 'import' | 'manual' | 'correction_reference' | 'production_backfill' | null;
+  timekeeping_context_snapshot?: Record<string, unknown>;
   // Additional earnings
   reported_tips?: number;
   tips_paid_out?: number;

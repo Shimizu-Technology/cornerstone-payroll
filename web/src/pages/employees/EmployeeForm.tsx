@@ -10,6 +10,8 @@ import { Select } from '@/components/ui/select';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmployeeDocumentsPanel } from '@/components/employees/EmployeeDocumentsPanel';
 import { EmployeeClassificationTransitionDialog } from '@/components/employees/EmployeeClassificationTransitionDialog';
+import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
+import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
@@ -197,7 +199,7 @@ export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const isEditing = Boolean(id);
-  const { user, isClient, isSuperAdmin } = useAuth();
+  const { user, isClient, isSuperAdmin, isManager } = useAuth();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
@@ -226,8 +228,7 @@ export function EmployeeForm() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isReactivating, setIsReactivating] = useState(false);
+  const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | null>(null);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
 
@@ -815,40 +816,6 @@ export function EmployeeForm() {
     }
   };
 
-  const handleDelete = async (): Promise<void> => {
-    if (!id || !confirm(`Are you sure you want to terminate this ${form.employment_type === 'contractor' ? 'contractor' : 'employee'}? This action will mark them as terminated.`)) {
-      return;
-    }
-
-    setIsDeleting(true);
-    try {
-      await employeesApi.delete(parseInt(id, 10));
-      navigate('/employees');
-    } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to terminate employee');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  const handleReactivate = async (): Promise<void> => {
-    if (!id || !confirm(`Are you sure you want to reactivate this ${form.employment_type === 'contractor' ? 'contractor' : 'employee'}? They will be marked as active again.`)) {
-      return;
-    }
-
-    setIsReactivating(true);
-    try {
-      const response = await employeesApi.reactivate(parseInt(id, 10));
-      setEmployeeStatus(response.data.status || 'active');
-      setTerminationDate(null);
-      setGeneralError(null);
-    } catch (err) {
-      setGeneralError(err instanceof Error ? err.message : 'Failed to reactivate employee');
-    } finally {
-      setIsReactivating(false);
-    }
-  };
-
   const getFieldError = (field: string): string | undefined => {
     return errors[field]?.[0];
   };
@@ -899,16 +866,15 @@ export function EmployeeForm() {
               )}
             </div>
           </div>
-          <Button
+          {isManager && <Button
             type="button"
             variant="outline"
-            onClick={handleReactivate}
-            disabled={isReactivating}
+            onClick={() => setStatusTransitionMode('reactivate')}
             className="border-red-300 text-red-700 hover:bg-red-100"
           >
             <RotateCcw className="w-4 h-4 mr-2" />
-            {isReactivating ? 'Reactivating...' : 'Reactivate'}
-          </Button>
+            Reactivate
+          </Button>}
         </div>
       )}
 
@@ -1302,6 +1268,39 @@ export function EmployeeForm() {
             )}
           </CardContent>
         </Card>
+
+        {isEditing && form.employment_type === 'salary' && loadedEmployee && !isClient && (
+          <EmployeeWorkProfilePanel
+            employee={loadedEmployee}
+            canManage={isManager}
+            onUpdated={(profile) => setLoadedEmployee((current) => current ? { ...current, current_work_profile: profile } : current)}
+          />
+        )}
+
+        {isEditing && loadedEmployee?.status_history && loadedEmployee.status_history.length > 0 && !isClient && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Employment status history</CardTitle>
+              <CardDescription>Effective dates are preserved separately from the date a staff member entered the change.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {loadedEmployee.status_history.map((event) => (
+                  <div key={event.id} className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold capitalize text-neutral-900">{event.event_type} effective {event.effective_date}</p>
+                      <p className="mt-1 text-xs text-neutral-600">
+                        {event.last_worked_on ? `Last worked ${event.last_worked_on} · ` : ''}{event.reason_category ? `${event.reason_category.replaceAll('_', ' ')} · ` : ''}Recorded by {event.actor_name || 'system'}
+                      </p>
+                      {event.internal_notes && <p className="mt-2 text-sm leading-6 text-neutral-700">{event.internal_notes}</p>}
+                    </div>
+                    <span className="text-xs text-neutral-500">Entered {new Date(event.created_at).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {!isClient && isEditing && (
           <Card className="mb-6 border-blue-200 bg-blue-50/40">
@@ -1996,16 +1995,15 @@ export function EmployeeForm() {
           </CardContent>
         </Card>
 
-        {isEditing && employeeStatus !== 'terminated' && !isClient && (
+        {isEditing && employeeStatus !== 'terminated' && !isClient && isManager && (
           <div className="flex justify-start">
             <Button
               type="button"
               variant="danger"
-              onClick={handleDelete}
-              disabled={isDeleting}
+              onClick={() => setStatusTransitionMode('terminate')}
             >
               <Trash2 className="mr-2 h-4 w-4" />
-              {isDeleting ? 'Terminating...' : `Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
+              {`Terminate ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>
           </div>
         )}
@@ -2070,6 +2068,21 @@ export function EmployeeForm() {
           onTransitioned={(newEmployee) => {
             setLoadedEmployee(newEmployee);
             navigate(`/employees/${newEmployee.id}`, { replace: true });
+          }}
+        />
+      )}
+
+      {isEditing && loadedEmployee && statusTransitionMode && (
+        <EmployeeStatusTransitionDialog
+          employee={loadedEmployee}
+          mode={statusTransitionMode}
+          open
+          onOpenChange={(open) => !open && setStatusTransitionMode(null)}
+          onCompleted={(employee) => {
+            setLoadedEmployee(employee);
+            setEmployeeStatus(employee.status);
+            setTerminationDate(employee.termination_date || null);
+            setGeneralError(null);
           }}
         />
       )}

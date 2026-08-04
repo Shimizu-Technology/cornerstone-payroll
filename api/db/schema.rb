@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -114,7 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.check_constraint "byte_size > 0", name: "check_print_runs_byte_size_check"
     t.check_constraint "selected_count > 0", name: "check_print_runs_selected_count_check"
     t.check_constraint "starting_slot >= 1 AND starting_slot <= 4", name: "check_print_runs_starting_slot_check"
-    t.check_constraint "status::text = ANY (ARRAY['generated'::character varying, 'confirmed'::character varying]::text[])", name: "check_print_runs_status_check"
+    t.check_constraint "status::text = ANY (ARRAY['generated'::character varying::text, 'confirmed'::character varying::text])", name: "check_print_runs_status_check"
   end
 
   create_table "check_signoff_sheets", force: :cascade do |t|
@@ -259,15 +259,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["company_id"], name: "idx_company_pay_schedules_one_current", unique: true, where: "(ends_on IS NULL)"
     t.index ["company_id"], name: "index_company_pay_schedules_on_company_id"
     t.index ["confirmed_by_id"], name: "index_company_pay_schedules_on_confirmed_by_id"
-    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying, 'needs_confirmation'::character varying]::text[])", name: "company_pay_schedules_confirmation_check"
+    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying::text, 'needs_confirmation'::character varying::text])", name: "company_pay_schedules_confirmation_check"
     t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_pay_schedules_dates_check"
-    t.check_constraint "frequency::text = ANY (ARRAY['weekly'::character varying, 'biweekly'::character varying, 'semimonthly'::character varying, 'monthly'::character varying]::text[])", name: "company_pay_schedules_frequency_check"
-    t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying, 'days_after_period_end'::character varying]::text[])", name: "company_pay_schedules_pay_date_rule_check"
+    t.check_constraint "frequency::text = ANY (ARRAY['weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text, 'monthly'::character varying::text])", name: "company_pay_schedules_frequency_check"
+    t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying::text, 'days_after_period_end'::character varying::text])", name: "company_pay_schedules_pay_date_rule_check"
     t.check_constraint "period_anchor_date IS NULL OR period_start_weekday IS NULL OR EXTRACT(dow FROM period_anchor_date)::integer = period_start_weekday", name: "company_pay_schedules_anchor_weekday_check"
     t.check_constraint "period_rule::text <> 'biweekly'::text OR period_anchor_date IS NOT NULL", name: "company_pay_schedules_biweekly_anchor_check"
-    t.check_constraint "period_rule::text = ANY (ARRAY['manual'::character varying, 'weekly'::character varying, 'biweekly'::character varying, 'semimonthly'::character varying]::text[])", name: "company_pay_schedules_period_rule_check"
+    t.check_constraint "period_rule::text = ANY (ARRAY['manual'::character varying::text, 'weekly'::character varying::text, 'biweekly'::character varying::text, 'semimonthly'::character varying::text])", name: "company_pay_schedules_period_rule_check"
     t.check_constraint "period_start_weekday IS NULL OR period_start_weekday >= 0 AND period_start_weekday <= 6", name: "company_pay_schedules_weekday_check"
-    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_inferred'::character varying, 'legacy_system_default'::character varying]::text[])", name: "company_pay_schedules_source_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying::text, 'production_inferred'::character varying::text, 'legacy_system_default'::character varying::text])", name: "company_pay_schedules_source_check"
   end
 
   create_table "company_workweeks", force: :cascade do |t|
@@ -288,9 +288,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["company_id"], name: "idx_company_workweeks_one_current", unique: true, where: "(ends_on IS NULL)"
     t.index ["company_id"], name: "index_company_workweeks_on_company_id"
     t.index ["confirmed_by_id"], name: "index_company_workweeks_on_confirmed_by_id"
-    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying, 'needs_confirmation'::character varying]::text[])", name: "company_workweeks_confirmation_check"
+    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying::text, 'needs_confirmation'::character varying::text])", name: "company_workweeks_confirmation_check"
     t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_workweeks_dates_check"
-    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_inferred'::character varying, 'legacy_system_default'::character varying]::text[])", name: "company_workweeks_source_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying::text, 'production_inferred'::character varying::text, 'legacy_system_default'::character varying::text])", name: "company_workweeks_source_check"
     t.check_constraint "starts_at_minutes >= 0 AND starts_at_minutes <= 1439", name: "company_workweeks_time_check"
     t.check_constraint "starts_on_weekday >= 0 AND starts_on_weekday <= 6", name: "company_workweeks_weekday_check"
   end
@@ -311,6 +311,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.integer "year", null: false
     t.index ["company_id", "year"], name: "index_company_ytd_totals_on_company_id_and_year", unique: true
     t.index ["company_id"], name: "index_company_ytd_totals_on_company_id"
+  end
+
+  create_table "daily_time_records", force: :cascade do |t|
+    t.decimal "actual_worked_hours", precision: 6, scale: 2
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_work_profile_id"
+    t.text "exception_reason"
+    t.decimal "holiday_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.string "ledger_key", default: "authoritative", null: false
+    t.text "override_reason"
+    t.decimal "pto_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.integer "revision", default: 1, null: false
+    t.decimal "scheduled_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.string "source", null: false
+    t.datetime "superseded_at"
+    t.bigint "supersedes_id"
+    t.datetime "updated_at", null: false
+    t.date "work_date", null: false
+    t.date "workweek_started_on", null: false
+    t.index ["company_id"], name: "index_daily_time_records_on_company_id"
+    t.index ["employee_id", "work_date", "ledger_key"], name: "idx_daily_time_records_current_day", unique: true, where: "(superseded_at IS NULL)"
+    t.index ["employee_id", "workweek_started_on", "ledger_key"], name: "idx_daily_time_records_workweek"
+    t.index ["employee_id"], name: "index_daily_time_records_on_employee_id"
+    t.index ["employee_work_profile_id"], name: "index_daily_time_records_on_employee_work_profile_id"
+    t.index ["supersedes_id"], name: "index_daily_time_records_on_supersedes_id"
+    t.check_constraint "ledger_key::text = ANY (ARRAY['authoritative'::character varying, 'parallel'::character varying, 'test'::character varying, 'historical'::character varying]::text[])", name: "daily_time_records_ledger_check"
+    t.check_constraint "scheduled_hours >= 0::numeric AND scheduled_hours <= 24::numeric AND (actual_worked_hours IS NULL OR actual_worked_hours >= 0::numeric AND actual_worked_hours <= 24::numeric) AND pto_hours >= 0::numeric AND holiday_hours >= 0::numeric", name: "daily_time_records_hours_check"
+    t.check_constraint "source::text = ANY (ARRAY['schedule'::character varying, 'import'::character varying, 'manual'::character varying, 'correction_reference'::character varying, 'production_backfill'::character varying]::text[])", name: "daily_time_records_source_check"
   end
 
   create_table "deduction_types", force: :cascade do |t|
@@ -434,6 +464,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["payroll_field_definition_id"], name: "idx_employee_payroll_fields_definition"
   end
 
+  create_table "employee_status_events", force: :cascade do |t|
+    t.bigint "actor_id"
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.date "effective_date", null: false
+    t.bigint "employee_id", null: false
+    t.string "event_type", null: false
+    t.text "internal_notes"
+    t.date "last_worked_on"
+    t.string "previous_status", null: false
+    t.string "reason_category"
+    t.string "resulting_status", null: false
+    t.string "source", default: "operator", null: false
+    t.datetime "updated_at", null: false
+    t.index ["actor_id"], name: "index_employee_status_events_on_actor_id"
+    t.index ["company_id"], name: "index_employee_status_events_on_company_id"
+    t.index ["employee_id", "effective_date", "id"], name: "idx_employee_status_events_timeline"
+    t.index ["employee_id"], name: "index_employee_status_events_on_employee_id"
+    t.check_constraint "event_type::text = ANY (ARRAY['terminated'::character varying, 'reactivated'::character varying]::text[])", name: "employee_status_events_type_check"
+    t.check_constraint "last_worked_on IS NULL OR last_worked_on <= effective_date", name: "employee_status_events_last_worked_check"
+    t.check_constraint "previous_status::text = ANY (ARRAY['active'::character varying, 'inactive'::character varying, 'terminated'::character varying]::text[])", name: "employee_status_events_previous_status_check"
+    t.check_constraint "resulting_status::text = ANY (ARRAY['active'::character varying, 'inactive'::character varying, 'terminated'::character varying]::text[])", name: "employee_status_events_resulting_status_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator'::character varying, 'production_migration'::character varying]::text[])", name: "employee_status_events_source_check"
+  end
+
   create_table "employee_tipped_occupations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.date "effective_from", null: false
@@ -459,6 +514,39 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.datetime "updated_at", null: false
     t.index ["employee_id", "label"], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index ["employee_id"], name: "index_employee_wage_rates_on_employee_id"
+  end
+
+  create_table "employee_work_profiles", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "confirmation_status", default: "needs_confirmation", null: false
+    t.datetime "confirmed_at"
+    t.bigint "confirmed_by_id"
+    t.datetime "created_at", null: false
+    t.jsonb "daily_schedule", default: {}, null: false
+    t.date "effective_on", null: false
+    t.bigint "employee_id", null: false
+    t.date "ends_on"
+    t.string "exemption_category"
+    t.text "exemption_reason"
+    t.text "notes"
+    t.string "overtime_status", default: "needs_review", null: false
+    t.string "pay_basis", null: false
+    t.string "source", default: "operator_confirmed", null: false
+    t.decimal "standard_weekly_hours", precision: 6, scale: 2
+    t.string "timekeeping_mode", default: "manual", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id"], name: "index_employee_work_profiles_on_company_id"
+    t.index ["confirmed_by_id"], name: "index_employee_work_profiles_on_confirmed_by_id"
+    t.index ["employee_id", "effective_on"], name: "idx_employee_work_profiles_effective", unique: true
+    t.index ["employee_id"], name: "idx_employee_work_profiles_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.index ["employee_id"], name: "index_employee_work_profiles_on_employee_id"
+    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying, 'needs_confirmation'::character varying]::text[])", name: "employee_work_profiles_confirmation_check"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_work_profiles_dates_check"
+    t.check_constraint "overtime_status::text = ANY (ARRAY['exempt'::character varying, 'nonexempt'::character varying, 'needs_review'::character varying]::text[])", name: "employee_work_profiles_overtime_status_check"
+    t.check_constraint "pay_basis::text = ANY (ARRAY['hourly'::character varying, 'salary'::character varying, 'contractor'::character varying]::text[])", name: "employee_work_profiles_pay_basis_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_migration'::character varying, 'imported'::character varying, 'legacy_system_default'::character varying]::text[])", name: "employee_work_profiles_source_check"
+    t.check_constraint "standard_weekly_hours IS NULL OR standard_weekly_hours > 0::numeric AND standard_weekly_hours <= 168::numeric", name: "employee_work_profiles_weekly_hours_check"
+    t.check_constraint "timekeeping_mode::text = ANY (ARRAY['imported'::character varying, 'manual'::character varying, 'schedule_with_exceptions'::character varying]::text[])", name: "employee_work_profiles_mode_check"
   end
 
   create_table "employee_ytd_totals", force: :cascade do |t|
@@ -635,7 +723,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["created_by_id"], name: "index_general_transmittals_on_created_by_id"
     t.index ["pay_period_id"], name: "index_general_transmittals_on_pay_period_id", unique: true, where: "(pay_period_id IS NOT NULL)"
     t.index ["updated_by_id"], name: "index_general_transmittals_on_updated_by_id"
-    t.check_constraint "source_kind::text = ANY (ARRAY['standalone'::character varying, 'pay_period'::character varying]::text[])", name: "general_transmittals_source_kind_check"
+    t.check_constraint "source_kind::text = ANY (ARRAY['standalone'::character varying::text, 'pay_period'::character varying::text])", name: "general_transmittals_source_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'generated'::character varying::text])", name: "general_transmittals_status_check"
   end
 
@@ -672,7 +760,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["organization_id"], name: "index_invoice_artifacts_on_organization_id"
     t.index ["storage_key"], name: "index_invoice_artifacts_on_storage_key", unique: true
     t.check_constraint "byte_size >= 0", name: "check_invoice_artifacts_byte_size"
-    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying, 'imported_original'::character varying, 'legacy_snapshot'::character varying, 'credit_note'::character varying, 'payment_receipt'::character varying]::text[])", name: "check_invoice_artifacts_kind"
+    t.check_constraint "kind::text = ANY (ARRAY['issued_pdf'::character varying::text, 'imported_original'::character varying::text, 'legacy_snapshot'::character varying::text, 'credit_note'::character varying::text, 'payment_receipt'::character varying::text])", name: "check_invoice_artifacts_kind"
   end
 
   create_table "invoice_billing_profiles", force: :cascade do |t|
@@ -758,7 +846,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["organization_id", "credit_number"], name: "idx_invoice_credit_notes_unique_number", unique: true
     t.index ["organization_id"], name: "index_invoice_credit_notes_on_organization_id"
     t.index ["voided_by_id"], name: "index_invoice_credit_notes_on_voided_by_id"
-    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying, 'voided'::character varying]::text[])", name: "check_invoice_credit_notes_status"
+    t.check_constraint "status::text = ANY (ARRAY['issued'::character varying::text, 'voided'::character varying::text])", name: "check_invoice_credit_notes_status"
     t.check_constraint "total_amount > 0::numeric", name: "check_invoice_credit_notes_positive_amount"
   end
 
@@ -779,7 +867,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["invoice_id"], name: "index_invoice_deliveries_on_invoice_id"
     t.index ["organization_id"], name: "index_invoice_deliveries_on_organization_id"
     t.index ["recorded_by_id"], name: "index_invoice_deliveries_on_recorded_by_id"
-    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying, 'mail'::character varying, 'hand_delivery'::character varying, 'portal'::character varying, 'other'::character varying]::text[])", name: "check_invoice_deliveries_channel"
+    t.check_constraint "channel::text = ANY (ARRAY['email'::character varying::text, 'mail'::character varying::text, 'hand_delivery'::character varying::text, 'portal'::character varying::text, 'other'::character varying::text])", name: "check_invoice_deliveries_channel"
   end
 
   create_table "invoice_events", force: :cascade do |t|
@@ -845,7 +933,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["recorded_by_id"], name: "index_invoice_payments_on_recorded_by_id"
     t.index ["reversed_by_id"], name: "index_invoice_payments_on_reversed_by_id"
     t.check_constraint "amount > 0::numeric", name: "check_invoice_payments_positive_amount"
-    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying, 'check'::character varying, 'ach'::character varying, 'card'::character varying, 'wire'::character varying, 'adjustment'::character varying, 'legacy'::character varying, 'other'::character varying]::text[])", name: "check_invoice_payments_method"
+    t.check_constraint "payment_method::text = ANY (ARRAY['cash'::character varying::text, 'check'::character varying::text, 'ach'::character varying::text, 'card'::character varying::text, 'wire'::character varying::text, 'adjustment'::character varying::text, 'legacy'::character varying::text, 'other'::character varying::text])", name: "check_invoice_payments_method"
     t.check_constraint "reversed_at IS NULL AND reversed_by_id IS NULL AND reversal_reason IS NULL OR reversed_at IS NOT NULL AND reversal_reason IS NOT NULL", name: "check_invoice_payments_reversal_fields"
   end
 
@@ -916,8 +1004,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["organization_id", "status"], name: "index_invoices_on_org_status"
     t.index ["organization_id"], name: "index_invoices_on_organization_id"
     t.index ["updated_by_id"], name: "index_invoices_on_updated_by_id"
-    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying, 'imported'::character varying]::text[])", name: "check_invoices_origin"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'open'::character varying, 'voided'::character varying, 'uncollectible'::character varying]::text[])", name: "check_invoices_status"
+    t.check_constraint "origin::text = ANY (ARRAY['native'::character varying::text, 'imported'::character varying::text])", name: "check_invoices_origin"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'open'::character varying::text, 'voided'::character varying::text, 'uncollectible'::character varying::text])", name: "check_invoices_status"
   end
 
   create_table "loan_transactions", force: :cascade do |t|
@@ -1144,8 +1232,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
     t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
-    t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying, 'off_cycle_tips'::character varying, 'bonus'::character varying, 'commission'::character varying, 'correction'::character varying, 'final'::character varying, 'adjustment'::character varying]::text[])", name: "pay_periods_run_purpose_check"
-    t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying, 'system_correction'::character varying, 'production_migration'::character varying, 'legacy_system_default'::character varying]::text[])", name: "pay_periods_run_purpose_source_check"
+    t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying::text, 'off_cycle_tips'::character varying::text, 'bonus'::character varying::text, 'commission'::character varying::text, 'correction'::character varying::text, 'final'::character varying::text, 'adjustment'::character varying::text])", name: "pay_periods_run_purpose_check"
+    t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying::text, 'system_correction'::character varying::text, 'production_migration'::character varying::text, 'legacy_system_default'::character varying::text])", name: "pay_periods_run_purpose_source_check"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -1368,11 +1456,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.decimal "retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "roth_retirement_payment", precision: 10, scale: 2, default: "0.0"
     t.decimal "salary_override", precision: 12, scale: 2
+    t.decimal "scheduled_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "service_charge_wages", precision: 14, scale: 2
     t.decimal "social_security_tax", precision: 10, scale: 2, default: "0.0"
     t.decimal "social_security_taxable_tips", precision: 14, scale: 2
     t.decimal "social_security_taxable_wages", precision: 14, scale: 2
     t.jsonb "tax_rule_snapshot", default: {}, null: false
+    t.jsonb "timekeeping_context_snapshot", default: {}, null: false
+    t.string "timekeeping_source"
     t.string "tip_pool"
     t.decimal "tips", precision: 10, scale: 2, default: "0.0"
     t.decimal "tips_paid_out", precision: 10, scale: 2, default: "0.0", null: false
@@ -1405,6 +1496,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["reprint_of_check_number"], name: "index_payroll_items_on_reprint_of_check_number"
     t.index ["tax_rule_snapshot"], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index ["voided"], name: "index_payroll_items_on_voided"
+    t.check_constraint "timekeeping_source IS NULL OR (timekeeping_source::text = ANY (ARRAY['schedule'::character varying, 'import'::character varying, 'manual'::character varying, 'correction_reference'::character varying, 'production_backfill'::character varying]::text[]))", name: "payroll_items_timekeeping_source_check"
   end
 
   create_table "payroll_liability_entries", force: :cascade do |t|
@@ -1476,6 +1568,32 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
     t.index ["company_id", "reminder_type", "expected_pay_date"], name: "idx_reminder_logs_create_unique", unique: true, where: "((pay_period_id IS NULL) AND (expected_pay_date IS NOT NULL))"
     t.index ["company_id"], name: "index_payroll_reminder_logs_on_company_id"
     t.index ["pay_period_id"], name: "index_payroll_reminder_logs_on_pay_period_id"
+  end
+
+  create_table "payroll_time_allocations", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "daily_time_record_id", null: false
+    t.bigint "employee_id", null: false
+    t.decimal "holiday_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.string "ledger_key", default: "authoritative", null: false
+    t.decimal "overtime_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.bigint "payroll_item_id", null: false
+    t.decimal "pto_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.decimal "regular_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.decimal "scheduled_hours", precision: 6, scale: 2, default: "0.0", null: false
+    t.string "source", null: false
+    t.datetime "updated_at", null: false
+    t.date "work_date", null: false
+    t.index ["company_id"], name: "index_payroll_time_allocations_on_company_id"
+    t.index ["daily_time_record_id"], name: "index_payroll_time_allocations_on_daily_time_record_id"
+    t.index ["employee_id", "work_date", "ledger_key"], name: "idx_payroll_time_allocations_employee_day"
+    t.index ["employee_id"], name: "index_payroll_time_allocations_on_employee_id"
+    t.index ["payroll_item_id", "daily_time_record_id"], name: "idx_payroll_time_allocations_unique", unique: true
+    t.index ["payroll_item_id"], name: "index_payroll_time_allocations_on_payroll_item_id"
+    t.check_constraint "ledger_key::text = ANY (ARRAY['authoritative'::character varying, 'parallel'::character varying, 'test'::character varying, 'historical'::character varying]::text[])", name: "payroll_time_allocations_ledger_check"
+    t.check_constraint "scheduled_hours >= 0::numeric AND regular_hours >= 0::numeric AND overtime_hours >= 0::numeric AND pto_hours >= 0::numeric AND holiday_hours >= 0::numeric", name: "payroll_time_allocations_hours_check"
+    t.check_constraint "source::text = ANY (ARRAY['schedule'::character varying, 'import'::character varying, 'manual'::character varying, 'correction_reference'::character varying, 'production_backfill'::character varying]::text[])", name: "payroll_time_allocations_source_check"
   end
 
   create_table "printer_profiles", force: :cascade do |t|
@@ -1942,6 +2060,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
   add_foreign_key "company_workweeks", "companies"
   add_foreign_key "company_workweeks", "users", column: "confirmed_by_id"
   add_foreign_key "company_ytd_totals", "companies"
+  add_foreign_key "daily_time_records", "companies"
+  add_foreign_key "daily_time_records", "daily_time_records", column: "supersedes_id"
+  add_foreign_key "daily_time_records", "employee_work_profiles"
+  add_foreign_key "daily_time_records", "employees"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "departments", "companies"
@@ -1957,8 +2079,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
   add_foreign_key "employee_payroll_fields", "employee_loans"
   add_foreign_key "employee_payroll_fields", "employees"
   add_foreign_key "employee_payroll_fields", "payroll_field_definitions"
+  add_foreign_key "employee_status_events", "companies"
+  add_foreign_key "employee_status_events", "employees"
+  add_foreign_key "employee_status_events", "users", column: "actor_id"
   add_foreign_key "employee_tipped_occupations", "employees", on_delete: :cascade
   add_foreign_key "employee_wage_rates", "employees"
+  add_foreign_key "employee_work_profiles", "companies"
+  add_foreign_key "employee_work_profiles", "employees"
+  add_foreign_key "employee_work_profiles", "users", column: "confirmed_by_id"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
@@ -2071,6 +2199,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
   add_foreign_key "payroll_reminder_configs", "companies"
   add_foreign_key "payroll_reminder_logs", "companies"
   add_foreign_key "payroll_reminder_logs", "pay_periods"
+  add_foreign_key "payroll_time_allocations", "companies"
+  add_foreign_key "payroll_time_allocations", "daily_time_records"
+  add_foreign_key "payroll_time_allocations", "employees"
+  add_foreign_key "payroll_time_allocations", "payroll_items"
   add_foreign_key "printer_profiles", "organizations"
   add_foreign_key "punch_entries", "timecards"
   add_foreign_key "quarterly_compliance_packets", "companies"

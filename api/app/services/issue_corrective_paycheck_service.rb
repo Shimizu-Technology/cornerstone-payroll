@@ -327,6 +327,7 @@ class IssueCorrectivePaycheckService
 
       # Inputs: original values overlaid with operator-supplied corrections.
       pay_rate:                 input_value.call(:pay_rate, original_item.pay_rate),
+      scheduled_hours:          original_item.scheduled_hours,
       hours_worked:             input_value.call(:hours_worked, original_item.hours_worked),
       overtime_hours:           input_value.call(:overtime_hours, original_item.overtime_hours),
       holiday_hours:            input_value.call(:holiday_hours, original_item.holiday_hours),
@@ -349,7 +350,9 @@ class IssueCorrectivePaycheckService
       custom_deductions:        input_value.call(:custom_deductions, original_item.custom_deductions),
       custom_columns_data:      input_value.call(:custom_columns_data, original_item.custom_columns_data),
       loan_deduction:           original_item.loan_deduction,
-      import_source:            original_item.import_source
+      import_source:            original_item.import_source,
+      timekeeping_source:       "correction_reference",
+      timekeeping_context_snapshot: original_item.timekeeping_context_snapshot
     )
     temp.pay_period = @original_pay_period
     temp.payroll_adjustments = original_item.payroll_adjustments.deep_dup
@@ -555,10 +558,13 @@ class IssueCorrectivePaycheckService
       # Hours/inputs are stored as deltas (so summing across the
       # original + supplemental yields the corrected totals).
       pay_rate:        original_item.pay_rate, # rate isn't a delta — keep for reporting
+      scheduled_hours: 0,
       hours_worked:    deltas[:hours_worked_delta],
       overtime_hours:  deltas[:overtime_hours_delta],
       holiday_hours:   deltas[:holiday_hours_delta],
       pto_hours:       deltas[:pto_hours_delta],
+      timekeeping_source: "correction_reference",
+      timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
 
       # Tip deltas are stored too because W-2GU / 941 / SWICA reporting derives
       # Social Security tips and YTD tip totals from these input columns, while

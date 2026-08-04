@@ -1765,6 +1765,7 @@ module Api
             employment_type: item.employment_type,
             worker_classification: employment_type_label(item.employment_type),
             pay_rate: item.pay_rate,
+            scheduled_hours: item.scheduled_hours,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
@@ -1820,6 +1821,7 @@ module Api
             pay_period_id: item.pay_period_id,
             pay_date: item.pay_period.pay_date,
             period_description: item.pay_period.period_description,
+            scheduled_hours: item.scheduled_hours,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
@@ -2732,7 +2734,10 @@ module Api
         end
 
         def ceo_regular_hours(emp)
-          emp[:employment_type].to_s == "salary" ? 80.0 : emp[:hours_worked].to_f
+          return emp[:hours_worked].to_f unless emp[:employment_type].to_s == "salary"
+
+          scheduled = emp[:scheduled_hours].to_f
+          scheduled.positive? ? scheduled : emp[:hours_worked].to_f
         end
 
         def ceo_hourly_pay(emp)
