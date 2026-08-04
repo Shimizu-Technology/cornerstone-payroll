@@ -62,6 +62,7 @@ class IssueCorrectivePaycheckService
   # not provided falls back to the original item's value.
   CORRECTABLE_INPUT_FIELDS = %i[
     pay_rate
+    salary_override
     hours_worked
     overtime_hours
     holiday_hours
@@ -327,6 +328,7 @@ class IssueCorrectivePaycheckService
 
       # Inputs: original values overlaid with operator-supplied corrections.
       pay_rate:                 input_value.call(:pay_rate, original_item.pay_rate),
+      salary_override:          input_value.call(:salary_override, original_item.salary_override),
       scheduled_hours:          original_item.scheduled_hours,
       hours_worked:             input_value.call(:hours_worked, original_item.hours_worked),
       overtime_hours:           input_value.call(:overtime_hours, original_item.overtime_hours),
