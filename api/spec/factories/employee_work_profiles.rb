@@ -11,6 +11,8 @@ FactoryBot.define do
     exemption_category { employee.salary? ? "administrative" : nil }
     exemption_reason { employee.salary? ? "Confirmed exempt administrative duties test" : nil }
     standard_weekly_hours { employee.salary? ? 40 : nil }
+    salary_covers_weekly_hours { employee.salary? && overtime_status == "nonexempt" ? 40 : nil }
+    salary_coverage_reason { employee.salary? && overtime_status == "nonexempt" ? "Employment agreement confirms a 40-hour salary basis" : nil }
     daily_schedule do
       employee.salary? ? {
         "sunday" => 0,

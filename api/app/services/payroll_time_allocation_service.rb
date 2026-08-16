@@ -34,14 +34,18 @@ class PayrollTimeAllocationService
       records = current_records_for_period
       return preserve_existing_hours!(profile) if records.empty?
 
-      allocations = build_allocations(records)
+      allocations = build_allocations(records, profile)
       unresolved_overtime = allocations.sum { |row| row[:overtime_hours] }
       if profile.overtime_status == "needs_review" && unresolved_overtime.positive?
         profile.errors.add(:overtime_status, "must be confirmed before paying salary hours above 40 in a legal workweek")
         raise ActiveRecord::RecordInvalid.new(profile)
       end
       @payroll_item.payroll_time_allocations.where(ledger_key: @ledger_key).delete_all
-      allocations.each { |attributes| @payroll_item.payroll_time_allocations.create!(attributes) }
+      allocations.each do |attributes|
+        @payroll_item.payroll_time_allocations.create!(
+          attributes.except(:salary_covered_overtime_hours, :salary_uncovered_overtime_hours)
+        )
+      end
 
       @payroll_item.scheduled_hours = allocations.sum { |row| row[:scheduled_hours] }
       @payroll_item.hours_worked = allocations.sum { |row| row[:regular_hours] }
@@ -49,7 +53,7 @@ class PayrollTimeAllocationService
       @payroll_item.pto_hours = allocations.sum { |row| row[:pto_hours] }
       @payroll_item.holiday_hours = allocations.sum { |row| row[:holiday_hours] }
       @payroll_item.timekeeping_source = source_for(records)
-      @payroll_item.timekeeping_context_snapshot = profile_snapshot(profile)
+      @payroll_item.timekeeping_context_snapshot = profile_snapshot(profile, allocations: allocations)
       @payroll_item.save!
       @payroll_item
     end
@@ -100,7 +104,7 @@ class PayrollTimeAllocationService
       .to_a
   end
 
-  def build_allocations(period_records)
+  def build_allocations(period_records, profile)
     week_starts = period_records.map(&:workweek_started_on).uniq
     all_records = DailyTimeRecord.current.where(
       employee: @employee,
@@ -109,19 +113,35 @@ class PayrollTimeAllocationService
     ).order(:work_date).group_by(&:workweek_started_on)
 
     overtime_by_id = {}
+    salary_overtime_by_id = {}
+    salary_covered_hours = profile.salary_covers_weekly_hours || 0.to_d
+    salary_covered_overtime_limit = [ salary_covered_hours - WEEKLY_OVERTIME_THRESHOLD, 0.to_d ].max
     all_records.each_value do |records|
       cumulative = 0.to_d
+      cumulative_overtime = 0.to_d
       records.each do |record|
         worked = worked_hours(record)
         regular = [ [ WEEKLY_OVERTIME_THRESHOLD - cumulative, 0.to_d ].max, worked ].min
-        overtime_by_id[record.id] = [ worked - regular, 0.to_d ].max
+        overtime = [ worked - regular, 0.to_d ].max
+        overtime_by_id[record.id] = overtime
+        covered_overtime = if profile.nonexempt?
+          [ [ salary_covered_overtime_limit - cumulative_overtime, 0.to_d ].max, overtime ].min
+        else
+          0.to_d
+        end
+        salary_overtime_by_id[record.id] = {
+          covered: covered_overtime,
+          uncovered: overtime - covered_overtime
+        }
         cumulative += worked
+        cumulative_overtime += overtime
       end
     end
 
     period_records.map do |record|
       worked = worked_hours(record)
       overtime = overtime_by_id.fetch(record.id, 0.to_d)
+      salary_overtime = salary_overtime_by_id.fetch(record.id, { covered: 0.to_d, uncovered: overtime })
       {
         company: @employee.company,
         employee: @employee,
@@ -130,6 +150,8 @@ class PayrollTimeAllocationService
         scheduled_hours: record.scheduled_hours,
         regular_hours: worked - overtime,
         overtime_hours: overtime,
+        salary_covered_overtime_hours: salary_overtime[:covered],
+        salary_uncovered_overtime_hours: salary_overtime[:uncovered],
         pto_hours: record.pto_hours,
         holiday_hours: record.holiday_hours,
         source: record.source,
@@ -161,8 +183,8 @@ class PayrollTimeAllocationService
     sources.one? ? sources.first : "manual"
   end
 
-  def profile_snapshot(profile)
-    {
+  def profile_snapshot(profile, allocations: nil)
+    snapshot = {
       "employee_work_profile_id" => profile.id,
       "effective_on" => profile.effective_on.iso8601,
       "pay_basis" => profile.pay_basis,
@@ -171,10 +193,15 @@ class PayrollTimeAllocationService
       "overtime_status" => profile.overtime_status,
       "exemption_category" => profile.exemption_category,
       "standard_weekly_hours" => profile.standard_weekly_hours&.to_f,
+      "salary_covers_weekly_hours" => profile.salary_covers_weekly_hours&.to_f,
+      "salary_coverage_reason" => profile.salary_coverage_reason,
       "timekeeping_mode" => profile.timekeeping_mode,
       "daily_schedule" => profile.daily_schedule,
       "company_workweek_id" => @pay_period.resolved_company_workweek&.id,
       "ledger_key" => @ledger_key
     }
+    snapshot["salary_covered_overtime_hours"] = (allocations&.sum { |row| row[:salary_covered_overtime_hours] } || 0).to_f
+    snapshot["salary_uncovered_overtime_hours"] = (allocations&.sum { |row| row[:salary_uncovered_overtime_hours] } || 0).to_f
+    snapshot
   end
 end

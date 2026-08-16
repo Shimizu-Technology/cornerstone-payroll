@@ -47,6 +47,37 @@ RSpec.describe "Api::V1::Admin::EmployeeWorkProfiles", type: :request do
       expect(response.parsed_body.dig("data", "notes")).to eq("Confirmed from the employer's written policy.")
     end
 
+    it "requires and returns the covered-hours basis for nonexempt salary" do
+      nonexempt_params = params.deep_dup
+      nonexempt_params[:work_profile].merge!(
+        overtime_status: "nonexempt",
+        exemption_category: nil,
+        exemption_reason: nil,
+        salary_covers_weekly_hours: 40,
+        salary_coverage_reason: "Employer confirmed the salary covers 40 straight-time hours."
+      )
+
+      post "/api/v1/admin/employees/#{employee.id}/work_profiles", params: nonexempt_params
+
+      expect(response).to have_http_status(:created)
+      expect(response.parsed_body.dig("data", "salary_covers_weekly_hours").to_f).to eq(40.0)
+      expect(response.parsed_body.dig("data", "salary_coverage_reason")).to match(/40 straight-time hours/)
+    end
+
+    it "rejects nonexempt salary when the compensation basis was not confirmed" do
+      nonexempt_params = params.deep_dup
+      nonexempt_params[:work_profile].merge!(
+        overtime_status: "nonexempt",
+        exemption_category: nil,
+        exemption_reason: nil
+      )
+
+      post "/api/v1/admin/employees/#{employee.id}/work_profiles", params: nonexempt_params
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.dig("details", "salary_covers_weekly_hours").join(" ")).to match(/must be confirmed/i)
+    end
+
     context "when signed in as an accountant" do
       let(:current_user) { accountant }
 

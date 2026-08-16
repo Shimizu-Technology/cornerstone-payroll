@@ -231,6 +231,28 @@ RSpec.describe "Golden payroll regression", type: :request do
     expect(money(form_1099.dig("totals", "reportable_compensation"))).to eq(annual_expected.fetch("contractor_compensation"))
   end
 
+  it "does not repeat a flat-fee contractor payment in a tips-only run" do
+    tips_period = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 1, 15),
+      end_date: Date.new(2026, 1, 28),
+      pay_date: Date.new(2026, 1, 30),
+      run_purpose: "off_cycle_tips",
+      includes_base_salary: false
+    )
+
+    post "/api/v1/admin/pay_periods/#{tips_period.id}/run_payroll", params: {
+      employee_ids: [ contractor.id ]
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("results", "errors")).to be_empty
+    contractor_item = tips_period.reload.payroll_items.find_by!(employee: contractor)
+    expect(contractor_item).to have_attributes(gross_pay: 0.to_d, net_pay: 0.to_d)
+    expect(contractor_item.payroll_item_earnings.where(category: "contract_fee")).to be_empty
+  end
+
   def create_flat_tax_configuration!
     annual_config = create(
       :annual_tax_config,

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_04_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_16_120500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -531,6 +531,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_04_120000) do
     t.text "notes"
     t.string "overtime_status", default: "needs_review", null: false
     t.string "pay_basis", null: false
+    t.text "salary_coverage_reason"
+    t.decimal "salary_covers_weekly_hours", precision: 6, scale: 2
     t.string "source", default: "operator_confirmed", null: false
     t.decimal "standard_weekly_hours", precision: 6, scale: 2
     t.string "timekeeping_mode", default: "manual", null: false
@@ -544,10 +546,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_04_120000) do
     t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "employee_work_profiles_dates_check"
     t.check_constraint "overtime_status::text = ANY (ARRAY['exempt'::character varying, 'nonexempt'::character varying, 'needs_review'::character varying]::text[])", name: "employee_work_profiles_overtime_status_check"
     t.check_constraint "pay_basis::text = ANY (ARRAY['hourly'::character varying, 'salary'::character varying, 'contractor'::character varying]::text[])", name: "employee_work_profiles_pay_basis_check"
+    t.check_constraint "salary_covers_weekly_hours IS NULL OR salary_covers_weekly_hours >= 40::numeric AND salary_covers_weekly_hours <= 168::numeric", name: "employee_work_profiles_salary_coverage_check"
     t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_migration'::character varying, 'imported'::character varying, 'legacy_system_default'::character varying]::text[])", name: "employee_work_profiles_source_check"
     t.check_constraint "standard_weekly_hours IS NULL OR standard_weekly_hours > 0::numeric AND standard_weekly_hours <= 168::numeric", name: "employee_work_profiles_weekly_hours_check"
     t.check_constraint "timekeeping_mode::text = ANY (ARRAY['imported'::character varying, 'manual'::character varying, 'schedule_with_exceptions'::character varying]::text[])", name: "employee_work_profiles_mode_check"
   end
+
+  add_check_constraint "employee_work_profiles", "pay_basis::text <> 'salary'::text OR overtime_status::text <> 'nonexempt'::text OR salary_covers_weekly_hours IS NOT NULL AND salary_coverage_reason IS NOT NULL", name: "employee_work_profiles_nonexempt_basis_check", validate: false
 
   create_table "employee_ytd_totals", force: :cascade do |t|
     t.decimal "bonus", precision: 14, scale: 2, default: "0.0"
