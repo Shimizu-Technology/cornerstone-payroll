@@ -111,6 +111,8 @@ RSpec.describe PayrollTimeAllocationService do
       exemption_category: nil,
       exemption_reason: nil,
       standard_weekly_hours: 45,
+      salary_covers_weekly_hours: 45,
+      salary_coverage_reason: "Employment agreement confirms a 45-hour salary basis",
       daily_schedule: schedule
     )
 
@@ -118,8 +120,12 @@ RSpec.describe PayrollTimeAllocationService do
     payroll_item.calculate!
 
     expect(payroll_item.reload.overtime_hours).to eq(10.to_d)
-    expect(payroll_item.salary_overtime_pay).to eq(333.33)
-    expect(payroll_item.gross_pay).to eq(2_333.33.to_d)
+    expect(payroll_item.timekeeping_context_snapshot).to include(
+      "salary_covered_overtime_hours" => 10.0,
+      "salary_uncovered_overtime_hours" => 0.0
+    )
+    expect(payroll_item.salary_overtime_pay).to eq(111.11)
+    expect(payroll_item.gross_pay).to eq(2_111.11.to_d)
   end
 
   it "uses the current per-period override for variable nonexempt salary overtime" do
@@ -136,6 +142,8 @@ RSpec.describe PayrollTimeAllocationService do
       exemption_category: nil,
       exemption_reason: nil,
       standard_weekly_hours: 45,
+      salary_covers_weekly_hours: 40,
+      salary_coverage_reason: "Employment agreement confirms a 40-hour salary basis",
       daily_schedule: schedule
     )
 
@@ -143,8 +151,101 @@ RSpec.describe PayrollTimeAllocationService do
     payroll_item.calculate!
 
     expect(payroll_item.reload.overtime_hours).to eq(10.to_d)
-    expect(payroll_item.salary_overtime_pay).to eq(333.33)
-    expect(payroll_item.gross_pay).to eq(2_333.33.to_d)
+    expect(payroll_item.timekeeping_context_snapshot).to include(
+      "salary_covered_overtime_hours" => 0.0,
+      "salary_uncovered_overtime_hours" => 10.0
+    )
+    expect(payroll_item.salary_overtime_pay).to eq(375.0)
+    expect(payroll_item.gross_pay).to eq(2_375.0.to_d)
+  end
+
+
+  it "pays half-time within the salary basis and time-and-a-half beyond it" do
+    schedule = {
+      "sunday" => 0, "monday" => 10, "tuesday" => 10, "wednesday" => 10,
+      "thursday" => 10, "friday" => 10, "saturday" => 0
+    }
+    create(
+      :employee_work_profile,
+      employee: employee,
+      overtime_status: "nonexempt",
+      exemption_category: nil,
+      exemption_reason: nil,
+      standard_weekly_hours: 50,
+      salary_covers_weekly_hours: 45,
+      salary_coverage_reason: "Employment agreement confirms a 45-hour salary basis",
+      daily_schedule: schedule
+    )
+
+    described_class.call!(payroll_item: payroll_item)
+    payroll_item.calculate!
+
+    expect(payroll_item.reload.overtime_hours).to eq(20.to_d)
+    expect(payroll_item.timekeeping_context_snapshot).to include(
+      "salary_covered_overtime_hours" => 10.0,
+      "salary_uncovered_overtime_hours" => 10.0
+    )
+    expect(payroll_item.salary_overtime_pay).to eq(444.44)
+    expect(payroll_item.gross_pay).to eq(2_444.44.to_d)
+  end
+
+  it "keeps covered and uncovered overtime correct across semimonthly boundaries" do
+    create(:tax_table, pay_frequency: "semimonthly")
+    employee.update!(pay_frequency: "semimonthly")
+    schedule = {
+      "sunday" => 0, "monday" => 10, "tuesday" => 10, "wednesday" => 10,
+      "thursday" => 10, "friday" => 10, "saturday" => 0
+    }
+    create(
+      :employee_work_profile,
+      employee: employee,
+      overtime_status: "nonexempt",
+      exemption_category: nil,
+      exemption_reason: nil,
+      standard_weekly_hours: 50,
+      salary_covers_weekly_hours: 45,
+      salary_coverage_reason: "Employment agreement confirms a 45-hour salary basis",
+      daily_schedule: schedule
+    )
+    first_period = create(
+      :pay_period,
+      company: company,
+      company_workweek: workweek,
+      start_date: Date.new(2024, 1, 1),
+      end_date: Date.new(2024, 1, 15),
+      pay_date: Date.new(2024, 1, 15),
+      run_purpose: "regular",
+      includes_base_salary: true
+    )
+    second_period = create(
+      :pay_period,
+      company: company,
+      company_workweek: workweek,
+      start_date: Date.new(2024, 1, 16),
+      end_date: Date.new(2024, 1, 31),
+      pay_date: Date.new(2024, 1, 31),
+      run_purpose: "regular",
+      includes_base_salary: true
+    )
+    items = [ first_period, second_period ].map do |period|
+      create(:payroll_item, :salary, company: company, employee: employee, pay_period: period, pay_rate: 52_000)
+    end
+
+    items.each do |item|
+      described_class.call!(payroll_item: item)
+      item.calculate!
+    end
+
+    items.each do |item|
+      expect(item.reload.overtime_hours).to eq(20.to_d)
+      expect(item.timekeeping_context_snapshot).to include(
+        "salary_covered_overtime_hours" => 10.0,
+        "salary_uncovered_overtime_hours" => 10.0
+      )
+      expect(item.salary_overtime_pay).to eq(444.44)
+      expect(item.gross_pay).to eq(2_611.11.to_d)
+    end
+    expect(employee.daily_time_records.current.group(:work_date).count.values).to all(eq(1))
   end
 
   it "preserves manually imported salary hours when no schedule profile exists" do

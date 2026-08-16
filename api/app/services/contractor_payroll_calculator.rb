@@ -36,7 +36,9 @@ class ContractorPayrollCalculator < PayrollCalculator
   private
 
   def calculate_gross_pay
-    if payroll_item.salary_override.present? && payroll_item.salary_override > 0
+    if pay_period.off_cycle_tips_run?
+      @base_pay = 0.0
+    elsif payroll_item.salary_override.present? && payroll_item.salary_override > 0
       @base_pay = payroll_item.salary_override.to_f
     elsif employee.contractor_hourly?
       if payroll_item.wage_rate_hours.present?

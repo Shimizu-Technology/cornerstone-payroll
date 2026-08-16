@@ -40,6 +40,8 @@ module Api
             :exemption_category,
             :exemption_reason,
             :standard_weekly_hours,
+            :salary_covers_weekly_hours,
+            :salary_coverage_reason,
             :timekeeping_mode,
             :source,
             :notes,

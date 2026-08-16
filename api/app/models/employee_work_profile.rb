@@ -21,13 +21,18 @@ class EmployeeWorkProfile < ApplicationRecord
   validates :source, inclusion: { in: SOURCES }
   validates :confirmation_status, inclusion: { in: CONFIRMATION_STATUSES }
   validates :standard_weekly_hours, numericality: { greater_than: 0, less_than_or_equal_to: 168 }, allow_nil: true
+  validates :salary_covers_weekly_hours,
+            numericality: { greater_than_or_equal_to: 40, less_than_or_equal_to: 168 },
+            allow_nil: true
   validates :exemption_reason, presence: true, length: { minimum: 10 }, if: :exempt?
+  validates :salary_coverage_reason, presence: true, length: { minimum: 10 }, if: :nonexempt_salary?
   validates :confirmed_by, :confirmed_at, presence: true, if: :confirmed?
   validate :company_matches_employee
   validate :pay_basis_matches_employee
   validate :ends_on_not_before_effective_on
   validate :schedule_is_valid
   validate :salary_schedule_requirements
+  validate :nonexempt_salary_compensation_basis
   validate :hourly_or_contractor_cannot_be_exempt
   validate :effective_dates_do_not_overlap
 
@@ -107,6 +112,21 @@ class EmployeeWorkProfile < ApplicationRecord
     elsif standard_weekly_hours.present? && total_scheduled_hours != standard_weekly_hours.to_d
       errors.add(:daily_schedule, "must total the standard weekly hours")
     end
+  end
+
+  def nonexempt_salary_compensation_basis
+    return unless pay_basis == "salary" && nonexempt?
+
+    if salary_covers_weekly_hours.blank?
+      errors.add(
+        :salary_covers_weekly_hours,
+        "must be confirmed for a nonexempt salary employee"
+      )
+    end
+  end
+
+  def nonexempt_salary?
+    pay_basis == "salary" && nonexempt?
   end
 
   def hourly_or_contractor_cannot_be_exempt

@@ -22,13 +22,14 @@ Keeping these histories separate prevents a salary schedule, termination, or con
 
 ### Employee work profiles
 
-Each profile stores its effective range, pay basis, overtime status, exemption evidence where applicable, standard weekly hours, normal daily schedule, timekeeping method, source, confirmer, confirmation timestamp, and restricted setup note.
+Each profile stores its effective range, pay basis, overtime status, exemption evidence where applicable, standard weekly hours, normal daily schedule, salary-covered weekly hours for nonexempt employees, timekeeping method, source, confirmer, confirmation timestamp, and restricted setup note.
 
 - A new profile closes the prior profile the day before the new effective date.
 - Profiles cannot overlap or rewrite historical payroll snapshots.
 - `salary` does not imply `exempt`.
 - An exempt profile requires a documented category and reason.
 - A nonexempt salary profile remains salary-paid but receives separately calculated workweek overtime.
+- A confirmed nonexempt profile must separately record how many weekly straight-time hours the salary is intended to cover and the agreement or confirmation source. The app never assumes that the work schedule and salary compensation basis are the same.
 - `needs_review` is deliberately not treated as an exemption. It blocks a payroll allocation that would otherwise contain overtime.
 - Managers and organization administrators can create profiles and see restricted setup notes. Accountants may review the nonrestricted configuration but cannot change it or see the restricted note.
 
@@ -74,9 +75,13 @@ For a nonexempt salary employee, including a variable salary with a confirmed pe
 1. the allocator loads complete seven-day workweeks intersecting the pay period;
 2. it allocates only dates inside the pay period to that payroll item;
 3. it identifies hours above 40 within each fixed workweek; and
-4. it adds salary overtime using the configured weekly salary equivalent and standard weekly hours.
+4. it derives the regular rate from the weekly salary equivalent and the explicitly confirmed salary-covered hours;
+5. overtime already included as straight time within that salary basis receives the additional one-half premium; and
+6. overtime beyond the salary-covered hours receives time-and-a-half.
 
 This prevents a semimonthly boundary from averaging or double-counting a split workweek. It also preserves imported/manual salary hours when no confirmed schedule profile exists.
+
+An off-cycle tips run also suppresses automatic flat-fee contractor compensation. Accountants must use an appropriate contractor/adjustment run when contractor compensation is intended; a tips-only run cannot silently repeat an ordinary per-period contractor fee.
 
 Payroll eligibility is date-aware. A worker terminated during a regular period is still eligible for that period; a later regular period excludes the worker. If the worker is later reactivated, payrolls wholly inside the inactive gap remain excluded and the reactivation date begins the new eligible interval. Final, correction, and adjustment workflows may include a terminated worker deliberately. Prior paychecks and reports are never recalculated merely because a status event was recorded.
 

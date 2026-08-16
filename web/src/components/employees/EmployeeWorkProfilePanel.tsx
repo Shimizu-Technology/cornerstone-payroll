@@ -47,6 +47,10 @@ function initialInput(employee: Employee): EmployeeWorkProfileInput {
     exemption_category: current?.exemption_category || '',
     exemption_reason: current?.exemption_reason || '',
     standard_weekly_hours: Number(current?.standard_weekly_hours || 40),
+    salary_covers_weekly_hours: current?.salary_covers_weekly_hours == null
+      ? 40
+      : Number(current.salary_covers_weekly_hours),
+    salary_coverage_reason: current?.salary_coverage_reason || '',
     daily_schedule: current?.daily_schedule || STANDARD_SCHEDULE,
     timekeeping_mode: current?.timekeeping_mode || 'schedule_with_exceptions',
     source: 'operator_confirmed',
@@ -86,11 +90,15 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
   const scheduleMatches = Math.abs(scheduledTotal - Number(form.standard_weekly_hours || 0)) < 0.001;
   const exemptComplete = form.overtime_status !== 'exempt'
     || (Boolean(form.exemption_category) && (form.exemption_reason || '').trim().length >= 10);
+  const nonexemptComplete = form.overtime_status !== 'nonexempt'
+    || (Number(form.salary_covers_weekly_hours) >= 40
+      && (form.salary_coverage_reason || '').trim().length >= 10);
   const canSubmit = Boolean(form.effective_on)
     && form.overtime_status !== 'needs_review'
     && Number(form.standard_weekly_hours) > 0
     && (form.timekeeping_mode !== 'schedule_with_exceptions' || scheduleMatches)
     && exemptComplete
+    && nonexemptComplete
     && !saving;
 
   const submit = async () => {
@@ -140,6 +148,11 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Standard time</p>
                 <p className="mt-2 text-sm font-semibold text-neutral-900">{Number(current.standard_weekly_hours || 0)} hours / week</p>
                 <p className="mt-1 text-xs text-neutral-600">{current.timekeeping_mode.replaceAll('_', ' ')}</p>
+                {current.overtime_status === 'nonexempt' && (
+                  <p className="mt-2 text-xs font-medium text-primary-800">
+                    Salary covers {Number(current.salary_covers_weekly_hours || 0)} straight-time hours / week
+                  </p>
+                )}
               </div>
               <div className="rounded-2xl border border-neutral-200 bg-white p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Confirmation</p>
@@ -198,6 +211,40 @@ export function EmployeeWorkProfilePanel({ employee, canManage, onUpdated }: Pro
                   <label className="mb-1 block text-sm font-medium text-amber-950">Basis for exemption <span className="text-danger-600">*</span></label>
                   <Textarea rows={2} value={form.exemption_reason || ''} onChange={(event) => setForm({ ...form, exemption_reason: event.target.value })} placeholder="Record who confirmed the duties test and the supporting basis." />
                 </div>
+              </div>
+            )}
+
+            {form.overtime_status === 'nonexempt' && (
+              <div className="rounded-2xl border border-primary-200 bg-primary-50 p-4">
+                <label className="mb-1 block text-sm font-medium text-primary-950">
+                  Weekly hours covered by salary <span className="text-danger-600">*</span>
+                </label>
+                <NumericInput
+                  value={Number(form.salary_covers_weekly_hours || 0)}
+                  min={40}
+                  max={168}
+                  onValueChange={(value) => setForm({ ...form, salary_covers_weekly_hours: value || 0 })}
+                />
+                <label className="mb-1 mt-4 block text-sm font-medium text-primary-950">
+                  Basis or confirmation source <span className="text-danger-600">*</span>
+                </label>
+                <Textarea
+                  rows={2}
+                  value={form.salary_coverage_reason || ''}
+                  onChange={(event) => setForm({ ...form, salary_coverage_reason: event.target.value })}
+                  placeholder="Example: Employment agreement confirms the weekly salary covers 45 straight-time hours."
+                />
+                <p className="mt-2 text-xs leading-5 text-primary-900">
+                  Confirm this from the compensation agreement. It is separate from the employee&apos;s normal schedule:
+                  overtime already covered as straight time receives the additional half-time premium, while overtime
+                  beyond the covered hours receives time-and-a-half.
+                </p>
+                {Number(form.salary_covers_weekly_hours || 0) < 40 && (
+                  <p className="mt-2 text-xs font-medium text-danger-700">Enter at least 40 covered hours.</p>
+                )}
+                {(form.salary_coverage_reason || '').trim().length < 10 && (
+                  <p className="mt-2 text-xs font-medium text-danger-700">Record the agreement or confirmation source.</p>
+                )}
               </div>
             )}
 

@@ -262,6 +262,8 @@ export interface EmployeeWorkProfile {
   exemption_category?: string | null;
   exemption_reason?: string | null;
   standard_weekly_hours?: number | null;
+  salary_covers_weekly_hours?: number | null;
+  salary_coverage_reason?: string | null;
   daily_schedule: Record<string, number>;
   timekeeping_mode: EmployeeTimekeepingMode;
   source: 'operator_confirmed' | 'production_migration' | 'imported' | 'legacy_system_default';
@@ -278,6 +280,8 @@ export interface EmployeeWorkProfileInput {
   exemption_category?: string;
   exemption_reason?: string;
   standard_weekly_hours?: number;
+  salary_covers_weekly_hours?: number;
+  salary_coverage_reason?: string;
   daily_schedule: Record<string, number>;
   timekeeping_mode: EmployeeTimekeepingMode;
   source?: EmployeeWorkProfile['source'];
