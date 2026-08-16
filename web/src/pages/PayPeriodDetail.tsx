@@ -1059,7 +1059,11 @@ export function PayPeriodDetail() {
       case 'rate':
         return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection) || nameTieBreak();
       case 'hours':
-        return compareDirectional(toNumber(left.hours_worked), toNumber(right.hours_worked), resultsSortDirection) || nameTieBreak();
+        return compareDirectional(
+          toNumber(left.hours_worked) + toNumber(left.overtime_hours),
+          toNumber(right.hours_worked) + toNumber(right.overtime_hours),
+          resultsSortDirection
+        ) || nameTieBreak();
       case 'gross':
         return compareDirectional(toNumber(left.gross_pay), toNumber(right.gross_pay), resultsSortDirection) || nameTieBreak();
       case 'net':
@@ -2206,6 +2210,9 @@ export function PayPeriodDetail() {
                     const empRecord = employeeLookup.get(item.employee_id);
                     const isContractorHourly = isContractor && empRecord?.contractor_pay_type === 'hourly';
                     const isContractorFlat = isContractor && empRecord?.contractor_pay_type !== 'hourly';
+                    const regularHours = toNumber(item.hours_worked);
+                    const overtimeHours = toNumber(item.overtime_hours);
+                    const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
                     const itemWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
                     const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && itemWageRates.length > 1;
                     const prevGroup = idx > 0 ? employmentGroupKey(displayItems[idx - 1]?.employment_type || '') : null;
@@ -2281,7 +2288,32 @@ export function PayPeriodDetail() {
                             </div>
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
-                            {isSalary || isContractorFlat ? (
+                            {isSalary ? (
+                              payPeriod.includes_base_salary === false && !hasSalaryTimekeeping ? (
+                                <span className="text-gray-400" title="Salary hours do not apply to this run">—</span>
+                              ) : hasSalaryTimekeeping ? (
+                                <div
+                                  className="inline-flex flex-col items-end leading-tight"
+                                  title="Informational salary hours from the timekeeping ledger; base salary is not calculated from these hours"
+                                >
+                                  <span className="font-medium text-gray-900">
+                                    {regularHours} <span className="font-normal text-gray-500">regular</span>
+                                  </span>
+                                  {overtimeHours > 0 && (
+                                    <span className="mt-1 font-medium text-orange-600">
+                                      +{overtimeHours} overtime
+                                    </span>
+                                  )}
+                                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
+                                    Informational
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs font-medium text-amber-700" title="No salary timekeeping record was available for this payroll item">
+                                  Not recorded
+                                </span>
+                              )
+                            ) : isContractorFlat ? (
                               <span className="text-gray-400">—</span>
                             ) : hasMultiRateResults ? (
                               <div className="space-y-1 text-left inline-block">
@@ -2300,9 +2332,9 @@ export function PayPeriodDetail() {
                               </div>
                             ) : (
                               <>
-                                {item.hours_worked || 0}
-                                {(item.overtime_hours || 0) > 0 && (
-                                  <span className="text-orange-600 ml-1">+{item.overtime_hours} OT</span>
+                                {regularHours}
+                                {overtimeHours > 0 && (
+                                  <span className="text-orange-600 ml-1">+{overtimeHours} OT</span>
                                 )}
                               </>
                             )}
