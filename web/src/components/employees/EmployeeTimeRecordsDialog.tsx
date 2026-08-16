@@ -29,6 +29,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
   const [endDate, setEndDate] = useState(initialRange.end);
   const [records, setRecords] = useState<DailyTimeRecord[]>([]);
   const [editing, setEditing] = useState<DailyTimeRecord | null>(null);
+  const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<DailyTimeRecordInput>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,11 +54,13 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
 
   const beginNew = () => {
     setEditing(null);
+    setCreating(true);
     setDraft({ ...EMPTY });
     setError(null);
   };
 
   const beginEdit = (record: DailyTimeRecord) => {
+    setCreating(false);
     setEditing(record);
     setDraft({
       scheduled_hours: Number(record.scheduled_hours),
@@ -85,6 +88,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
         await employeesApi.createTimeRecord(employee.id, draft);
       }
       setEditing(null);
+      setCreating(false);
       setDraft(EMPTY);
       await load();
     } catch (err) {
@@ -94,10 +98,23 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
     }
   };
 
-  const editorVisible = editing !== null || draft.work_date !== '';
+  const editorVisible = editing !== null || creating;
+
+  const cancelEditor = () => {
+    setEditing(null);
+    setCreating(false);
+    setDraft(EMPTY);
+    setError(null);
+  };
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (saving) return;
+    if (!nextOpen) cancelEditor();
+    onOpenChange(nextOpen);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !saving && onOpenChange(nextOpen)}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="dialog-wide dialog-top max-h-[calc(100vh-2rem)] max-w-5xl overflow-y-auto rounded-3xl p-0">
         <div className="border-b border-neutral-800 bg-neutral-950 px-6 py-5 text-white sm:rounded-t-3xl">
           <DialogHeader>
@@ -131,7 +148,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
                 <div><label className="mb-1 block text-xs font-medium text-neutral-700">Exception note</label><Textarea rows={2} value={draft.exception_reason || ''} onChange={(event) => setDraft({ ...draft, exception_reason: event.target.value })} placeholder="PTO, holiday, schedule variance, or imported source context" /></div>
                 {editing && <div><label className="mb-1 block text-xs font-medium text-neutral-700">Correction reason *</label><Textarea rows={2} value={draft.override_reason || ''} onChange={(event) => setDraft({ ...draft, override_reason: event.target.value })} placeholder="Why this revision is necessary" /></div>}
               </div>
-              <div className="mt-4 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => { setEditing(null); setDraft(EMPTY); }}>Cancel edit</Button><Button type="button" onClick={save} disabled={saving}>{saving ? 'Saving revision...' : 'Save time record'}</Button></div>
+              <div className="mt-4 flex justify-end gap-2"><Button type="button" variant="outline" onClick={cancelEditor}>Cancel edit</Button><Button type="button" onClick={save} disabled={saving || (!editing && !draft.work_date)}>{saving ? 'Saving revision...' : 'Save time record'}</Button></div>
             </div>
           )}
 
@@ -155,7 +172,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
           </div>
         </div>
 
-        <DialogFooter className="sticky bottom-0 z-10 border-t border-neutral-200 bg-white/95 px-6 py-4 backdrop-blur-md sm:rounded-b-3xl"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button></DialogFooter>
+        <DialogFooter className="sticky bottom-0 z-10 border-t border-neutral-200 bg-white/95 px-6 py-4 backdrop-blur-md sm:rounded-b-3xl"><Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>Close</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );
