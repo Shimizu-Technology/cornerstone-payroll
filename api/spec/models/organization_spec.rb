@@ -39,23 +39,23 @@ RSpec.describe Organization, type: :model do
       company = create(:company, organization: organization)
       regular_user = create(:user, company: company, organization: organization, role: "admin")
       super_admin = create(:user, company: company, organization: organization, role: "super_admin")
-      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+      allow(RevokePayrollAccessJob).to receive(:perform_later)
 
       organization.update!(status: "inactive")
 
-      expect(PayrollAccess::SessionRevoker).to have_received(:disconnect_user).with(regular_user)
-      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user).with(super_admin)
+      expect(RevokePayrollAccessJob).to have_received(:perform_later).with(regular_user.id)
+      expect(RevokePayrollAccessJob).not_to have_received(:perform_later).with(super_admin.id)
     end
 
     it "does not disconnect users for unrelated organization updates" do
       organization = create(:organization)
       company = create(:company, organization: organization)
       create(:user, company: company, organization: organization)
-      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+      allow(RevokePayrollAccessJob).to receive(:perform_later)
 
       organization.update!(name: "Renamed Organization")
 
-      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user)
+      expect(RevokePayrollAccessJob).not_to have_received(:perform_later)
     end
   end
 end

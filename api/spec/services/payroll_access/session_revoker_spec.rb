@@ -18,11 +18,9 @@ RSpec.describe PayrollAccess::SessionRevoker do
     expect(described_class.disconnect_user(user)).not_to eq(false)
   end
 
-  it "logs adapter failures without making a committed deactivation look reversible" do
+  it "raises adapter failures so the revocation job retries them" do
     allow(matching_connections).to receive(:disconnect).and_raise(StandardError, "adapter unavailable")
-    allow(Rails.logger).to receive(:error)
 
-    expect(described_class.disconnect_user(user)).to eq(false)
-    expect(Rails.logger).to have_received(:error).with(include("user=#{user.id}", "adapter unavailable"))
+    expect { described_class.disconnect_user(user) }.to raise_error(StandardError, "adapter unavailable")
   end
 end

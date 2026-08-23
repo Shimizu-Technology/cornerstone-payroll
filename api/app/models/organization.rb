@@ -54,7 +54,7 @@ class Organization < ApplicationRecord
     return if active?
 
     users.where.not(role: User.roles.fetch("super_admin")).find_each do |user|
-      PayrollAccess::SessionRevoker.disconnect_user(user)
+      RevokePayrollAccessJob.perform_later(user.id)
     end
   end
 

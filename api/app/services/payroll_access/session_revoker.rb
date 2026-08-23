@@ -7,11 +7,6 @@ module PayrollAccess
         ActionCable.server.remote_connections
           .where(current_user: user)
           .disconnect(reconnect: false)
-      rescue StandardError => e
-        Rails.logger.error(
-          "[SessionRevoker] Failed to disconnect cable sessions for user=#{user.id}: #{e.class}: #{e.message}"
-        )
-        false
       end
     end
   end
