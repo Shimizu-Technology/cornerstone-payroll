@@ -81,6 +81,24 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     )
   end
 
+  it "does not deadlock commit against the check-number worksheet" do
+    commit_at_check_assignment, release_commit = pause_commit_before_company_lock
+    worksheet_at_period_lock = observe_worksheet_period_lock
+    results = Queue.new
+
+    commit_thread = lifecycle_thread(results, :commit!)
+    commit_at_check_assignment.pop
+    worksheet_thread = check_number_worksheet_thread(results)
+    worksheet_at_period_lock.pop
+    release_commit << true
+    [ commit_thread, worksheet_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
+
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :commit! ], [ :ok, :worksheet ])
+    expect_exactly_once_commit_effects
+    expect(payroll_item.reload.check_number).to eq("2500")
+    expect(payroll_item.check_events.where(event_type: "renumbered").count).to eq(1)
+  end
+
   private
 
   def lifecycle_thread(results, operation)
@@ -117,6 +135,56 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     [ first_at_posting, release_first ]
   end
 
+  def pause_commit_before_company_lock
+    commit_at_check_assignment = Queue.new
+    release_commit = Queue.new
+    paused_once = false
+    mutex = Mutex.new
+
+    allow_any_instance_of(Company).to receive(:assign_check_numbers!).and_wrap_original do |original, *args|
+      first_call = mutex.synchronize do
+        next false if paused_once
+
+        paused_once = true
+      end
+      if first_call
+        commit_at_check_assignment << true
+        release_commit.pop
+      end
+      original.call(*args)
+    end
+
+    [ commit_at_check_assignment, release_commit ]
+  end
+
+  def observe_worksheet_period_lock
+    worksheet_at_period_lock = Queue.new
+    allow_any_instance_of(PayPeriod).to receive(:lock!).and_wrap_original do |original, *args|
+      worksheet_at_period_lock << true if Thread.current[:check_number_worksheet]
+      original.call(*args)
+    end
+    worksheet_at_period_lock
+  end
+
+  def check_number_worksheet_thread(results)
+    Thread.new do
+      Thread.current[:check_number_worksheet] = true
+      ActiveRecord::Base.connection_pool.with_connection do
+        period = PayPeriod.find(pay_period.id)
+        thread_actor = User.find(actor.id)
+        CheckNumberBatchCorrectionService.new(
+          pay_period: period,
+          changes: [ { "source_type" => "payroll_item", "source_id" => payroll_item.id, "check_number" => "2500" } ],
+          actor: thread_actor,
+          ip_address: "127.0.0.1"
+        ).call
+        results << [ :ok, :worksheet ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+  end
+
   def expect_exactly_once_commit_effects
     expect(pay_period.reload.status).to eq("committed")
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(1_200)
@@ -141,6 +209,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayPeriod.where(id: pay_period_id).delete_all
     Employee.where(id: employee_id).delete_all
     Department.where(id: department.id).delete_all
+    AuditLog.where(company_id: company_id).delete_all
     User.where(id: actor.id).delete_all
     Company.where(id: company_id).delete_all
     Organization.where(id: organization.id).delete_all
