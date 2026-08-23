@@ -200,6 +200,7 @@ export interface Employee {
   last_name: string;
   email?: string;
   ssn?: string | null;
+  ssn_last_four?: string | null;
   date_of_birth?: string;
   hire_date: string;
   termination_date?: string;
@@ -229,6 +230,7 @@ export interface Employee {
   employer_retirement_match_rate?: number;
   employer_roth_match_rate?: number;
   status: EmployeeStatus;
+  portal_pending_approval?: boolean;
   // Contractor-specific fields
   business_name?: string;
   contractor_ein?: string;

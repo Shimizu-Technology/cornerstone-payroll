@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_23_173000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_23_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -396,19 +396,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_23_173000) do
     t.bigint "employee_id", null: false
     t.jsonb "original_values", default: {}, null: false
     t.jsonb "proposed_changes", default: {}, null: false
+    t.string "request_kind", default: "update", null: false
     t.text "request_notes"
     t.bigint "requested_by_id"
     t.text "review_notes"
     t.datetime "reviewed_at"
     t.bigint "reviewed_by_id"
+    t.text "sensitive_payload_encrypted"
     t.integer "status", default: 0, null: false
     t.datetime "updated_at", null: false
     t.index ["company_id", "status"], name: "index_employee_change_requests_on_company_id_and_status"
     t.index ["company_id"], name: "index_employee_change_requests_on_company_id"
     t.index ["employee_id", "created_at"], name: "index_employee_change_requests_on_employee_id_and_created_at"
+    t.index ["employee_id"], name: "idx_employee_change_requests_one_pending", unique: true, where: "(status = 0)"
     t.index ["employee_id"], name: "index_employee_change_requests_on_employee_id"
     t.index ["requested_by_id"], name: "index_employee_change_requests_on_requested_by_id"
     t.index ["reviewed_by_id"], name: "index_employee_change_requests_on_reviewed_by_id"
+    t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying, 'update'::character varying]::text[])", name: "employee_change_requests_kind_check"
   end
 
   create_table "employee_deductions", force: :cascade do |t|
@@ -606,6 +610,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_23_173000) do
     t.string "pay_frequency", default: "biweekly"
     t.decimal "pay_rate", precision: 18, scale: 6, null: false
     t.string "phone"
+    t.boolean "portal_pending_approval", default: false, null: false
     t.bigint "previous_employee_id"
     t.decimal "retirement_rate", precision: 5, scale: 4, default: "0.0"
     t.decimal "roth_retirement_rate", precision: 5, scale: 4, default: "0.0"
@@ -629,6 +634,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_23_173000) do
     t.index ["employment_type"], name: "index_employees_on_employment_type"
     t.index ["previous_employee_id"], name: "index_employees_on_previous_employee_id", unique: true
     t.index ["status"], name: "index_employees_on_status"
+    t.check_constraint "portal_pending_approval = false OR status::text = 'inactive'::text", name: "employees_portal_pending_inactive_check"
   end
 
   create_table "filing_status_configs", force: :cascade do |t|

@@ -19,8 +19,10 @@ const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').th
 const ClientPayPeriodDetail = lazy(() => import('@/pages/client/ClientPayPeriodDetail').then((module) => ({ default: module.ClientPayPeriodDetail })));
 const ClientReports = lazy(() => import('@/pages/client/ClientReports').then((module) => ({ default: module.ClientReports })));
 const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then((module) => ({ default: module.ClientDocuments })));
+const ClientChangeRequests = lazy(() => import('@/pages/client/ClientChangeRequests').then((module) => ({ default: module.ClientChangeRequests })));
 const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
 const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
+const AdminEmployeeChangeRequestsPage = lazy(() => import('@/pages/AdminEmployeeChangeRequestsPage').then((module) => ({ default: module.AdminEmployeeChangeRequestsPage })));
 const TaxConfigs = lazy(() => import('@/pages/TaxConfigs'));
 const Users = lazy(() => import('@/pages/Users').then((module) => ({ default: module.Users })));
 const Organizations = lazy(() => import('@/pages/Organizations').then((module) => ({ default: module.Organizations })));
@@ -287,6 +289,7 @@ function AppRoutes() {
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />
         <Route path="reports" element={isClient ? <ClientReports /> : <Reports />} />
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
+        <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
         <Route path="payroll-fields" element={<StaffOnlyRoute><PayrollFields /></StaffOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
@@ -298,6 +301,7 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
+        <Route path="settings/client-change-requests" element={<StaffOnlyRoute><AdminEmployeeChangeRequestsPage /></StaffOnlyRoute>} />
         <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
         <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
         <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />

@@ -14,6 +14,13 @@ RSpec.describe "Api::V1::Client::EmployeeChangeRequests", type: :request do
       first_name: "Mia",
       last_name: "Cruz")
   end
+  let!(:other_employee) do
+    create(:employee,
+      company: company,
+      department: department,
+      first_name: "Noah",
+      last_name: "Santos")
+  end
   let!(:own_request) do
     create(:employee_change_request,
       company: company,
@@ -26,7 +33,7 @@ RSpec.describe "Api::V1::Client::EmployeeChangeRequests", type: :request do
   let!(:other_request) do
     create(:employee_change_request,
       company: company,
-      employee: employee,
+      employee: other_employee,
       requested_by: other_client_user,
       proposed_changes: { pay_rate: 24.0 },
       original_values: { pay_rate: 18.0 })
