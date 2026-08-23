@@ -4,7 +4,9 @@ Guam-specific payroll processing for Cornerstone Tax Services.
 
 ## Why This Exists
 
-No major payroll software (Gusto, ADP, Check.com) supports Guam. QuickBooks requires mainland US addresses and needs manual check cleanup. This module solves both problems with native Guam tax support.
+Cornerstone's payroll work combined spreadsheets, source exports, manual review, and QuickBooks. QuickBooks created Guam address and payroll-workflow friction, while calculations, checks, compliance preparation, client communication, and evidence lived in different places. This application turns that work into a controlled Guam payroll lifecycle.
+
+Vendor coverage changes and must be verified directly before it is used in sales material. The product's durable advantage is Cornerstone's Guam payroll and accounting-firm workflow, not an absolute claim that no other vendor serves Guam.
 
 ## Status
 
@@ -47,6 +49,9 @@ See [PRD.md](PRD.md) and [BUILD_PLAN.md](BUILD_PLAN.md) for details.
 - [PRD](PRD.md) — Product Requirements Document
 - [Build Plan](BUILD_PLAN.md) — Tactical plan
 - [Future Improvements](FUTURE_IMPROVEMENTS.md)
+- [Documentation Map](docs/README.md) — Current authority and historical-document rules
+- [Product Strategy and Platform Boundaries](docs/PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md)
+- [Gate 0 Trust and Release Plan](docs/GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md)
 - [Payroll, QuickBooks, and Compliance Master Plan](docs/PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md)
 - [Pay Schedules, Salary Timekeeping, and Client Cloning Design](docs/PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
 - [Pay Schedule, Timekeeping, and MoSa History Implementation Plan](docs/PAY_SCHEDULE_TIMEKEEPING_AND_MOSA_HISTORY_IMPLEMENTATION_PLAN_2026-08-03.md)
