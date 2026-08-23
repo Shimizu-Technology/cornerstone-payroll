@@ -64,6 +64,8 @@ class ProductionReadiness
     cable_adapter: ActionCable.server.config.cable.fetch("adapter", nil),
     storage_factory: -> { R2StorageService.new },
     time_sources: -> { TimeTrackingSource.active.to_a },
+    encryption_credentials: Rails.application.credentials,
+    encrypted_data_probe: -> { EncryptedDataReadiness.verify! },
     http_get: nil
   )
     @env = env
@@ -79,6 +81,8 @@ class ProductionReadiness
     @cable_adapter = cable_adapter
     @storage_factory = storage_factory
     @time_sources = time_sources
+    @encryption_credentials = encryption_credentials
+    @encrypted_data_probe = encrypted_data_probe
     @http_get = http_get || method(:default_http_get)
   end
 
@@ -92,7 +96,7 @@ class ProductionReadiness
 
   attr_reader :env, :environment, :config, :primary_record, :cache, :cache_record,
     :queue_record, :queue_process, :cable_record, :job_adapter, :cable_adapter,
-    :storage_factory, :time_sources, :http_get
+    :storage_factory, :time_sources, :encryption_credentials, :encrypted_data_probe, :http_get
 
   def configuration_checks
     [
@@ -113,6 +117,13 @@ class ProductionReadiness
       check("time tracking destinations are allowlisted") { time_tracking_configuration_valid? },
       check("Active Record encryption is effectively configured") do
         ActiveRecordEncryptionConfiguration.configured?(config.active_record.encryption)
+      end,
+      check("Active Record encryption sources do not conflict") do
+        !ActiveRecordEncryptionConfiguration.sources_conflict?(
+          environment: environment,
+          env: env,
+          credentials: encryption_credentials
+        )
       end
     ]
   end
@@ -120,6 +131,7 @@ class ProductionReadiness
   def live_dependency_checks
     [
       check("primary database accepts a query") { select_one(primary_record) },
+      check("persisted encrypted data can be decrypted") { encrypted_data_probe.call },
       check("all database migrations are current") { ActiveRecord::Migration.check_all_pending!; true },
       check("Solid Cache round trip succeeds") { cache_round_trip },
       check("Solid Queue database accepts a query") { select_one(queue_record) },

@@ -20,6 +20,8 @@ When any external time source is active, `TIME_TRACKING_ALLOWED_HOSTS` must list
 The command validates the effective Rails configuration rather than trusting feature-toggle strings. In production it also proves:
 
 - primary, cache, queue, and cable database connectivity and current migrations;
+- agreement between complete environment and Rails credential encryption key sets, when both are present;
+- decryption of every persisted employee and time-source value, every encrypted change request, and every active session token without printing plaintext;
 - a cache write/read/delete round trip;
 - a recent Solid Queue process heartbeat;
 - an R2 upload/read/delete round trip under the isolated `production-readiness/` prefix;
@@ -40,7 +42,7 @@ The R2 and cache probes create random, non-customer test values and remove their
 - [ ] Roles are least-privilege; a client user cannot access another company by changing an ID in a URL or request.
 - [ ] TLS is forced end-to-end; secure cookies and HSTS are visible from the public endpoint.
 - [ ] CORS contains only approved HTTPS frontend origins.
-- [ ] Active Record encryption keys are stored in the deployment secret manager and covered by a documented recovery process.
+- [ ] Active Record encryption uses one authoritative, recoverable key set. If both Rails credentials and deployment environment keys exist, they match exactly.
 - [ ] R2 is private, lifecycle/versioning policy is documented, and a generated payroll document remains available after an application redeploy.
 - [ ] Solid Queue, Cache, and Cable schemas are installed; a queued job survives a web-process restart.
 - [ ] Email delivery, bounce/error reporting, and sender-domain authentication are verified.
