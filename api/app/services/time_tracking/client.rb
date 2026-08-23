@@ -11,10 +11,12 @@ module TimeTracking
     READ_TIMEOUT_SECONDS = 15
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
+    MAX_CONNECTION_ATTEMPTS = 4
 
-    def initialize(source, destination_policy: DestinationPolicy.new)
+    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil)
       @source = source
       @destination_policy = destination_policy
+      @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
     end
 
     def time_summary(start_date:, end_date:)
@@ -26,8 +28,8 @@ module TimeTracking
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
 
-      pinned_ip = @destination_policy.resolve_public_addresses!(uri).first
-      response, body = perform_request(uri, request, pinned_ip)
+      pinned_ips = @destination_policy.resolve_public_addresses!(uri)
+      response, body = perform_request(uri, request, pinned_ips)
 
       unless response.is_a?(Net::HTTPSuccess)
         raise Error, "#{@source.name} returned HTTP #{response.code}"
@@ -62,12 +64,34 @@ module TimeTracking
       uri
     end
 
-    def perform_request(uri, request, pinned_ip)
+    def perform_request(uri, request, pinned_ips)
+      last_connection_error = nil
+
+      pinned_ips.first(MAX_CONNECTION_ATTEMPTS).each do |pinned_ip|
+        http = build_http(uri, pinned_ip)
+        begin
+          http.start
+        rescue SystemCallError, SocketError, Net::OpenTimeout, OpenSSL::SSL::SSLError => e
+          last_connection_error = e
+          next
+        end
+
+        begin
+          return read_response(http, request)
+        ensure
+          http.finish if http.started?
+        end
+      end
+
+      raise last_connection_error || Error.new("#{@source.name} has no reachable inspected address")
+    end
+
+    def build_http(uri, pinned_ip)
       # Pass nil as the proxy address so HTTP_PROXY cannot reroute a request
       # carrying the shared integration secret. `ipaddr` pins the connection
       # to the address that the destination policy inspected, while `address`
       # remains the hostname used for Host and TLS verification.
-      http = Net::HTTP.new(uri.host, uri.port, nil)
+      http = @http_factory.call(uri.host, uri.port)
       http.ipaddr = pinned_ip
       http.use_ssl = uri.scheme == "https"
       if http.use_ssl?
@@ -79,19 +103,20 @@ module TimeTracking
       http.read_timeout = READ_TIMEOUT_SECONDS
       http.write_timeout = WRITE_TIMEOUT_SECONDS
       http.max_retries = 0
+      http
+    end
 
+    def read_response(http, request)
       response = nil
       body = +""
-      http.start do
-        http.request(request) do |streamed_response|
-          response = streamed_response
-          declared_size = streamed_response["Content-Length"].presence&.to_i
-          raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared_size&.>(MAX_RESPONSE_BYTES)
+      http.request(request) do |streamed_response|
+        response = streamed_response
+        declared_size = streamed_response["Content-Length"].presence&.to_i
+        raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared_size&.>(MAX_RESPONSE_BYTES)
 
-          streamed_response.read_body do |chunk|
-            body << chunk
-            raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if body.bytesize > MAX_RESPONSE_BYTES
-          end
+        streamed_response.read_body do |chunk|
+          body << chunk
+          raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if body.bytesize > MAX_RESPONSE_BYTES
         end
       end
 

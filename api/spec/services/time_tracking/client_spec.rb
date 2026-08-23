@@ -11,8 +11,31 @@ RSpec.describe TimeTracking::Client do
     )
   end
 
-  def client_for(source, policy: destination_policy)
-    described_class.new(source, destination_policy: policy)
+  def client_for(source, policy: destination_policy, http_factory: nil)
+    described_class.new(source, destination_policy: policy, http_factory: http_factory)
+  end
+
+  def configure_http_double(http, pinned_ip:, start_error: nil, response: nil)
+    allow(http).to receive(:ipaddr=).with(pinned_ip)
+    allow(http).to receive(:use_ssl=).with(true)
+    allow(http).to receive(:use_ssl?).and_return(true)
+    allow(http).to receive(:verify_mode=)
+    allow(http).to receive(:verify_hostname=)
+    allow(http).to receive(:min_version=)
+    allow(http).to receive(:open_timeout=)
+    allow(http).to receive(:read_timeout=)
+    allow(http).to receive(:write_timeout=)
+    allow(http).to receive(:max_retries=)
+
+    if start_error
+      allow(http).to receive(:start).and_raise(start_error)
+      allow(http).to receive(:request)
+    else
+      allow(http).to receive(:start).and_return(http)
+      allow(http).to receive(:started?).and_return(true)
+      allow(http).to receive(:finish)
+      allow(http).to receive(:request).and_yield(response)
+    end
   end
 
   describe "#time_summary" do
@@ -183,6 +206,64 @@ RSpec.describe TimeTracking::Client do
         expect(error.message).to include("HTTP 500")
         expect(error.message).not_to include("internal-token")
       }
+    end
+
+    it "falls back to another inspected address only when connection establishment fails" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Multi-address Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "test",
+        resolver: ->(_host) { [ "8.8.4.4", "8.8.8.8" ] }
+      )
+      first_http = instance_double(Net::HTTP)
+      second_http = instance_double(Net::HTTP)
+      response = Net::HTTPOK.new("1.1", "200", "OK")
+      response["Content-Type"] = "application/json"
+      allow(response).to receive(:read_body).and_yield('{"employees":[]}')
+      configure_http_double(first_http, pinned_ip: "8.8.4.4", start_error: Errno::ECONNREFUSED.new)
+      configure_http_double(second_http, pinned_ip: "8.8.8.8", response: response)
+      http_factory = instance_double(Proc)
+      allow(http_factory).to receive(:call).and_return(first_http, second_http)
+
+      payload = client_for(source, policy: policy, http_factory: http_factory)
+        .time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+
+      expect(payload["employees"]).to eq([])
+      expect(first_http).not_to have_received(:request)
+      expect(second_http).to have_received(:request).once
+    end
+
+    it "does not retry another address after a request begins" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Read Failure Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "test",
+        resolver: ->(_host) { [ "8.8.4.4", "8.8.8.8" ] }
+      )
+      first_http = instance_double(Net::HTTP)
+      second_http = instance_double(Net::HTTP)
+      configure_http_double(first_http, pinned_ip: "8.8.4.4", response: nil)
+      allow(first_http).to receive(:request).and_raise(Net::ReadTimeout)
+      http_factory = instance_double(Proc)
+      allow(http_factory).to receive(:call).and_return(first_http, second_http)
+
+      expect do
+        client_for(source, policy: policy, http_factory: http_factory)
+          .time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /Could not securely reach/)
+
+      expect(http_factory).to have_received(:call).once
+      expect(first_http).to have_received(:request).once
     end
   end
 end
