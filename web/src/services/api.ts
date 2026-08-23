@@ -2637,6 +2637,7 @@ export interface ClientPortalThread {
 export interface EmployeeChangeRequest {
   id: number;
   status: 'pending' | 'approved' | 'rejected';
+  request_kind: 'create' | 'update';
   employee_id: number;
   employee_name: string;
   requested_by_id: number;

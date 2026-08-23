@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-08-23
 
-**Baseline:** re-audited against `origin/main` through `d7db0b8`
+**Baseline:** re-audited against `origin/main` through `ad76491`
 
 **Status:** In progress; no item is closed until its acceptance evidence is linked below
 
@@ -45,14 +45,14 @@ Gate 0 closes only when:
 | G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Code closed in PR #128; `main` green |
 | G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Code closed in PR #128; `main` green |
 | G0-13 | OCR apply can recreate an employee excluded from a pay period | Explicit operator exclusion can be bypassed | Share the same exclusion guard across all import paths | Code closed in PR #126; `main` green |
-| G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Open |
-| G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Open |
+| G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Implemented on branch; review and `main` verification pending |
+| G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Implemented on branch; review and `main` verification pending |
 | G0-16 | Cornerstone Tax frontend fails open without Clerk configuration | A production configuration error can expose the application shell | Fail closed in production and test the missing-config state | Open |
 | G0-17 | Authenticated Playwright normally skips because CI has no backend fixture/auth state | Release automation does not exercise payroll | Deterministic Postgres/Rails/Vite fixture and required journeys without skips | Open |
 | G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Open |
 | G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | Open |
 | G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Open |
-| G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Implemented in PR #129; review and `main` verification pending |
+| G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Code closed in PR #129; `main` green |
 | G0-22 | Cornerstone Tax and AIRE frontend dependency audits report direct and transitive vulnerabilities, including critical/high findings | A companion application can remain an insecure production dependency even while Payroll itself is green | Upgrade to audit-clean compatible dependency sets; run each app's complete frontend/runtime gate; retain current-head review and post-merge evidence | Open |
 
 ## Delivery sequence
@@ -117,6 +117,16 @@ The normative payload and versioning rules are in [Time Summary v1 contract](TIM
 
 This contract governs the AIRE, Cornerstone Tax, and custom Time Summary pull path. The separate Spike email/OCR adapter does not emit dated daily evidence and is tracked independently as G0-21; closing G0-10 through G0-12 must not be read as certifying that adapter.
 
+## Client employee data and approval contract
+
+Client employee access follows least disclosure. A stored full SSN is never serialized to a client. The employee form receives last four only and treats a blank SSN field as “keep the saved value.” A replacement requires entry and confirmation of the full value. Client request history redacts identifiers entirely; the staff review queue shows only masked original and proposed values. Full replacement identifiers exist only in the encrypted request payload and are decrypted for the locked approval transaction.
+
+Basic profile changes—name, email, birth and hire dates, department, address, and phone—may apply immediately. Changes that affect pay, tax, classification, withholding, retirement, recurring earnings or deductions, wage rates, SSN, contractor EIN, or W-9 state create a pending staff review. If a mixed submission cannot create its review request, its direct-safe edits roll back as part of the same transaction.
+
+A new worker submitted by a client is not payroll-ready before approval. The saved shell is inactive, has zero pay, carries `portal_pending_approval`, and is excluded from the normal active-worker list. Approval applies the encrypted and payroll-sensitive values, activates the worker, and clears the marker. Rejection leaves the shell inactive for staff follow-up; it does not silently activate or delete it.
+
+Only one pending request may exist for a worker. Approval locks both request and employee, rechecks captured source values, and rejects a stale request rather than overwriting an intervening staff edit. A legacy request that contains a plaintext identifier without the corresponding encrypted payload fails closed and must be resubmitted.
+
 ## Required browser and negative tests
 
 The deterministic browser lane must cover at least:
@@ -176,3 +186,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | G0-07, G0-08, G0-13 | #126 | `b915fa3` | Yes | `main` Quality run 32618765810 passed | Greptile 5/5 on head `7ac5387`; deterministic PostgreSQL races cover lifecycle, check-number, YTD, and loan lock order |
 | G0-09 | #127 | `d7db0b8` | Yes | `main` Quality run 32621927046 passed | Greptile 5/5 on head `76f7a42`; DNS, connection fallback, and all request attempts share bounded trust rules without replaying the export request |
 | G0-10–G0-12 | #128 | `3b9a822` | Yes | `main` Quality run 32625636302 passed | Greptile 5/5 on head `24fbc29`; AIRE PR #74 (`f5186ad`) and Cornerstone Tax PR #52 (`ea7edc1`) emit complete Time Summary v1 day coverage before Payroll enforces it |
+| G0-21 | #129 | `ad76491` | Yes | `main` Quality run 32627924118 passed | Greptile 5/5 on head `ac9f24d`; invalid rows, unsupported workweeks, and unreconciled override totals block apply |

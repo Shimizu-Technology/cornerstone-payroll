@@ -47,6 +47,7 @@ module Api
           payload = {
             id: change_request.id,
             status: change_request.status,
+            request_kind: change_request.request_kind,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,

@@ -88,6 +88,7 @@ class Employee < ApplicationRecord
   has_many :employee_status_events, dependent: :restrict_with_error
   has_many :daily_time_records, dependent: :restrict_with_error
   has_many :payroll_time_allocations, dependent: :restrict_with_error
+  has_many :employee_change_requests, dependent: :restrict_with_error
 
   before_validation :normalize_pay_rate_precision
   before_validation :normalize_filing_status_value
@@ -116,6 +117,7 @@ class Employee < ApplicationRecord
   validate :matching_ssn_confirmation, if: :ssn_confirmation_required?
   validate :tax_classification_cannot_change_in_place, on: :update
   validate :previous_employee_transition_is_valid
+  validate :portal_pending_employee_is_inactive
 
   # W-2 employee validations (not applicable to contractors)
   with_options unless: :contractor? do
@@ -454,9 +456,17 @@ class Employee < ApplicationRecord
   end
 
   def filing_data_validation_required?
+    return false if portal_pending_approval?
     return true if new_record?
 
     (changes_to_save.keys - %w[status termination_date updated_at]).any?
+  end
+
+  def portal_pending_employee_is_inactive
+    return unless portal_pending_approval?
+    return if status == "inactive"
+
+    errors.add(:status, "must be inactive while client-submitted payroll details await approval")
   end
 
   def filing_ssn_format

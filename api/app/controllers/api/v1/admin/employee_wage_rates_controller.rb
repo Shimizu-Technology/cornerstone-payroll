@@ -26,9 +26,11 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
-          rate = EmployeeWageRate.new(rate_params)
-          rate.employee = employee
-          if rate.save
+          rate = EmployeeWageRate.create_with_employee_lock(
+            employee: employee,
+            attributes: rate_params.except(:employee_id)
+          )
+          if rate.persisted?
             render json: { wage_rate: rate_payload(rate) }, status: :created
           else
             render json: { errors: rate.errors.full_messages }, status: :unprocessable_entity
@@ -42,7 +44,7 @@ module Api
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          if rate.update(rate_update_params)
+          if rate.update_with_employee_lock(rate_update_params)
             render json: { wage_rate: rate_payload(rate) }
           else
             render json: { errors: rate.errors.full_messages }, status: :unprocessable_entity
@@ -56,7 +58,7 @@ module Api
             return render json: { error: "Wage rate not found" }, status: :not_found
           end
 
-          rate.destroy!
+          rate.destroy_with_employee_lock!
           render json: { message: "Wage rate deleted" }
         end
 

@@ -2,6 +2,25 @@
 
 Date: 2026-04-25
 
+## Implementation update — 2026-08-23
+
+The client portal described below now exists. The April sections remain as historical planning context; they are not the authority for current behavior.
+
+The employee-data boundary implemented for Gate 0 is:
+
+- Client users may directly update basic profile fields: name, email, birth and hire dates, department, address, and phone.
+- Pay configuration, employment and tax classification, W-4 and withholding values, retirement settings, contractor identifiers, W-9 state, default earnings and adjustments, wage rates, and SSN replacements require staff approval.
+- A client never receives a stored full SSN from the API. The edit form receives last four only; an empty replacement keeps the existing value.
+- Full SSN and contractor-EIN replacements are stored only in the encrypted payload of the pending request. Client history redacts them; staff review responses expose masked last four only.
+- A client-submitted new worker is saved inactive with zero pay and a pending-approval marker. It cannot enter payroll until staff approves the creation request.
+- One pending payroll-sensitive request is allowed per worker. A mixed safe/sensitive submission is atomic: if the sensitive request cannot be created, the safe edits roll back too.
+- Approval locks the request and employee, compares the captured original values with current data, and refuses a stale request instead of overwriting a newer staff edit.
+- Legacy requests containing a plaintext identifier but no encrypted payload cannot be approved; the client must resubmit the identifier securely.
+- Client and staff review pages are routed and linked in their respective navigation.
+
+The authoritative acceptance and release state is tracked in
+`docs/GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md`. Code completion does not by itself prove that production migration, deployment, permissions, or operator training is complete.
+
 ## Purpose
 
 This document captures what we want to do next in three related areas:
@@ -10,7 +29,7 @@ This document captures what we want to do next in three related areas:
 2. Address requirements and check layout updates
 3. Guam-specific post-payroll operations beyond payroll calculation itself
 
-This is a planning and discovery document. It does not represent implemented behavior.
+This was created as a planning and discovery document. The dated implementation update above supersedes statements below about whether the portal or approval workflow exists.
 
 Related follow-up document:
 
