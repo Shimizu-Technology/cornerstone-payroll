@@ -77,13 +77,27 @@ module PayrollImport
     # @param tips_paid_out_from_tips [Boolean] when true, imported tips were already paid daily and should offset the check
     # @return [Hash] results with success/error counts
     def apply!(matched:, force_overwrite: false, tips_paid_out_from_tips: false)
+      pay_period.with_lock do
+        apply_locked!(
+          matched: matched,
+          force_overwrite: force_overwrite,
+          tips_paid_out_from_tips: tips_paid_out_from_tips
+        )
+      end
+    end
+
+    private
+
+    def apply_locked!(matched:, force_overwrite:, tips_paid_out_from_tips:)
+      raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
+
       results = { success: [], skipped: [], errors: [] }
 
       employee_ids = matched.map { |row| row[:employee_id] }.compact.uniq
       employees_by_id = Employee.where(id: employee_ids, company_id: company_id).index_by(&:id)
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-      ActiveRecord::Base.transaction do
+      ActiveRecord::Base.transaction(requires_new: true) do
         matched.each do |row|
           employee_id = row[:employee_id]
           if excluded_employee_ids.include?(employee_id)
@@ -143,11 +157,11 @@ module PayrollImport
             results[:errors] << { employee_id: employee.id, name: employee&.full_name, error: e.message }
           end
         end
-
       end
 
-      # Update pay period status outside row-write transaction so status transition
-      # failures don't roll back successful payroll item writes.
+      # The parent pay-period lock owns the outer transaction. Keep the status
+      # transition in that boundary so item writes cannot survive a failed state
+      # transition or race a commit.
       if results[:errors].empty? && results[:success].any?
         pay_period.update!(
           status: "calculated",
@@ -160,8 +174,6 @@ module PayrollImport
 
       results
     end
-
-    private
 
     def build_excel_lookup(excel_records, matcher)
       lookup = {}

@@ -9,6 +9,7 @@ module Api
         include TrigramMatching
 
         before_action :set_pay_period
+        around_action :with_financial_pay_period_lock, only: :apply
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/preview_timecard_import
         # Accepts CSV (file upload or raw text) from the Timecard OCR app export.
@@ -89,6 +90,10 @@ module Api
 
         private
 
+        def with_financial_pay_period_lock
+          @pay_period.with_lock { yield }
+        end
+
         def set_pay_period
           @pay_period = PayPeriod.find(params[:pay_period_id])
           unless @pay_period.company_id == current_company_id
@@ -156,7 +161,6 @@ module Api
             match_score: best_score.round(2)
           }
         end
-
       end
     end
   end

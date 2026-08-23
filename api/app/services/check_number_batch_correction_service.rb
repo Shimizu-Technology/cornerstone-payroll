@@ -23,8 +23,8 @@ class CheckNumberBatchCorrectionService
 
     updated_count = 0
     ApplicationRecord.transaction do
-      company.lock!
       pay_period.lock!
+      company.lock!
       validate_pay_period!
 
       targets = load_and_lock_targets!

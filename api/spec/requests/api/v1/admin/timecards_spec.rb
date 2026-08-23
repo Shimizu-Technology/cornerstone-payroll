@@ -67,6 +67,24 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(response.parsed_body["error"]).to include("Choose which earning type")
     end
 
+    it "does not re-add an employee explicitly excluded from the pay period" do
+      PayPeriodExcludedEmployee.create!(
+        pay_period: pay_period,
+        employee: employee,
+        excluded_by: admin_user,
+        reason: "Operator removed employee"
+      )
+
+      expect {
+        post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+          params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
+      }.not_to change(PayrollItem, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to eq("Employee is excluded from this pay period")
+      expect(timecard.reload.applied_payroll_item_id).to be_nil
+    end
+
     it "applies OCR hours to the selected wage rate without removing other rates" do
       item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company, employment_type: "hourly")
       item.wage_rate_hours = [

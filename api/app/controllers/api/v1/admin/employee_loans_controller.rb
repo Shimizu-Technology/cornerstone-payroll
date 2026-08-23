@@ -4,7 +4,7 @@ module Api
   module V1
     module Admin
       class EmployeeLoansController < BaseController
-        before_action :set_loan, only: [:show, :update, :destroy, :record_payment, :record_addition, :mark_paid_off, :suspend, :reactivate]
+        before_action :set_loan, only: [ :show, :update, :destroy, :record_payment, :record_addition, :mark_paid_off, :suspend, :reactivate ]
 
         # GET /api/v1/admin/employee_loans
         def index
@@ -64,20 +64,24 @@ module Api
           attributes = scoped_loan_attributes(loan_update_params)
           return if performed?
 
-          if @loan.update(attributes)
-            render json: { loan: loan_payload(@loan) }
-          else
-            render json: { errors: @loan.errors.full_messages }, status: :unprocessable_entity
+          @loan.with_lock do
+            if @loan.update(attributes)
+              render json: { loan: loan_payload(@loan) }
+            else
+              render json: { errors: @loan.errors.full_messages }, status: :unprocessable_entity
+            end
           end
         end
 
         # DELETE /api/v1/admin/employee_loans/:id
         def destroy
-          if @loan.loan_transactions.payments.any?
-            return render json: { error: "Cannot delete a loan with payment history" }, status: :unprocessable_entity
-          end
+          @loan.with_lock do
+            if @loan.loan_transactions.payments.any?
+              return render json: { error: "Cannot delete a loan with payment history" }, status: :unprocessable_entity
+            end
 
-          @loan.destroy!
+            @loan.destroy!
+          end
           render json: { message: "Loan deleted" }
         end
 
