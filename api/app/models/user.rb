@@ -138,7 +138,7 @@ class User < ApplicationRecord
   private
 
   def disconnect_cable_after_deactivation
-    RevokePayrollAccessJob.perform_later(id) unless active?
+    PayrollAccess::RevocationDispatcher.call(self) unless active?
   end
 
   def platform_owner_requirements
