@@ -1,12 +1,14 @@
 # Cornerstone Payroll: QuickBooks, Payroll, and Compliance Master Plan
 
-> **Implementation status (2026-07-16):** Phase 0 was merged through PR #111, Phase 1A through PR #112, and Invoice Center IM-0/IM-1 through PR #113. Before Phase 1B liability settlement work, implement the approved user/audit foundation, unified check-printing workflow, and unified transmittal builder described in the [Operational Controls, Unified Printing, and Transmittal Plan](OPERATIONAL_CONTROLS_PRINTING_TRANSMITTAL_PLAN_2026-07-16.md). These foundations ensure Phase 1B payment actions are attributable and can flow into a stable operator workflow.
+> **Implementation status (2026-08-23):** PRs #114–#123 added audit history, unified check printing, payroll worksheets, unified transmittals, custom reporting, view-first reports, onboarding/SWICA hardening, pay schedules/run purposes, employee lifecycle, and salary timekeeping. PR #119 liability settlement remains open and conflicts with current `main`; PR #34 appears superseded by PR #117 and requires closure review. Code merged in these PRs still requires the trust, release, and operational evidence in the [Gate 0 plan](GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md).
 
 **Status:** Active source of truth for post-July 2026 planning
 **Created:** 2026-07-11
 **Owner:** Shimizu Technology / Cornerstone Tax Services
 **Primary objective:** Replace QuickBooks and spreadsheet-driven payroll operations for Cornerstone with a dependable Guam-native payroll and employer-compliance platform.
 **Deferred objective:** Individual and business income-tax return preparation is intentionally lower priority and is not part of the near-term execution plan.
+
+The [product strategy and platform boundaries](PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md) govern cross-application packaging and the decision not to merge Payroll, Workforce, and Tax Practice into one monolith. This master plan remains authoritative for payroll parity and compliance work after Gate 0.
 
 ---
 
