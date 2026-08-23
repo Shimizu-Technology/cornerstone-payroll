@@ -61,7 +61,12 @@ RSpec.describe "Clerk Authentication", type: :request do
         "id" => "user_new456",
         "first_name" => "New",
         "last_name" => "User",
-        "email_addresses" => [{ "email_address" => "new@example.com" }]
+        "primary_email_address_id" => "email_new_primary",
+        "email_addresses" => [ {
+          "id" => "email_new_primary",
+          "email_address" => "new@example.com",
+          "verification" => { "status" => "verified" }
+        } ]
       }
     end
 
@@ -152,7 +157,12 @@ RSpec.describe "Clerk Authentication", type: :request do
           "id" => "user_existing789",
           "first_name" => "Existing",
           "last_name" => "User",
-          "email_addresses" => [{ "email_address" => "existing@example.com" }]
+          "primary_email_address_id" => "email_existing_primary",
+          "email_addresses" => [ {
+            "id" => "email_existing_primary",
+            "email_address" => "existing@example.com",
+            "verification" => { "status" => "verified" }
+          } ]
         })
 
       expect {
@@ -161,6 +171,79 @@ RSpec.describe "Clerk Authentication", type: :request do
 
       existing.reload
       expect(existing.clerk_id).to eq("user_existing789")
+    end
+
+    it "links only the verified primary email when Clerk returns multiple addresses" do
+      primary_user = User.create!(
+        company: company,
+        email: "primary@example.com",
+        name: "Primary User",
+        clerk_id: nil,
+        role: "employee"
+      )
+      secondary_user = User.create!(
+        company: company,
+        email: "secondary@example.com",
+        name: "Secondary User",
+        clerk_id: nil,
+        role: "employee"
+      )
+
+      allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
+        "sub" => "user_primary789"
+      })
+      allow_any_instance_of(ApplicationController).to receive(:fetch_clerk_user)
+        .with("user_primary789").and_return({
+          "id" => "user_primary789",
+          "primary_email_address_id" => "email_primary",
+          "email_addresses" => [
+            {
+              "id" => "email_secondary",
+              "email_address" => "secondary@example.com",
+              "verification" => { "status" => "verified" }
+            },
+            {
+              "id" => "email_primary",
+              "email_address" => "primary@example.com",
+              "verification" => { "status" => "verified" }
+            }
+          ]
+        })
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(primary_user.reload.clerk_id).to eq("user_primary789")
+      expect(secondary_user.reload.clerk_id).to be_nil
+    end
+
+    it "rejects an unverified primary email without linking a local account" do
+      existing = User.create!(
+        company: company,
+        email: "unverified@example.com",
+        name: "Unverified User",
+        clerk_id: nil,
+        role: "employee"
+      )
+
+      allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
+        "sub" => "user_unverified789"
+      })
+      allow_any_instance_of(ApplicationController).to receive(:fetch_clerk_user)
+        .with("user_unverified789").and_return({
+          "id" => "user_unverified789",
+          "primary_email_address_id" => "email_unverified",
+          "email_addresses" => [ {
+            "id" => "email_unverified",
+            "email_address" => "unverified@example.com",
+            "verification" => { "status" => "unverified" }
+          } ]
+        })
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(existing.reload.clerk_id).to be_nil
     end
   end
 
@@ -174,7 +257,12 @@ RSpec.describe "Clerk Authentication", type: :request do
           "id" => "user_race123",
           "first_name" => "Race",
           "last_name" => "Condition",
-          "email_addresses" => [{ "email_address" => "race@example.com" }]
+          "primary_email_address_id" => "email_race_primary",
+          "email_addresses" => [ {
+            "id" => "email_race_primary",
+            "email_address" => "race@example.com",
+            "verification" => { "status" => "verified" }
+          } ]
         })
 
       race_user = User.create!(
@@ -237,6 +325,41 @@ RSpec.describe "Clerk Authentication", type: :request do
       expect(user.reload.last_session_id_digest).to be_nil
       expect(user.last_login_at).to be_nil
       expect(user.last_active_at).to be_nil
+    end
+  end
+
+  describe "local account access policy" do
+    before do
+      allow_any_instance_of(ApplicationController).to receive(:verify_clerk_token).and_return({
+        "sub" => valid_clerk_id
+      })
+    end
+
+    it "rejects an inactive local user even with a valid Clerk token" do
+      user.update!(active: false)
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(JSON.parse(response.body)["error"]).to eq("Account inactive")
+    end
+
+    it "rejects a regular user whose organization is inactive" do
+      organization.update!(status: "inactive")
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(JSON.parse(response.body)["error"]).to eq("Account inactive")
+    end
+
+    it "preserves super-admin recovery access to an inactive organization" do
+      user.update!(role: "super_admin")
+      organization.update!(status: "inactive")
+
+      get "/api/v1/admin/employees", headers: { "Authorization" => "Bearer valid.token" }
+
+      expect(response).to have_http_status(:ok)
     end
   end
 

@@ -19,6 +19,7 @@ class Organization < ApplicationRecord
   belongs_to :primary_company, class_name: "Company", optional: true
 
   before_validation :normalize_slug
+  after_update_commit :disconnect_cable_users_after_deactivation, if: :saved_change_to_status?
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: true
@@ -30,6 +31,10 @@ class Organization < ApplicationRecord
 
   def unlimited_clients?
     client_limit.nil?
+  end
+
+  def active?
+    status == "active"
   end
 
   def save_company_within_client_limit!(company)
@@ -44,6 +49,14 @@ class Organization < ApplicationRecord
   end
 
   private
+
+  def disconnect_cable_users_after_deactivation
+    return if active?
+
+    users.where.not(role: User.roles.fetch("super_admin")).find_each do |user|
+      PayrollAccess::RevocationDispatcher.call(user)
+    end
+  end
 
   def normalize_slug
     self.slug = name.to_s.parameterize if slug.blank? && name.present?

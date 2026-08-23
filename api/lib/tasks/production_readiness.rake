@@ -20,11 +20,9 @@ namespace :production do
         "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ACCOUNT_ID", "R2_BUCKET_NAME"
       ).all?(&:present?),
       "email delivery is configured" => ENV.values_at("RESEND_API_KEY", "MAILER_FROM_EMAIL").all?(&:present?),
-      "Active Record encryption is configured" => ENV.values_at(
-        "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY",
-        "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY",
-        "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT"
-      ).all?(&:present?)
+      "Active Record encryption is configured" => ActiveRecordEncryptionConfiguration.configured?(
+        Rails.application.config.active_record.encryption
+      )
     }
 
     checks.each { |name, passed| puts "#{passed ? 'PASS' : 'FAIL'}  #{name}" }
