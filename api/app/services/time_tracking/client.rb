@@ -4,6 +4,7 @@ require "net/http"
 require "uri"
 require "json"
 require "openssl"
+require "timeout"
 
 module TimeTracking
   class Client
@@ -12,11 +13,12 @@ module TimeTracking
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
 
-    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil)
+    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
       @destination_policy = destination_policy
       @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
       @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+      @timeout_runner = timeout_runner || ->(seconds, &block) { Timeout.timeout(seconds, Net::OpenTimeout, &block) }
     end
 
     def time_summary(start_date:, end_date:)
@@ -28,8 +30,9 @@ module TimeTracking
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
 
-      pinned_ips = @destination_policy.resolve_public_addresses!(uri)
-      response, body = perform_request(uri, request, pinned_ips)
+      connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
+      pinned_ips = resolve_public_addresses(uri, connection_deadline)
+      response, body = perform_request(uri, request, pinned_ips, connection_deadline)
 
       unless response.is_a?(Net::HTTPSuccess)
         raise Error, "#{@source.name} returned HTTP #{response.code}"
@@ -64,13 +67,18 @@ module TimeTracking
       uri
     end
 
-    def perform_request(uri, request, pinned_ips)
+    def resolve_public_addresses(uri, connection_deadline)
+      @timeout_runner.call(remaining_timeout!(connection_deadline)) do
+        @destination_policy.resolve_public_addresses!(uri)
+      end
+    end
+
+    def perform_request(uri, request, pinned_ips, connection_deadline)
       last_connection_error = nil
-      connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
 
       pinned_ips.each do |pinned_ip|
-        remaining_open_timeout = connection_deadline - @monotonic_clock.call
-        break unless remaining_open_timeout.positive?
+        remaining_open_timeout = remaining_timeout(connection_deadline)
+        break unless remaining_open_timeout&.positive?
 
         http = build_http(uri, pinned_ip, open_timeout: remaining_open_timeout)
         begin
@@ -88,6 +96,17 @@ module TimeTracking
       end
 
       raise last_connection_error || Error.new("#{@source.name} has no reachable inspected address")
+    end
+
+    def remaining_timeout(connection_deadline)
+      connection_deadline - @monotonic_clock.call
+    end
+
+    def remaining_timeout!(connection_deadline)
+      remaining = remaining_timeout(connection_deadline)
+      raise Net::OpenTimeout unless remaining.positive?
+
+      remaining
     end
 
     def build_http(uri, pinned_ip, open_timeout:)
