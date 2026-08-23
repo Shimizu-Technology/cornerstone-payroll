@@ -12,17 +12,23 @@ module ApplicationCable
     private
 
     def find_verified_user
-      return User.where(role: %w[super_admin admin org_admin]).first || User.first if auth_disabled?
+      if auth_disabled?
+        preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).find(&:payroll_access_allowed?)
+        return preferred || User.includes(:organization).find(&:payroll_access_allowed?) || reject_unauthorized_connection
+      end
 
       payload = cable_ticket_payload
       user = User.find_by(id: payload&.dig("user_id"))
-      user || reject_unauthorized_connection
+      reject_unauthorized_connection unless user&.payroll_access_allowed?
+
+      user
     end
 
     def resolve_company
       company_id = cable_ticket_payload&.dig("company_id")
       company_id ||= current_user.company_id
 
+      reject_unauthorized_connection unless current_user.payroll_access_allowed?
       reject_unauthorized_connection unless current_user.can_access_company?(company_id)
 
       Company.find(company_id)

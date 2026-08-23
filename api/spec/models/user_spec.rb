@@ -100,4 +100,47 @@ RSpec.describe User, type: :model do
       expect(User.exists?(owner.id)).to be(true)
     end
   end
+
+  describe "payroll access and session revocation" do
+    let(:organization) { create(:organization) }
+    let(:company) { create(:company, organization: organization) }
+
+    it "requires both the user and regular user's organization to be active" do
+      user = create(:user, company: company, organization: organization, role: "admin")
+
+      expect(user.payroll_access_allowed?).to be(true)
+      organization.update_columns(status: "inactive")
+      user.reload
+      expect(user.payroll_access_allowed?).to be(false)
+      user.update_columns(active: false)
+      expect(user.reload.payroll_access_allowed?).to be(false)
+    end
+
+    it "allows only an active super admin to recover an inactive organization" do
+      user = create(:user, company: company, organization: organization, role: "super_admin")
+      organization.update_columns(status: "inactive")
+
+      expect(user.reload.payroll_access_allowed?).to be(true)
+      user.update_columns(active: false)
+      expect(user.reload.payroll_access_allowed?).to be(false)
+    end
+
+    it "disconnects existing cable sessions after deactivation commits" do
+      user = create(:user, company: company, organization: organization)
+      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+
+      user.update!(active: false)
+
+      expect(PayrollAccess::SessionRevoker).to have_received(:disconnect_user).with(user)
+    end
+
+    it "does not disconnect sessions for unrelated user updates" do
+      user = create(:user, company: company, organization: organization)
+      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+
+      user.update!(name: "Updated Name")
+
+      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user)
+    end
+  end
 end

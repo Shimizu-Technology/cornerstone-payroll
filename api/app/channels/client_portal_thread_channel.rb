@@ -2,7 +2,8 @@
 
 class ClientPortalThreadChannel < ApplicationCable::Channel
   def subscribed
-    return reject unless current_user&.can_access_company?(current_company.id)
+    return reject unless current_user&.payroll_access_allowed?
+    return reject unless current_user.can_access_company?(current_company.id)
 
     stream_for current_company
   end
