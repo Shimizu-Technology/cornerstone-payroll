@@ -35,6 +35,7 @@ class User < ApplicationRecord
 
   before_validation :default_organization_from_company
   before_destroy :prevent_platform_owner_destroy
+  after_update_commit :disconnect_cable_after_deactivation, if: :saved_change_to_active?
 
   scope :active, -> { where(active: true) }
 
@@ -83,6 +84,13 @@ class User < ApplicationRecord
     super_admin?
   end
 
+  # A Clerk session proves identity, but the local payroll account remains the
+  # authority for access. Platform super admins retain recovery access when a
+  # customer organization is inactive; every user must still be active.
+  def payroll_access_allowed?
+    active? && (super_admin? || organization&.active?)
+  end
+
   def organization_admin?
     super_admin? || admin? || org_admin?
   end
@@ -128,6 +136,10 @@ class User < ApplicationRecord
   end
 
   private
+
+  def disconnect_cable_after_deactivation
+    PayrollAccess::SessionRevoker.disconnect_user(self) unless active?
+  end
 
   def platform_owner_requirements
     return unless platform_owner?

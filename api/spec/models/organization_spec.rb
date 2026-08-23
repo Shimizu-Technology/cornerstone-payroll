@@ -32,4 +32,30 @@ RSpec.describe Organization, type: :model do
       expect(company).not_to be_persisted
     end
   end
+
+  describe "cable session revocation" do
+    it "disconnects regular users but preserves super-admin recovery sessions after deactivation" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      regular_user = create(:user, company: company, organization: organization, role: "admin")
+      super_admin = create(:user, company: company, organization: organization, role: "super_admin")
+      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+
+      organization.update!(status: "inactive")
+
+      expect(PayrollAccess::SessionRevoker).to have_received(:disconnect_user).with(regular_user)
+      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user).with(super_admin)
+    end
+
+    it "does not disconnect users for unrelated organization updates" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      create(:user, company: company, organization: organization)
+      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+
+      organization.update!(name: "Renamed Organization")
+
+      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user)
+    end
+  end
 end

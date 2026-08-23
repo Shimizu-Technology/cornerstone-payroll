@@ -66,7 +66,10 @@ class ApplicationController < ActionController::API
   def current_user
     return super unless auth_disabled?
 
-    @current_user ||= User.where(role: %w[super_admin admin org_admin]).first || User.first
+    @current_user ||= begin
+      preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).find(&:payroll_access_allowed?)
+      preferred || User.includes(:organization).find(&:payroll_access_allowed?)
+    end
   end
 
   def current_organization
