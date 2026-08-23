@@ -64,6 +64,8 @@ RSpec.describe ProductionReadiness do
   end
   let(:queue_relation) { instance_double(ActiveRecord::Relation, exists?: true) }
   let(:queue_process) { class_double(SolidQueue::Process, where: queue_relation) }
+  let(:encryption_credentials) { ActiveSupport::InheritableOptions.new }
+  let(:encrypted_data_probe) { -> { true } }
   let(:storage) do
     Class.new do
       attr_reader :objects, :deleted
@@ -117,6 +119,8 @@ RSpec.describe ProductionReadiness do
       cable_adapter: "solid_cable",
       storage_factory: -> { storage },
       time_sources: -> { [] },
+      encryption_credentials: encryption_credentials,
+      encrypted_data_probe: encrypted_data_probe,
       http_get: http_get
     )
   end
@@ -129,7 +133,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: true)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(26)
+    expect(report.checks.length).to eq(28)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -143,7 +147,34 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(16)
+    expect(report.checks.length).to eq(17)
+  end
+
+  it "fails closed when complete production encryption sources conflict" do
+    encryption_credentials[:active_record_encryption] = ActiveSupport::InheritableOptions.new(
+      primary_key: "credential-primary",
+      deterministic_key: "credential-deterministic",
+      key_derivation_salt: "credential-salt"
+    )
+    env.merge!(
+      "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "environment-primary",
+      "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY" => "environment-deterministic",
+      "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT" => "environment-salt"
+    )
+
+    report = readiness.run(live: false)
+
+    expect(report.failures.map(&:name)).to include("Active Record encryption sources do not conflict")
+  end
+
+  it "fails closed when persisted ciphertext cannot be decrypted" do
+    allow(encrypted_data_probe).to receive(:call)
+      .and_raise(ActiveRecord::Encryption::Errors::Decryption)
+
+    report = readiness.run(live: true)
+
+    failure = report.failures.find { |check| check.name == "persisted encrypted data can be decrypted" }
+    expect(failure.detail).to eq("ActiveRecord::Encryption::Errors::Decryption while verifying")
   end
 
   it "fails closed for non-production Clerk keys and unsafe wildcard origins" do

@@ -52,10 +52,14 @@ RSpec.describe ActiveRecordEncryptionConfiguration do
     )
   end
 
-  it "prefers an environment value over the matching Rails credential" do
+  it "keeps the complete Rails credential key set authoritative in production" do
     values = described_class.resolve(
       environment: production,
-      env: { "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "rotated-primary" },
+      env: {
+        "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "rotated-primary",
+        "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY" => "rotated-deterministic",
+        "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT" => "rotated-salt"
+      },
       credentials: credentials_with(
         primary_key: "credential-primary",
         deterministic_key: "credential-deterministic",
@@ -63,8 +67,52 @@ RSpec.describe ActiveRecordEncryptionConfiguration do
       )
     )
 
-    expect(values[:primary_key]).to eq("rotated-primary")
-    expect(values[:deterministic_key]).to eq("credential-deterministic")
+    expect(values).to eq(
+      primary_key: "credential-primary",
+      deterministic_key: "credential-deterministic",
+      key_derivation_salt: "credential-salt"
+    )
+  end
+
+  it "reports conflicting complete production key sources without exposing either source" do
+    env = {
+      "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "rotated-primary",
+      "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY" => "rotated-deterministic",
+      "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT" => "rotated-salt"
+    }
+    credentials = credentials_with(
+      primary_key: "credential-primary",
+      deterministic_key: "credential-deterministic",
+      key_derivation_salt: "credential-salt"
+    )
+
+    expect(described_class.sources_conflict?(environment: production, env: env, credentials: credentials)).to be(true)
+  end
+
+  it "reports an incomplete duplicate production key source as a conflict" do
+    env = { "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "environment-primary" }
+    credentials = credentials_with(
+      primary_key: "credential-primary",
+      deterministic_key: "credential-deterministic",
+      key_derivation_salt: "credential-salt"
+    )
+
+    expect(described_class.sources_conflict?(environment: production, env: env, credentials: credentials)).to be(true)
+  end
+
+  it "accepts identical complete production key sources" do
+    env = {
+      "ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY" => "same-primary",
+      "ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY" => "same-deterministic",
+      "ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT" => "same-salt"
+    }
+    credentials = credentials_with(
+      primary_key: "same-primary",
+      deterministic_key: "same-deterministic",
+      key_derivation_salt: "same-salt"
+    )
+
+    expect(described_class.sources_conflict?(environment: production, env: env, credentials: credentials)).to be(false)
   end
 
   it "fails production configuration before boot when any effective key is missing" do
@@ -76,7 +124,7 @@ RSpec.describe ActiveRecordEncryptionConfiguration do
       )
     }.to raise_error(
       ActiveRecordEncryptionConfiguration::MissingConfiguration,
-      /ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY.*ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT/
+      /Missing complete Active Record encryption configuration/
     )
   end
 
@@ -85,6 +133,20 @@ RSpec.describe ActiveRecordEncryptionConfiguration do
       environment: development,
       env: {},
       credentials: empty_credentials
+    )
+
+    expect(values).to eq(described_class::DEVELOPMENT_DEFAULTS)
+  end
+
+  it "does not reuse production Rails credentials for non-production data" do
+    values = described_class.resolve(
+      environment: development,
+      env: {},
+      credentials: credentials_with(
+        primary_key: "credential-primary",
+        deterministic_key: "credential-deterministic",
+        key_derivation_salt: "credential-salt"
+      )
     )
 
     expect(values).to eq(described_class::DEVELOPMENT_DEFAULTS)

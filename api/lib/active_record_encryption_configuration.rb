@@ -23,25 +23,58 @@ module ActiveRecordEncryptionConfiguration
     end
 
     def resolve(environment:, env:, credentials:)
-      values = KEY_SPECS.to_h do |credential_key, env_key|
-        value = env[env_key].presence || credentials.dig(:active_record_encryption, credential_key).presence
-        value ||= DEVELOPMENT_DEFAULTS.fetch(credential_key) unless environment.production?
-        [ credential_key, value ]
-      end
+      return non_production_values(env) unless environment.production?
 
-      missing = values.filter_map do |credential_key, value|
-        KEY_SPECS.fetch(credential_key) if value.blank?
-      end
-      if missing.any?
-        raise MissingConfiguration,
-          "Missing Active Record encryption configuration: #{missing.join(', ')}"
-      end
+      credential_values = credential_values(credentials)
+      environment_values = environment_values(env)
 
-      values
+      return credential_values if complete?(credential_values)
+      return environment_values if complete?(environment_values)
+
+      raise MissingConfiguration,
+        "Missing complete Active Record encryption configuration in Rails credentials or environment variables"
     end
 
     def configured?(config)
       KEY_SPECS.keys.all? { |key| config.public_send(key).present? }
+    end
+
+    def sources_conflict?(environment:, env:, credentials:)
+      return false unless environment.production?
+
+      credential_values = credential_values(credentials)
+      environment_values = environment_values(env)
+      return false unless present?(credential_values) && present?(environment_values)
+
+      !complete?(credential_values) || !complete?(environment_values) || credential_values != environment_values
+    end
+
+    private
+
+    def credential_values(credentials)
+      KEY_SPECS.keys.to_h do |credential_key|
+        [ credential_key, credentials.dig(:active_record_encryption, credential_key).presence ]
+      end
+    end
+
+    def environment_values(env)
+      KEY_SPECS.to_h do |credential_key, env_key|
+        [ credential_key, env[env_key].presence ]
+      end
+    end
+
+    def non_production_values(env)
+      KEY_SPECS.to_h do |credential_key, env_key|
+        [ credential_key, env[env_key].presence || DEVELOPMENT_DEFAULTS.fetch(credential_key) ]
+      end
+    end
+
+    def complete?(values)
+      values.values.all?(&:present?)
+    end
+
+    def present?(values)
+      values.values.any?(&:present?)
     end
   end
 end
