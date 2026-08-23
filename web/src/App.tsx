@@ -300,7 +300,7 @@ function AppRoutes() {
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
         <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
-        <Route path="time-tracking-sources" element={<StaffOnlyRoute><TimeTrackingSources /></StaffOnlyRoute>} />
+        <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
         <Route path="pay-schedule-settings" element={<StaffOnlyRoute><PayScheduleSettings /></StaffOnlyRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>

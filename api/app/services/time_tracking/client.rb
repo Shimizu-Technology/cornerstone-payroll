@@ -3,13 +3,22 @@
 require "net/http"
 require "uri"
 require "json"
+require "openssl"
+require "timeout"
 
 module TimeTracking
   class Client
-    TIMEOUT_SECONDS = 15
+    OPEN_TIMEOUT_SECONDS = 5
+    READ_TIMEOUT_SECONDS = 15
+    WRITE_TIMEOUT_SECONDS = 15
+    MAX_RESPONSE_BYTES = 1.megabyte
 
-    def initialize(source)
+    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil, timeout_runner: nil)
       @source = source
+      @destination_policy = destination_policy
+      @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
+      @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+      @timeout_runner = timeout_runner || ->(seconds, &block) { Timeout.timeout(seconds, Net::OpenTimeout, &block) }
     end
 
     def time_summary(start_date:, end_date:)
@@ -17,24 +26,32 @@ module TimeTracking
 
       request = Net::HTTP::Get.new(uri)
       request["Accept"] = "application/json"
+      request["Accept-Encoding"] = "identity"
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
 
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: TIMEOUT_SECONDS, read_timeout: TIMEOUT_SECONDS) do |http|
-        http.request(request)
-      end
+      connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
+      pinned_ips = resolve_public_addresses(uri, connection_deadline)
+      response, body = perform_request(uri, request, pinned_ips, connection_deadline)
 
       unless response.is_a?(Net::HTTPSuccess)
-        raise Error, "#{@source.name} returned #{response.code}: #{response.body.to_s.truncate(300)}"
+        raise Error, "#{@source.name} returned HTTP #{response.code}"
       end
+      content_type = response["Content-Type"].to_s.downcase
+      raise Error, "#{@source.name} returned a non-JSON response" unless content_type.start_with?("application/json")
 
-      payload = JSON.parse(response.body)
+      payload = JSON.parse(body)
+      raise Error, "#{@source.name} returned an invalid payload" unless payload.is_a?(Hash)
+
       validate_source_identity!(payload)
       payload
-    rescue JSON::ParserError => e
-      raise Error, "#{@source.name} returned invalid JSON: #{e.message}"
-    rescue Timeout::Error, Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout => e
-      raise Error, "Could not reach #{@source.name}: #{e.message}"
+    rescue JSON::ParserError
+      raise Error, "#{@source.name} returned invalid JSON"
+    rescue DestinationPolicy::Error => e
+      raise Error, "#{@source.name} destination rejected: #{e.message}"
+    rescue Timeout::Error, SystemCallError, SocketError, Net::OpenTimeout, Net::ReadTimeout,
+           OpenSSL::SSL::SSLError
+      raise Error, "Could not securely reach #{@source.name}"
     end
 
     class Error < StandardError; end
@@ -50,13 +67,89 @@ module TimeTracking
       uri
     end
 
+    def resolve_public_addresses(uri, connection_deadline)
+      @timeout_runner.call(remaining_timeout!(connection_deadline)) do
+        @destination_policy.resolve_public_addresses!(uri)
+      end
+    end
+
+    def perform_request(uri, request, pinned_ips, connection_deadline)
+      last_connection_error = nil
+
+      pinned_ips.each do |pinned_ip|
+        remaining_open_timeout = remaining_timeout(connection_deadline)
+        break unless remaining_open_timeout&.positive?
+
+        http = build_http(uri, pinned_ip, open_timeout: remaining_open_timeout)
+        begin
+          http.start
+        rescue SystemCallError, SocketError, Net::OpenTimeout, OpenSSL::SSL::SSLError => e
+          last_connection_error = e
+          next
+        end
+
+        begin
+          return read_response(http, request)
+        ensure
+          http.finish if http.started?
+        end
+      end
+
+      raise last_connection_error || Error.new("#{@source.name} has no reachable inspected address")
+    end
+
+    def remaining_timeout(connection_deadline)
+      connection_deadline - @monotonic_clock.call
+    end
+
+    def remaining_timeout!(connection_deadline)
+      remaining = remaining_timeout(connection_deadline)
+      raise Net::OpenTimeout unless remaining.positive?
+
+      remaining
+    end
+
+    def build_http(uri, pinned_ip, open_timeout:)
+      # Pass nil as the proxy address so HTTP_PROXY cannot reroute a request
+      # carrying the shared integration secret. `ipaddr` pins the connection
+      # to the address that the destination policy inspected, while `address`
+      # remains the hostname used for Host and TLS verification.
+      http = @http_factory.call(uri.host, uri.port)
+      http.ipaddr = pinned_ip
+      http.use_ssl = uri.scheme == "https"
+      if http.use_ssl?
+        http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        http.verify_hostname = true
+        http.min_version = OpenSSL::SSL::TLS1_2_VERSION
+      end
+      http.open_timeout = open_timeout
+      http.read_timeout = READ_TIMEOUT_SECONDS
+      http.write_timeout = WRITE_TIMEOUT_SECONDS
+      http.max_retries = 0
+      http
+    end
+
+    def read_response(http, request)
+      response = nil
+      body = +""
+      http.request(request) do |streamed_response|
+        response = streamed_response
+        declared_size = streamed_response["Content-Length"].presence&.to_i
+        raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared_size&.>(MAX_RESPONSE_BYTES)
+
+        streamed_response.read_body do |chunk|
+          body << chunk
+          raise Error, "#{@source.name} response exceeded #{MAX_RESPONSE_BYTES} bytes" if body.bytesize > MAX_RESPONSE_BYTES
+        end
+      end
+
+      [ response, body ]
+    end
+
     def validate_source_identity!(payload)
       return if @source.source_type == "custom"
 
-      if payload["source"].blank?
-        Rails.logger.warn("#{@source.name} time tracking response omitted source identity; accepting for rollout compatibility")
-        return
-      end
+      raise Error, "#{@source.name} response omitted source identity" if payload["source"].blank?
 
       returned_source = payload["source"].to_s
       return if returned_source == @source.source_type

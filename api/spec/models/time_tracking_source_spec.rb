@@ -14,7 +14,7 @@ RSpec.describe TimeTrackingSource do
       )
 
       expect(source).not_to be_valid
-      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL")
+      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL with a host and no embedded credentials")
     end
 
     it "rejects URLs with embedded credentials" do
@@ -27,7 +27,26 @@ RSpec.describe TimeTrackingSource do
       )
 
       expect(source).not_to be_valid
-      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL")
+      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL with a host and no embedded credentials")
+    end
+
+    it "rejects query strings and fragments in base URLs" do
+      company = create(:company)
+      query_source = described_class.new(
+        company: company,
+        name: "Query Source",
+        source_type: "custom",
+        base_url: "https://example.com?target=internal",
+        shared_secret: "secret"
+      )
+      fragment_source = query_source.dup
+      fragment_source.name = "Fragment Source"
+      fragment_source.base_url = "https://example.com#fragment"
+
+      expect(query_source).not_to be_valid
+      expect(fragment_source).not_to be_valid
+      expect(query_source.errors[:base_url]).to include("must not include a query or fragment")
+      expect(fragment_source.errors[:base_url]).to include("must not include a query or fragment")
     end
 
     it "does not allow source_type to change after creation" do
@@ -87,6 +106,23 @@ RSpec.describe TimeTrackingSource do
       )
 
       expect(inactive).to be_valid
+    end
+
+    it "lets production administrators deactivate legacy HTTP sources but not reactivate them" do
+      source = described_class.create!(
+        company: create(:company),
+        name: "Legacy Source",
+        source_type: "custom",
+        base_url: "http://legacy.example.com",
+        shared_secret: "secret"
+      )
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+
+      expect { source.update!(active: false) }.not_to raise_error
+
+      source.active = true
+      expect(source).not_to be_valid
+      expect(source.errors[:base_url]).to include("must use HTTPS in production")
     end
 
     it "stores long shared secrets without truncating encrypted ciphertext" do

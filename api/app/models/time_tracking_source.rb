@@ -26,11 +26,14 @@ class TimeTrackingSource < ApplicationRecord
 
   def base_url_must_be_http_url
     uri = URI.parse(base_url.to_s)
-    return if uri.host.present? && uri.userinfo.blank? && uri.scheme.in?(%w[http https])
-
-    errors.add(:base_url, "must be an HTTP or HTTPS URL")
+    TimeTracking::DestinationPolicy.new.validate_configuration!(
+      uri,
+      enforce_production: Rails.env.production? && active?
+    )
+  rescue TimeTracking::DestinationPolicy::Error => e
+    errors.add(:base_url, e.message)
   rescue URI::InvalidURIError
-    errors.add(:base_url, "must be an HTTP or HTTPS URL")
+    errors.add(:base_url, "must be an HTTP or HTTPS URL with a host and no embedded credentials")
   end
 
   def source_type_must_not_change

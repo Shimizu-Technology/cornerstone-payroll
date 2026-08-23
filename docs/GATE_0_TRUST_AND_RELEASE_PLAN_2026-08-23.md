@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-08-23
 
-**Baseline:** `origin/main` at `c3ff96b`
+**Baseline:** re-audited against `origin/main` through `b915fa3`
 
 **Status:** In progress; no item is closed until its acceptance evidence is linked below
 
@@ -38,13 +38,13 @@ Gate 0 closes only when:
 | G0-04 | Action Cable accepts and retains inactive users | A deactivated user can retain live access | Apply the same policy to Cable and disconnect sessions after deactivation | Code closed in PR #125; `main` green |
 | G0-05 | Clerk provisioning uses the first email without proving it is the verified primary address | The wrong email could link to an invited payroll account | Require Clerk's verified primary email | Code closed in PR #125; `main` green |
 | G0-06 | Production encryption docs/readiness check environment keys that the initializer does not bind | Encrypted SSNs, bank data, secrets, or tokens can fail at runtime while readiness passes | One effective env-or-credentials contract; fail closed and test it | Code closed in PR #125; `main` green |
-| G0-07 | Commit checks stale state before its transaction and does not lock the pay period | Concurrent requests can duplicate YTD/loan effects | Lock and revalidate; prove exactly-once outcomes with PostgreSQL concurrency tests | Code proposed in PR #126 |
-| G0-08 | Approve, unapprove, calculation, item mutation, imports, and commit do not share one lifecycle lock boundary | A committed run can race back to editable state or be mutated during commit | Lock every financial transition/mutation in a consistent order | Code proposed in PR #126 |
-| G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Open |
+| G0-07 | Commit checks stale state before its transaction and does not lock the pay period | Concurrent requests can duplicate YTD/loan effects | Lock and revalidate; prove exactly-once outcomes with PostgreSQL concurrency tests | Code closed in PR #126; `main` green |
+| G0-08 | Approve, unapprove, calculation, item mutation, imports, and commit do not share one lifecycle lock boundary | A committed run can race back to editable state or be mutated during commit | Lock every financial transition/mutation in a consistent order | Code closed in PR #126; `main` green |
+| G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Implementation in progress |
 | G0-10 | Imported overtime uses a hard-coded Sunday week and can preserve source splits | Payroll is not reliably the legal overtime authority | Use the pay period's confirmed workweek and calculate the paid split in Payroll | Open |
 | G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Open |
 | G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Open |
-| G0-13 | OCR apply can recreate an employee excluded from a pay period | Explicit operator exclusion can be bypassed | Share the same exclusion guard across all import paths | Code proposed in PR #126 |
+| G0-13 | OCR apply can recreate an employee excluded from a pay period | Explicit operator exclusion can be bypassed | Share the same exclusion guard across all import paths | Code closed in PR #126; `main` green |
 | G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Open |
 | G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Open |
 | G0-16 | Cornerstone Tax frontend fails open without Clerk configuration | A production configuration error can expose the application shell | Fail closed in production and test the missing-config state | Open |
@@ -96,6 +96,14 @@ The covered mutation surface is:
 Nested editable work follows `pay_period -> import/session -> payroll item`. Commit and void take shared financial rows in the deterministic order `pay_period -> employee YTDs by employee ID -> company YTD -> employee loans by employee and loan ID -> company check sequence -> payroll items`. The check-number worksheet also takes `pay_period -> company` so it cannot invert commit's locks. Every loan balance transition locks and reloads the loan before calculating its before/after values. Operations that intentionally rescue row-level failures use a savepoint so a rescued exception cannot commit half of an import or edit inside the outer lifecycle transaction. Commit owns status, YTD and loan effects, liability posting, check assignment, optional FIT check creation, correction audit, and tax-sync scheduling as one transaction.
 
 Acceptance requires real PostgreSQL competing-thread tests for commit-versus-commit, commit-versus-unapprove, commit-versus-check-worksheet, payment-versus-payment, and payment-versus-loan-addition. The winner commits once; stale lifecycle transitions must reload the final state and receive an invalid-transition result. Final status, YTD totals, liabilities, loan balances, and check audit events must agree.
+
+## External time destination contract
+
+Time-source settings are secret-bearing integration configuration. Organization administrators may create, update, test, or deactivate them. Other staff may read only the non-secret metadata needed to select an already-approved source during payroll import.
+
+In production, every source must use HTTPS on port 443 and its exact normalized hostname must appear in `TIME_TRACKING_ALLOWED_HOSTS`. At request time Payroll resolves the hostname, rejects the full DNS answer set if any address is loopback, private, link-local, shared-address, documentation, multicast, or reserved space, and pins the connection to one of the inspected public addresses. This closes the validation-to-connection DNS-rebinding window while retaining hostname-based TLS verification. Redirects are not followed, environment proxy variables are ignored, responses must be JSON and no larger than one MiB, and operator-facing errors never include the upstream response body.
+
+Development may deliberately use `localhost` over HTTP for local integration testing. That exception does not exist in production. Production readiness fails when an active source exists without a hostname allowlist.
 
 ## Required browser and negative tests
 
@@ -153,3 +161,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | --- | --- | --- | --- | --- | --- |
 | G0-01, G0-02 | #124 | `d59173e` | Yes | `main` Quality run 32615025379 passed; ruleset 16468532 now requires strict current-base `backend` and `frontend` checks | Dependency advisory cleared; browser authentication skip remains tracked as G0-17 |
 | G0-03–G0-06 | #125 | `24b5c77` | Yes | `main` Quality run 32616646822 passed | Greptile 5/5 on head `cb20bed`; revocation is enforced at HTTP, Cable connection, retryable disconnect, and final broadcast delivery boundaries |
+| G0-07, G0-08, G0-13 | #126 | `b915fa3` | Yes | `main` Quality run 32618765810 passed | Greptile 5/5 on head `7ac5387`; deterministic PostgreSQL races cover lifecycle, check-number, YTD, and loan lock order |
