@@ -68,7 +68,7 @@ class PayPeriodLifecycleService
         :employee,
         payroll_item_deductions: :deduction_type,
         employee: { employee_loans: :loan_transactions }
-      ).to_a
+      ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
 
       apply_ytd_and_loan_effects!(committed_items)
       PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)

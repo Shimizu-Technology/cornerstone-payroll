@@ -71,7 +71,10 @@ class PayPeriodCorrectionService
       # Reverse all payroll items; paper-check void state must not affect payroll correction math.
       # Preload YTD records to avoid 2×N queries in the loop.
       year = locked.pay_date.year
-      all_items = locked.payroll_items.to_a
+      # Commit and void both lock employee YTD rows. Keep a deterministic
+      # employee order across pay periods so concurrent financial operations
+      # cannot acquire the same YTD rows in opposite orders.
+      all_items = locked.payroll_items.order(:employee_id, :id).to_a
       employee_ids = all_items.map(&:employee_id).uniq
 
       emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
