@@ -65,6 +65,29 @@ RSpec.describe PayrollTimeAllocationService do
     expect(employee.daily_time_records.current.count).to eq(20) # full intersecting workweeks, excluding the pre-hire boundary day
   end
 
+  it "blocks salary time calculation until the legal workweek is confirmed" do
+    create(:employee_work_profile, employee: employee)
+    workweek.update_columns(
+      confirmation_status: "needs_confirmation",
+      confirmed_by_id: nil,
+      confirmed_at: nil,
+      notes: nil
+    )
+
+    expect { described_class.call!(payroll_item: payroll_item) }
+      .to raise_error(described_class::Error, /Confirm the legal overtime workweek/)
+    expect(employee.daily_time_records).to be_empty
+  end
+
+  it "blocks legacy non-midnight boundaries that date-only records cannot apply" do
+    create(:employee_work_profile, employee: employee)
+    workweek.update_column(:starts_at_minutes, 480)
+
+    expect { described_class.call!(payroll_item: payroll_item) }
+      .to raise_error(described_class::Error, /starts at midnight/)
+    expect(employee.daily_time_records).to be_empty
+  end
+
   it "does not apply a newly effective schedule to dates before the profile began" do
     create(:employee_work_profile, employee: employee, effective_on: Date.new(2024, 1, 8))
 

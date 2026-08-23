@@ -3,6 +3,44 @@
 require "rails_helper"
 
 RSpec.describe TimeTracking::ApplyImportService do
+  def mark_as_validated_preview!(import)
+    pay_period = import.pay_period
+    workweek = pay_period.resolved_company_workweek || CompanyWorkweek.create!(
+      company: pay_period.company,
+      starts_on_weekday: 0,
+      starts_at_minutes: 0,
+      timezone: "Pacific/Guam",
+      source: "operator_confirmed",
+      confirmation_status: "confirmed",
+      confirmed_by: create(:user, company: pay_period.company),
+      confirmed_at: Time.current,
+      notes: "Confirmed for apply import tests",
+      effective_on: pay_period.start_date
+    )
+    pay_period.update!(company_workweek: workweek) unless pay_period.company_workweek_id == workweek.id
+    import.update!(
+      processed_payload: import.processed_payload.merge(
+        "schema_version" => "1.0",
+        "validation_version" => "time_summary_v1",
+        "start_date" => import.start_date.iso8601,
+        "end_date" => import.end_date.iso8601,
+        "legal_workweek" => {
+          "company_workweek_id" => workweek.id,
+          "starts_on_weekday" => workweek.starts_on_weekday,
+          "starts_at_minutes" => workweek.starts_at_minutes,
+          "timezone" => workweek.timezone
+        }
+      )
+    )
+  end
+
+  before do
+    allow(described_class).to receive(:new).and_wrap_original do |original, **kwargs|
+      mark_as_validated_preview!(kwargs.fetch(:import)) unless RSpec.current_example.metadata[:unvalidated_preview]
+      original.call(**kwargs)
+    end
+  end
+
   describe "#call" do
     it "preserves existing holiday and PTO hours when applying imported regular and overtime hours" do
       company = create(:company)
@@ -249,6 +287,18 @@ RSpec.describe TimeTracking::ApplyImportService do
       employee = create(:employee, company: company, department: department, email: "cfi@example.com")
       flight_rate = employee.employee_wage_rates.create!(label: "Flight Instruction", rate: 75.0, is_primary: true, active: true)
       employee.employee_wage_rates.create!(label: "Ground School", rate: 45.0, is_primary: false, active: true)
+      CompanyWorkweek.create!(
+        company: company,
+        starts_on_weekday: 0,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: create(:user, company: company),
+        confirmed_at: Time.current,
+        notes: "Confirmed for import test",
+        effective_on: Date.new(2020, 1, 1)
+      )
       pay_period = create(:pay_period, company: company)
       source = TimeTrackingSource.create!(
         company: company,
@@ -894,6 +944,102 @@ RSpec.describe TimeTracking::ApplyImportService do
       expect do
         described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
       end.to raise_error(ArgumentError, "Only previewed time tracking imports can be applied")
+    end
+
+
+    it "blocks a legacy preview that was not validated under the v1 contract", :unvalidated_preview do
+      company = create(:company)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("legacy-preview"),
+        processed_payload: { "rows" => [] }
+      )
+
+      expect do
+        described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+      end.to raise_error(ArgumentError, /Refresh this time import preview/)
+    end
+
+    it "blocks a preview when the pay period workweek no longer matches its snapshot", :unvalidated_preview do
+      company = create(:company)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("stale-workweek"),
+        processed_payload: { "rows" => [] }
+      )
+      mark_as_validated_preview!(import)
+      replacement = CompanyWorkweek.create!(
+        company: company,
+        starts_on_weekday: 1,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: create(:user, company: company),
+        confirmed_at: Time.current,
+        notes: "Replacement legal workweek",
+        effective_on: pay_period.start_date - 1.day,
+        ends_on: pay_period.start_date - 1.day
+      )
+      pay_period.update!(company_workweek: replacement)
+
+      expect do
+        described_class.new(import: import.reload, mappings: [], applied_by: create(:user, company: company)).call
+      end.to raise_error(ArgumentError, /legal workweek changed/)
+    end
+
+    it "blocks a preview when the workweek timezone changes in place", :unvalidated_preview do
+      company = create(:company)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("stale-workweek-timezone"),
+        processed_payload: { "rows" => [] }
+      )
+      mark_as_validated_preview!(import)
+      pay_period.reload.company_workweek.update!(timezone: "UTC")
+
+      expect do
+        described_class.new(import: import.reload, mappings: [], applied_by: create(:user, company: company)).call
+      end.to raise_error(ArgumentError, /legal workweek changed/)
     end
   end
 end

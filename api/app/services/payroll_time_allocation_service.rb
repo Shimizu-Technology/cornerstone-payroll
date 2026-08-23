@@ -20,6 +20,7 @@ class PayrollTimeAllocationService
   def call!
     profile = @employee.work_profile_on(@pay_period.end_date)
     return preserve_existing_hours!(profile) unless allocatable_profile?(profile)
+    @legal_workweek = legal_workweek!
 
     profiles = profiles_for_full_workweeks
     if profiles.many?
@@ -169,9 +170,23 @@ class PayrollTimeAllocationService
   end
 
   def workweek_start(date)
-    start_weekday = @pay_period.resolved_company_workweek&.starts_on_weekday || 0
+    start_weekday = @legal_workweek.starts_on_weekday
     date = date.to_date
     date - ((date.wday - start_weekday) % 7).days
+  end
+
+  def legal_workweek!
+    workweek = @pay_period.resolved_company_workweek
+    unless workweek&.confirmed?
+      raise Error, "Confirm the legal overtime workweek before calculating salary time"
+    end
+    if workweek.starts_at_minutes.to_i != 0
+      raise Error,
+            "Salary time allocation currently requires a legal workweek that starts at midnight; " \
+            "timestamp-based boundaries are not supported yet"
+    end
+
+    workweek
   end
 
   def eligible_work_date?(date)
@@ -197,7 +212,7 @@ class PayrollTimeAllocationService
       "salary_coverage_reason" => profile.salary_coverage_reason,
       "timekeeping_mode" => profile.timekeeping_mode,
       "daily_schedule" => profile.daily_schedule,
-      "company_workweek_id" => @pay_period.resolved_company_workweek&.id,
+      "company_workweek_id" => @legal_workweek&.id || @pay_period.resolved_company_workweek&.id,
       "ledger_key" => @ledger_key
     }
     snapshot["salary_covered_overtime_hours"] = (allocations&.sum { |row| row[:salary_covered_overtime_hours] } || 0).to_f
