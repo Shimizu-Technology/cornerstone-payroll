@@ -20,6 +20,7 @@ module Api
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs
         ]
+        around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll ]
 
         # GET /api/v1/admin/pay_periods
         def index
@@ -111,7 +112,7 @@ module Api
           end
 
           begin
-            @pay_period.transaction do
+            @pay_period.transaction(requires_new: true) do
               update_attributes = pay_period_params.to_h
               if purpose_fields_submitted?
                 update_attributes["run_purpose_source"] = "operator_selected"
@@ -390,7 +391,7 @@ module Api
               end
 
               # Calculate payroll
-              PayrollItem.transaction do
+              PayrollItem.transaction(requires_new: true) do
                 PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 payroll_item.calculate!
               end
@@ -426,111 +427,25 @@ module Api
 
         # POST /api/v1/admin/pay_periods/:id/approve
         def approve
-          unless @pay_period.calculated?
-            return render json: { error: "Can only approve a calculated pay period" }, status: :unprocessable_entity
-          end
-
-          @pay_period.update!(
-            status: "approved",
-            approved_by_id: current_user_id,
-            approved_at: Time.current
-          )
+          lifecycle_service.approve!
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue PayPeriodLifecycleService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/unapprove
         # Roll back an approved pay period to calculated status.
         def unapprove
-          unless @pay_period.approved?
-            return render json: { error: "Can only unapprove an approved pay period" }, status: :unprocessable_entity
-          end
-
-          @pay_period.update!(
-            status: "calculated",
-            approved_by_id: nil,
-            approved_at: nil,
-            unapproved_at: Time.current,
-            unapproved_by_id: current_user_id
-          )
+          lifecycle_service.unapprove!
           render json: { pay_period: pay_period_json(@pay_period) }
+        rescue PayPeriodLifecycleService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/commit
         # Final lock - no more changes allowed
         def commit
-          unless @pay_period.approved?
-            return render json: { error: "Can only commit an approved pay period" }, status: :unprocessable_entity
-          end
-
-          unless @pay_period.payroll_items.exists?
-            return render json: { error: "Cannot commit pay period with no payroll items" }, status: :unprocessable_entity
-          end
-
-          ActiveRecord::Base.transaction do
-            @pay_period.update!(
-              status: "committed",
-              committed_at: Time.current,
-              committed_by_id: current_user_id
-            )
-            committed_items = @pay_period.payroll_items.includes(
-              :employee,
-              payroll_item_deductions: :deduction_type,
-              employee: { employee_loans: :loan_transactions }
-            ).to_a
-
-            # Preload YTD records to avoid N find_or_create_by calls per item
-            year = @pay_period.pay_date.year
-            employee_ids = committed_items.map(&:employee_id).uniq
-
-            emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
-            employee_ids.each do |eid|
-              emp_ytds[eid] ||= EmployeeYtdTotal.find_or_create_by!(employee_id: eid, year: year)
-            end
-
-            co_ytd = CompanyYtdTotal.find_or_create_by!(company_id: @pay_period.company_id, year: year)
-
-            committed_items.each do |item|
-              PayrollCalculator.for(item.employee, item).apply_loan_payments!
-              emp_ytds[item.employee_id].add_payroll_item!(item)
-              co_ytd.add_payroll_item!(item)
-            end
-
-            PayrollLiabilityPostingService.post!(
-              pay_period: @pay_period,
-              actor: current_user
-            )
-
-            # Auto-assign check numbers to payroll items with positive net pay.
-            # $0 net pay items don't get checks. Uses company-level row lock to prevent collisions.
-            unassigned = committed_items.select { |i| i.check_number.nil? && i.net_pay.to_d > 0 }
-            if unassigned.any?
-              @pay_period.company.assign_check_numbers!(unassigned)
-              record_check_assignment_events!(unassigned.map(&:id))
-            end
-
-            # Auto-create FIT tax deposit check if company setting is enabled
-            if @pay_period.company.auto_create_fit_check?
-              create_fit_tax_deposit_check!(committed_items)
-            end
-
-            # Prepare external tax sync only when the CST ingest integration is configured.
-            tax_sync_enabled = @pay_period.prepare_tax_sync_if_configured!
-
-            # CPR-71: if this is a correction run, write committed audit event atomically
-            if @pay_period.correction_run?
-              PayPeriodCorrectionService.record_correction_committed!(
-                pay_period: @pay_period,
-                actor:      current_user
-              )
-            end
-
-            if tax_sync_enabled
-              ActiveRecord.after_all_transactions_commit do
-                PayrollTaxSyncJob.perform_later(@pay_period.id)
-              end
-            end
-          end
-
+          lifecycle_service.commit!
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodCorrectionService::CorrectionError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -539,6 +454,8 @@ module Api
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
         rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue PayPeriodLifecycleService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -856,6 +773,18 @@ module Api
 
         private
 
+        def with_financial_pay_period_lock
+          @pay_period.with_lock { yield }
+        end
+
+        def lifecycle_service
+          PayPeriodLifecycleService.new(
+            pay_period: @pay_period,
+            actor: current_user,
+            ip_address: request.remote_ip
+          )
+        end
+
         # Strong-params extraction for the corrective-paycheck endpoints'
         # `corrected_inputs` payload.
         #
@@ -897,31 +826,6 @@ module Api
           end
 
           permitted
-        end
-
-        def record_check_assignment_events!(payroll_item_ids)
-          assigned_items = PayrollItem.where(id: payroll_item_ids).where.not(check_number: nil).pluck(:id, :check_number)
-          return if assigned_items.empty?
-
-          now = Time.current
-          actor_id = User.exists?(id: current_user_id) ? current_user_id : nil
-          CheckEvent.insert_all!(
-            assigned_items.map do |item_id, check_number|
-              {
-                payroll_item_id: item_id,
-                user_id: actor_id,
-                event_type: "assigned",
-                check_number: check_number,
-                reason: "Assigned when pay period was committed",
-                ip_address: request.remote_ip,
-                created_at: now,
-                updated_at: now
-              }
-            end
-          )
-        rescue ActiveRecord::StatementInvalid => e
-          Rails.logger.error("record_check_assignment_events! failed: #{e.message}")
-          raise ArgumentError, "An error occurred recording check assignment audit events; the pay period commit was rolled back in full. Please retry committing this pay period."
         end
 
         def create_fit_tax_deposit_check!(items)

@@ -27,7 +27,7 @@ module PayrollIntake
 
           excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-          session.with_lock do
+          session.with_lock(requires_new: true) do
             raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
 
             rows = session.rows.includes(:employee).to_a

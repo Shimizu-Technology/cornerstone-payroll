@@ -6,7 +6,7 @@ module Api
       class TimecardsController < BaseController
         include TrigramMatching
 
-        before_action :set_timecard, only: [:show, :update, :review, :reprocess, :destroy]
+        before_action :set_timecard, only: [ :show, :update, :review, :reprocess, :destroy ]
 
         # GET /api/v1/admin/timecards?pay_period_id=123&status=complete&page=1&per_page=20&search=smith
         def index
@@ -32,8 +32,8 @@ module Api
           total_count = timecards.count
 
           if params[:page].present?
-            page = [params[:page].to_i, 1].max
-            per_page = [params[:per_page].to_i, 1].max.clamp(1, 100)
+            page = [ params[:page].to_i, 1 ].max
+            per_page = [ params[:per_page].to_i, 1 ].max.clamp(1, 100)
             offset = (page - 1) * per_page
 
             ordered = timecards.order(created_at: :desc).offset(offset).limit(per_page)
@@ -44,7 +44,7 @@ module Api
           else
             prioritized = timecards.to_a.sort_by do |tc|
               summary = TimecardOcr::ReviewSummary.build(tc)
-              [summary["priority_rank"], -tc.created_at.to_i]
+              [ summary["priority_rank"], -tc.created_at.to_i ]
             end
 
             render json: prioritized.map { |tc| timecard_json(tc) }
@@ -157,10 +157,6 @@ module Api
             return render json: { error: "Timecard must be reviewed before applying to payroll" }, status: :unprocessable_entity
           end
 
-          unless pay_period.can_edit?
-            return render json: { error: "Cannot apply to a non-draft pay period" }, status: :unprocessable_entity
-          end
-
           employee = find_or_match_employee(timecard)
           unless employee
             return render json: { error: "Could not match timecard employee. Please specify employee_id." }, status: :unprocessable_entity
@@ -171,7 +167,15 @@ module Api
           multi_rate_error = nil
 
           begin
-            ApplicationRecord.transaction do
+            pay_period.with_lock do
+              unless pay_period.can_edit?
+                return render json: { error: "Cannot apply to a non-draft pay period" }, status: :unprocessable_entity
+              end
+
+              if pay_period.pay_period_excluded_employees.exists?(employee_id: employee.id)
+                return render json: { error: "Employee is excluded from this pay period" }, status: :unprocessable_entity
+              end
+
               item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
               if item.new_record?
                 item.company_id = current_company_id

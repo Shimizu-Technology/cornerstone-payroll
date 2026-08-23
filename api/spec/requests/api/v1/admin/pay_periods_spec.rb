@@ -1289,6 +1289,33 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_periods/:id/unapprove" do
+    it "returns an approved pay period to calculated with an audit timestamp" do
+      pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: 1.hour.ago)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to have_attributes(
+        status: "calculated",
+        approved_by_id: nil,
+        approved_at: nil,
+        unapproved_by_id: admin_user.id
+      )
+      expect(pay_period.unapproved_at).to be_present
+    end
+
+    it "cannot unapprove a committed pay period" do
+      pay_period.update!(status: "committed", committed_at: Time.current, committed_by_id: admin_user.id)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove"
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to eq("Can only unapprove an approved pay period")
+      expect(pay_period.reload.status).to eq("committed")
+    end
+  end
+
   describe "POST /api/v1/admin/pay_periods/:id/commit" do
     before do
       pay_period.update!(status: "approved")

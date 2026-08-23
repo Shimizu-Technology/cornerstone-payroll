@@ -6,6 +6,7 @@ module Api
       class PayrollItemsController < BaseController
         before_action :set_pay_period
         before_action :set_payroll_item, only: [ :show, :update, :destroy, :recalculate ]
+        around_action :with_financial_pay_period_lock, only: [ :create, :update, :destroy, :recalculate ]
 
         # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items
         def index
@@ -65,7 +66,7 @@ module Api
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed, ActiveRecord::RecordNotUnique, ActiveRecord::RecordNotFound, ArgumentError => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         # PATCH/PUT /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id
@@ -73,6 +74,7 @@ module Api
           unless @pay_period.can_edit?
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
+          @payroll_item.reload
 
           attrs = payroll_item_params
           wage_rate_hours = attrs.delete(:wage_rate_hours)
@@ -88,7 +90,7 @@ module Api
             render json: { errors: @payroll_item.errors.full_messages }, status: :unprocessable_entity
           end
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         # DELETE /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id
@@ -96,8 +98,9 @@ module Api
           unless @pay_period.can_edit?
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
+          @payroll_item.reload
 
-          ActiveRecord::Base.transaction do
+          ActiveRecord::Base.transaction(requires_new: true) do
             PayPeriodExcludedEmployee.create_or_find_by!(
               pay_period: @pay_period,
               employee: @payroll_item.employee
@@ -110,7 +113,7 @@ module Api
 
           head :no_content
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotDestroyed => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate
@@ -118,6 +121,7 @@ module Api
           unless @pay_period.can_edit?
             return render json: { error: "Cannot modify a committed pay period" }, status: :unprocessable_entity
           end
+          @payroll_item.reload
 
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee)
           @payroll_item.employment_type = @payroll_item.employee.employment_type
@@ -125,13 +129,17 @@ module Api
           calculate_with_timekeeping!(@payroll_item)
           render json: { payroll_item: payroll_item_json(@payroll_item) }
         rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, ActiveRecord::RecordNotUnique, ArgumentError => e
-          render json: { errors: [e.message] }, status: :unprocessable_entity
+          render json: { errors: [ e.message ] }, status: :unprocessable_entity
         end
 
         private
 
+        def with_financial_pay_period_lock
+          @pay_period.with_lock { yield }
+        end
+
         def calculate_with_timekeeping!(payroll_item)
-          PayrollItem.transaction do
+          PayrollItem.transaction(requires_new: true) do
             PayrollTimeAllocationService.call!(payroll_item: payroll_item)
             payroll_item.calculate!
           end
@@ -239,7 +247,7 @@ module Api
         def save_payroll_item_and_clear_exclusion(payroll_item, employee)
           return false unless payroll_item.valid?
 
-          ActiveRecord::Base.transaction do
+          ActiveRecord::Base.transaction(requires_new: true) do
             payroll_item.save!
             @pay_period.pay_period_excluded_employees.where(employee_id: employee.id).find_each(&:destroy!)
           end
