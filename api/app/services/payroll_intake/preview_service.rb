@@ -28,6 +28,8 @@ module PayrollIntake
       raise ArgumentError, "Payroll intake source is not enabled for this company" unless company.payroll_intake_source_enabled?(source_type)
       raise ArgumentError, "Paste text or upload at least one source file" if pasted_text.blank? && files.empty?
 
+      capture_workweek_evidence!
+
       snapshot_files!
       duplicate = existing_duplicate_session
       return duplicate_session_result(duplicate) if duplicate
@@ -45,6 +47,7 @@ module PayrollIntake
           source_label: adapter_class::SOURCE_LABEL,
           import_hash: import_hash,
           parser_version: adapter_class::PARSER_VERSION,
+          evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence),
           status: "draft",
           created_by: actor
         )
@@ -101,6 +104,8 @@ module PayrollIntake
         digest << "\n"
         digest << adapter_class::PARSER_VERSION
         digest << "\n"
+        digest << JSON.generate(workweek_evidence)
+        digest << "\n"
         digest << pasted_text.strip
         file_snapshots.each do |snapshot|
           digest << "\n--file--\n"
@@ -139,6 +144,14 @@ module PayrollIntake
       end
 
       normalized.merge(warnings: warnings)
+    end
+
+    def capture_workweek_evidence!
+      @workweek_evidence = PayrollIntake::WorkweekEvidence.new(pay_period: pay_period).capture!
+    end
+
+    def workweek_evidence
+      @workweek_evidence || capture_workweek_evidence!
     end
 
     def build_document_attributes

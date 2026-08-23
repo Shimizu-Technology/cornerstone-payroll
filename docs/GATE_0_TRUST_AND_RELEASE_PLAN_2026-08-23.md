@@ -41,9 +41,9 @@ Gate 0 closes only when:
 | G0-07 | Commit checks stale state before its transaction and does not lock the pay period | Concurrent requests can duplicate YTD/loan effects | Lock and revalidate; prove exactly-once outcomes with PostgreSQL concurrency tests | Code closed in PR #126; `main` green |
 | G0-08 | Approve, unapprove, calculation, item mutation, imports, and commit do not share one lifecycle lock boundary | A committed run can race back to editable state or be mutated during commit | Lock every financial transition/mutation in a consistent order | Code closed in PR #126; `main` green |
 | G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Code closed in PR #127; `main` green |
-| G0-10 | Imported overtime uses a hard-coded Sunday week and can preserve source splits | Payroll is not reliably the legal overtime authority | Use the pay period's confirmed workweek and calculate the paid split in Payroll | Implementation in progress |
-| G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Implementation in progress |
-| G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Implementation in progress |
+| G0-10 | Imported overtime uses a hard-coded Sunday week and can preserve source splits | Payroll is not reliably the legal overtime authority | Use the pay period's confirmed workweek and calculate the paid split in Payroll | Code closed in PR #128; `main` green |
+| G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Code closed in PR #128; `main` green |
+| G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Code closed in PR #128; `main` green |
 | G0-13 | OCR apply can recreate an employee excluded from a pay period | Explicit operator exclusion can be bypassed | Share the same exclusion guard across all import paths | Code closed in PR #126; `main` green |
 | G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Open |
 | G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Open |
@@ -52,7 +52,8 @@ Gate 0 closes only when:
 | G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Open |
 | G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | Open |
 | G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Open |
-| G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Open |
+| G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Implemented in PR #129; review and `main` verification pending |
+| G0-22 | Cornerstone Tax and AIRE frontend dependency audits report direct and transitive vulnerabilities, including critical/high findings | A companion application can remain an insecure production dependency even while Payroll itself is green | Upgrade to audit-clean compatible dependency sets; run each app's complete frontend/runtime gate; retain current-head review and post-merge evidence | Open |
 
 ## Delivery sequence
 
@@ -72,7 +73,8 @@ Each row is a coherent PR or small PR group. A later group branches from updated
 5. **Client portal data and approval boundary**
    - G0-14 and G0-15.
 6. **Cornerstone Tax fail-closed authentication**
-   - G0-16 in the Cornerstone Tax repository.
+   - G0-16 and the Cornerstone Tax portion of G0-22 in the Cornerstone Tax repository.
+   - Close the AIRE portion of G0-22 in its own repository before calling the companion boundary secure.
 7. **Deterministic browser and production-shaped verification**
    - G0-17 and G0-18.
 8. **Operational readiness and role certification**
@@ -173,3 +175,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | G0-03–G0-06 | #125 | `24b5c77` | Yes | `main` Quality run 32616646822 passed | Greptile 5/5 on head `cb20bed`; revocation is enforced at HTTP, Cable connection, retryable disconnect, and final broadcast delivery boundaries |
 | G0-07, G0-08, G0-13 | #126 | `b915fa3` | Yes | `main` Quality run 32618765810 passed | Greptile 5/5 on head `7ac5387`; deterministic PostgreSQL races cover lifecycle, check-number, YTD, and loan lock order |
 | G0-09 | #127 | `d7db0b8` | Yes | `main` Quality run 32621927046 passed | Greptile 5/5 on head `76f7a42`; DNS, connection fallback, and all request attempts share bounded trust rules without replaying the export request |
+| G0-10–G0-12 | #128 | `3b9a822` | Yes | `main` Quality run 32625636302 passed | Greptile 5/5 on head `24fbc29`; AIRE PR #74 (`f5186ad`) and Cornerstone Tax PR #52 (`ea7edc1`) emit complete Time Summary v1 day coverage before Payroll enforces it |

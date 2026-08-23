@@ -90,7 +90,8 @@ function severityVariant(severity?: string) {
 function readinessBadge(row: EditableRow) {
   if (!row.include) return <Badge variant="outline">Skipped</Badge>;
   if (!row.employee_id) return <Badge variant="danger">Needs match</Badge>;
-  if ((row.errors || []).length > 0 || (row.warnings || []).length > 0) return <Badge variant="warning">Review</Badge>;
+  if ((row.errors || []).length > 0) return <Badge variant="danger">Blocked</Badge>;
+  if ((row.warnings || []).length > 0) return <Badge variant="warning">Review</Badge>;
   return <Badge variant="success">Ready</Badge>;
 }
 
@@ -146,10 +147,11 @@ export function PayrollIntakeImportModal({
     });
     return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([employeeId]) => employeeId));
   }, [rows]);
-  const hasWarnings = includedRows.some((row) => (row.warnings || []).length > 0 || (row.errors || []).length > 0) || (importData?.warnings || []).length > 0;
+  const hasWarnings = includedRows.some((row) => (row.warnings || []).length > 0) || (importData?.warnings || []).length > 0;
+  const hasBlockingRowErrors = includedRows.some((row) => (row.errors || []).length > 0);
   const hasBlockingMissingMatches = includedRows.some((row) => !row.employee_id);
   const hasDuplicateEmployeeMappings = duplicateEmployeeIds.size > 0;
-  const canApply = includedRows.length > 0 && !hasBlockingMissingMatches && !hasDuplicateEmployeeMappings && (!hasWarnings || acknowledgeWarnings);
+  const canApply = includedRows.length > 0 && !hasBlockingMissingMatches && !hasDuplicateEmployeeMappings && !hasBlockingRowErrors && (!hasWarnings || acknowledgeWarnings);
 
   const reset = () => {
     setStep('upload');
@@ -218,6 +220,24 @@ export function PayrollIntakeImportModal({
       const next = { ...row, [key]: Math.max(0, value) };
       const totalTips = toNumber(next.week1_tips) + toNumber(next.week2_tips);
       return normalizeRow({ ...next, reported_tips: totalTips, tips_paid_out: totalTips });
+    }));
+  };
+
+  const updateWeekHours = (rowId: number, key: 'week1_hours' | 'week2_hours', value: number): void => {
+    setRows((current) => current.map((row) => {
+      if (row.id !== rowId) return row;
+
+      const next = { ...row, [key]: Math.max(0, value) };
+      const week1 = toNumber(next.week1_hours);
+      const week2 = toNumber(next.week2_hours);
+      const regularHours = Math.min(week1, 40) + Math.min(week2, 40);
+      const overtimeHours = Math.max(week1 - 40, 0) + Math.max(week2 - 40, 0);
+      const sourceTotal = toNumber(row.extracted_total_hours);
+      const weeklyTotalMatches = Math.abs((week1 + week2) - sourceTotal) <= 0.01;
+      const errors = (row.errors || []).filter((entry) => (
+        !['weekly_hours_required', 'incomplete_weekly_hours'].includes(entry.code) || !weeklyTotalMatches
+      ));
+      return normalizeRow({ ...next, regular_hours: regularHours, overtime_hours: overtimeHours, errors });
     }));
   };
 
@@ -519,7 +539,9 @@ export function PayrollIntakeImportModal({
                   <TableRow>
                     <TableHead className="w-10">Use</TableHead>
                     <TableHead className="min-w-[220px]">Source / Employee</TableHead>
-                    <TableHead className="min-w-[130px] text-right">Hours</TableHead>
+                    <TableHead className="min-w-[120px] text-right">Week 1</TableHead>
+                    <TableHead className="min-w-[120px] text-right">Week 2</TableHead>
+                    <TableHead className="min-w-[130px] text-right">Regular</TableHead>
                     <TableHead className="min-w-[120px] text-right">OT</TableHead>
                     <TableHead className="min-w-[130px] text-right">W1 Tips</TableHead>
                     <TableHead className="min-w-[130px] text-right">W2 Tips</TableHead>
@@ -567,8 +589,10 @@ export function PayrollIntakeImportModal({
                           ))}
                         </div>
                       </TableCell>
-                      <NumericCell value={row.regular_hours} onChange={(value) => updateRow(row.id, { regular_hours: value ?? 0 })} />
-                      <NumericCell value={row.overtime_hours} onChange={(value) => updateRow(row.id, { overtime_hours: value ?? 0 })} />
+                      <NumericCell value={row.week1_hours} onChange={(value) => updateWeekHours(row.id, 'week1_hours', value ?? 0)} />
+                      <NumericCell value={row.week2_hours} onChange={(value) => updateWeekHours(row.id, 'week2_hours', value ?? 0)} />
+                      <TableCell className="text-right font-mono">{toNumber(row.regular_hours).toFixed(2)}</TableCell>
+                      <TableCell className="text-right font-mono">{toNumber(row.overtime_hours).toFixed(2)}</TableCell>
                       <NumericCell value={row.week1_tips} onChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} money />
                       <NumericCell value={row.week2_tips} onChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} money />
                       <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
@@ -587,7 +611,7 @@ export function PayrollIntakeImportModal({
                   onChange={(event) => setAcknowledgeWarnings(event.target.checked)}
                   className="mt-0.5 rounded border-warning-300"
                 />
-                <span>I reviewed the highlighted warnings/errors and confirmed the rows are ready to apply.</span>
+                <span>I reviewed the highlighted warnings and confirmed the rows are ready to apply.</span>
               </label>
             )}
 
@@ -640,10 +664,14 @@ export function PayrollIntakeImportModal({
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>Back</Button>
-              {!canApply && (hasBlockingMissingMatches || hasDuplicateEmployeeMappings) && (
+              {!canApply && (hasBlockingMissingMatches || hasDuplicateEmployeeMappings || hasBlockingRowErrors) && (
                 <span className="mr-auto flex items-center gap-2 text-sm text-danger-600">
                   <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                  {hasBlockingMissingMatches ? 'Match all included rows.' : 'Each included row must map to a different employee.'}
+                  {hasBlockingMissingMatches
+                    ? 'Match all included rows.'
+                    : hasDuplicateEmployeeMappings
+                      ? 'Each included row must map to a different employee.'
+                      : 'Resolve all blocked row errors before applying.'}
                 </span>
               )}
               <Button onClick={handleApply} disabled={!canApply}>Apply Reviewed Rows</Button>

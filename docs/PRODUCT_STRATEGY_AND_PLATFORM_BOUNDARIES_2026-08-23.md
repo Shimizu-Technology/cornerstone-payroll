@@ -75,7 +75,7 @@ This runtime separation is sound. Gate 0 found that the original contract was no
 - the configurable workweek start time is not implemented by the date-only allocation model; and
 - the connection URL could expose the integration secret through unsafe outbound requests.
 
-The destination boundary was code-closed in PR #127. The workweek, overtime, reconciliation, and versioned-contract changes remain in progress until their PR is merged and `main` is green. The separate Spike email/OCR payroll-intake adapter uses a different, less detailed evidence model and remains tracked as G0-21; the Time Summary contract does not certify it.
+The destination boundary was code-closed in PR #127. PR #128 then made Payroll authoritative for the legal workweek and paid overtime split, blocked unsupported non-midnight semantics, and added strict Time Summary v1 reconciliation after AIRE PR #74 and Cornerstone Tax PR #52 made both producers emit complete date coverage. The separate Spike email/OCR payroll-intake adapter uses a different, less detailed evidence model and remains tracked as G0-21; the Time Summary contract does not certify it.
 
 ## Market categories
 
