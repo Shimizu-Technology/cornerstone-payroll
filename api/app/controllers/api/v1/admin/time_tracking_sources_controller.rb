@@ -4,6 +4,7 @@ module Api
   module V1
     module Admin
       class TimeTrackingSourcesController < BaseController
+        before_action :require_admin!, except: [ :index, :show ]
         before_action :set_source, only: [ :show, :update, :destroy, :test_connection ]
         before_action :disable_http_caching
 

@@ -248,16 +248,18 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         href: '/payroll-fields',
       });
 
-      add({
-        id: 'time-tracking-sources',
-        label: 'Time Tracking Sources',
-        description: 'Configure external time tracking import sources.',
-        group: 'Settings',
-        keywords: ['time tracking', 'integrations'],
-        icon: <Link2 className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/time-tracking-sources',
-      });
+      if (isAdmin) {
+        add({
+          id: 'time-tracking-sources',
+          label: 'Time Tracking Sources',
+          description: 'Configure external time tracking import sources.',
+          group: 'Settings',
+          keywords: ['time tracking', 'integrations'],
+          icon: <Link2 className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/time-tracking-sources',
+        });
+      }
 
       add({
         id: 'client-documents-admin',

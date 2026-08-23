@@ -20,6 +20,9 @@ namespace :production do
         "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ACCOUNT_ID", "R2_BUCKET_NAME"
       ).all?(&:present?),
       "email delivery is configured" => ENV.values_at("RESEND_API_KEY", "MAILER_FROM_EMAIL").all?(&:present?),
+      "time tracking destinations are allowlisted" => TimeTracking::DestinationPolicy.production_configuration_valid?(
+        sources: TimeTrackingSource.active.to_a
+      ),
       "Active Record encryption is configured" => ActiveRecordEncryptionConfiguration.configured?(
         Rails.application.config.active_record.encryption
       )
