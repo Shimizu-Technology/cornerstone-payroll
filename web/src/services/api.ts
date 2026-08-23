@@ -935,9 +935,9 @@ export const payPeriodsApi = {
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`
     ),
-  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string }) =>
+  create: (data: { start_date: string; end_date: string; pay_date: string; notes?: string; starting_check_number?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean }) =>
     api.post<PayPeriodResponse>('/admin/pay_periods', { pay_period: data }),
-  update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string }) =>
+  update: (id: number, data: { start_date?: string; end_date?: string; pay_date?: string; notes?: string; run_purpose?: import('@/types').PayRunPurpose; includes_base_salary?: boolean }) =>
     api.patch<PayPeriodResponse>(`/admin/pay_periods/${id}`, { pay_period: data }),
   delete: (id: number) =>
     api.delete<void>(`/admin/pay_periods/${id}`),
@@ -2505,6 +2505,55 @@ export const companiesApi = {
       api.setActiveCompanyId(parseInt(stored, 10));
     }
   },
+};
+
+export type ScheduleSource = 'operator_confirmed' | 'production_inferred' | 'legacy_system_default';
+export type ScheduleConfirmationStatus = 'confirmed' | 'needs_confirmation';
+
+export interface CompanyPayScheduleSetting {
+  id?: number;
+  frequency: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
+  period_rule: 'manual' | 'weekly' | 'biweekly' | 'semimonthly';
+  period_start_weekday?: number | null;
+  period_anchor_date?: string | null;
+  pay_date_rule: 'manual' | 'days_after_period_end';
+  pay_date_offset_days?: number | null;
+  timezone: string;
+  source: ScheduleSource;
+  confirmation_status: ScheduleConfirmationStatus;
+  confirmed_at?: string | null;
+  effective_on: string;
+  ends_on?: string | null;
+  notes?: string | null;
+}
+
+export interface CompanyWorkweekSetting {
+  id?: number;
+  starts_on_weekday: number;
+  starts_at_minutes: number;
+  timezone: string;
+  source: ScheduleSource;
+  confirmation_status: ScheduleConfirmationStatus;
+  confirmed_at?: string | null;
+  effective_on: string;
+  ends_on?: string | null;
+  notes?: string | null;
+}
+
+export interface PayScheduleSettingsResponse {
+  pay_schedule_settings: {
+    pay_schedule: CompanyPayScheduleSetting;
+    workweek: CompanyWorkweekSetting;
+  };
+}
+
+export const payScheduleSettingsApi = {
+  get: () => api.get<PayScheduleSettingsResponse>('/admin/pay_schedule_settings'),
+  update: (data: {
+    effective_on: string;
+    pay_schedule: Pick<CompanyPayScheduleSetting, 'frequency' | 'period_rule' | 'period_start_weekday' | 'period_anchor_date' | 'pay_date_rule' | 'pay_date_offset_days' | 'timezone' | 'notes'>;
+    workweek: Pick<CompanyWorkweekSetting, 'starts_on_weekday' | 'starts_at_minutes' | 'timezone' | 'notes'>;
+  }) => api.put<PayScheduleSettingsResponse>('/admin/pay_schedule_settings', { pay_schedule_settings: data }),
 };
 
 // Initialize from localStorage on module load

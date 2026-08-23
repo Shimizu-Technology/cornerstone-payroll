@@ -35,6 +35,7 @@ const InvoiceMaker = lazy(() => import('@/pages/InvoiceMaker').then((module) => 
 const InvoiceCenter = lazy(() => import('@/pages/InvoiceCenter').then((module) => ({ default: module.InvoiceCenter })));
 const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
+const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
@@ -300,6 +301,7 @@ function AppRoutes() {
         <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
         <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
         <Route path="time-tracking-sources" element={<StaffOnlyRoute><TimeTrackingSources /></StaffOnlyRoute>} />
+        <Route path="pay-schedule-settings" element={<StaffOnlyRoute><PayScheduleSettings /></StaffOnlyRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>
 

@@ -205,6 +205,17 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       }
 
       add({
+        id: 'pay-schedule-settings',
+        label: 'Pay Schedule',
+        description: 'Confirm payroll cadence and the legal overtime workweek.',
+        group: 'Settings',
+        keywords: ['pay schedule', 'workweek', 'frequency', 'pay date'],
+        icon: <CalendarDays className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/pay-schedule-settings',
+      });
+
+      add({
         id: 'check-settings',
         label: 'Check Settings',
         description: 'Adjust check stock, printer profiles, and check layout.',

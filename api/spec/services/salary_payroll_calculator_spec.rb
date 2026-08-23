@@ -49,4 +49,15 @@ RSpec.describe SalaryPayrollCalculator do
     expect(payroll_item.medicare_tax).to be_positive
     expect(payroll_item.additional_medicare_tax).to be_positive
   end
+
+  it "never adds base salary to an off-cycle tips run" do
+    pay_period.update!(run_purpose: "off_cycle_tips", includes_base_salary: false)
+    payroll_item.update!(reported_tips: 125.00, service_charge_wages: 0, salary_override: 500.00)
+
+    payroll_item.calculate!
+
+    expect(payroll_item.reload.gross_pay).to eq(125.00)
+    expect(payroll_item.payroll_item_earnings.where(category: "salary")).to be_empty
+    expect(payroll_item.payroll_item_earnings.find_by(category: "tips").amount).to eq(125.00)
+  end
 end
