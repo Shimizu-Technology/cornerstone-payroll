@@ -208,7 +208,7 @@ RSpec.describe TimeTracking::Client do
       }
     end
 
-    it "falls back to another inspected address only when connection establishment fails" do
+    it "tries every inspected address until one establishes a connection" do
       source = TimeTrackingSource.create!(
         company: create(:company),
         name: "Multi-address Source",
@@ -218,24 +218,26 @@ RSpec.describe TimeTracking::Client do
       )
       policy = TimeTracking::DestinationPolicy.new(
         environment: "test",
-        resolver: ->(_host) { [ "8.8.4.4", "8.8.8.8" ] }
+        resolver: ->(_host) { [ "8.8.4.1", "8.8.4.2", "8.8.4.3", "8.8.4.4", "8.8.8.8" ] }
       )
-      first_http = instance_double(Net::HTTP)
-      second_http = instance_double(Net::HTTP)
+      failed_http_clients = 4.times.map { instance_double(Net::HTTP) }
+      successful_http = instance_double(Net::HTTP)
       response = Net::HTTPOK.new("1.1", "200", "OK")
       response["Content-Type"] = "application/json"
       allow(response).to receive(:read_body).and_yield('{"employees":[]}')
-      configure_http_double(first_http, pinned_ip: "8.8.4.4", start_error: Errno::ECONNREFUSED.new)
-      configure_http_double(second_http, pinned_ip: "8.8.8.8", response: response)
+      failed_http_clients.each_with_index do |http, index|
+        configure_http_double(http, pinned_ip: "8.8.4.#{index + 1}", start_error: Errno::ECONNREFUSED.new)
+      end
+      configure_http_double(successful_http, pinned_ip: "8.8.8.8", response: response)
       http_factory = instance_double(Proc)
-      allow(http_factory).to receive(:call).and_return(first_http, second_http)
+      allow(http_factory).to receive(:call).and_return(*failed_http_clients, successful_http)
 
       payload = client_for(source, policy: policy, http_factory: http_factory)
         .time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
 
       expect(payload["employees"]).to eq([])
-      expect(first_http).not_to have_received(:request)
-      expect(second_http).to have_received(:request).once
+      failed_http_clients.each { |http| expect(http).not_to have_received(:request) }
+      expect(successful_http).to have_received(:request).once
     end
 
     it "does not retry another address after a request begins" do

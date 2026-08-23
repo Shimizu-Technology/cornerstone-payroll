@@ -11,7 +11,6 @@ module TimeTracking
     READ_TIMEOUT_SECONDS = 15
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
-    MAX_CONNECTION_ATTEMPTS = 4
 
     def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil)
       @source = source
@@ -67,7 +66,7 @@ module TimeTracking
     def perform_request(uri, request, pinned_ips)
       last_connection_error = nil
 
-      pinned_ips.first(MAX_CONNECTION_ATTEMPTS).each do |pinned_ip|
+      pinned_ips.each do |pinned_ip|
         http = build_http(uri, pinned_ip)
         begin
           http.start
