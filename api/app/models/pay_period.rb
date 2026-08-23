@@ -163,6 +163,10 @@ class PayPeriod < ApplicationRecord
     run_purpose == "regular"
   end
 
+  def off_cycle_tips_run?
+    run_purpose == "off_cycle_tips"
+  end
+
   def resolved_company_workweek
     company_workweek || CompanyWorkweek.for_date(company_id, start_date)
   end

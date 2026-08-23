@@ -97,7 +97,6 @@ module Api
             :ssn,
             :date_of_birth,
             :hire_date,
-            :termination_date,
             :department_id,
             :job_title,
             :employment_type,
@@ -128,7 +127,6 @@ module Api
             :state,
             :zip,
             :phone,
-            :status,
             default_custom_earnings: [ :label, :amount ],
             default_payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ],
             wage_rates: [ :id, :label, :rate, :is_primary, :active ]

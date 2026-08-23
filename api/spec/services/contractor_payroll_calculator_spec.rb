@@ -43,6 +43,17 @@ RSpec.describe ContractorPayrollCalculator do
     expect(payroll_item.medicare_tax).to eq(0.00)
   end
 
+  it "does not repeat an automatic flat fee in a tips-only run" do
+    employee.update!(contractor_pay_type: "flat_fee", pay_rate: 3_000)
+    pay_period.update!(run_purpose: "off_cycle_tips", includes_base_salary: false)
+    payroll_item.update!(pay_rate: 3_000, hours_worked: 0)
+
+    payroll_item.calculate!
+
+    expect(payroll_item.reload).to have_attributes(gross_pay: 0.to_d, net_pay: 0.to_d)
+    expect(payroll_item.payroll_item_earnings.where(category: "contract_fee")).to be_empty
+  end
+
   it "records employer contribution payroll field entries without reducing contractor net pay" do
     contribution_field = PayrollFieldDefinition.create!(
       company: company,

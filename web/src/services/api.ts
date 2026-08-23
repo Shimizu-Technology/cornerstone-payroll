@@ -368,10 +368,20 @@ export const employeesApi = {
     api.post<{ data: Employee }>('/admin/employees', { employee: data }),
   update: (id: number, data: Partial<EmployeeFormData>) =>
     api.patch<{ data: Employee }>(`/admin/employees/${id}`, { employee: data }),
-  delete: (id: number) =>
-    api.delete<void>(`/admin/employees/${id}`),
-  reactivate: (id: number) =>
-    api.post<{ data: Employee }>(`/admin/employees/${id}/reactivate`),
+  terminate: (id: number, termination: import('@/types').EmployeeTerminationInput) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/terminate`, { termination }),
+  reactivate: (id: number, reactivation: import('@/types').EmployeeReactivationInput) =>
+    api.post<{ data: Employee }>(`/admin/employees/${id}/reactivate`, { reactivation }),
+  workProfiles: (id: number) =>
+    api.get<{ data: import('@/types').EmployeeWorkProfile[] }>(`/admin/employees/${id}/work_profiles`),
+  createWorkProfile: (id: number, work_profile: import('@/types').EmployeeWorkProfileInput) =>
+    api.post<{ data: import('@/types').EmployeeWorkProfile }>(`/admin/employees/${id}/work_profiles`, { work_profile }),
+  timeRecords: (id: number, params?: { start_date?: string; end_date?: string }) =>
+    api.get<{ data: import('@/types').DailyTimeRecord[] }>(`/admin/employees/${id}/time_records`, params),
+  createTimeRecord: (id: number, time_record: import('@/types').DailyTimeRecordInput) =>
+    api.post<{ data: import('@/types').DailyTimeRecord }>(`/admin/employees/${id}/time_records`, { time_record }),
+  updateTimeRecord: (employeeId: number, recordId: number, time_record: import('@/types').DailyTimeRecordInput) =>
+    api.patch<{ data: import('@/types').DailyTimeRecord }>(`/admin/employees/${employeeId}/time_records/${recordId}`, { time_record }),
   transitionTaxClassification: (id: number, transition: EmployeeClassificationTransition) =>
     api.post<{ data: Employee; previous_employee: { id: number; name: string }; message: string }>(
       `/admin/employees/${id}/transition_tax_classification`,

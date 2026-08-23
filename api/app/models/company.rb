@@ -15,6 +15,10 @@ class Company < ApplicationRecord
   has_many :pay_periods, dependent: :destroy
   has_many :company_pay_schedules, dependent: :restrict_with_error
   has_many :company_workweeks, dependent: :restrict_with_error
+  has_many :employee_work_profiles, dependent: :restrict_with_error
+  has_many :employee_status_events, dependent: :restrict_with_error
+  has_many :daily_time_records, dependent: :restrict_with_error
+  has_many :payroll_time_allocations, dependent: :restrict_with_error
   has_many :payroll_items, dependent: :restrict_with_error
   has_many :payroll_field_definitions, dependent: :destroy
   has_many :deduction_types, dependent: :destroy

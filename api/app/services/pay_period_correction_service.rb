@@ -235,6 +235,7 @@ class PayPeriodCorrectionService
         employee_id:              source_item.employee_id,
         employment_type:          source_item.employment_type,
         pay_rate:                 source_item.pay_rate,
+        scheduled_hours:          source_item.scheduled_hours,
         hours_worked:             source_item.hours_worked,
         overtime_hours:           source_item.overtime_hours,
         holiday_hours:            source_item.holiday_hours,
@@ -249,7 +250,9 @@ class PayPeriodCorrectionService
         withholding_tax_adjustment: source_item.withholding_tax_adjustment,
         withholding_tax_override: source_item.withholding_tax_override,
         import_source:            source_item.import_source,
-        custom_columns_data:      source_item.custom_columns_data
+        custom_columns_data:      source_item.custom_columns_data,
+        timekeeping_source:       "correction_reference",
+        timekeeping_context_snapshot: source_item.timekeeping_context_snapshot
         # Calculated fields (gross_pay, taxes, etc.) start at zero —
         # operator must run Calculate Payroll to recompute.
       )

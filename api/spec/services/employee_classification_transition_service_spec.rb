@@ -70,6 +70,7 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
       "previous_employee_id" => contractor.id,
       "historical_payroll_preserved" => true
     )
+    expect(contractor.employee_status_events).to be_empty
   end
 
   it "requires a super admin" do

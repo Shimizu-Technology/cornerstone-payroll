@@ -2,7 +2,7 @@
 
 # Calculator for salary employees
 #
-# Gross pay = base_salary + tips + bonus
+# Gross pay = base_salary + nonexempt salary overtime + tips + bonus
 #
 # base_salary is determined by salary_type:
 #   annual     → pay_rate / periods_per_year
@@ -65,14 +65,19 @@ class SalaryPayrollCalculator < PayrollCalculator
     @tips_amount = payroll_item.reported_tips.to_f
     @bonus_amount = payroll_item.bonus.to_f
     @custom_earnings_amount = custom_earnings_total
+    @overtime_pay = payroll_item.salary_overtime_pay
 
-    payroll_item.gross_pay = (@base_pay + @tips_amount + @bonus_amount + @custom_earnings_amount + payroll_item.service_charge_wages.to_f).round(2)
+    payroll_item.gross_pay = (@base_pay + @overtime_pay + @tips_amount + @bonus_amount + @custom_earnings_amount + payroll_item.service_charge_wages.to_f).round(2)
   end
 
   def record_earnings_breakdown
     payroll_item.payroll_item_earnings.clear
 
     build_earning("salary", "Salary", nil, nil, @base_pay) if @base_pay > 0
+    if @overtime_pay.to_f > 0
+      overtime_rate = @overtime_pay.to_f / payroll_item.overtime_hours.to_f
+      build_earning("overtime", "Salary Overtime", payroll_item.overtime_hours, overtime_rate, @overtime_pay)
+    end
     build_earning("tips", "Tips", nil, nil, @tips_amount) if @tips_amount > 0
     build_earning("service_charge", "Service Charges", nil, nil, payroll_item.service_charge_wages) if payroll_item.service_charge_wages.to_f > 0
     build_earning("bonus", "Bonus", nil, nil, @bonus_amount) if @bonus_amount > 0

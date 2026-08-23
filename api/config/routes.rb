@@ -127,9 +127,12 @@ Rails.application.routes.draw do
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
           member do
+            post :terminate
             post :reactivate
             post :transition_tax_classification
           end
+          resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
+          resources :time_records, only: [ :index, :create, :update ], controller: :employee_time_records
           resources :payroll_fields, only: [ :index, :create, :update, :destroy ], controller: :employee_payroll_fields do
             collection do
               post :bulk_update
