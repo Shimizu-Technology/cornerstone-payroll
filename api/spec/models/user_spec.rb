@@ -127,20 +127,20 @@ RSpec.describe User, type: :model do
 
     it "disconnects existing cable sessions after deactivation commits" do
       user = create(:user, company: company, organization: organization)
-      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+      allow(RevokePayrollAccessJob).to receive(:perform_later)
 
       user.update!(active: false)
 
-      expect(PayrollAccess::SessionRevoker).to have_received(:disconnect_user).with(user)
+      expect(RevokePayrollAccessJob).to have_received(:perform_later).with(user.id)
     end
 
     it "does not disconnect sessions for unrelated user updates" do
       user = create(:user, company: company, organization: organization)
-      allow(PayrollAccess::SessionRevoker).to receive(:disconnect_user)
+      allow(RevokePayrollAccessJob).to receive(:perform_later)
 
       user.update!(name: "Updated Name")
 
-      expect(PayrollAccess::SessionRevoker).not_to have_received(:disconnect_user)
+      expect(RevokePayrollAccessJob).not_to have_received(:perform_later)
     end
   end
 end
