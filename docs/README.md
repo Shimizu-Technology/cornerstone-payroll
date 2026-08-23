@@ -22,6 +22,7 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 - [Product strategy and platform boundaries](PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md) — product position, module ownership, packaging, and accounting decision boundary.
 - [Gate 0 trust and release plan](GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md) — verified release blockers, PR sequence, acceptance criteria, and operational evidence.
+- [Deterministic payroll release lane](DETERMINISTIC_RELEASE_LANE.md) — disposable full-stack browser fixture, deidentified PDF corpus, commands, and evidence rules.
 - [Time Summary v1 contract](TIME_TRACKING_V1_CONTRACT.md) — normative Workforce/Tax-to-Payroll payload, authority boundary, reconciliation rules, and versioning policy.
 - [Payroll, QuickBooks, and compliance master plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md) — payroll parity and compliance roadmap after Gate 0.
 - [Production readiness checklist](PRODUCTION_READINESS_CHECKLIST.md) — environment-specific evidence and release signoff.

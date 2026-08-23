@@ -368,9 +368,48 @@ RSpec.describe "Clerk Authentication", type: :request do
       allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(true)
     end
 
+    around do |example|
+      original_e2e_test_mode = ENV["E2E_TEST_MODE"]
+      example.run
+    ensure
+      ENV["E2E_TEST_MODE"] = original_e2e_test_mode
+    end
+
     it "allows requests when AUTH_ENABLED is false" do
+      user
+
       get "/api/v1/admin/employees"
       expect(response).not_to have_http_status(:unauthorized)
+    end
+
+    it "ignores the test identity header unless the explicit test mode is enabled" do
+      user
+      client = create(:user, company: company, organization: organization, role: "client")
+      ENV.delete("E2E_TEST_MODE")
+
+      get "/api/v1/admin/employees", headers: { "X-E2E-User-Email" => client.email }
+
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "selects a scoped test identity only in test mode" do
+      user
+      client = create(:user, company: company, organization: organization, role: "client")
+      ENV["E2E_TEST_MODE"] = "true"
+
+      get "/api/v1/admin/employees", headers: { "X-E2E-User-Email" => client.email }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Staff access required")
+    end
+
+    it "does not let the test identity header reactivate an inactive account" do
+      inactive_user = create(:user, company: company, organization: organization, active: false)
+      ENV["E2E_TEST_MODE"] = "true"
+
+      get "/api/v1/auth/me", headers: { "X-E2E-User-Email" => inactive_user.email }
+
+      expect(response).to have_http_status(:unauthorized)
     end
   end
 end

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class ApplicationController < ActionController::API
+  E2E_USER_EMAIL_HEADER = "X-E2E-User-Email"
+
   include ClerkAuthenticatable
 
   around_action :reset_current_context, prepend: true
@@ -67,9 +69,19 @@ class ApplicationController < ActionController::API
     return super unless auth_disabled?
 
     @current_user ||= begin
-      preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).find(&:payroll_access_allowed?)
-      preferred || User.includes(:organization).find(&:payroll_access_allowed?)
+      if e2e_test_identity_requested?
+        candidate = User.includes(:organization)
+                        .find_by(email: request.headers[E2E_USER_EMAIL_HEADER].to_s.downcase)
+        candidate if candidate&.payroll_access_allowed?
+      else
+        preferred = User.includes(:organization).where(role: %w[super_admin admin org_admin]).find(&:payroll_access_allowed?)
+        preferred || User.includes(:organization).find(&:payroll_access_allowed?)
+      end
     end
+  end
+
+  def e2e_test_identity_requested?
+    Rails.env.test? && ENV["E2E_TEST_MODE"] == "true" && request.headers[E2E_USER_EMAIL_HEADER].present?
   end
 
   def current_organization

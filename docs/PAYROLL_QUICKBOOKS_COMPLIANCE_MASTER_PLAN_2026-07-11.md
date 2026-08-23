@@ -96,7 +96,7 @@ The application already provides a substantial payroll foundation:
 - client documents, client messages, change requests, and read-only client payroll/report access;
 - audit logging and tax-configuration history.
 
-The backend also has broad automated coverage. Phase 0 added Playwright infrastructure and public/authenticated payroll smoke tests. The authenticated smoke remains environment-gated and does not replace broader browser coverage for calculate, review, approve, commit, correct, and filing workflows.
+The backend also has broad automated coverage. Phase 0 added Playwright infrastructure. Gate 0 replaces the environment-gated authenticated smoke with a required, disposable Postgres/Rails/Vite lane covering identity and company boundaries, client approval and SSN handling, destination-secret failures, calculate/approve/unapprove/commit, immutable committed runs, and external-time apply/retry behavior. Correction, printing, preparation, and filing workflows still need broader browser coverage.
 
 ### 3.2 Current capability assessment
 
@@ -365,7 +365,7 @@ The current application-level audit log is useful, but it is not yet a complete 
 
 ### 4.15 Frontend workflow testing is missing
 
-There are no frontend application tests. The calculate, review, approve, commit, correct, print, prepare, and filing-readiness workflows require browser-level automated coverage.
+Gate 0 adds deterministic frontend coverage for the critical payroll lifecycle and trust boundaries. Correction, print, prepare, and filing-readiness workflows still require browser-level automation; the new lane is a foundation, not complete UI coverage.
 
 Large frontend and controller files also need incremental decomposition so that filing rules, report presentation, and HTTP concerns do not remain coupled.
 
@@ -651,8 +651,8 @@ Current gate assessment:
 | Known P0 calculation/status/year defects | Passed for merged scope | Focused and full regression suites passed; Greptile final review was 5/5 |
 | Backend/frontend dependency audits | Passed at merged commit | Enforced by GitHub quality workflow |
 | Federal Form 941 and filing-authority language | Passed for active changed surfaces | Backward-compatible route names remain where required |
-| Browser smoke infrastructure | Implemented | Public and authenticated smoke paths exist |
-| Authenticated production-shaped payroll smoke | Open | No permanent staging environment exists; use a temporary isolated Neon branch or equivalent production-shaped validation environment |
+| Browser smoke infrastructure | Implemented | Public checks and the deterministic authenticated payroll lane run as separate CI jobs |
+| Authenticated production-shaped payroll smoke | Implemented for synthetic release coverage; staging evidence remains open | The required disposable Postgres/Rails/Vite lane has no skips or retries; a representative staging payroll is still required by the production-readiness checklist |
 | Production configuration/readiness command | Implemented | Must be run with actual production configuration and evidence retained |
 | Backup/restore, MFA, R2, mail, monitoring, and operational checklist | Open | Requires manual release-owner signoff in the production-readiness checklist |
 | General pay-component taxability matrix | Partial | Stored committed bases/rule snapshots are delivered; the reusable effective-dated component matrix remains Phase 1 work |
@@ -978,7 +978,7 @@ The software must block unsupported tax years/forms rather than silently falling
 | **CPR-MP-003** | Delivered in PR #111 | Add year-versioned information-return thresholds and 2026 1099-NEC behavior |
 | **CPR-MP-004** | Delivered in PR #111 | Rename user-facing 941-GU language and correct filing authority/documentation |
 | **CPR-MP-005** | Delivered in PR #111 | Remediate dependency advisories and add CI audit gates |
-| **CPR-MP-006** | Delivered foundation; operational smoke open | Pin supported Node, add Playwright infrastructure and authenticated payroll smoke path |
+| **CPR-MP-006** | Delivered deterministic release foundation; staging evidence open | Pin supported Node and run public plus authenticated payroll browser lanes without silent skips |
 | **CPR-MP-007** | Implementation candidate in Phase 1A | Stored FIT/SS/Medicare bases remain authoritative; effective-dated component classifications and commit-time snapshots added without changing calculation formulas |
 | **CPR-MP-008** | Delivered foundation in PR #111 | Cash-tip, service-charge, tipped-occupation, and qualified-overtime facts and 2026 reporting foundations |
 | **CPR-MP-009** | Liability posting candidate in Phase 1A; payment settlement remains | Immutable commit/reversal/replacement ledger, reconciliation API/UI, and explicit historical backfill; payment/allocation/evidence follows in the next bounded PR |

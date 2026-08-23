@@ -1,6 +1,6 @@
 # Production Readiness Checklist
 
-Last reviewed: July 11, 2026
+Last reviewed: August 23, 2026
 
 This is the release gate for payroll and compliance workloads. Passing automated tests is necessary but does not authorize production use by itself. The release owner must attach evidence for every applicable control below.
 
@@ -35,7 +35,8 @@ The command fails closed unless production authentication, forced TLS, durable s
 - [ ] Object-storage backup/recovery has been exercised.
 - [ ] Error monitoring, uptime monitoring, and alert ownership are configured without leaking SSNs, tax IDs, or payroll values.
 - [ ] API throttling is enabled and its limits are load-tested against the largest expected payroll run.
-- [ ] Dependency audit, Brakeman, backend tests, frontend gate, and Playwright smoke tests pass at the release commit.
+- [ ] Dependency audit, Brakeman, all backend tests with zero pending examples, frontend gate, public Playwright checks, and the deterministic payroll browser lane pass at the release commit.
+- [ ] The required `backend`, `frontend`, and `browser` GitHub checks were produced from the current PR head against current `main`; no stale-base result or skipped authenticated test is accepted.
 - [ ] A representative payroll is calculated, reviewed, approved, committed, exported, and reconciled in staging.
 - [ ] W-2GU, 1099-NEC, and Federal Form 941 outputs are compared to authoritative source instructions and a known-good fixture for the filing year.
 - [ ] Filing outputs show blockers—not silent estimates—when historical taxable bases or 2026 tip/overtime occupation data are incomplete.
