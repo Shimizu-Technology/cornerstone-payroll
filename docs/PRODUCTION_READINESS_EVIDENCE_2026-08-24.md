@@ -43,7 +43,7 @@ The readiness gate caught a configuration mistake during the mail/authentication
 
 This incident is why release evidence must come from effective configuration and provider calls after deployment. A dashboard save or a successful deploy is not proof that the intended key received the intended value.
 
-The former worker database credential was also visible in the internal remediation transcript while the split-brain connection was being diagnosed. The worker no longer uses that database, and the database was retained only as a rollback artifact. Its credential must still be treated as exposed: rotate it immediately if the database remains in the rollback window, or retire the database and credential after an approved retention decision. No credential value is retained in this repository.
+The former worker database credential was also visible in the internal remediation transcript while the split-brain connection was being diagnosed. The worker no longer uses that database, and the database was retained only as a rollback artifact. Its credential must still be treated as exposed and rotated immediately in every case. After rotation, the retention owner may either keep the database under the new credential for an approved rollback window or retire the database and replacement credential under the approved retention policy. No credential value is retained in this repository.
 
 ## Final automated job evidence
 
@@ -80,7 +80,7 @@ The automated gate deliberately cannot close these controls:
 | Control | What is already proved | Missing acceptance evidence | Owner |
 | --- | --- | --- | --- |
 | Database backup and restore | Live database queries and migrations pass. | Restore the production backup to an isolated environment, time it, reconcile expected data, and destroy or retain it under an approved policy. | Unassigned |
-| Legacy worker database credential | The worker now uses the web service's durable database target; the former database is disconnected. | Rotate the exposed legacy credential if the database is retained, or retire the database and credential after an approved rollback/retention decision. | Unassigned |
+| Legacy worker database credential | The worker now uses the web service's durable database target; the former database is disconnected. | Rotate the exposed credential immediately regardless of retention. Then either retain the database under the replacement credential for an approved rollback window or retire it under the approved retention policy. | Unassigned |
 | R2 recovery/versioning | Live isolated upload/read/delete passes. | Prove versioning or backup policy and recover a deleted/replaced generated payroll document. | Unassigned |
 | Queue restart durability | Shared stores and a recent worker heartbeat pass after redeploy. | Enqueue an isolated probe, restart the web service, and prove the worker completes the same queued job exactly once. | Unassigned |
 | Error and uptime monitoring | `/up` is configured and healthy. | Name alert recipients, test delivery, and review logs/events for SSN, tax-ID, bank, and payroll-value leakage. | Unassigned |
