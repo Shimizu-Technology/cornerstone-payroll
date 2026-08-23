@@ -12,10 +12,11 @@ module TimeTracking
     WRITE_TIMEOUT_SECONDS = 15
     MAX_RESPONSE_BYTES = 1.megabyte
 
-    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil)
+    def initialize(source, destination_policy: DestinationPolicy.new, http_factory: nil, monotonic_clock: nil)
       @source = source
       @destination_policy = destination_policy
       @http_factory = http_factory || ->(host, port) { Net::HTTP.new(host, port, nil) }
+      @monotonic_clock = monotonic_clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
     end
 
     def time_summary(start_date:, end_date:)
@@ -65,9 +66,13 @@ module TimeTracking
 
     def perform_request(uri, request, pinned_ips)
       last_connection_error = nil
+      connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
 
       pinned_ips.each do |pinned_ip|
-        http = build_http(uri, pinned_ip)
+        remaining_open_timeout = connection_deadline - @monotonic_clock.call
+        break unless remaining_open_timeout.positive?
+
+        http = build_http(uri, pinned_ip, open_timeout: remaining_open_timeout)
         begin
           http.start
         rescue SystemCallError, SocketError, Net::OpenTimeout, OpenSSL::SSL::SSLError => e
@@ -85,7 +90,7 @@ module TimeTracking
       raise last_connection_error || Error.new("#{@source.name} has no reachable inspected address")
     end
 
-    def build_http(uri, pinned_ip)
+    def build_http(uri, pinned_ip, open_timeout:)
       # Pass nil as the proxy address so HTTP_PROXY cannot reroute a request
       # carrying the shared integration secret. `ipaddr` pins the connection
       # to the address that the destination policy inspected, while `address`
@@ -98,7 +103,7 @@ module TimeTracking
         http.verify_hostname = true
         http.min_version = OpenSSL::SSL::TLS1_2_VERSION
       end
-      http.open_timeout = OPEN_TIMEOUT_SECONDS
+      http.open_timeout = open_timeout
       http.read_timeout = READ_TIMEOUT_SECONDS
       http.write_timeout = WRITE_TIMEOUT_SECONDS
       http.max_retries = 0

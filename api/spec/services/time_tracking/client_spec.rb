@@ -11,8 +11,13 @@ RSpec.describe TimeTracking::Client do
     )
   end
 
-  def client_for(source, policy: destination_policy, http_factory: nil)
-    described_class.new(source, destination_policy: policy, http_factory: http_factory)
+  def client_for(source, policy: destination_policy, http_factory: nil, monotonic_clock: nil)
+    described_class.new(
+      source,
+      destination_policy: policy,
+      http_factory: http_factory,
+      monotonic_clock: monotonic_clock
+    )
   end
 
   def configure_http_double(http, pinned_ip:, start_error: nil, response: nil)
@@ -266,6 +271,39 @@ RSpec.describe TimeTracking::Client do
 
       expect(http_factory).to have_received(:call).once
       expect(first_http).to have_received(:request).once
+    end
+
+    it "stops address fallback when the aggregate connection deadline expires" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Slow Multi-address Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "test",
+        resolver: ->(_host) { [ "8.8.4.4", "8.8.8.8" ] }
+      )
+      first_http = instance_double(Net::HTTP)
+      second_http = instance_double(Net::HTTP)
+      configure_http_double(first_http, pinned_ip: "8.8.4.4", start_error: Net::OpenTimeout.new)
+      http_factory = instance_double(Proc)
+      allow(http_factory).to receive(:call).and_return(first_http, second_http)
+      monotonic_clock = instance_double(Proc)
+      allow(monotonic_clock).to receive(:call).and_return(0.0, 4.9, 5.0)
+
+      expect do
+        client_for(
+          source,
+          policy: policy,
+          http_factory: http_factory,
+          monotonic_clock: monotonic_clock
+        ).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /Could not securely reach/)
+
+      expect(first_http).to have_received(:open_timeout=).with(be_within(0.001).of(0.1))
+      expect(http_factory).to have_received(:call).once
     end
   end
 end
