@@ -752,7 +752,7 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
       expect(response.parsed_body["errors"].join).to include("check_offset_x must be a number")
     end
 
-    it "allows accountants to update check settings for their assigned companies" do
+    it "keeps accountants from changing check configuration for assigned companies" do
       accountant_user = User.create!(
         company: company,
         email: "checks-accountant@example.com",
@@ -768,8 +768,9 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
           check_offset_x: 0.1
         }
 
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body["check_settings"]).to be_present
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(company.reload.check_offset_x).not_to eq(0.1)
     end
 
     it "accepts JSON layout payloads from the visual check editor" do

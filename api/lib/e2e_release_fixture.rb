@@ -94,6 +94,24 @@ class E2eReleaseFixture
         active: true
       )
       CompanyAssignment.create!(user: client, company: company)
+      manager = User.create!(
+        organization: organization,
+        company: company,
+        email: "gate0-manager@example.test",
+        name: "Gate 0 Manager",
+        role: "manager",
+        active: true
+      )
+      CompanyAssignment.create!(user: manager, company: company)
+      accountant = User.create!(
+        organization: organization,
+        company: company,
+        email: "gate0-accountant@example.test",
+        name: "Gate 0 Accountant",
+        role: "accountant",
+        active: true
+      )
+      CompanyAssignment.create!(user: accountant, company: company)
       inactive_user = User.create!(
         organization: organization,
         company: company,
@@ -223,6 +241,8 @@ class E2eReleaseFixture
         company_id: company.id,
         other_company_id: other_company.id,
         admin_email: admin.email,
+        manager_email: manager.email,
+        accountant_email: accountant.email,
         client_email: client.email,
         inactive_user_email: inactive_user.email,
         employee_id: employee.id,
