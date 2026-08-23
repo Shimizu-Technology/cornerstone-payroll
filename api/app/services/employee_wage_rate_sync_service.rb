@@ -12,6 +12,16 @@ class EmployeeWageRateSyncService
   end
 
   def sync!
+    employee.with_lock do
+      sync_under_employee_lock!
+    end
+  end
+
+  private
+
+  attr_reader :employee, :wage_rates
+
+  def sync_under_employee_lock!
     normalized = normalize_rates
 
     existing_by_id = employee.employee_wage_rates.index_by(&:id)
@@ -32,10 +42,6 @@ class EmployeeWageRateSyncService
 
     normalized
   end
-
-  private
-
-  attr_reader :employee, :wage_rates
 
   def replace_missing?
     @replace_missing
