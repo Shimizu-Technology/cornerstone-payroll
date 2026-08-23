@@ -145,6 +145,34 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/client/employees/:id" do
+    it "redacts identifiers even if a legacy request reaches the employee action serializer" do
+      legacy_request = create(:employee_change_request,
+        company: company,
+        employee: employee,
+        requested_by: client_user,
+        proposed_changes: { ssn_encrypted: "123-45-6789", contractor_ein: "98-7654321" },
+        original_values: { ssn_encrypted: "987-65-4321" })
+      result = ClientEmployeeUpdateService::Result.new(
+        employee: employee,
+        change_request: legacy_request,
+        applied_direct_fields: [],
+        approval_fields: %i[ssn_encrypted contractor_ein],
+        changed_fields: %i[ssn_encrypted contractor_ein],
+        before_values: {},
+        after_values: {}
+      )
+      service = instance_double(ClientEmployeeUpdateService, update!: result)
+      allow(ClientEmployeeUpdateService).to receive(:new).and_return(service)
+
+      patch "/api/v1/client/employees/#{employee.id}", params: { employee: { first_name: employee.first_name } }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("change_request", "proposed_changes", "ssn_encrypted")).to eq("[REDACTED]")
+      expect(response.parsed_body.dig("change_request", "proposed_changes", "contractor_ein")).to eq("[REDACTED]")
+      expect(response.parsed_body.dig("change_request", "original_values", "ssn_encrypted")).to eq("[REDACTED]")
+      expect(response.body).not_to include("123-45-6789", "987-65-4321", "98-7654321")
+    end
+
     it "applies profile-only changes without creating an approval request" do
       expect do
         patch "/api/v1/client/employees/#{employee.id}",
@@ -217,6 +245,77 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
       expect(employee.reload.pay_rate.to_f).to eq(21.75)
       expect(employee.additional_withholding.to_f).to eq(25.0)
       expect(employee.ssn_encrypted).to eq("123-45-6789")
+    end
+
+    it "preserves an existing wage rate identity through review and approval" do
+      wage_rate = employee.employee_wage_rates.create!(
+        label: "Regular",
+        rate: 18.0,
+        is_primary: true,
+        active: true
+      )
+
+      patch "/api/v1/client/employees/#{employee.id}",
+        params: {
+          employee: {
+            wage_rates: [
+              { id: wage_rate.id, label: "Regular", rate: 19.75, is_primary: true, active: true }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:ok), response.body
+      request = EmployeeChangeRequest.order(:id).last
+      expect(request.proposed_changes.dig("wage_rates", 0, "id")).to eq(wage_rate.id)
+      expect(request.original_values.dig("wage_rates", 0, "id")).to eq(wage_rate.id)
+
+      expect do
+        request.apply!(actor: create(:user, company: company, role: "admin"))
+      end.not_to change(EmployeeWageRate, :count)
+      expect(wage_rate.reload.rate.to_f).to eq(19.75)
+    end
+
+    it "rejects a wage rate id belonging to another employee" do
+      other_employee = create(:employee, company: company, department: department)
+      foreign_rate = other_employee.employee_wage_rates.create!(
+        label: "Foreign",
+        rate: 99.0,
+        is_primary: true,
+        active: true
+      )
+
+      patch "/api/v1/client/employees/#{employee.id}",
+        params: {
+          employee: {
+            wage_rates: [
+              { id: foreign_rate.id, label: "Foreign", rate: 20.0, is_primary: true, active: true }
+            ]
+          }
+        }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "wage_rates")).to include("must reference rates belonging to this employee")
+      expect(EmployeeChangeRequest.where(employee: employee)).to be_empty
+      expect(foreign_rate.reload.rate.to_f).to eq(99.0)
+    end
+
+    it "captures approval originals after acquiring the employee lock" do
+      intervening_update_applied = false
+      allow_any_instance_of(Employee).to receive(:lock!).and_wrap_original do |method, *args|
+        unless intervening_update_applied
+          Employee.where(id: employee.id).update_all(pay_rate: 19.25)
+          intervening_update_applied = true
+        end
+        method.call(*args)
+      end
+
+      patch "/api/v1/client/employees/#{employee.id}", params: { employee: { pay_rate: 22.0 } }
+
+      expect(response).to have_http_status(:ok), response.body
+      request = EmployeeChangeRequest.order(:id).last
+      expect(request.original_values.fetch("pay_rate")).to eq(19.25)
+      expect(request.proposed_changes.fetch("pay_rate")).to eq(22.0)
+      expect(employee.reload.pay_rate.to_f).to eq(19.25)
     end
 
     it "rolls back direct fields when another payroll-sensitive request is already pending" do
