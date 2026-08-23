@@ -35,6 +35,12 @@ module ClerkAuthenticatable
 
     unless @current_user
       render json: { error: "User not found" }, status: :unauthorized
+      return
+    end
+
+    unless @current_user.payroll_access_allowed?
+      @current_user = nil
+      render json: { error: "Account inactive" }, status: :unauthorized
     end
   end
 
@@ -128,7 +134,7 @@ module ClerkAuthenticatable
     clerk_user = fetch_clerk_user(payload["sub"])
     return nil unless clerk_user
 
-    email = clerk_user.dig("email_addresses", 0, "email_address")&.strip&.downcase
+    email = verified_primary_email(clerk_user)
     return nil unless email
     clerk_name = [ clerk_user["first_name"], clerk_user["last_name"] ].compact.join(" ").presence
 
@@ -167,6 +173,18 @@ module ClerkAuthenticatable
   rescue ActiveRecord::RecordInvalid => e
     Rails.logger.error("Failed to provision Clerk user: #{e.message}")
     nil
+  end
+
+  def verified_primary_email(clerk_user)
+    primary_email_id = clerk_user["primary_email_address_id"]
+    return nil if primary_email_id.blank?
+
+    primary_email = Array(clerk_user["email_addresses"]).find do |address|
+      address["id"] == primary_email_id
+    end
+    return nil unless primary_email&.dig("verification", "status") == "verified"
+
+    primary_email["email_address"]&.strip&.downcase.presence
   end
 
   def bootstrap_first_user!(payload, email, clerk_name)

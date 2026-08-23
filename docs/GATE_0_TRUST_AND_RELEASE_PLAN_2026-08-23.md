@@ -32,12 +32,12 @@ Gate 0 closes only when:
 
 | ID | Finding | Risk | Required outcome | State |
 | --- | --- | --- | --- | --- |
-| G0-01 | `main` resolves vulnerable `mail 2.9.0`; Quality is red | A known advisory is present and red main can become normal | Upgrade to a fixed version; full backend/frontend/security gates green | Open |
-| G0-02 | `main` requires PRs but no current status checks | A PR can merge with stale results against an older base | Require backend/frontend checks and an up-to-date branch or merge queue | Open |
-| G0-03 | HTTP auth accepts inactive users and inactive organizations | Deactivation does not revoke payroll access | Central active-account policy with verified Clerk identity and regression tests | Open |
-| G0-04 | Action Cable accepts and retains inactive users | A deactivated user can retain live access | Apply the same policy to Cable and disconnect sessions after deactivation | Open |
-| G0-05 | Clerk provisioning uses the first email without proving it is the verified primary address | The wrong email could link to an invited payroll account | Require Clerk's verified primary email | Open |
-| G0-06 | Production encryption docs/readiness check environment keys that the initializer does not bind | Encrypted SSNs, bank data, secrets, or tokens can fail at runtime while readiness passes | One effective env-or-credentials contract; fail closed and test it | Open |
+| G0-01 | `main` resolves vulnerable `mail 2.9.0`; Quality is red | A known advisory is present and red main can become normal | Upgrade to a fixed version; full backend/frontend/security gates green | Code closed in PR #124; `main` green |
+| G0-02 | `main` requires PRs but no current status checks | A PR can merge with stale results against an older base | Require backend/frontend checks and an up-to-date branch or merge queue | Closed in repository ruleset 2026-08-23 |
+| G0-03 | HTTP auth accepts inactive users and inactive organizations | Deactivation does not revoke payroll access | Central active-account policy with verified Clerk identity and regression tests | In progress |
+| G0-04 | Action Cable accepts and retains inactive users | A deactivated user can retain live access | Apply the same policy to Cable and disconnect sessions after deactivation | In progress |
+| G0-05 | Clerk provisioning uses the first email without proving it is the verified primary address | The wrong email could link to an invited payroll account | Require Clerk's verified primary email | In progress |
+| G0-06 | Production encryption docs/readiness check environment keys that the initializer does not bind | Encrypted SSNs, bank data, secrets, or tokens can fail at runtime while readiness passes | One effective env-or-credentials contract; fail closed and test it | In progress |
 | G0-07 | Commit checks stale state before its transaction and does not lock the pay period | Concurrent requests can duplicate YTD/loan effects | Lock and revalidate; prove exactly-once outcomes with PostgreSQL concurrency tests | Open |
 | G0-08 | Approve, unapprove, calculation, item mutation, imports, and commit do not share one lifecycle lock boundary | A committed run can race back to editable state or be mutated during commit | Lock every financial transition/mutation in a consistent order | Open |
 | G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Open |
@@ -132,4 +132,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 
 | Finding(s) | PR | Merge commit | Code closed | Operational evidence | Notes |
 | --- | --- | --- | --- | --- | --- |
-| — | — | — | No | Not verified | Gate opened 2026-08-23 |
+| G0-01, G0-02 | #124 | `d59173e` | Yes | `main` Quality run 32615025379 passed; ruleset 16468532 now requires strict current-base `backend` and `frontend` checks | Dependency advisory cleared; browser authentication skip remains tracked as G0-17 |
