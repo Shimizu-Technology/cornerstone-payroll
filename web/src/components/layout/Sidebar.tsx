@@ -222,6 +222,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
+  const canManageClientConfiguration = isAdmin || user?.role === 'manager';
   const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -302,7 +303,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </>
         )}
 
-        {!isClient && (
+        {canManageClientConfiguration && (
           <>
             <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
             <div className="space-y-1.5">
@@ -319,7 +320,13 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           <>
             <SectionDivider icon={<FileSpreadsheet className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Client Portal" collapsed={collapsed} />
             <div className="space-y-1.5">
-              <NavSection items={portalAdminNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+              <NavSection
+                items={canManageClientConfiguration
+                  ? portalAdminNavigation
+                  : portalAdminNavigation.filter((item) => item.href !== '/settings/client-change-requests')}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+              />
             </div>
           </>
         )}

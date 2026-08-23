@@ -78,10 +78,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isAdmin, isLoading } = useAuth();
 
-  if (!AUTH_ENABLED) {
-    return <>{children}</>;
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -103,12 +99,22 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function ManagerOnlyRoute({ children }: { children: React.ReactNode }) {
+  const { isManager, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  if (!isManager) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 function SuperAdminOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isSuperAdmin, isLoading } = useAuth();
-
-  if (!AUTH_ENABLED) {
-    return <>{children}</>;
-  }
 
   if (isLoading) {
     return (
@@ -134,10 +140,6 @@ function SuperAdminOnlyRoute({ children }: { children: React.ReactNode }) {
 function StaffOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isClient, isLoading } = useAuth();
 
-  if (!AUTH_ENABLED) {
-    return <>{children}</>;
-  }
-
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -161,10 +163,6 @@ function StaffOnlyRoute({ children }: { children: React.ReactNode }) {
 
 function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   const { isClient, isLoading } = useAuth();
-
-  if (!AUTH_ENABLED) {
-    return <>{children}</>;
-  }
 
   if (isLoading) {
     return (
@@ -291,7 +289,7 @@ function AppRoutes() {
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
-        <Route path="payroll-fields" element={<StaffOnlyRoute><PayrollFields /></StaffOnlyRoute>} />
+        <Route path="payroll-fields" element={<ManagerOnlyRoute><PayrollFields /></ManagerOnlyRoute>} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
         <Route path="tools/invoices" element={<AdminOnlyRoute><InvoiceCenter /></AdminOnlyRoute>} />
@@ -301,11 +299,11 @@ function AppRoutes() {
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
-        <Route path="settings/client-change-requests" element={<StaffOnlyRoute><AdminEmployeeChangeRequestsPage /></StaffOnlyRoute>} />
-        <Route path="check-settings" element={<StaffOnlyRoute><CheckSettingsPage /></StaffOnlyRoute>} />
-        <Route path="payroll-reminders" element={<StaffOnlyRoute><PayrollReminders /></StaffOnlyRoute>} />
+        <Route path="settings/client-change-requests" element={<ManagerOnlyRoute><AdminEmployeeChangeRequestsPage /></ManagerOnlyRoute>} />
+        <Route path="check-settings" element={<ManagerOnlyRoute><CheckSettingsPage /></ManagerOnlyRoute>} />
+        <Route path="payroll-reminders" element={<ManagerOnlyRoute><PayrollReminders /></ManagerOnlyRoute>} />
         <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
-        <Route path="pay-schedule-settings" element={<StaffOnlyRoute><PayScheduleSettings /></StaffOnlyRoute>} />
+        <Route path="pay-schedule-settings" element={<ManagerOnlyRoute><PayScheduleSettings /></ManagerOnlyRoute>} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
       </Route>
 

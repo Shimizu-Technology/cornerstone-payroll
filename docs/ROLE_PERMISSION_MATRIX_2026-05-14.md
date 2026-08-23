@@ -1,41 +1,67 @@
-# Role And Permission Matrix
+# Staff role and permission matrix
 
-This document captures the role boundaries after the organization tenant work. The goal is to keep "accounting firm workspace" and "payroll client company" separate, while preserving the payroll workflows that already work for Cornerstone.
+**Reviewed:** August 23, 2026
 
-## Role Summary
+This is the approved staff authorization contract for Cornerstone Payroll. The backend policy registry in `api/app/policies/staff_role_policy.rb` is the executable source for high-impact actions. Frontend route and navigation guards mirror it for usability, but the backend remains authoritative.
 
-| Role | Scope | Intended Use |
+## Roles and scope
+
+| Role | Scope | Intended use |
 | --- | --- | --- |
-| `super_admin` | Platform-wide | Cornerstone platform owner. Can see every organization, create firms, manage organization admins, and help with support across tenants. |
-| `org_admin` | One organization | Firm owner/admin for a tenant. Can manage users and client companies inside only their own organization. |
-| `admin` | One organization | Legacy admin role. Treated like `org_admin` for now so existing Cornerstone admins keep working during the transition. |
-| `manager` | Assigned client companies | Staff role for payroll operations on assigned clients within the user's organization. |
-| `accountant` | Assigned client companies | Staff role for accounting/payroll work on assigned clients within the user's organization. |
-| `client` | Assigned client companies | Client portal user. Only sees portal-safe workflows for assigned client companies. |
-| `employee` | Home company only | Employee/self-service role. Not currently used for firm administration. |
+| `super_admin` | Every organization | Platform recovery, tenant provisioning, and the rare worker tax-classification record transition. Not a routine payroll identity. |
+| `org_admin` | One organization | Firm owner/admin. Manages the firm's users, clients, tax rules, integrations, audit history, and organization-wide tools. |
+| `admin` | One organization | Legacy alias for `org_admin` until existing Cornerstone accounts are migrated. |
+| `manager` | Assigned companies | Payroll manager. Performs payroll work and manages client-specific configuration and sensitive workforce approvals. |
+| `accountant` | Assigned companies | Payroll operator. Maintains employees, imports time and payroll evidence, calculates/processes payroll, checks, corrections, reports, transmittals, and other assigned-client operations. |
+| `client` | Assigned companies | Portal-safe employee requests, documents, completed pay periods, and approved reports only. |
+| `employee` | Home company | Reserved for future employee self-service; it has no staff-console access. |
 
-## Access Rules
+## Capability matrix
 
-- `Organization` is the tenant boundary. Users and client companies must belong to exactly one organization.
-- `Company` means payroll client company, not accounting firm workspace.
-- `current_organization_id` comes from the signed-in user.
-- `X-Company-Id` can select an active client only when the current user can access that company.
-- `CompanyAssignment` rows must connect a user and company in the same organization. This protects the system even when a platform super admin can see every organization.
-- `super_admin` users can access all companies for support and platform administration, but they should not be used for routine payroll processing.
-- `org_admin` and legacy `admin` users can manage users and clients only inside their organization.
-- `manager`, `accountant`, and `client` users only get access to assigned companies that are still inside their organization.
+| Capability | Super admin | Org/legacy admin | Manager | Accountant | Client | Employee |
+| --- | --- | --- | --- | --- | --- | --- |
+| Staff workspace and assigned-client read access | Yes | Yes | Yes | Yes | No | No |
+| Assigned-client payroll operations | Yes | Yes | Yes | Yes | No | No |
+| Client configuration and sensitive workforce approval | Yes | Yes | Yes | No | No | No |
+| Organization administration | Yes | Yes | No | No | No | No |
+| Platform administration | Yes | No | No | No | No | No |
+| Client portal | No | No | No | No | Yes | No |
 
-## Product Notes
+“Payroll operations” includes employee maintenance, departments, pay periods and items, imports, calculate/approve/unapprove/commit, checks and corrections, reports and filing preparation, loans, transmittals, portal documents, and assigned-client contact details. This is intentionally available to accountants because it is their core job.
 
-- The Organizations screen is intentionally visible only to `super_admin` users.
-- The active company switcher is labeled as an active client selector because it changes payroll-client context, not tenant organization context.
-- New external accounting firms should be created as organizations, then given at least one `org_admin`.
-- The `admin` role should eventually be migrated or renamed once Cornerstone is comfortable with the new organization model.
+“Client configuration” includes pay schedule/legal workweek confirmation, check stock/layout/sequence, reusable payroll-field definitions, reminder configuration, printer-profile application across companies, employee termination/reactivation and work-profile changes, and approval or rejection of client payroll-sensitive employee changes.
 
-## Local Smoke Tests
+“Organization administration” includes users and invitations, client assignments and creation, audit history, tax configuration and effective-dated pay-component tax rules, external time-source secrets, and the organization-wide invoice center.
 
-- As a `super_admin`, open Organizations and confirm you can create/edit organizations and invite org admins.
-- As an `org_admin` or legacy `admin`, confirm Organizations is hidden and direct navigation is forbidden.
-- As an org admin, create a client company and confirm it appears only inside that organization.
-- As assigned staff, switch active clients and confirm payroll pages stay scoped to the selected client.
-- Confirm payroll calculation, check printing, reports, and taxes still work for an existing Cornerstone client.
+## High-impact endpoint contract
+
+Every endpoint below is registered in `StaffRolePolicy` and is enforced by `Admin::BaseController` before the controller action runs:
+
+| Required capability | Endpoint groups |
+| --- | --- |
+| Platform administration | all organization endpoints; employee tax-classification record transition |
+| Organization administration | all user, invitation, company-assignment, audit-log, tax-config, and invoice controllers; client creation; time-source create/update/delete/test; pay-component tax-rule create/update |
+| Client configuration | pay-schedule update; payroll-field definition create/update/archive; reminder update/test; check settings and next-number update; apply printer profile to all companies; employee-change review/approve/reject; terminate/reactivate; work-profile create |
+
+Read access remains narrower than a mutation response suggests:
+
+- Managers, accountants, and clients only receive companies assigned within their own organization.
+- An `X-Company-Id` outside that set is rejected; it cannot grant access.
+- Non-admin staff may update only a client's address, city/state/ZIP, phone, and email. They cannot change EIN, company identity/status, pay frequency, bank/check configuration, or the next check number through the company endpoint.
+- Accountants may read client configuration needed to process payroll, but configuration mutations are rejected.
+- Managers may inspect non-secret time-source metadata for imports, but only organization admins may create, test, rotate, or deactivate the secret-bearing integration.
+- Client users never enter the staff namespace, and staff users do not enter the client namespace.
+
+## Segregation and audit limits
+
+This matrix defines authorization, not a two-person approval control. An authorized payroll operator can currently calculate, approve, and commit the same payroll. If Cornerstone requires preparer/reviewer segregation, add named preparer and approver capabilities plus an explicit “cannot approve your own run” rule; do not infer that control from the `manager` label.
+
+High-impact authorization does not replace company scoping, payroll lifecycle locks, immutable committed records, audit events, or provider-side MFA. All of those controls must pass independently.
+
+## Verification requirements
+
+- The policy spec checks every role/capability pair and confirms every registered action still exists.
+- Request specs prove denied mutations do not persist data while permitted read paths remain available.
+- The frontend must not advertise client-configuration or sensitive-approval pages to accountants.
+- Cross-company and cross-organization request tests remain mandatory.
+- Any new high-impact action must be added to the policy registry, this matrix, and focused authorization tests in the same PR.

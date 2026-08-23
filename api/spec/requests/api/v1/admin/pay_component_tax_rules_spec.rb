@@ -59,6 +59,19 @@ RSpec.describe "Api::V1::Admin::PayComponentTaxRules", type: :request do
     expect(rule.approved_at).to be_present
   end
 
+  it "reserves tax-rule mutation for organization administrators" do
+    manager = create(:user, company: company, organization: company.organization, role: "manager")
+    allow_any_instance_of(Api::V1::Admin::PayComponentTaxRulesController)
+      .to receive(:current_user).and_return(manager)
+
+    get "/api/v1/admin/pay_component_tax_rules", params: { effective_on: "2026-07-01" }
+    expect(response).to have_http_status(:ok)
+
+    post "/api/v1/admin/pay_component_tax_rules", params: { pay_component_tax_rule: valid_attributes }
+    expect(response).to have_http_status(:forbidden)
+    expect(company.pay_component_tax_rules).to be_empty
+  end
+
   it "rejects overlapping versions" do
     company.pay_component_tax_rules.create!(valid_attributes.merge(effective_to: "2026-12-31"))
 

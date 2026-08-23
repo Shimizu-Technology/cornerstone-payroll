@@ -22,6 +22,19 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     expect(settings.dig("workweek", "confirmation_status")).to eq("needs_confirmation")
   end
 
+  it "lets accountants read but not change client schedule configuration" do
+    accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+    allow_any_instance_of(Api::V1::Admin::PayScheduleSettingsController)
+      .to receive(:current_user).and_return(accountant)
+
+    get "/api/v1/admin/pay_schedule_settings"
+    expect(response).to have_http_status(:ok)
+
+    put "/api/v1/admin/pay_schedule_settings", params: { pay_schedule_settings: {} }
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+  end
+
   it "creates a confirmed effective-dated schedule and legal workweek" do
     put "/api/v1/admin/pay_schedule_settings", params: {
       pay_schedule_settings: {
