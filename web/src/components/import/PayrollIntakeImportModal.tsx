@@ -223,7 +223,7 @@ export function PayrollIntakeImportModal({
     }));
   };
 
-  const updateWeekHours = (rowId: number, key: 'week1_hours' | 'week2_hours', value: number) => {
+  const updateWeekHours = (rowId: number, key: 'week1_hours' | 'week2_hours', value: number): void => {
     setRows((current) => current.map((row) => {
       if (row.id !== rowId) return row;
 
