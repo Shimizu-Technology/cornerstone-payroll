@@ -29,6 +29,14 @@ RSpec.describe TimeTracking::DestinationPolicy do
       .to raise_error(described_class::Error, /TIME_TRACKING_ALLOWED_HOSTS is set/)
   end
 
+  it "can apply structural validation without blocking deactivation of a legacy source" do
+    policy = described_class.new(environment: "production", env: {})
+
+    expect(
+      policy.validate_configuration!(uri("http://legacy.example.com"), enforce_production: false)
+    ).to be_a(URI::HTTP)
+  end
+
   it "validates every active source against the effective production policy" do
     valid_source = instance_double(TimeTrackingSource, base_url: "https://time.example.com/client")
     invalid_source = instance_double(TimeTrackingSource, base_url: "http://other.example.com")

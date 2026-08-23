@@ -26,7 +26,10 @@ class TimeTrackingSource < ApplicationRecord
 
   def base_url_must_be_http_url
     uri = URI.parse(base_url.to_s)
-    TimeTracking::DestinationPolicy.new.validate_configuration!(uri)
+    TimeTracking::DestinationPolicy.new.validate_configuration!(
+      uri,
+      enforce_production: Rails.env.production? && active?
+    )
   rescue TimeTracking::DestinationPolicy::Error => e
     errors.add(:base_url, e.message)
   rescue URI::InvalidURIError

@@ -108,6 +108,23 @@ RSpec.describe TimeTrackingSource do
       expect(inactive).to be_valid
     end
 
+    it "lets production administrators deactivate legacy HTTP sources but not reactivate them" do
+      source = described_class.create!(
+        company: create(:company),
+        name: "Legacy Source",
+        source_type: "custom",
+        base_url: "http://legacy.example.com",
+        shared_secret: "secret"
+      )
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+
+      expect { source.update!(active: false) }.not_to raise_error
+
+      source.active = true
+      expect(source).not_to be_valid
+      expect(source.errors[:base_url]).to include("must use HTTPS in production")
+    end
+
     it "stores long shared secrets without truncating encrypted ciphertext" do
       source = described_class.create!(
         company: create(:company),

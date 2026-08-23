@@ -62,13 +62,13 @@ module TimeTracking
       @resolver = resolver || ->(host) { Resolv.getaddresses(host) }
     end
 
-    def validate_configuration!(uri, allow_query: false)
+    def validate_configuration!(uri, allow_query: false, enforce_production: production?)
       unless uri.is_a?(URI::HTTP) && uri.host.present? && uri.userinfo.blank?
         raise Error, "must be an HTTP or HTTPS URL with a host and no embedded credentials"
       end
       raise Error, "must not include a query or fragment" if (!allow_query && uri.query.present?) || uri.fragment.present?
 
-      return uri unless production?
+      return uri unless enforce_production
 
       raise Error, "must use HTTPS in production" unless uri.scheme == "https"
       raise Error, "must use the standard HTTPS port in production" unless uri.port == 443
