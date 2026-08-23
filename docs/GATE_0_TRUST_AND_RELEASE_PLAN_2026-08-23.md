@@ -154,7 +154,7 @@ For each environment-specific control, record:
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | MFA enforcement | Unassigned | Production | `1d19362` | 2026-08-24 | Clerk dashboard and `job-da5g1ojbc2fs738uld00` | Failed: development instance has no enabled MFA strategy or enforcement | After coordinated Clerk cutover |
 | Database backup and restore | Unassigned | Production-shaped isolated restore | — | — | — | Not verified | — |
-| Legacy worker database credential | Unassigned | Former production worker database | `1d19362` | 2026-08-24 | [August 24 production evidence](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md) | Former database disconnected; exposed credential not yet rotated or retired | Before rollback window closes |
+| Legacy worker database credential | Unassigned | Former production worker database | `1d19362` | 2026-08-24 | [August 24 production evidence](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md) | Credential is exposed and unresolved: rotate it immediately while the database is retained, or retire the database and credential now | Immediate while retained; otherwise retire now |
 | R2 upload/read/delete and recovery | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` | Basic round trip verified; recovery/versioning not verified | — |
 | Queue/cache/cable durability and restart | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` | Connectivity and worker heartbeat verified; queued-job restart proof missing | — |
 | Email delivery and sender authentication | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` and Resend key-use evidence | Provider authentication and every sender domain verified | On key/domain change |
