@@ -2,7 +2,9 @@
 
 # Active Record Encryption Configuration
 #
-# Production accepts either these environment variables:
+# Production uses the complete Rails credential key set when present, preserving
+# compatibility with existing encrypted records. A complete environment key set
+# remains supported for deployments without encrypted Rails credentials:
 # - ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY
 # - ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY
 # - ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT
@@ -23,3 +25,14 @@ ActiveRecordEncryptionConfiguration.apply!(
   env: ENV,
   credentials: Rails.application.credentials
 )
+
+if ActiveRecordEncryptionConfiguration.sources_conflict?(
+  environment: Rails.env,
+  env: ENV,
+  credentials: Rails.application.credentials
+)
+  Rails.logger.error(
+    "Active Record encryption sources conflict; Rails credentials remain authoritative. " \
+    "Remove or correct the environment key set before the production readiness gate."
+  )
+end
