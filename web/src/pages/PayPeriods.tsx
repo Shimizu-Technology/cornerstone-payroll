@@ -927,7 +927,7 @@ export function PayPeriods() {
                     <span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Regular payroll includes it by default. Non-regular runs do not.</span></span>
                   </label>
                 </div>
-                {formData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs can never generate salary base pay.</p>}
+                {formData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs exclude ordinary salary and automatic flat-fee contractor pay.</p>}
                 {formData.run_purpose !== 'regular' && formData.run_purpose !== 'off_cycle_tips' && formData.includes_base_salary && <p className="mt-3 text-xs font-medium text-warning-800">You deliberately enabled base salary for a non-regular run. Verify this is intended before calculating payroll.</p>}
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1053,7 +1053,7 @@ export function PayPeriods() {
                     <div className="space-y-2"><Label htmlFor="edit_run_purpose">Run purpose</Label><Select id="edit_run_purpose" value={editFormData.run_purpose} onChange={(event) => { const runPurpose = event.target.value as PayRunPurpose; setEditFormData({ ...editFormData, run_purpose: runPurpose, includes_base_salary: runPurpose === 'regular' }); }}>{Object.entries(RUN_PURPOSE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div>
                     <label className="flex items-start gap-3 rounded-xl border border-neutral-200 bg-white p-3"><input type="checkbox" className="mt-1 h-4 w-4 rounded border-neutral-300 text-primary-600" checked={editFormData.includes_base_salary} disabled={editFormData.run_purpose === 'off_cycle_tips'} onChange={(event) => setEditFormData({ ...editFormData, includes_base_salary: event.target.checked })} /><span><span className="block text-sm font-semibold text-neutral-900">Include ordinary base salary</span><span className="mt-1 block text-xs leading-5 text-neutral-500">Locked after payroll is calculated.</span></span></label>
                   </div>
-                  {editFormData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs can never generate salary base pay.</p>}
+                  {editFormData.run_purpose === 'off_cycle_tips' && <p className="mt-3 text-xs font-medium text-primary-800">Tips-only runs exclude ordinary salary and automatic flat-fee contractor pay.</p>}
                 </div>
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

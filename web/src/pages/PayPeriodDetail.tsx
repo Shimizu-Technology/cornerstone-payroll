@@ -181,7 +181,7 @@ function buildHoursMap(payrollItems: PayrollItem[], employees: Employee[]): Reco
 
   payrollItems.forEach((item) => {
     const employee = employeeMap.get(item.employee_id);
-    const noHours = employee?.employment_type === 'salary' || (employee?.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly');
+    const noHours = employee?.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly';
     const wageRates = employee && (employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly'))
       ? templateWageRates(employee, item)
       : [];
@@ -888,6 +888,7 @@ export function PayPeriodDetail() {
 
   // Summaries
   const reportablePayrollItems = payrollItems.filter(i => !i.voided);
+  const payrollItemByEmployeeId = new Map(reportablePayrollItems.map((item) => [item.employee_id, item]));
   const contractorItems = reportablePayrollItems.filter(i => i.employment_type === 'contractor');
   const totalGross = reportablePayrollItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
   const totalWithholding = reportablePayrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
@@ -1059,7 +1060,11 @@ export function PayPeriodDetail() {
       case 'rate':
         return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection) || nameTieBreak();
       case 'hours':
-        return compareDirectional(toNumber(left.hours_worked), toNumber(right.hours_worked), resultsSortDirection) || nameTieBreak();
+        return compareDirectional(
+          toNumber(left.hours_worked) + toNumber(left.overtime_hours),
+          toNumber(right.hours_worked) + toNumber(right.overtime_hours),
+          resultsSortDirection
+        ) || nameTieBreak();
       case 'gross':
         return compareDirectional(toNumber(left.gross_pay), toNumber(right.gross_pay), resultsSortDirection) || nameTieBreak();
       case 'net':
@@ -1736,6 +1741,9 @@ export function PayPeriodDetail() {
 
                         if (hoursSortBy === 'gross') {
                           const estimateGross = (employee: Employee) => {
+                            const calculatedItem = payrollItemByEmployeeId.get(employee.id);
+                            if (isCalculated && calculatedItem) return toNumber(calculatedItem.gross_pay);
+
                             const entry = hoursMap[String(employee.id)] || { regular: 0, overtime: 0 };
                             const rate = toNumber(employee.pay_rate);
                             const isHourlyContractor = employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly';
@@ -1747,7 +1755,10 @@ export function PayPeriodDetail() {
                             const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[employee.pay_frequency] || 26;
                             const override = salaryOverrideMap[String(employee.id)] || 0;
 
+                            const excludesAutomaticContractorFee = payPeriod.run_purpose === 'off_cycle_tips' && isFlatContractor;
                             const baseGross = employee.employment_type === 'salary' && !payPeriod.includes_base_salary
+                              ? 0
+                              : excludesAutomaticContractorFee
                               ? 0
                               : variableSalary
                               ? override
@@ -1797,7 +1808,10 @@ export function PayPeriodDetail() {
                       const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
                       const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                       const rowTone = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                      const excludesAutomaticContractorFee = payPeriod.run_purpose === 'off_cycle_tips' && isContractorFlat;
                       const baseEstGross = emp.employment_type === 'salary' && !payPeriod.includes_base_salary
+                        ? 0
+                        : excludesAutomaticContractorFee
                         ? 0
                         : isVariableSalary
                         ? salaryOverride
@@ -1817,7 +1831,10 @@ export function PayPeriodDetail() {
                         ? 0
                         : Math.max(toNumber(tipsMap[String(emp.id)]?.amount), toNumber(tipsPaidOutMap[String(emp.id)]));
                       const grossBeforeFields = baseEstGross + reportedTipGross;
-                      const estGross = grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
+                      const calculatedItem = payrollItemByEmployeeId.get(emp.id);
+                      const estGross = isCalculated && calculatedItem
+                        ? toNumber(calculatedItem.gross_pay)
+                        : grossBeforeFields + estimatedTaxablePayrollFieldAdditions(emp.id, grossBeforeFields);
                       return (
                       <Fragment key={emp.id}>
                       {showDivider && (() => {
@@ -1853,7 +1870,9 @@ export function PayPeriodDetail() {
                           ) : emp.employment_type === 'salary' ? (
                             `${formatCurrency(payRate / periodsPerYear)}/period`
                           ) : isContractorFlat ? (
-                            `${formatCurrency(payRate)}/period`
+                            payPeriod.run_purpose === 'off_cycle_tips'
+                              ? <span className="font-medium text-primary-700">Excluded from tips-only run</span>
+                              : `${formatCurrency(payRate)}/period`
                           ) : hasMultiRate ? (
                             <div className="space-y-1 text-left">
                               {activeWageRates.map((rate) => (
@@ -2206,6 +2225,9 @@ export function PayPeriodDetail() {
                     const empRecord = employeeLookup.get(item.employee_id);
                     const isContractorHourly = isContractor && empRecord?.contractor_pay_type === 'hourly';
                     const isContractorFlat = isContractor && empRecord?.contractor_pay_type !== 'hourly';
+                    const regularHours = toNumber(item.hours_worked);
+                    const overtimeHours = toNumber(item.overtime_hours);
+                    const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
                     const itemWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
                     const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && itemWageRates.length > 1;
                     const prevGroup = idx > 0 ? employmentGroupKey(displayItems[idx - 1]?.employment_type || '') : null;
@@ -2281,7 +2303,32 @@ export function PayPeriodDetail() {
                             </div>
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
-                            {isSalary || isContractorFlat ? (
+                            {isSalary ? (
+                              payPeriod.includes_base_salary === false && !hasSalaryTimekeeping ? (
+                                <span className="text-gray-400" title="Salary hours do not apply to this run">—</span>
+                              ) : hasSalaryTimekeeping ? (
+                                <div
+                                  className="inline-flex flex-col items-end leading-tight"
+                                  title="Informational salary hours from the timekeeping ledger; base salary is not calculated from these hours"
+                                >
+                                  <span className="font-medium text-gray-900">
+                                    {regularHours} <span className="font-normal text-gray-500">regular</span>
+                                  </span>
+                                  {overtimeHours > 0 && (
+                                    <span className="mt-1 font-medium text-orange-600">
+                                      +{overtimeHours} overtime
+                                    </span>
+                                  )}
+                                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-500">
+                                    Informational
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-xs font-medium text-amber-700" title="No salary timekeeping record was available for this payroll item">
+                                  Not recorded
+                                </span>
+                              )
+                            ) : isContractorFlat ? (
                               <span className="text-gray-400">—</span>
                             ) : hasMultiRateResults ? (
                               <div className="space-y-1 text-left inline-block">
@@ -2300,9 +2347,9 @@ export function PayPeriodDetail() {
                               </div>
                             ) : (
                               <>
-                                {item.hours_worked || 0}
-                                {(item.overtime_hours || 0) > 0 && (
-                                  <span className="text-orange-600 ml-1">+{item.overtime_hours} OT</span>
+                                {regularHours}
+                                {overtimeHours > 0 && (
+                                  <span className="text-orange-600 ml-1">+{overtimeHours} OT</span>
                                 )}
                               </>
                             )}
@@ -2321,6 +2368,9 @@ export function PayPeriodDetail() {
                                 return `${formatCurrency(payRate / periodsPerYear)}/period`;
                               }
                               if (isContractorFlat) {
+                                if (payPeriod.run_purpose === 'off_cycle_tips') {
+                                  return <span className="font-medium text-primary-700">Excluded from tips-only run</span>;
+                                }
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
                                 if (override > 0) return <span className="text-emerald-600" title="Flat Fee Override">{formatCurrency(override)}/period</span>;
                                 return <span className="text-emerald-600">{formatCurrency(toNumber(item.pay_rate))}/period</span>;

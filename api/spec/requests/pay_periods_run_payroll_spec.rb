@@ -199,5 +199,25 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(payload[:department_id]).to be_nil
       expect(payload[:department_name]).to be_nil
     end
+
+    it "includes a terminated employee when the termination falls inside the pay period" do
+      employee.update!(status: "terminated", termination_date: Date.new(2024, 1, 5))
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll",
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.payroll_items.find_by(employee_id: employee.id)).to be_present
+    end
+
+    it "excludes a terminated employee from regular payroll after their effective termination" do
+      employee.update!(status: "terminated", termination_date: Date.new(2023, 12, 31))
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll",
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.payroll_items.find_by(employee_id: employee.id)).to be_nil
+    end
   end
 end

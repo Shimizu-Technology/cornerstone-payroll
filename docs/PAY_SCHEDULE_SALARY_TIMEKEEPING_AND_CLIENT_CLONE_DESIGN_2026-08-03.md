@@ -1,7 +1,7 @@
 # Pay Schedules, Salary Timekeeping, and Client Cloning
 
 **Decision date:** August 3, 2026
-**Status:** Approved staged design; consolidated into four implementation PRs, with PR 1 schedule/pay-run foundation and golden regression harness implemented on the feature branch
+**Status:** Approved staged design; PR 1 is an unmerged draft foundation and PR 2 is implemented on a dependent feature branch pending local review
 **Scope:** Cornerstone Payroll production clients, employee lifecycle history, salary-hour recordkeeping, pay-run purpose, and clean client cutover/cloning
 **Related work:** PR #39 (zero-hour defaults), PR #105 (paid-out tip taxable gross), PR #121 (classification-history safeguards), and CPR-MP-016 in the payroll compliance master plan
 

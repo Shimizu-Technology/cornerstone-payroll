@@ -571,17 +571,12 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   describe "DELETE /api/v1/admin/employees/:id" do
     let!(:employee) { create(:employee, company: company, status: "active") }
 
-    it "soft deletes the employee by setting terminated status" do
+    it "requires the explicit termination workflow instead of guessing today's date" do
       delete "/api/v1/admin/employees/#{employee.id}"
 
-      expect(response).to have_http_status(:no_content)
-      expect(employee.reload.status).to eq("terminated")
-      expect(employee.termination_date).to eq(Date.current)
-
-      audit = AuditLog.find_by!(action: "employees#destroy", record_id: employee.id)
-      expect(audit.subject_name).to eq(employee.display_name)
-      expect(audit.metadata.fetch("before_values")).to include("status" => "active")
-      expect(audit.metadata.fetch("after_values")).to include("status" => "terminated")
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("error")).to match(/termination workflow/)
+      expect(employee.reload).to be_active
     end
 
     it "does not hard delete the employee" do
@@ -594,6 +589,43 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       delete "/api/v1/admin/employees/99999"
 
       expect(response).to have_http_status(:not_found)
+    end
+  end
+
+
+  describe "POST /api/v1/admin/employees/:id/terminate" do
+    let!(:employee) { create(:employee, company: company, status: "active", hire_date: Date.new(2024, 1, 1)) }
+    let(:payload) do
+      {
+        termination: {
+          effective_date: "2024-03-15",
+          last_worked_on: "2024-03-14",
+          reason_category: "voluntary",
+          internal_notes: "Written notice received by the payroll team."
+        }
+      }
+    end
+
+    it "records an immutable effective-dated status event" do
+      post "/api/v1/admin/employees/#{employee.id}/terminate", params: payload, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(employee.reload).to have_attributes(status: "terminated", termination_date: Date.new(2024, 3, 15))
+      expect(response.parsed_body.dig("data", "status_history", 0)).to include(
+        "event_type" => "terminated",
+        "effective_date" => "2024-03-15",
+        "last_worked_on" => "2024-03-14",
+        "internal_notes" => "Written notice received by the payroll team."
+      )
+    end
+
+    it "does not let an accountant perform a status transition" do
+      allow_any_instance_of(Api::V1::Admin::EmployeesController).to receive(:current_user).and_return(accountant_user)
+
+      post "/api/v1/admin/employees/#{employee.id}/terminate", params: payload, as: :json
+
+      expect(response).to have_http_status(:forbidden)
+      expect(employee.reload).to be_active
     end
   end
 end

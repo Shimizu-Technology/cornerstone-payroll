@@ -13,6 +13,7 @@ class PayrollItem < ApplicationRecord
   has_many :payroll_item_field_entries, dependent: :destroy
   has_many :loan_transactions, dependent: :nullify
   has_many :payroll_liability_entries, dependent: :restrict_with_error
+  has_many :payroll_time_allocations, dependent: :destroy
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 
@@ -44,7 +45,7 @@ class PayrollItem < ApplicationRecord
   # Hours / wage validations only apply to non-correction rows. A correction
   # row stores deltas (corrected_value - original_value), which can legitimately
   # be negative when the correction reduces hours/wages.
-  validates :hours_worked, :overtime_hours, :holiday_hours, :pto_hours,
+  validates :hours_worked, :overtime_hours, :holiday_hours, :pto_hours, :scheduled_hours,
             numericality: { greater_than_or_equal_to: 0 },
             allow_nil: true,
             unless: :correction_entry?
@@ -350,9 +351,43 @@ class PayrollItem < ApplicationRecord
   end
 
   def overtime_pay
+    return salary_overtime_pay if salary?
     return 0 unless hourly?
 
     overtime_hours.to_f * pay_rate * 1.5
+  end
+
+  def salary_overtime_pay
+    snapshot = timekeeping_context_snapshot.to_h.deep_stringify_keys
+    return 0 unless snapshot["overtime_status"] == "nonexempt"
+
+    salary_covered_hours = BigDecimal(snapshot["salary_covers_weekly_hours"].to_s.presence || "0")
+    unless salary_covered_hours.between?(40, 168)
+      raise ArgumentError, "Confirm how many weekly hours the salary covers before calculating nonexempt salary overtime"
+    end
+
+    weekly_salary = case snapshot["salary_type"]
+    when "annual"
+      BigDecimal(pay_rate.to_s) / 52
+    when "per_period", "variable"
+      periods = SalaryPayrollCalculator::PERIODS_PER_YEAR.fetch(snapshot["pay_frequency"], 26)
+      period_salary = snapshot["salary_type"] == "variable" ? BigDecimal(salary_override.to_s) : BigDecimal(pay_rate.to_s)
+      period_salary * periods / 52
+    else
+      return 0
+    end
+
+    covered_overtime = BigDecimal(snapshot["salary_covered_overtime_hours"].to_s.presence || "0")
+    uncovered_overtime = BigDecimal(snapshot["salary_uncovered_overtime_hours"].to_s.presence || "0")
+    total_snapshotted_overtime = covered_overtime + uncovered_overtime
+    unless total_snapshotted_overtime == BigDecimal(overtime_hours.to_s)
+      raise ArgumentError, "Rebuild daily salary time allocations before calculating nonexempt salary overtime"
+    end
+
+    regular_rate = weekly_salary / salary_covered_hours
+    premium = (covered_overtime * regular_rate * BigDecimal("0.5")) +
+              (uncovered_overtime * regular_rate * BigDecimal("1.5"))
+    premium.round(2).to_f
   end
 
   def regular_pay
