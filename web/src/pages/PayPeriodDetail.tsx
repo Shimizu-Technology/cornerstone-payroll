@@ -42,7 +42,7 @@ import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPane
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
-import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs } from '@/types';
+import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
   regular: number;
@@ -58,6 +58,15 @@ interface PayrollFieldDraftEntry {
 const TABLE_STICKY_TOP_CLASS = 'top-0';
 
 const MAX_HOURS_PER_PERIOD = 200;
+const runPurposeLabels: Record<PayRunPurpose, string> = {
+  regular: 'Regular payroll',
+  off_cycle_tips: 'Off-cycle tips',
+  bonus: 'Bonus',
+  commission: 'Commission',
+  correction: 'Correction',
+  final: 'Final paycheck',
+  adjustment: 'Adjustment',
+};
 const adjustmentTreatmentLabels: Record<PayrollAdjustmentTreatment, string> = {
   taxable_addition: 'Taxable add.',
   non_taxable_addition: 'Non-taxable add.',
@@ -740,7 +749,10 @@ export function PayPeriodDetail() {
 
   const handleCommit = async () => {
     if (!payPeriod) return;
-    if (!confirm('Commit this payroll? This will update YTD totals and cannot be undone.')) return;
+    const warningText = payPeriod.compliance_warnings?.length
+      ? `\n\nAttention:\n${payPeriod.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
+      : '';
+    if (!confirm(`Commit this payroll? This will update YTD totals and cannot be undone.${warningText}`)) return;
     try {
       setProcessing(true);
       setError(null);
@@ -1192,6 +1204,12 @@ export function PayPeriodDetail() {
           </div>
         )}
 
+        {payPeriod.compliance_warnings?.map((warning) => (
+          <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span className="font-semibold">Workweek confirmation needed:</span> {warning}
+          </div>
+        ))}
+
         {payPeriod.notes && (
           <Card className="border-blue-100 bg-blue-50/60">
             <CardContent className="py-4">
@@ -1214,6 +1232,10 @@ export function PayPeriodDetail() {
           {isCorrection && (
             <Badge variant="warning">Correction Run</Badge>
           )}
+          <Badge variant={payPeriod.run_purpose === 'regular' ? 'default' : 'warning'}>
+            {runPurposeLabels[payPeriod.run_purpose] || payPeriod.run_purpose}
+          </Badge>
+          {!payPeriod.includes_base_salary && <Badge variant="info">Base salary excluded</Badge>}
           {isCommitted && payPeriod.committed_at && (
             <span className="text-sm text-gray-500">
               Processed {formatGuamDateTime(payPeriod.committed_at)}
@@ -1725,7 +1747,9 @@ export function PayPeriodDetail() {
                             const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[employee.pay_frequency] || 26;
                             const override = salaryOverrideMap[String(employee.id)] || 0;
 
-                            const baseGross = variableSalary
+                            const baseGross = employee.employment_type === 'salary' && !payPeriod.includes_base_salary
+                              ? 0
+                              : variableSalary
                               ? override
                               : perPeriodSalary
                               ? rate
@@ -1773,7 +1797,9 @@ export function PayPeriodDetail() {
                       const salaryOverride = salaryOverrideMap[String(emp.id)] || 0;
                       const periodsPerYear = ({ weekly: 52, biweekly: 26, semimonthly: 24, monthly: 12 } as Record<string, number>)[emp.pay_frequency] || 26;
                       const rowTone = rowIndex % 2 === 0 ? 'bg-white' : 'bg-slate-100';
-                      const baseEstGross = isVariableSalary
+                      const baseEstGross = emp.employment_type === 'salary' && !payPeriod.includes_base_salary
+                        ? 0
+                        : isVariableSalary
                         ? salaryOverride
                         : isPerPeriodSalary
                         ? payRate
@@ -2284,6 +2310,7 @@ export function PayPeriodDetail() {
                           <TableCell className={`text-right ${rowTone}`}>
                             {(() => {
                               if (isSalary) {
+                                if (!payPeriod.includes_base_salary) return <span className="font-medium text-primary-700">Excluded from this run</span>;
                                 const override = item.salary_override ? toNumber(item.salary_override) : 0;
                                 if (override > 0) return <span className="text-indigo-600" title="Salary Override">{formatCurrency(override)}/period</span>;
                                 if (empRecord?.salary_type === 'variable') return <span className="text-indigo-600 font-medium">Variable</span>;

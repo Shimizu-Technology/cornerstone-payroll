@@ -471,7 +471,7 @@ Level B is a later decision, not assumed near-term scope. Before authorizing it,
 | Garnishment case/remittance tracking | Partial deduction/check support | P2 |
 | Benefits and workers' compensation classification/reporting | Missing | P2 |
 | Locations/worksites/jobs/classes | Partial departments only | P2 |
-| New-hire and terminated-employee reports | Partial | P2 |
+| New-hire and terminated-employee reports | Partial; current termination action records the click date and lacks preserved transition context | P1/P2 |
 | Payroll tax liability and payment history | Partial | P0/P1 |
 | Quarterly filing workflow | Partial | P0/P1 |
 | Annual filing workflow | Partial | P1 |
@@ -669,11 +669,14 @@ Deliverables:
 6. Garnishment case, priority, limit, deduction, remittance, and evidence workflow.
 7. Employer contribution and benefit configuration.
 8. Locations/worksites and optional job/class costing.
-9. Employee onboarding completeness and new-hire/termination reporting views.
+9. Employee onboarding completeness and effective-dated termination/reactivation history: actual effective date, recorded date/actor, optional controlled reason and restricted notes, date-aware final-pay eligibility, and new-hire/termination reporting views. Tax-classification transitions remain a separate filing-record workflow.
 10. Paystub delivery and controlled employee self-service.
 11. Expanded payroll anomaly detection and previous-period comparisons.
 12. QuickBooks-equivalent report catalog and customizable filters/exports.
 13. Guam wage-and-hour diagnostics for minimum wage, regular-rate overtime, workweek completeness, pay timing, final pay, and meal-period exceptions.
+14. A canonical synthetic golden-payroll regression suite that exercises calculation, commit, payroll register, YTD/QTD, 941, SWICA, W-2GU, 1099, correction, final-pay, and reconciliation paths in CI.
+
+The effective-dated pay schedule, salary timekeeping, pay-run purpose, production migration, and clean client-cloning design is documented in [Pay Schedules, Salary Timekeeping, and Client Cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md).
 
 Exit gate:
 

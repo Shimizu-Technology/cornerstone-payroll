@@ -319,6 +319,7 @@ export interface EmployeeFormData {
 
 export type PayPeriodStatus = 'draft' | 'calculated' | 'approved' | 'committed';
 export type TaxSyncStatus = 'pending' | 'syncing' | 'synced' | 'failed';
+export type PayRunPurpose = 'regular' | 'off_cycle_tips' | 'bonus' | 'commission' | 'correction' | 'final' | 'adjustment';
 
 // CPR-71: Payroll correction lifecycle
 export type CorrectionStatus = 'voided' | 'correction';
@@ -363,6 +364,12 @@ export interface PayPeriod {
   end_date: string;
   pay_date: string;
   status: PayPeriodStatus;
+  run_purpose: PayRunPurpose;
+  includes_base_salary: boolean;
+  run_purpose_source?: 'operator_selected' | 'system_correction' | 'production_migration' | 'legacy_system_default';
+  company_pay_schedule_id?: number | null;
+  company_workweek_id?: number | null;
+  compliance_warnings?: string[];
   excluded_employee_ids?: number[];
   notes?: string;
   period_description?: string;

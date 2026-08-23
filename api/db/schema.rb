@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_03_121000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -235,6 +235,64 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
     t.index ["company_id"], name: "index_company_assignments_on_company_id"
     t.index ["user_id", "company_id"], name: "index_company_assignments_on_user_id_and_company_id", unique: true
     t.index ["user_id"], name: "index_company_assignments_on_user_id"
+  end
+
+  create_table "company_pay_schedules", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "confirmation_status", default: "needs_confirmation", null: false
+    t.datetime "confirmed_at"
+    t.bigint "confirmed_by_id"
+    t.datetime "created_at", null: false
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.string "frequency", null: false
+    t.text "notes"
+    t.integer "pay_date_offset_days"
+    t.string "pay_date_rule", default: "manual", null: false
+    t.date "period_anchor_date"
+    t.string "period_rule", default: "manual", null: false
+    t.integer "period_start_weekday"
+    t.string "source", default: "legacy_system_default", null: false
+    t.string "timezone", default: "Pacific/Guam", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "effective_on"], name: "idx_company_pay_schedules_effective", unique: true
+    t.index ["company_id"], name: "idx_company_pay_schedules_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.index ["company_id"], name: "index_company_pay_schedules_on_company_id"
+    t.index ["confirmed_by_id"], name: "index_company_pay_schedules_on_confirmed_by_id"
+    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying, 'needs_confirmation'::character varying]::text[])", name: "company_pay_schedules_confirmation_check"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_pay_schedules_dates_check"
+    t.check_constraint "frequency::text = ANY (ARRAY['weekly'::character varying, 'biweekly'::character varying, 'semimonthly'::character varying, 'monthly'::character varying]::text[])", name: "company_pay_schedules_frequency_check"
+    t.check_constraint "pay_date_rule::text = ANY (ARRAY['manual'::character varying, 'days_after_period_end'::character varying]::text[])", name: "company_pay_schedules_pay_date_rule_check"
+    t.check_constraint "period_anchor_date IS NULL OR period_start_weekday IS NULL OR EXTRACT(dow FROM period_anchor_date)::integer = period_start_weekday", name: "company_pay_schedules_anchor_weekday_check"
+    t.check_constraint "period_rule::text <> 'biweekly'::text OR period_anchor_date IS NOT NULL", name: "company_pay_schedules_biweekly_anchor_check"
+    t.check_constraint "period_rule::text = ANY (ARRAY['manual'::character varying, 'weekly'::character varying, 'biweekly'::character varying, 'semimonthly'::character varying]::text[])", name: "company_pay_schedules_period_rule_check"
+    t.check_constraint "period_start_weekday IS NULL OR period_start_weekday >= 0 AND period_start_weekday <= 6", name: "company_pay_schedules_weekday_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_inferred'::character varying, 'legacy_system_default'::character varying]::text[])", name: "company_pay_schedules_source_check"
+  end
+
+  create_table "company_workweeks", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "confirmation_status", default: "needs_confirmation", null: false
+    t.datetime "confirmed_at"
+    t.bigint "confirmed_by_id"
+    t.datetime "created_at", null: false
+    t.date "effective_on", null: false
+    t.date "ends_on"
+    t.text "notes"
+    t.string "source", default: "legacy_system_default", null: false
+    t.integer "starts_at_minutes", default: 0, null: false
+    t.integer "starts_on_weekday", default: 0, null: false
+    t.string "timezone", default: "Pacific/Guam", null: false
+    t.datetime "updated_at", null: false
+    t.index ["company_id", "effective_on"], name: "idx_company_workweeks_effective", unique: true
+    t.index ["company_id"], name: "idx_company_workweeks_one_current", unique: true, where: "(ends_on IS NULL)"
+    t.index ["company_id"], name: "index_company_workweeks_on_company_id"
+    t.index ["confirmed_by_id"], name: "index_company_workweeks_on_confirmed_by_id"
+    t.check_constraint "confirmation_status::text = ANY (ARRAY['confirmed'::character varying, 'needs_confirmation'::character varying]::text[])", name: "company_workweeks_confirmation_check"
+    t.check_constraint "ends_on IS NULL OR ends_on >= effective_on", name: "company_workweeks_dates_check"
+    t.check_constraint "source::text = ANY (ARRAY['operator_confirmed'::character varying, 'production_inferred'::character varying, 'legacy_system_default'::character varying]::text[])", name: "company_workweeks_source_check"
+    t.check_constraint "starts_at_minutes >= 0 AND starts_at_minutes <= 1439", name: "company_workweeks_time_check"
+    t.check_constraint "starts_on_weekday >= 0 AND starts_on_weekday <= 6", name: "company_workweeks_weekday_check"
   end
 
   create_table "company_ytd_totals", force: :cascade do |t|
@@ -1037,14 +1095,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
     t.datetime "committed_at"
     t.bigint "committed_by_id"
     t.bigint "company_id", null: false
+    t.bigint "company_pay_schedule_id"
+    t.bigint "company_workweek_id"
     t.string "correction_status"
     t.bigint "corrects_pay_period_id"
     t.datetime "created_at", null: false
     t.bigint "created_by_id"
     t.string "cycle", default: "regular", null: false
     t.date "end_date", null: false
+    t.boolean "includes_base_salary", default: true, null: false
     t.text "notes"
     t.date "pay_date", null: false
+    t.string "run_purpose", default: "regular", null: false
+    t.string "run_purpose_source", default: "legacy_system_default", null: false
     t.bigint "source_pay_period_id"
     t.date "start_date", null: false
     t.string "status", default: "draft"
@@ -1063,9 +1126,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
     t.index ["calculated_by_id"], name: "index_pay_periods_on_calculated_by_id"
     t.index ["committed_by_id"], name: "index_pay_periods_on_committed_by_id"
     t.index ["company_id", "end_date"], name: "index_pay_periods_on_company_id_and_end_date"
+    t.index ["company_id", "run_purpose"], name: "idx_pay_periods_company_purpose"
     t.index ["company_id", "start_date"], name: "index_pay_periods_on_company_id_and_start_date"
     t.index ["company_id", "status"], name: "index_pay_periods_on_company_id_and_status"
     t.index ["company_id"], name: "index_pay_periods_on_company_id"
+    t.index ["company_pay_schedule_id"], name: "index_pay_periods_on_company_pay_schedule_id"
+    t.index ["company_workweek_id"], name: "index_pay_periods_on_company_workweek_id"
     t.index ["correction_status"], name: "index_pay_periods_on_correction_status"
     t.index ["corrects_pay_period_id"], name: "index_pay_periods_on_corrects_pay_period_id"
     t.index ["cycle"], name: "index_pay_periods_on_cycle"
@@ -1077,6 +1143,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
     t.index ["unapproved_by_id"], name: "index_pay_periods_on_unapproved_by_id"
     t.index ["voided_by_id"], name: "index_pay_periods_on_voided_by_id"
     t.check_constraint "cycle::text = ANY (ARRAY['regular'::character varying::text, 'supplemental'::character varying::text])", name: "pay_periods_cycle_check"
+    t.check_constraint "run_purpose::text <> 'off_cycle_tips'::text OR includes_base_salary = false", name: "pay_periods_off_cycle_tips_salary_check"
+    t.check_constraint "run_purpose::text = ANY (ARRAY['regular'::character varying, 'off_cycle_tips'::character varying, 'bonus'::character varying, 'commission'::character varying, 'correction'::character varying, 'final'::character varying, 'adjustment'::character varying]::text[])", name: "pay_periods_run_purpose_check"
+    t.check_constraint "run_purpose_source::text = ANY (ARRAY['operator_selected'::character varying, 'system_correction'::character varying, 'production_migration'::character varying, 'legacy_system_default'::character varying]::text[])", name: "pay_periods_run_purpose_source_check"
   end
 
   create_table "payroll_field_definitions", force: :cascade do |t|
@@ -1868,6 +1937,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
   add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
+  add_foreign_key "company_pay_schedules", "companies"
+  add_foreign_key "company_pay_schedules", "users", column: "confirmed_by_id"
+  add_foreign_key "company_workweeks", "companies"
+  add_foreign_key "company_workweeks", "users", column: "confirmed_by_id"
   add_foreign_key "company_ytd_totals", "companies"
   add_foreign_key "deduction_types", "companies"
   add_foreign_key "department_ytd_totals", "departments"
@@ -1959,6 +2032,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_02_090000) do
   add_foreign_key "pay_period_excluded_employees", "pay_periods"
   add_foreign_key "pay_period_excluded_employees", "users", column: "excluded_by_id"
   add_foreign_key "pay_periods", "companies"
+  add_foreign_key "pay_periods", "company_pay_schedules"
+  add_foreign_key "pay_periods", "company_workweeks"
   add_foreign_key "pay_periods", "pay_periods", column: "corrects_pay_period_id"
   add_foreign_key "pay_periods", "pay_periods", column: "source_pay_period_id", on_delete: :nullify
   add_foreign_key "pay_periods", "pay_periods", column: "superseded_by_id", on_delete: :nullify

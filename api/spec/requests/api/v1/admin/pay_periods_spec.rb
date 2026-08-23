@@ -262,6 +262,51 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(response).to have_http_status(:created)
       json = JSON.parse(response.body)
       expect(json["pay_period"]["status"]).to eq("draft")
+      expect(json["pay_period"]["run_purpose"]).to eq("regular")
+      expect(json["pay_period"]["includes_base_salary"]).to be(true)
+    end
+
+    it "defaults a non-regular run to no base salary" do
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.today,
+          end_date: Date.today + 14.days,
+          pay_date: Date.today + 17.days,
+          run_purpose: "bonus"
+        }
+      }
+
+      expect(response).to have_http_status(:created)
+      period = PayPeriod.order(:id).last
+      expect(period.run_purpose).to eq("bonus")
+      expect(period.includes_base_salary).to be(false)
+      expect(period.run_purpose_source).to eq("operator_selected")
+    end
+
+    it "rejects base salary on an off-cycle tips run" do
+      post "/api/v1/admin/pay_periods", params: {
+        pay_period: {
+          start_date: Date.today,
+          end_date: Date.today + 14.days,
+          pay_date: Date.today + 17.days,
+          run_purpose: "off_cycle_tips",
+          includes_base_salary: true
+        }
+      }
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("errors").join(" ")).to match(/base salary/i)
+    end
+
+    it "records operator intent when a draft run purpose changes" do
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}", params: {
+        pay_period: { run_purpose: "commission" }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.run_purpose).to eq("commission")
+      expect(pay_period.includes_base_salary).to be(false)
+      expect(pay_period.run_purpose_source).to eq("operator_selected")
     end
 
     it "optionally updates the company starting check number" do
