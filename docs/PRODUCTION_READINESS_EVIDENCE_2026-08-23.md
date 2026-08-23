@@ -8,6 +8,8 @@
 
 **Result:** No-go
 
+> This is the initial failed audit. The remediation rerun and current disposition are recorded in [Production readiness evidence: August 24, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md). The original evidence remains unchanged below so the failure and recovery trail are not erased.
+
 ## What this evidence establishes
 
 The production web service was running the audited `main` revision. Safe probes established that Rails was in production, authentication was enabled, TLS was configured, R2 was selected for Active Storage, Solid Cache/Queue/Cable adapters were selected, explicit frontend origins and URL were present, R2 configuration existed, and effective Active Record encryption keys were bound.

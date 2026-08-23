@@ -1,6 +1,8 @@
 # Production Readiness Checklist
 
-Last reviewed: August 23, 2026
+Last reviewed: August 24, 2026
+
+Current evidence: [August 24, 2026 production rerun](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md). The deployed command passes 24 of 26 controls. Clerk production keys and MFA remain failed, and the manual controls below remain no-go until their evidence is attached.
 
 This is the release gate for payroll and compliance workloads. Passing automated tests is necessary but does not authorize production use by itself. The release owner must attach evidence for every applicable control below.
 

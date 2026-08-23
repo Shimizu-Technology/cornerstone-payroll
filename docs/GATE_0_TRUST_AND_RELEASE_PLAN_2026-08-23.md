@@ -1,8 +1,8 @@
 # Gate 0 trust and release plan
 
-**Reviewed:** 2026-08-23
+**Reviewed:** 2026-08-24
 
-**Baseline:** re-audited against `origin/main` through `0d42371`
+**Baseline:** re-audited against deployed `main` through `1d19362`
 
 **Status:** In progress; no item is closed until its acceptance evidence is linked below
 
@@ -50,7 +50,7 @@ Gate 0 closes only when:
 | G0-16 | Cornerstone Tax frontend fails open without Clerk configuration | A production configuration error can expose the application shell | Fail closed in production and test the missing-config state | Code closed in Cornerstone Tax PR #53; production signed-out routes verified |
 | G0-17 | Authenticated Playwright normally skips because CI has no backend fixture/auth state | Release automation does not exercise payroll | Deterministic Postgres/Rails/Vite fixture and required journeys without skips | Code closed in PR #131; `main` green |
 | G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Code closed in PR #131; `main` green |
-| G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | In implementation; the dated production audit found development Clerk keys, an invalid Resend key, and web/worker queue database split-brain |
+| G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | Code closed in PR #133; deployed probe passes 24/26. Clerk production identity, MFA, and manual operational evidence remain open. |
 | G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Code closed in PR #132; `main` green |
 | G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Code closed in PR #129; `main` green |
 | G0-22 | Cornerstone Tax and AIRE frontend dependency audits report direct and transitive vulnerabilities, including critical/high findings | A companion application can remain an insecure production dependency even while Payroll itself is green | Upgrade to audit-clean compatible dependency sets; run each app's complete frontend/runtime gate; retain current-head review and post-merge evidence | Code closed in Cornerstone Tax PR #53 and AIRE PR #75; both production frontends verified |
@@ -152,11 +152,11 @@ For each environment-specific control, record:
 
 | Control | Owner | Environment | Commit | Verified at | Evidence link/location | Result | Retest date |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| MFA enforcement | Unassigned | Production | — | — | — | Not verified | — |
+| MFA enforcement | Unassigned | Production | `1d19362` | 2026-08-24 | Clerk dashboard and `job-da5g1ojbc2fs738uld00` | Failed: development instance has no enabled MFA strategy or enforcement | After coordinated Clerk cutover |
 | Database backup and restore | Unassigned | Production-shaped isolated restore | — | — | — | Not verified | — |
-| R2 upload/read/delete and recovery | Unassigned | Production | — | — | — | Not verified | — |
-| Queue/cache/cable durability and restart | Unassigned | Production | — | — | — | Not verified | — |
-| Email delivery and sender authentication | Unassigned | Production | — | — | — | Not verified | — |
+| R2 upload/read/delete and recovery | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` | Basic round trip verified; recovery/versioning not verified | — |
+| Queue/cache/cable durability and restart | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` | Connectivity and worker heartbeat verified; queued-job restart proof missing | — |
+| Email delivery and sender authentication | Unassigned | Production | `1d19362` | 2026-08-24 | `job-da5g1ojbc2fs738uld00` and Resend key-use evidence | Provider authentication and every sender domain verified | On key/domain change |
 | Error and uptime monitoring | Unassigned | Production | — | — | — | Not verified | — |
 | Representative payroll lifecycle | Unassigned | Staging | — | — | — | Not verified | — |
 | Filing-output certification | Cornerstone reviewer unassigned | Staging/official validator | — | — | — | Not verified | — |
@@ -164,7 +164,7 @@ For each environment-specific control, record:
 
 Repository evidence cannot prove these external controls. Missing evidence remains a no-go under the production readiness checklist.
 
-The first dated audit is [Production readiness evidence: August 23, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-23.md). It deliberately records failed controls. A failed audit is useful evidence, but it does not close G0-19.
+The initial failed audit is [Production readiness evidence: August 23, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-23.md). The current remediation rerun is [Production readiness evidence: August 24, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md). The deployed command now passes 24 of 26 controls, but Clerk production identity, MFA, and the listed manual controls keep G0-19 operationally open.
 
 ## PR evidence template
 
@@ -197,3 +197,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | AIRE portion of G0-22 | AIRE #75 | `b6321e2` | Yes | Production served the final reviewed asset set; authenticated dashboard and time-tracking surfaces loaded without mutation | Greptile 5/5 on head `4d6b24a`; dependency audit closed and public phone-link regression retained |
 | G0-17, G0-18, G0-23 | #131 | `2d849b9` | Yes | `main` Quality run 32637076159 passed | Greptile 5/5 on head `fe607e7`; required `browser` check added to strict ruleset 16468532 |
 | G0-20 | #132 | `0d42371` | Yes | `main` Quality run 32638594832 passed | Greptile 5/5 on head `4878734`; accountants retain assigned-client payroll operations but cannot mutate client configuration, sensitive workforce approval, organization settings, integration secrets, or printer calibration |
+| G0-19 implementation | #133 | `1d19362` | Yes | `main` Quality run 32640601945 passed; deployed job `job-da5g1ojbc2fs738uld00` passed 24/26 | Greptile 5/5 on head `2974a75`; effective production configuration and safe provider probes are enforced. Clerk production identity, MFA, restore/recovery, restart durability, monitoring, staging payroll, filing certification, and incident ownership remain operationally open. |
