@@ -27,7 +27,8 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 - [Staff role and permission matrix](ROLE_PERMISSION_MATRIX_2026-05-14.md) — approved staff capabilities, high-impact endpoint ownership, and enforcement rules.
 - [Payroll, QuickBooks, and compliance master plan](PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md) — payroll parity and compliance roadmap after Gate 0.
 - [Production readiness checklist](PRODUCTION_READINESS_CHECKLIST.md) — environment-specific evidence and release signoff.
-- [Production readiness evidence: August 23, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-23.md) — dated production audit results, verified failures, and remediation ownership.
+- [Production readiness evidence: August 24, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md) — current deployed remediation result: 24/26 automated controls pass; Clerk production identity, MFA, and manual operations evidence remain no-go blockers.
+- [Production readiness evidence: August 23, 2026](PRODUCTION_READINESS_EVIDENCE_2026-08-23.md) — preserved initial failed audit and remediation baseline.
 - [Cutover gate criteria](rollout/03-CUTOVER-GATE-CRITERIA.md) — per-client parallel-run and cutover evidence.
 
 ## Supporting implementation records
