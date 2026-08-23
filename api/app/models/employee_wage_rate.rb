@@ -12,6 +12,26 @@ class EmployeeWageRate < ApplicationRecord
   scope :active, -> { where(active: true) }
   scope :primary, -> { where(is_primary: true) }
 
+  def self.create_with_employee_lock(employee:, attributes:)
+    employee.with_lock do
+      employee.employee_wage_rates.create(attributes)
+    end
+  end
+
+  def update_with_employee_lock(attributes)
+    employee.with_lock do
+      reload
+      update(attributes)
+    end
+  end
+
+  def destroy_with_employee_lock!
+    employee.with_lock do
+      reload
+      destroy!
+    end
+  end
+
   private
 
   def normalize_rate_precision

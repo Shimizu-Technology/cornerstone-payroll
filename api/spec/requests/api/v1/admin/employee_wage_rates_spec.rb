@@ -31,6 +31,24 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
   end
 
   describe "POST /api/v1/admin/employee_wage_rates" do
+    it "creates the wage rate under the employee lock" do
+      expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
+
+      post "/api/v1/admin/employee_wage_rates",
+        params: {
+          employee_wage_rate: {
+            employee_id: employee.id,
+            label: "Regular",
+            rate: 18.00,
+            is_primary: true,
+            active: true
+          }
+        },
+        as: :json
+
+      expect(response).to have_http_status(:created)
+    end
+
     it "rejects creating a wage rate for an employee in another company" do
       expect {
         post "/api/v1/admin/employee_wage_rates",
@@ -51,6 +69,18 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
   end
 
   describe "PATCH /api/v1/admin/employee_wage_rates/:id" do
+    it "updates the wage rate under the employee lock" do
+      rate = employee.employee_wage_rates.create!(label: "Regular", rate: 18, is_primary: true, active: true)
+      expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
+
+      patch "/api/v1/admin/employee_wage_rates/#{rate.id}",
+        params: { employee_wage_rate: { rate: 20.00 } },
+        as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(rate.reload.rate.to_f).to eq(20.0)
+    end
+
     it "returns 404 for a wage rate in another company" do
       foreign_rate = EmployeeWageRate.create!(
         employee: other_employee,
@@ -69,6 +99,16 @@ RSpec.describe "Api::V1::Admin::EmployeeWageRates", type: :request do
   end
 
   describe "DELETE /api/v1/admin/employee_wage_rates/:id" do
+    it "deletes the wage rate under the employee lock" do
+      rate = employee.employee_wage_rates.create!(label: "Regular", rate: 18, is_primary: true, active: true)
+      expect_any_instance_of(Employee).to receive(:with_lock).and_call_original
+
+      delete "/api/v1/admin/employee_wage_rates/#{rate.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(EmployeeWageRate.exists?(rate.id)).to eq(false)
+    end
+
     it "returns 404 for a wage rate in another company" do
       foreign_rate = EmployeeWageRate.create!(
         employee: other_employee,
