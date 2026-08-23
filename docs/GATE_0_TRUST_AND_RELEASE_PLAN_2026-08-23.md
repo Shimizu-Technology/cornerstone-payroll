@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-08-23
 
-**Baseline:** re-audited against `origin/main` through `b915fa3`
+**Baseline:** re-audited against `origin/main` through `d7db0b8`
 
 **Status:** In progress; no item is closed until its acceptance evidence is linked below
 
@@ -40,10 +40,10 @@ Gate 0 closes only when:
 | G0-06 | Production encryption docs/readiness check environment keys that the initializer does not bind | Encrypted SSNs, bank data, secrets, or tokens can fail at runtime while readiness passes | One effective env-or-credentials contract; fail closed and test it | Code closed in PR #125; `main` green |
 | G0-07 | Commit checks stale state before its transaction and does not lock the pay period | Concurrent requests can duplicate YTD/loan effects | Lock and revalidate; prove exactly-once outcomes with PostgreSQL concurrency tests | Code closed in PR #126; `main` green |
 | G0-08 | Approve, unapprove, calculation, item mutation, imports, and commit do not share one lifecycle lock boundary | A committed run can race back to editable state or be mutated during commit | Lock every financial transition/mutation in a consistent order | Code closed in PR #126; `main` green |
-| G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Implementation in progress |
-| G0-10 | Imported overtime uses a hard-coded Sunday week and can preserve source splits | Payroll is not reliably the legal overtime authority | Use the pay period's confirmed workweek and calculate the paid split in Payroll | Open |
-| G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Open |
-| G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Open |
+| G0-09 | Time-source URL accepts unsafe HTTP/private destinations and sends the integration secret | SSRF, metadata access, secret disclosure, and response exfiltration | Admin-only config; production HTTPS/allowlist; DNS/IP pinning; safe response limits/errors | Code closed in PR #127; `main` green |
+| G0-10 | Imported overtime uses a hard-coded Sunday week and can preserve source splits | Payroll is not reliably the legal overtime authority | Use the pay period's confirmed workweek and calculate the paid split in Payroll | Implementation in progress |
+| G0-11 | Workweek start minute is configurable but date-only code ignores it | UI claims unsupported non-midnight semantics | Implement timestamp boundaries or block non-midnight configuration | Implementation in progress |
+| G0-12 | Source day/category/regular/OT totals need not reconcile | Malformed payloads can inflate paid hours | Blocking invariants with tolerance and source evidence | Implementation in progress |
 | G0-13 | OCR apply can recreate an employee excluded from a pay period | Explicit operator exclusion can be bypassed | Share the same exclusion guard across all import paths | Code closed in PR #126; `main` green |
 | G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Open |
 | G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Open |
@@ -52,6 +52,7 @@ Gate 0 closes only when:
 | G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Open |
 | G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | Open |
 | G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Open |
+| G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Open |
 
 ## Delivery sequence
 
@@ -67,6 +68,7 @@ Each row is a coherent PR or small PR group. A later group branches from updated
    - G0-07 and G0-08 across every transition and child mutation/import path.
 4. **Time integration trust and correctness**
    - G0-09 through G0-13 plus a versioned integration contract.
+   - G0-21 follows as a separate payroll-intake boundary because it has a different evidence model and operator flow.
 5. **Client portal data and approval boundary**
    - G0-14 and G0-15.
 6. **Cornerstone Tax fail-closed authentication**
@@ -104,6 +106,14 @@ Time-source settings are secret-bearing integration configuration. Organization 
 In production, every source must use HTTPS on port 443 and its exact normalized hostname must appear in `TIME_TRACKING_ALLOWED_HOSTS`. At request time Payroll resolves the hostname, rejects the full DNS answer set if any address is loopback, private, link-local, shared-address, documentation, multicast, or reserved space, and pins the connection to one of the inspected public addresses. This closes the validation-to-connection DNS-rebinding window while retaining hostname-based TLS verification. Redirects are not followed, environment proxy variables are ignored, responses must be JSON and no larger than one MiB, and operator-facing errors never include the upstream response body.
 
 Development may deliberately use `localhost` over HTTP for local integration testing. That exception does not exist in production. Production readiness fails when an active source exists without a hostname allowlist.
+
+DNS resolution and every inspected-address TCP/TLS attempt share one monotonic five-second connection-establishment deadline. Payroll tries another inspected address only when connection establishment fails. It never replays the authenticated export request after request processing begins.
+
+## Time Summary v1 authority and reconciliation contract
+
+The normative payload and versioning rules are in [Time Summary v1 contract](TIME_TRACKING_V1_CONTRACT.md). Payroll owns the confirmed legal workweek and paid regular/overtime split. Time sources own approved daily/category evidence. Payroll rejects unreconciled totals and ambiguous category allocation; it does not let a source-provided overtime split replace Payroll's calculation.
+
+This contract governs the AIRE, Cornerstone Tax, and custom Time Summary pull path. The separate Spike email/OCR adapter does not emit dated daily evidence and is tracked independently as G0-21; closing G0-10 through G0-12 must not be read as certifying that adapter.
 
 ## Required browser and negative tests
 
@@ -162,3 +172,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | G0-01, G0-02 | #124 | `d59173e` | Yes | `main` Quality run 32615025379 passed; ruleset 16468532 now requires strict current-base `backend` and `frontend` checks | Dependency advisory cleared; browser authentication skip remains tracked as G0-17 |
 | G0-03–G0-06 | #125 | `24b5c77` | Yes | `main` Quality run 32616646822 passed | Greptile 5/5 on head `cb20bed`; revocation is enforced at HTTP, Cable connection, retryable disconnect, and final broadcast delivery boundaries |
 | G0-07, G0-08, G0-13 | #126 | `b915fa3` | Yes | `main` Quality run 32618765810 passed | Greptile 5/5 on head `7ac5387`; deterministic PostgreSQL races cover lifecycle, check-number, YTD, and loan lock order |
+| G0-09 | #127 | `d7db0b8` | Yes | `main` Quality run 32621927046 passed | Greptile 5/5 on head `76f7a42`; DNS, connection fallback, and all request attempts share bounded trust rules without replaying the export request |

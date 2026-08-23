@@ -29,11 +29,6 @@ function minutesToTime(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
-function timeToMinutes(value: string) {
-  const [hours, minutes] = value.split(':').map(Number);
-  return (hours * 60) + minutes;
-}
-
 function nextEffectiveDate(current: string) {
   const today = new Date();
   const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -133,7 +128,7 @@ export function PayScheduleSettings() {
         },
         workweek: {
           starts_on_weekday: form.workweek_start_weekday,
-          starts_at_minutes: timeToMinutes(form.workweek_start_time),
+          starts_at_minutes: 0,
           timezone: 'Pacific/Guam',
           notes: form.notes,
         },
@@ -199,7 +194,15 @@ export function PayScheduleSettings() {
             </CardHeader>
             <CardContent className="grid gap-5 sm:grid-cols-2">
               <div className="space-y-2"><Label htmlFor="workweek-day">Workweek starts on</Label><Select id="workweek-day" value={form.workweek_start_weekday} onChange={(event) => setForm({ ...form, workweek_start_weekday: Number(event.target.value) })}>{WEEKDAYS.map((day, index) => <option key={day} value={index}>{day}</option>)}</Select></div>
-              <div className="space-y-2"><Label htmlFor="workweek-time">Start time (Guam)</Label><Input id="workweek-time" type="time" value={form.workweek_start_time} onChange={(event) => setForm({ ...form, workweek_start_time: event.target.value })} /></div>
+              <div className="space-y-2">
+                <Label htmlFor="workweek-time">Start time (Guam)</Label>
+                <Input id="workweek-time" type="time" value={form.workweek_start_time} disabled />
+                <p className="text-xs leading-5 text-neutral-500">
+                  {form.workweek_start_time === '00:00'
+                    ? 'Midnight is required while payroll imports contain work dates rather than clock timestamps.'
+                    : `This legacy ${form.workweek_start_time} boundary is not supported by date-only records. Saving establishes a midnight boundary.`}
+                </p>
+              </div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="schedule-notes">Confirmation source / notes</Label><Textarea id="schedule-notes" required value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Who confirmed this schedule, and what source was used?" /></div>
             </CardContent>
           </Card>

@@ -18,7 +18,14 @@ module Api
         def create
           work_date = Date.parse(time_record_params.fetch(:work_date))
           workweek = CompanyWorkweek.for_date(current_company_id, work_date)
-          return render json: { error: "Confirm the company's legal workweek before recording time" }, status: :unprocessable_entity unless workweek
+          unless workweek&.confirmed?
+            return render json: { error: "Confirm the company's legal workweek before recording time" }, status: :unprocessable_entity
+          end
+          if workweek.starts_at_minutes.to_i != 0
+            return render json: {
+              error: "Time records currently require a legal workweek that starts at midnight"
+            }, status: :unprocessable_entity
+          end
 
           record = @employee.daily_time_records.create!(
             time_record_params.except(:work_date).merge(

@@ -2,11 +2,16 @@
 
 module TimeTracking
   class OvertimeCalculator
-    WEEKLY_THRESHOLD = 40.0
+    class AllocationError < ArgumentError; end
 
-    def initialize(period_start:, period_end:)
+    WEEKLY_THRESHOLD = 40.0
+    RECONCILIATION_TOLERANCE = 0.01
+
+    def initialize(period_start:, period_end:, workweek_start_weekday:)
       @period_start = period_start.to_date
       @period_end = period_end.to_date
+      @workweek_start_weekday = Integer(workweek_start_weekday)
+      raise ArgumentError, "workweek_start_weekday must be between 0 and 6" unless @workweek_start_weekday.between?(0, 6)
     end
 
     def split_days(days)
@@ -25,7 +30,12 @@ module TimeTracking
 
           regular = round(regular)
           overtime = round(overtime)
-          category_splits = split_categories(row[:categories], regular_hours: regular)
+          category_splits = split_categories(
+            row[:categories],
+            regular_hours: regular,
+            overtime_hours: overtime,
+            work_date: row[:date]
+          )
           regular = round(category_splits.sum { |category| category[:regular_hours].to_f }) if category_splits.present?
           overtime = round(category_splits.sum { |category| category[:overtime_hours].to_f }) if category_splits.present?
           total_hours = category_splits.present? ? round(category_splits.sum { |category| category[:total_hours].to_f }) : round(hours)
@@ -49,12 +59,13 @@ module TimeTracking
       result
     end
 
-    def self.fetch_start_for(date)
-      date.to_date.beginning_of_week(:sunday)
+    def self.fetch_start_for(date, workweek_start_weekday:)
+      work_date = date.to_date
+      work_date - ((work_date.wday - Integer(workweek_start_weekday)) % 7).days
     end
 
-    def self.fetch_end_for(date)
-      date.to_date.end_of_week(:sunday)
+    def self.fetch_end_for(date, workweek_start_weekday:)
+      fetch_start_for(date, workweek_start_weekday: workweek_start_weekday) + 6.days
     end
 
     private
@@ -63,9 +74,10 @@ module TimeTracking
       Array(days).map do |day|
         categories = Array(day["categories"]).map { |category| normalize_category(category) }
         category_hours = categories.sum { |category| category[:total_hours].to_f }
+        day_hours = day.key?("hours") ? day["hours"] : day["total_hours"]
         {
           date: Date.parse(day["work_date"].to_s),
-          hours: day["hours"].presence&.to_f || category_hours,
+          hours: day_hours.nil? ? category_hours : day_hours.to_f,
           entry_ids: Array(day["entry_ids"]),
           categories: categories
         }
@@ -101,37 +113,24 @@ module TimeTracking
       }
     end
 
-    def split_categories(categories, regular_hours:)
+    def split_categories(categories, regular_hours:, overtime_hours:, work_date:)
       return [] if categories.blank?
 
-      remaining_regular = regular_hours.to_f
+      return [ category_payload(categories.first, regular_hours, overtime_hours) ] if categories.one?
+      return categories.map { |category| category_payload(category, category[:total_hours], 0.0) } if overtime_hours.zero?
+      return categories.map { |category| category_payload(category, 0.0, category[:total_hours]) } if regular_hours.zero?
 
-      if categories.any? { |category| category[:split_provided] }
-        categories.each do |category|
-          next unless category[:split_provided]
-
-          remaining_regular -= category[:regular_hours].to_f
-        end
+      unless categories.all? { |category| category[:split_provided] } &&
+             reconciles?(categories.sum { |category| category[:regular_hours].to_f }, regular_hours) &&
+             reconciles?(categories.sum { |category| category[:overtime_hours].to_f }, overtime_hours)
+        raise AllocationError,
+              "Multiple categories cross the overtime threshold on #{work_date}; " \
+              "the source must provide category regular/overtime splits that reconcile with Payroll"
       end
-
-      remaining_regular = [ remaining_regular, 0.0 ].max
 
       categories.map do |category|
-        if category[:split_provided]
-          category_payload(category, category[:regular_hours].to_f, category[:overtime_hours].to_f)
-        else
-          regular, overtime = split_category_from_remaining(category, remaining_regular)
-          remaining_regular -= regular
-          category_payload(category, regular, overtime)
-        end
+        category_payload(category, category[:regular_hours], category[:overtime_hours])
       end
-    end
-
-    def split_category_from_remaining(category, remaining_regular)
-      hours = category[:total_hours].to_f
-      regular = [ remaining_regular, hours ].min
-      overtime = [ hours - regular, 0.0 ].max
-      [ regular, overtime ]
     end
 
     def category_payload(category, regular_hours, overtime_hours)
@@ -150,7 +149,11 @@ module TimeTracking
     end
 
     def week_start(date)
-      date.beginning_of_week(:sunday)
+      self.class.fetch_start_for(date, workweek_start_weekday: @workweek_start_weekday)
+    end
+
+    def reconciles?(left, right)
+      (left.to_f - right.to_f).abs <= RECONCILIATION_TOLERANCE
     end
 
     def round(value)

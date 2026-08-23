@@ -67,15 +67,15 @@ Tax and AIRE currently contain related but diverging timekeeping implementations
 
 AIRE and Cornerstone Tax expose authenticated time summaries. Payroll pulls those summaries, maps employees, previews issues, stores source evidence, and applies approved hours. Committed payroll can optionally send totals to Cornerstone Tax.
 
-This runtime separation is sound, but the current contract is not yet safe enough to call Payroll authoritative for imported overtime:
+This runtime separation is sound. Gate 0 found that the original contract was not safe enough to call Payroll authoritative for imported overtime:
 
 - the importer uses a hard-coded Sunday workweek instead of the pay period's configured workweek;
 - source-provided category regular/overtime splits can override Payroll's calculated split;
 - category totals can disagree with day totals and inflate imported hours;
 - the configurable workweek start time is not implemented by the date-only allocation model; and
-- the connection URL can currently expose the integration secret through unsafe outbound requests.
+- the connection URL could expose the integration secret through unsafe outbound requests.
 
-Gate 0 must correct these claims and controls before timekeeping is productized.
+The destination boundary was code-closed in PR #127. The workweek, overtime, reconciliation, and versioned-contract changes remain in progress until their PR is merged and `main` is green. The separate Spike email/OCR payroll-intake adapter uses a different, less detailed evidence model and remains tracked as G0-21; the Time Summary contract does not certify it.
 
 ## Market categories
 

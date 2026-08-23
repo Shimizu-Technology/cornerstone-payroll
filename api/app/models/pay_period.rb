@@ -178,6 +178,8 @@ class PayPeriod < ApplicationRecord
       warnings << "No legal overtime workweek is configured for this pay period. Confirm the employer's workweek before relying on overtime results."
     elsif !workweek.confirmed?
       warnings << "The legal overtime workweek is still a legacy or inferred default and has not been confirmed by the employer."
+    elsif workweek.starts_at_minutes.to_i != 0
+      warnings << "This workweek starts outside midnight, but current date-only time records cannot apply that boundary safely."
     end
     warnings
   end

@@ -15,11 +15,26 @@ module TimeTracking
       raise ArgumentError, "Time tracking source is inactive" unless source.active?
       raise ArgumentError, "Source does not belong to this company" unless source.company_id == pay_period.company_id
       raise ArgumentError, "end_date must be on or after start_date" if end_date < start_date
+      unless start_date >= pay_period.start_date && end_date <= pay_period.end_date
+        raise ArgumentError, "Time import dates must be within the selected pay period"
+      end
 
-      fetch_start = OvertimeCalculator.fetch_start_for(start_date)
-      fetch_end = OvertimeCalculator.fetch_end_for(end_date)
+      workweek = legal_workweek!
+      fetch_start = OvertimeCalculator.fetch_start_for(
+        start_date,
+        workweek_start_weekday: workweek.starts_on_weekday
+      )
+      fetch_end = OvertimeCalculator.fetch_end_for(
+        end_date,
+        workweek_start_weekday: workweek.starts_on_weekday
+      )
       raw = Client.new(source).time_summary(start_date: fetch_start.iso8601, end_date: fetch_end.iso8601)
-      processed = process(raw)
+      PayloadValidator.new(
+        payload: raw,
+        fetch_start_date: fetch_start,
+        fetch_end_date: fetch_end
+      ).validate!
+      processed = process(raw, workweek: workweek, fetch_start: fetch_start, fetch_end: fetch_end)
       warnings = processed[:rows].flat_map { |row| row[:warnings].map { |warning| warning.merge(source_user_id: row[:source_user_id], display_name: row[:source_display_name]) } }
       payload_hash = Digest::SHA256.hexdigest(JSON.generate(raw))
 
@@ -46,6 +61,18 @@ module TimeTracking
     end
 
     private
+
+    def legal_workweek!
+      workweek = pay_period.resolved_company_workweek
+      raise ArgumentError, "Confirm the legal overtime workweek before importing time" unless workweek&.confirmed?
+      if workweek.starts_at_minutes.to_i != 0
+        raise ArgumentError,
+              "Time imports currently require a legal workweek that starts at midnight; " \
+              "timestamp-based boundaries are not supported yet"
+      end
+
+      workweek
+    end
 
     def save_preview_import!(lookup_attrs:, import_attrs:)
       import = TimeTrackingImport.find_or_initialize_by(lookup_attrs)
@@ -80,9 +107,13 @@ module TimeTracking
       raise ArgumentError, "#{name} must be a valid ISO 8601 date (YYYY-MM-DD)"
     end
 
-    def process(raw)
+    def process(raw, workweek:, fetch_start:, fetch_end:)
       matcher = EmployeeMatcher.new(company: pay_period.company, source: source)
-      overtime = OvertimeCalculator.new(period_start: start_date, period_end: end_date)
+      overtime = OvertimeCalculator.new(
+        period_start: start_date,
+        period_end: end_date,
+        workweek_start_weekday: workweek.starts_on_weekday
+      )
       rows = Array(raw["employees"]).filter_map do |source_employee|
         match = matcher.match(source_employee)
         split = overtime.split_days(source_employee["days"])
@@ -114,10 +145,18 @@ module TimeTracking
 
       {
         source: raw["source"],
+        schema_version: raw["schema_version"].presence || PayloadValidator::CONTRACT_VERSION,
+        validation_version: "time_summary_v1",
         start_date: start_date.iso8601,
         end_date: end_date.iso8601,
-        fetch_start_date: OvertimeCalculator.fetch_start_for(start_date).iso8601,
-        fetch_end_date: OvertimeCalculator.fetch_end_for(end_date).iso8601,
+        fetch_start_date: fetch_start.iso8601,
+        fetch_end_date: fetch_end.iso8601,
+        legal_workweek: {
+          company_workweek_id: workweek.id,
+          starts_on_weekday: workweek.starts_on_weekday,
+          starts_at_minutes: workweek.starts_at_minutes,
+          timezone: workweek.timezone
+        },
         rows: rows,
         ready: rows.all? { |row| row[:ready] }
       }

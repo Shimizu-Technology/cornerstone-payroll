@@ -52,6 +52,7 @@ See [PRD.md](PRD.md) and [BUILD_PLAN.md](BUILD_PLAN.md) for details.
 - [Documentation Map](docs/README.md) — Current authority and historical-document rules
 - [Product Strategy and Platform Boundaries](docs/PRODUCT_STRATEGY_AND_PLATFORM_BOUNDARIES_2026-08-23.md)
 - [Gate 0 Trust and Release Plan](docs/GATE_0_TRUST_AND_RELEASE_PLAN_2026-08-23.md)
+- [Time Summary v1 Contract](docs/TIME_TRACKING_V1_CONTRACT.md)
 - [Payroll, QuickBooks, and Compliance Master Plan](docs/PAYROLL_QUICKBOOKS_COMPLIANCE_MASTER_PLAN_2026-07-11.md)
 - [Pay Schedules, Salary Timekeeping, and Client Cloning Design](docs/PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
 - [Pay Schedule, Timekeeping, and MoSa History Implementation Plan](docs/PAY_SCHEDULE_TIMEKEEPING_AND_MOSA_HISTORY_IMPLEMENTATION_PLAN_2026-08-03.md)
