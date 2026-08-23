@@ -93,6 +93,7 @@ export function AdminEmployeeChangeRequestsPage() {
                     <TableRow>
                       <TableHead>Employee</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Type</TableHead>
                       <TableHead>Requested By</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
@@ -102,6 +103,7 @@ export function AdminEmployeeChangeRequestsPage() {
                       <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" onClick={() => void selectRequest(request.id)}>
                         <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
+                        <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
                         <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
                       </TableRow>
@@ -122,6 +124,11 @@ export function AdminEmployeeChangeRequestsPage() {
                   <div className="flex items-center gap-3">
                     <StatusBadge status={selected.status} />
                     <span className="text-sm text-gray-500">Submitted by {selected.requested_by_name || 'Unknown'}</span>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                    {selected.request_kind === 'create'
+                      ? 'Approving this request activates the new worker after applying the reviewed payroll details.'
+                      : 'Approving this request applies the reviewed payroll-sensitive changes.'}
                   </div>
                   <JsonBlock title="Original Values" value={selected.original_values} />
                   <JsonBlock title="Proposed Changes" value={selected.proposed_changes} />

@@ -207,6 +207,7 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
   const [initialSsn, setInitialSsn] = useState('');
+  const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -247,11 +248,12 @@ export function EmployeeForm() {
       const employee = response.data;
       setLoadedEmployee(employee);
       
+      const loadedSsn = isClient ? '' : (employee.ssn || '');
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
         last_name: employee.last_name,
-        ssn: employee.ssn || '',
+        ssn: loadedSsn,
         ssn_confirmation: '',
         date_of_birth: employee.date_of_birth || '',
         hire_date: employee.hire_date,
@@ -284,7 +286,8 @@ export function EmployeeForm() {
         default_payroll_adjustments: employee.default_payroll_adjustments || [],
       };
       setForm(normalizeEmployeeMonetaryFields(nextForm));
-      setInitialSsn(employee.ssn || '');
+      setInitialSsn(loadedSsn);
+      setStoredSsnLastFour(employee.ssn_last_four || null);
       setInitialEmploymentType(employee.employment_type);
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
@@ -591,6 +594,7 @@ export function EmployeeForm() {
     const newErrors: FormErrors = {};
     const usesSsn = form.employment_type !== 'contractor' || form.contractor_type !== 'business';
     const ssnChanged = (form.ssn || '') !== initialSsn;
+    const storedSsnCanRemain = isClient && isEditing && Boolean(storedSsnLastFour) && !form.ssn?.trim();
 
     if (!form.first_name.trim()) {
       newErrors.first_name = ['First name is required'];
@@ -615,7 +619,7 @@ export function EmployeeForm() {
         }
       }
     }
-    if (usesSsn && !form.ssn?.trim()) {
+    if (usesSsn && !form.ssn?.trim() && !storedSsnCanRemain) {
       newErrors.ssn = ['Social Security Number is required'];
     } else if (usesSsn && form.ssn && !/^\d{3}-\d{2}-\d{4}$/.test(form.ssn)) {
       newErrors.ssn = ['SSN must be in format XXX-XX-XXXX'];
@@ -716,6 +720,7 @@ export function EmployeeForm() {
 
       let savedEmployeeId: number;
       let portalNotice: string | null = null;
+      let portalChangeRequestId: number | null = null;
       if (isEditing && id) {
         // Don't send SSN if it's empty (user didn't update it)
         const updateData = { ...employeePayload };
@@ -730,6 +735,7 @@ export function EmployeeForm() {
           const response = await clientEmployeesApi.update(parseInt(id, 10), updateData);
           savedEmployeeId = response.data.id;
           portalNotice = response.message || null;
+          portalChangeRequestId = response.change_request?.id || null;
         } else {
           const response = await employeesApi.update(parseInt(id, 10), updateData);
           savedEmployeeId = response.data.id;
@@ -739,6 +745,7 @@ export function EmployeeForm() {
           const response = await clientEmployeesApi.create(employeePayload);
           savedEmployeeId = response.data.id;
           portalNotice = response.message || null;
+          portalChangeRequestId = response.change_request?.id || null;
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
@@ -801,8 +808,8 @@ export function EmployeeForm() {
         }
       }
 
-      navigate('/employees', {
-        state: portalNotice ? { portalNotice } : null,
+      navigate(isClient && portalChangeRequestId ? '/change-requests' : '/employees', {
+        state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
     } catch (err) {
       if (err instanceof ApiError && err.details) {
@@ -937,14 +944,19 @@ export function EmployeeForm() {
                     </label>
                     <Input
                       name="ssn"
-                      required
-                      placeholder="XXX-XX-XXXX"
+                      required={!(isClient && storedSsnLastFour && !form.ssn)}
+                      placeholder={isClient && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
                       value={form.ssn || ''}
                       onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
                       error={getFieldError('ssn')}
                       inputMode="numeric"
                       autoComplete="off"
                     />
+                    {isClient && storedSsnLastFour && !form.ssn && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Saved SSN ending in {storedSsnLastFour}. Enter the full number only to submit a replacement for approval.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-gray-700">

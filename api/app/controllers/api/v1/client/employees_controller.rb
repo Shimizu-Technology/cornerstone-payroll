@@ -4,6 +4,8 @@ module Api
   module V1
     module Client
       class EmployeesController < BaseController
+        SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
+
         before_action :set_employee, only: [ :show, :update ]
 
         def index
@@ -21,7 +23,7 @@ module Api
 
         def show
           render json: {
-            data: serialize_employee(@employee, include_department: true, include_sensitive: true)
+            data: serialize_employee(@employee, include_department: true)
           }
         end
 
@@ -43,7 +45,9 @@ module Api
 
           render json: {
             data: serialize_employee(result.employee),
-            message: "Employee created successfully"
+            change_request: serialize_change_request(result.change_request),
+            applied_direct_fields: result.applied_direct_fields,
+            message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: {
@@ -69,8 +73,11 @@ module Api
 
           render json: {
             data: serialize_employee(result.employee),
+            change_request: serialize_change_request(result.change_request),
             applied_direct_fields: result.applied_direct_fields,
-            message: "Employee updated successfully"
+            message: result.change_request ?
+              "Profile updates saved. Payroll-sensitive changes were submitted for approval as request ##{result.change_request.id}." :
+              "Employee profile updated successfully."
           }
         rescue ActiveRecord::RecordInvalid => e
           render json: {
@@ -98,7 +105,6 @@ module Api
             :date_of_birth,
             :hire_date,
             :department_id,
-            :job_title,
             :employment_type,
             :salary_type,
             :pay_rate,
@@ -212,12 +218,11 @@ module Api
           }
         end
 
-        def serialize_employee(employee, include_department: false, include_sensitive: false)
+        def serialize_employee(employee, include_department: false)
           data = employee.as_json(
             except: [ :ssn_encrypted, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
           data["ssn_last_four"] = employee.ssn_last_four
-          data["ssn"] = employee.ssn_encrypted if include_sensitive
           data["wage_rates"] = employee.active_wage_rates.map do |rate|
             {
               id: rate.id,
@@ -239,6 +244,42 @@ module Api
           data
         end
 
+        def serialize_change_request(change_request)
+          return nil unless change_request
+
+          {
+            id: change_request.id,
+            status: change_request.status,
+            request_kind: change_request.request_kind,
+            employee_id: change_request.employee_id,
+            employee_name: change_request.employee.full_name,
+            requested_by_id: change_request.requested_by_id,
+            requested_by_name: change_request.requested_by&.name,
+            proposed_changes: redact_change_request_payload(change_request.proposed_changes),
+            original_values: redact_change_request_payload(change_request.original_values),
+            direct_changes_applied: redact_change_request_payload(change_request.direct_changes_applied),
+            request_notes: change_request.request_notes,
+            created_at: change_request.created_at
+          }
+        end
+
+        def redact_change_request_payload(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, nested_value), redacted|
+              redacted[key] = if SENSITIVE_CHANGE_REQUEST_KEYS.include?(key.to_s)
+                "[REDACTED]"
+              else
+                redact_change_request_payload(nested_value)
+              end
+            end
+          when Array
+            value.map { |nested_value| redact_change_request_payload(nested_value) }
+          else
+            value
+          end
+        end
+
         def normalize_custom_earnings(entries)
           Array(entries).filter_map do |entry|
             label = entry[:label].to_s.strip
@@ -256,6 +297,9 @@ module Api
             source: "client_portal",
             employee_name: result.employee.display_name,
             changed_fields: result.changed_fields,
+            applied_direct_fields: result.applied_direct_fields,
+            approval_fields: result.approval_fields,
+            change_request_id: result.change_request&.id,
             before_values: sanitized_audit_values(result.before_values),
             after_values: sanitized_audit_values(result.after_values)
           }
