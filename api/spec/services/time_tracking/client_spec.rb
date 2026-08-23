@@ -4,6 +4,17 @@ require "rails_helper"
 require "webmock/rspec"
 
 RSpec.describe TimeTracking::Client do
+  let(:destination_policy) do
+    TimeTracking::DestinationPolicy.new(
+      environment: "test",
+      resolver: ->(_host) { [ "8.8.8.8" ] }
+    )
+  end
+
+  def client_for(source, policy: destination_policy)
+    described_class.new(source, destination_policy: policy)
+  end
+
   describe "#time_summary" do
     it "builds the time summary URL when the configured source base URL has no path" do
       source = TimeTrackingSource.create!(
@@ -17,7 +28,7 @@ RSpec.describe TimeTracking::Client do
         .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
         .to_return(status: 200, body: { employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
-      described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
 
       expect(stub).to have_been_requested
     end
@@ -37,7 +48,7 @@ RSpec.describe TimeTracking::Client do
         )
         .to_return(status: 200, body: { employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
-      described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
 
       expect(stub).to have_been_requested
     end
@@ -55,11 +66,11 @@ RSpec.describe TimeTracking::Client do
         .to_return(status: 200, body: { source: "cornerstone_tax", employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
       expect do
-        described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+        client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
       end.to raise_error(TimeTracking::Client::Error, /responded as cornerstone_tax, expected aire_services/)
     end
 
-    it "accepts a known source when an older compatible endpoint omits source identity" do
+    it "rejects a known source when the endpoint omits source identity" do
       source = TimeTrackingSource.create!(
         company: create(:company),
         name: "AIRE",
@@ -71,14 +82,12 @@ RSpec.describe TimeTracking::Client do
         .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
         .to_return(status: 200, body: { employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
-      expect(Rails.logger).to receive(:warn).with(/omitted source identity/)
-
-      payload = described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
-
-      expect(payload["employees"]).to eq([])
+      expect do
+        client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /omitted source identity/)
     end
 
-    it "accepts a known source when an older compatible endpoint returns a null source identity" do
+    it "rejects a known source when the endpoint returns a null source identity" do
       source = TimeTrackingSource.create!(
         company: create(:company),
         name: "AIRE",
@@ -90,11 +99,9 @@ RSpec.describe TimeTracking::Client do
         .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
         .to_return(status: 200, body: { source: nil, employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
-      expect(Rails.logger).to receive(:warn).with(/omitted source identity/)
-
-      payload = described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
-
-      expect(payload["employees"]).to eq([])
+      expect do
+        client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /omitted source identity/)
     end
 
     it "allows custom sources to return any compatible source identity" do
@@ -109,9 +116,73 @@ RSpec.describe TimeTracking::Client do
         .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
         .to_return(status: 200, body: { source: "cornerstone_tax", employees: [] }.to_json, headers: { "Content-Type" => "application/json" })
 
-      payload = described_class.new(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      payload = client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
 
       expect(payload["source"]).to eq("cornerstone_tax")
+    end
+
+    it "rejects every DNS answer when any answer is non-public before sending the secret" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Mixed DNS",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      policy = TimeTracking::DestinationPolicy.new(
+        environment: "test",
+        resolver: ->(_host) { [ "8.8.8.8", "169.254.169.254" ] }
+      )
+      request = stub_request(:get, %r{time\.example\.com})
+
+      expect do
+        client_for(source, policy: policy).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /non-public address/)
+      expect(request).not_to have_been_requested
+    end
+
+    it "rejects a declared response larger than the import limit" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Oversized Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      stub_request(:get, "https://time.example.com/api/v1/payroll/time_summary")
+        .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
+        .to_return(
+          status: 200,
+          body: "{}",
+          headers: {
+            "Content-Type" => "application/json",
+            "Content-Length" => (described_class::MAX_RESPONSE_BYTES + 1).to_s
+          }
+        )
+
+      expect do
+        client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error, /response exceeded/)
+    end
+
+    it "does not include a rejected response body in an operator-facing error" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "Failing Source",
+        source_type: "custom",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      stub_request(:get, "https://time.example.com/api/v1/payroll/time_summary")
+        .with(query: { start_date: "2026-05-01", end_date: "2026-05-15" })
+        .to_return(status: 500, body: "internal-token=do-not-leak", headers: { "Content-Type" => "text/plain" })
+
+      expect do
+        client_for(source).time_summary(start_date: "2026-05-01", end_date: "2026-05-15")
+      end.to raise_error(TimeTracking::Client::Error) { |error|
+        expect(error.message).to include("HTTP 500")
+        expect(error.message).not_to include("internal-token")
+      }
     end
   end
 end

@@ -13,6 +13,8 @@ cd api
 RAILS_ENV=production bin/rails production:readiness
 ```
 
+When any external time source is active, `TIME_TRACKING_ALLOWED_HOSTS` must list each exact public HTTPS hostname Payroll may contact. Do not use wildcard domains, IP ranges, internal hostnames, or non-standard ports.
+
 The command fails closed unless production authentication, forced TLS, durable storage/cache/jobs/cable, frontend origins, Clerk, R2, email, encryption, and an MFA-policy attestation are configured.
 
 `REQUIRE_MFA=true` is an operational attestation: MFA must also be enforced and verified in the Clerk production dashboard. The application cannot prove a provider-side policy merely from an environment variable.

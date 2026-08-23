@@ -14,7 +14,7 @@ RSpec.describe TimeTrackingSource do
       )
 
       expect(source).not_to be_valid
-      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL")
+      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL with a host and no embedded credentials")
     end
 
     it "rejects URLs with embedded credentials" do
@@ -27,7 +27,26 @@ RSpec.describe TimeTrackingSource do
       )
 
       expect(source).not_to be_valid
-      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL")
+      expect(source.errors[:base_url]).to include("must be an HTTP or HTTPS URL with a host and no embedded credentials")
+    end
+
+    it "rejects query strings and fragments in base URLs" do
+      company = create(:company)
+      query_source = described_class.new(
+        company: company,
+        name: "Query Source",
+        source_type: "custom",
+        base_url: "https://example.com?target=internal",
+        shared_secret: "secret"
+      )
+      fragment_source = query_source.dup
+      fragment_source.name = "Fragment Source"
+      fragment_source.base_url = "https://example.com#fragment"
+
+      expect(query_source).not_to be_valid
+      expect(fragment_source).not_to be_valid
+      expect(query_source.errors[:base_url]).to include("must not include a query or fragment")
+      expect(fragment_source.errors[:base_url]).to include("must not include a query or fragment")
     end
 
     it "does not allow source_type to change after creation" do

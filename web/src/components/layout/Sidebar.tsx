@@ -304,7 +304,11 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           <>
             <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
             <div className="space-y-1.5">
-              <NavSection items={clientSettingsNavigation} collapsed={collapsed} onNavigate={onNavigate} />
+              <NavSection
+                items={isAdmin ? clientSettingsNavigation : clientSettingsNavigation.filter((item) => item.href !== '/time-tracking-sources')}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+              />
             </div>
           </>
         )}
