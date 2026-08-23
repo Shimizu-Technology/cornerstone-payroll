@@ -7,6 +7,8 @@ interface Gate0Fixture {
   company_id: number;
   other_company_id: number;
   admin_email: string;
+  manager_email: string;
+  accountant_email: string;
   client_email: string;
   inactive_user_email: string;
   employee_id: number;
@@ -45,6 +47,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   const fixture = loadFixture();
   const apiBaseUrl = process.env.E2E_API_URL || `http://127.0.0.1:${process.env.E2E_API_PORT || '4317'}/api/v1/`;
   let adminApi: APIRequestContext;
+  let accountantApi: APIRequestContext;
   let clientApi: APIRequestContext;
 
   test.beforeAll(async () => {
@@ -62,11 +65,49 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
         'X-Company-Id': String(fixture.company_id),
       },
     });
+    accountantApi = await playwrightRequest.newContext({
+      baseURL: apiBaseUrl,
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.accountant_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
   });
 
   test.afterAll(async () => {
     await adminApi.dispose();
+    await accountantApi.dispose();
     await clientApi.dispose();
+  });
+
+  test('keeps accountant payroll operations available while denying client configuration', async ({ browser }) => {
+    const payrollPeriods = await accountantApi.get('admin/pay_periods');
+    expect(payrollPeriods.ok()).toBeTruthy();
+
+    const schedule = await accountantApi.get('admin/pay_schedule_settings');
+    expect(schedule.ok()).toBeTruthy();
+    const rejectedUpdate = await accountantApi.put('admin/pay_schedule_settings', {
+      data: { pay_schedule_settings: {} },
+    });
+    expect(rejectedUpdate.status()).toBe(403);
+    expect((await responseJson(rejectedUpdate)).error).toBe('Manager or admin access required');
+
+    const accountantContext = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.accountant_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const accountantPage = await accountantContext.newPage();
+    await accountantPage.goto('/app');
+    await expect(accountantPage.getByText('Gate 0 Accountant')).toBeVisible();
+    await expect(accountantPage.getByRole('link', { name: 'Timecard OCR' })).toBeVisible();
+    await expect(accountantPage.getByRole('link', { name: 'Pay Schedule' })).toHaveCount(0);
+    await expect(accountantPage.getByRole('link', { name: 'Client Changes' })).toHaveCount(0);
+
+    await accountantPage.goto('/pay-schedule-settings');
+    await expect(accountantPage).toHaveURL(/\/app$/);
+    await accountantContext.close();
   });
 
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {

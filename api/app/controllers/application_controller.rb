@@ -105,26 +105,28 @@ class ApplicationController < ActionController::API
   end
 
   def require_admin!
-    unless current_user&.organization_admin?
-      render json: { error: "Admin access required" }, status: :forbidden
-    end
+    require_capability!(:manage_organization, error: "Admin access required")
   end
 
   def require_super_admin!
-    unless current_user&.super_admin?
-      render json: { error: "Super admin access required" }, status: :forbidden
-    end
+    require_capability!(:manage_platform, error: "Super admin access required")
   end
 
   def require_manager_or_admin!
-    unless current_user&.organization_admin? || current_user&.manager?
-      render json: { error: "Manager or admin access required" }, status: :forbidden
-    end
+    require_capability!(:manage_client_configuration, error: "Manager or admin access required")
   end
 
   # Backward-compatible alias used by admin base controller.
   def require_admin_or_manager!
     require_manager_or_admin!
+  end
+
+  def require_capability!(capability, error: nil)
+    return if StaffRolePolicy.allowed?(current_user, capability)
+
+    render json: {
+      error: error || StaffRolePolicy.error_message(capability)
+    }, status: :forbidden
   end
 
   # Resolve the active company for this request.

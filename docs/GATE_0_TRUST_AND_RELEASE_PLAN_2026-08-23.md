@@ -2,7 +2,7 @@
 
 **Reviewed:** 2026-08-23
 
-**Baseline:** re-audited against `origin/main` through `42d5784`
+**Baseline:** re-audited against `origin/main` through `2d849b9`
 
 **Status:** In progress; no item is closed until its acceptance evidence is linked below
 
@@ -48,13 +48,13 @@ Gate 0 closes only when:
 | G0-14 | Client employee show returns full decrypted SSN | An assigned client account receives more identity data than needed | Never return a stored full SSN; use last four and replacement semantics | Code closed in PR #130; `main` green |
 | G0-15 | Client portal directly applies pay, W-4, SSN, adjustments, and wage-rate changes | Client edits can change payroll math without Cornerstone approval | Direct-safe fields only; sensitive changes enter an auditable approval workflow | Code closed in PR #130; `main` green |
 | G0-16 | Cornerstone Tax frontend fails open without Clerk configuration | A production configuration error can expose the application shell | Fail closed in production and test the missing-config state | Code closed in Cornerstone Tax PR #53; production signed-out routes verified |
-| G0-17 | Authenticated Playwright normally skips because CI has no backend fixture/auth state | Release automation does not exercise payroll | Deterministic Postgres/Rails/Vite fixture and required journeys without skips | Implemented on branch; review and `main` verification pending |
-| G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Implemented on branch; review and `main` verification pending |
+| G0-17 | Authenticated Playwright normally skips because CI has no backend fixture/auth state | Release automation does not exercise payroll | Deterministic Postgres/Rails/Vite fixture and required journeys without skips | Code closed in PR #131; `main` green |
+| G0-18 | Thirty production-data-dependent examples remain pending | Real import/calculation edge cases are not part of normal release proof | Deidentified production-shaped fixtures or a required secure validation lane | Code closed in PR #131; `main` green |
 | G0-19 | Production readiness checks strings, not effective configuration or dependencies | A passing command can coexist with broken database/storage/queue/mail behavior | Validate effective config and live dependencies; retain manual restore/monitoring evidence | Open |
-| G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Open |
+| G0-20 | Staff-role authority is broader than a documented field/action matrix | Accountants or managers may reach high-impact settings unintentionally | Review every high-impact endpoint and encode the approved role matrix | Implemented on branch; review and `main` verification pending |
 | G0-21 | Spike email/OCR intake does not block stored row validation errors and its week-level overtime evidence is not bound to the confirmed legal workweek | Invalid or semantically misaligned extracted hours can reach payroll after a warning acknowledgement | Block validation errors; require confirmed, supported workweek evidence; reconcile extracted and overridden totals before apply | Code closed in PR #129; `main` green |
 | G0-22 | Cornerstone Tax and AIRE frontend dependency audits report direct and transitive vulnerabilities, including critical/high findings | A companion application can remain an insecure production dependency even while Payroll itself is green | Upgrade to audit-clean compatible dependency sets; run each app's complete frontend/runtime gate; retain current-head review and post-merge evidence | Code closed in Cornerstone Tax PR #53 and AIRE PR #75; both production frontends verified |
-| G0-23 | Creating annual company YTD state with a create-first helper conflicts with model uniqueness validation | A second committed pay period for the same company and year fails after the first created the annual aggregate | Reuse an existing annual aggregate, preserve the race-safe create path, and commit two sequential periods in regression and browser coverage | Implemented on branch; review and `main` verification pending |
+| G0-23 | Creating annual company YTD state with a create-first helper conflicts with model uniqueness validation | A second committed pay period for the same company and year fails after the first created the annual aggregate | Reuse an existing annual aggregate, preserve the race-safe create path, and commit two sequential periods in regression and browser coverage | Code closed in PR #131; `main` green |
 
 ## Delivery sequence
 
@@ -193,3 +193,4 @@ Add one row after each merge. “Code closed” and “operationally closed” a
 | G0-14, G0-15 | #130 | `42d5784` | Yes | `main` Quality run 32631558131 passed | Greptile 5/5 on head `2f6a0e1`; client identifiers are masked and payroll-sensitive changes require locked staff approval |
 | G0-16, Cornerstone Tax portion of G0-22 | Cornerstone Tax #53 | `ac01691` | Yes | Production signed-out admin and portal routes redirected to Clerk after merge | Greptile 5/5 on head `a583c80`; frontend dependency audit closed and production auth fails closed |
 | AIRE portion of G0-22 | AIRE #75 | `b6321e2` | Yes | Production served the final reviewed asset set; authenticated dashboard and time-tracking surfaces loaded without mutation | Greptile 5/5 on head `4d6b24a`; dependency audit closed and public phone-link regression retained |
+| G0-17, G0-18, G0-23 | #131 | `2d849b9` | Yes | `main` Quality run 32637076159 passed | Greptile 5/5 on head `fe607e7`; required `browser` check added to strict ruleset 16468532 |
