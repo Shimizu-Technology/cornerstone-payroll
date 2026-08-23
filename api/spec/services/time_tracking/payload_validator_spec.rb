@@ -38,7 +38,15 @@ RSpec.describe TimeTracking::PayloadValidator do
                 }
               ]
             }
-          ],
+          ] + (Date.new(2026, 5, 19)..Date.new(2026, 5, 24)).map do |date|
+            {
+              "work_date" => date.iso8601,
+              "hours" => 0,
+              "regular_hours" => 0,
+              "overtime_hours" => 0,
+              "categories" => []
+            }
+          end,
           "total_hours" => 10,
           "regular_hours" => 8,
           "overtime_hours" => 2
@@ -86,6 +94,27 @@ RSpec.describe TimeTracking::PayloadValidator do
     payload["employees"].first["days"] << Marshal.load(Marshal.dump(payload["employees"].first["days"].first))
 
     expect { validate! }.to raise_error(described_class::Error, /duplicate work_date 2026-05-18/)
+  end
+
+  it "requires an explicit zero-hour row for every date in the requested range" do
+    payload["employees"].first["days"].delete_at(1)
+
+    expect { validate! }.to raise_error(described_class::Error, /must include zero-hour rows.*missing 2026-05-19/)
+  end
+
+  it "rejects malformed source issues instead of bypassing warning gates" do
+    payload["employees"].first["issues"] = "none"
+
+    expect { validate! }.to raise_error(described_class::Error, /issues must be an object/)
+  end
+
+  it "requires issue counts to be finite non-negative whole numbers" do
+    [ -1, 1.5, "not-a-number" ].each do |invalid|
+      candidate = Marshal.load(Marshal.dump(payload))
+      candidate["employees"].first["issues"] = { "pending_count" => invalid }
+
+      expect { validate!(candidate) }.to raise_error(described_class::Error, /issues.pending_count/)
+    end
   end
 
   it "rejects duplicate normalized category identities on one day" do
@@ -136,12 +165,12 @@ RSpec.describe TimeTracking::PayloadValidator do
   end
 
   it "rejects partial day split evidence when the employee supplies a split" do
-    second_day = {
-      "work_date" => "2026-05-19",
+    second_day = payload.dig("employees", 0, "days", 1)
+    second_day.merge!(
       "hours" => 2,
       "categories" => [ { "source_category_id" => "flight", "hours" => 2 } ]
-    }
-    payload.dig("employees", 0, "days") << second_day
+    )
+    second_day.except!("regular_hours", "overtime_hours")
     payload.dig("employees", 0)["total_hours"] = 12
     payload.dig("employees", 0)["regular_hours"] = 10
 
@@ -190,7 +219,9 @@ RSpec.describe TimeTracking::PayloadValidator do
               "hours" => 5,
               "categories" => [ { "source_category_id" => "tax", "name" => "Tax", "hours" => 5 } ]
             }
-          ],
+          ] + (Date.new(2026, 5, 19)..Date.new(2026, 5, 24)).map do |date|
+            { "work_date" => date.iso8601, "hours" => 0, "categories" => [] }
+          end,
           "total_hours" => 5
         }
       ],

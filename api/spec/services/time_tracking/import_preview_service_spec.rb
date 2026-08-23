@@ -18,6 +18,15 @@ RSpec.describe TimeTracking::ImportPreviewService do
     )
   end
 
+  def complete_export_days(days, start_date: Date.new(2026, 5, 18), end_date: Date.new(2026, 5, 31))
+    supplied_by_date = days.index_by { |day| day.fetch("work_date") }
+    (start_date..end_date).map do |date|
+      supplied_by_date.fetch(date.iso8601) do
+        { "work_date" => date.iso8601, "hours" => 0, "categories" => [] }
+      end
+    end
+  end
+
   describe "#call" do
     it "surfaces category buckets and warns when a multi-rate employee needs earning-type mapping" do
       company = create(:company)
@@ -41,7 +50,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
             "source_user_id" => "aire-1",
             "email" => "cfi@example.com",
             "display_name" => "CFI One",
-            "days" => [
+            "days" => complete_export_days([
               {
                 "work_date" => "2026-05-18",
                 "hours" => 5,
@@ -49,7 +58,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
                   { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "regular_hours" => 5, "overtime_hours" => 0, "effective_rate_cents" => 55_00 }
                 ]
               }
-            ],
+            ]),
             "issues" => {}
           }
         ]
@@ -90,7 +99,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
             "source_user_id" => "aire-1",
             "email" => "cfi@example.com",
             "display_name" => "CFI One",
-            "days" => [
+            "days" => complete_export_days([
               {
                 "work_date" => "2026-05-18",
                 "hours" => 5,
@@ -98,7 +107,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
                   { "source_category_id" => "premium", "key" => "premium", "name" => "Premium", "regular_hours" => 5, "overtime_hours" => 0, "effective_rate_cents" => 75_00 }
                 ]
               }
-            ],
+            ]),
             "issues" => {}
           }
         ]
@@ -137,7 +146,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
             "source_user_id" => "aire-1",
             "email" => "cfi@example.com",
             "display_name" => "CFI One",
-            "days" => [
+            "days" => complete_export_days([
               {
                 "work_date" => "2026-05-18",
                 "hours" => 5,
@@ -145,7 +154,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
                   { "source_category_id" => "premium", "key" => "premium", "name" => "Premium", "regular_hours" => 5, "overtime_hours" => 0, "effective_rate_cents" => 45_00 }
                 ]
               }
-            ],
+            ]),
             "issues" => {}
           }
         ]
@@ -184,7 +193,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
             "source_user_id" => "aire-1",
             "email" => "cfi@example.com",
             "display_name" => "CFI One",
-            "days" => [
+            "days" => complete_export_days([
               {
                 "work_date" => "2026-05-18",
                 "hours" => 5,
@@ -192,7 +201,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
                   { "source_category_id" => "ground-school", "key" => "ground_school", "name" => "Ground School", "regular_hours" => 5, "overtime_hours" => 0 }
                 ]
               }
-            ],
+            ]),
             "issues" => {}
           }
         ]
@@ -340,6 +349,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
         { "work_date" => date.iso8601, "hours" => 8 }
       end
       days << { "work_date" => "2026-05-24", "hours" => 8 }
+      days = complete_export_days(days, end_date: Date.new(2026, 5, 24))
       raw_payload = {
         "source" => "aire_services",
         "start_date" => "2026-05-18",

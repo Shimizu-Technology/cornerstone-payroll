@@ -7,6 +7,12 @@ module TimeTracking
     CONTRACT_VERSION = "1.0"
     RECONCILIATION_TOLERANCE = BigDecimal("0.01")
     MAX_DAILY_HOURS = BigDecimal("24")
+    ISSUE_COUNT_KEYS = %w[
+      pending_count pending_overtime_count denied_count denied_overtime_count open_clock_count
+    ].freeze
+    ISSUE_HOUR_KEYS = %w[
+      pending_hours pending_overtime_hours denied_hours denied_overtime_hours
+    ].freeze
 
     def initialize(payload:, fetch_start_date:, fetch_end_date:)
       @payload = payload
@@ -55,9 +61,11 @@ module TimeTracking
       require_hash!(employee, path)
       require_string!(employee["source_user_id"], "#{path}.source_user_id")
       days = require_array!(employee["days"], "#{path}.days")
-      validate_unique_work_dates!(days, path)
+      work_dates = validate_unique_work_dates!(days, path)
+      validate_issues!(employee, path)
 
       day_totals = days.each_with_index.map { |day, day_index| validate_day!(day, "#{path}.days[#{day_index}]") }
+      validate_complete_date_coverage!(work_dates, path)
       total_hours = day_totals.sum { |totals| totals.fetch(:total) }
       reconcile_optional_total!(employee, "total_hours", total_hours, path)
       validate_optional_split!(employee, total_hours, path)
@@ -93,6 +101,38 @@ module TimeTracking
       end
       duplicate = dates.tally.find { |_date, count| count > 1 }&.first
       raise Error, "#{employee_path}.days contains duplicate work_date #{duplicate}" if duplicate
+
+      dates
+    end
+
+    def validate_complete_date_coverage!(dates, employee_path)
+      expected_dates = (@fetch_start_date..@fetch_end_date).to_a
+      missing_dates = expected_dates - dates
+      return if missing_dates.empty?
+
+      sample = missing_dates.first(3).map(&:iso8601).join(", ")
+      suffix = missing_dates.length > 3 ? " and #{missing_dates.length - 3} more" : ""
+      raise Error,
+            "#{employee_path}.days must include zero-hour rows for every requested date; " \
+            "missing #{sample}#{suffix}"
+    end
+
+    def validate_issues!(employee, path)
+      return unless employee.key?("issues")
+
+      issues = require_hash!(employee["issues"], "#{path}.issues")
+      ISSUE_COUNT_KEYS.each do |key|
+        next unless issues.key?(key)
+
+        value = numeric!(issues[key], "#{path}.issues.#{key}")
+        raise Error, "#{path}.issues.#{key} must be a whole number" unless value.frac.zero?
+      end
+      ISSUE_HOUR_KEYS.each do |key|
+        numeric!(issues[key], "#{path}.issues.#{key}") if issues.key?(key)
+      end
+      if issues.key?("open_clock_entry_ids")
+        require_array!(issues["open_clock_entry_ids"], "#{path}.issues.open_clock_entry_ids")
+      end
     end
 
     def validate_day!(day, path)

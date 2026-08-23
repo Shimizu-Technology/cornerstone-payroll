@@ -59,6 +59,60 @@ The source authenticates either `X-Payroll-Shared-Secret` or the legacy-compatib
               "entry_ids": [101]
             }
           ]
+        },
+        {
+          "work_date": "2026-05-19",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
+        },
+        {
+          "work_date": "2026-05-20",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
+        },
+        {
+          "work_date": "2026-05-21",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
+        },
+        {
+          "work_date": "2026-05-22",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
+        },
+        {
+          "work_date": "2026-05-23",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
+        },
+        {
+          "work_date": "2026-05-24",
+          "hours": 0.0,
+          "total_hours": 0.0,
+          "regular_hours": 0.0,
+          "overtime_hours": 0.0,
+          "entry_ids": [],
+          "categories": []
         }
       ],
       "total_hours": 8.0,
@@ -93,6 +147,7 @@ Payroll rejects the complete export before creating a preview when any invariant
 - `employees` and every `days`/`categories` collection must be arrays of objects;
 - `source_user_id` must be present and unique within the export;
 - each employee may have only one row per `work_date`, and dates must be inside the requested range;
+- every included employee must have one row for every requested calendar date, including explicit zero-hour rows, so a partial workweek cannot silently understate overtime;
 - hour values must be finite, non-negative numbers, with no more than 24 hours on one work date;
 - `hours` and `total_hours`, when both supplied, must agree;
 - regular and overtime values must appear together and must sum to their total;
@@ -101,6 +156,7 @@ Payroll rejects the complete export before creating a preview when any invariant
 - category totals must equal their day total;
 - employee totals must equal their day totals;
 - source employee and summary splits, when supplied, must reconcile with their child evidence; and
+- `issues`, when supplied, must be an object; known issue counts must be non-negative whole numbers, hour totals must be finite and non-negative, and open-clock identifiers must be an array; and
 - all reconciliation uses a 0.01-hour tolerance.
 
 Pending, denied, pending-overtime, denied-overtime, open-clock, employee-mapping, and wage-rate-mapping warnings continue to block apply. The raw export, checksum, processed preview, legal-workweek snapshot, warnings, mappings, and apply identity remain auditable.

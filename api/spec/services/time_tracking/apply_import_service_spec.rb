@@ -307,6 +307,27 @@ RSpec.describe TimeTracking::ApplyImportService do
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
+      fetch_start = TimeTracking::OvertimeCalculator.fetch_start_for(
+        pay_period.start_date,
+        workweek_start_weekday: 0
+      )
+      fetch_end = TimeTracking::OvertimeCalculator.fetch_end_for(
+        pay_period.end_date,
+        workweek_start_weekday: 0
+      )
+      days = (fetch_start..fetch_end).map do |date|
+        if date == pay_period.start_date
+          {
+            "work_date" => date.iso8601,
+            "hours" => 8.0,
+            "categories" => [
+              { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0 }
+            ]
+          }
+        else
+          { "work_date" => date.iso8601, "hours" => 0.0, "categories" => [] }
+        end
+      end
       raw_payload = {
         "source" => "aire_services",
         "employees" => [
@@ -314,15 +335,7 @@ RSpec.describe TimeTracking::ApplyImportService do
             "source_user_id" => "source-1",
             "email" => "cfi@example.com",
             "display_name" => "CFI One",
-            "days" => [
-              {
-                "work_date" => pay_period.start_date.iso8601,
-                "hours" => 8.0,
-                "categories" => [
-                  { "source_category_id" => "sim", "key" => "simulator", "name" => "Simulator", "total_hours" => 8.0, "regular_hours" => 8.0, "overtime_hours" => 0.0 }
-                ]
-              }
-            ],
+            "days" => days,
             "issues" => {}
           }
         ]
