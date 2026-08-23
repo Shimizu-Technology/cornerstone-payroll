@@ -1228,6 +1228,7 @@ export interface PayrollIntakeRowData {
   confidence?: number | null;
   week1_hours: number;
   week2_hours: number;
+  extracted_total_hours: number;
   regular_hours: number;
   overtime_hours: number;
   week1_tips: number;
@@ -1251,6 +1252,7 @@ export interface PayrollIntakeImportData {
   status: 'draft' | 'previewed' | 'reviewed' | 'applied' | 'failed';
   import_hash: string;
   parser_version: string;
+  evidence_snapshot?: Record<string, unknown>;
   warnings: PayrollIntakeWarning[];
   totals: Record<string, number>;
   error_message?: string | null;

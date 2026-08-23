@@ -7,6 +7,20 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
   let!(:organization) { create(:organization) }
   let!(:company) { create(:company, organization: organization, payroll_intake_source_types: [ "spike_email" ]) }
   let!(:admin_user) { create(:user, company: company, role: "admin") }
+  let!(:company_workweek) do
+    CompanyWorkweek.create!(
+      company: company,
+      starts_on_weekday: 0,
+      starts_at_minutes: 0,
+      timezone: "Pacific/Guam",
+      source: "operator_confirmed",
+      confirmation_status: "confirmed",
+      effective_on: Date.new(2026, 1, 1),
+      confirmed_by: admin_user,
+      confirmed_at: Time.current,
+      notes: "Confirmed for Spike payroll intake"
+    )
+  end
   let!(:tax_table) do
     TaxTable.find_by(tax_year: 2026, filing_status: "single", pay_frequency: "biweekly") ||
       create(:tax_table, tax_year: 2026, filing_status: "single", pay_frequency: "biweekly")
@@ -15,9 +29,9 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
     create(
       :pay_period,
       company: company,
-      start_date: Date.new(2026, 6, 1),
-      end_date: Date.new(2026, 6, 14),
-      pay_date: Date.new(2026, 6, 19),
+      start_date: Date.new(2026, 6, 14),
+      end_date: Date.new(2026, 6, 27),
+      pay_date: Date.new(2026, 7, 3),
       status: "draft"
     )
   end
@@ -45,10 +59,53 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(alice_row["reported_tips"]).to eq(126.0)
       expect(alice_row["tips_paid_out"]).to eq(126.0)
       expect(json.dig("import", "totals", "total_tips_paid_out")).to eq(151.0)
+      expect(json.dig("import", "evidence_snapshot", "workweek")).to include(
+        "company_workweek_id" => company_workweek.id,
+        "pay_period_start" => "2026-06-14",
+        "pay_period_end" => "2026-06-27",
+        "legal_week_starts" => [ "2026-06-14", "2026-06-21" ]
+      )
+      expect(json.dig("import", "evidence_snapshot", "source_period")).to eq(
+        "start_date" => "2026-06-14",
+        "end_date" => "2026-06-27"
+      )
+    end
+
+    it "rejects intake before extraction when the legal workweek is not confirmed" do
+      company_workweek.update_columns(confirmation_status: "needs_confirmation", confirmed_by_id: nil, confirmed_at: nil)
+
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Confirm the employer's legal overtime workweek")
+      expect(PayrollIntakeSession.count).to eq(0)
+    end
+
+    it "rejects a pay period that is not two complete legal workweeks" do
+      pay_period.update!(
+        start_date: Date.new(2026, 6, 15),
+        end_date: Date.new(2026, 6, 28),
+        pay_date: Date.new(2026, 7, 3)
+      )
+
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("begin on the confirmed legal workweek start day")
+      expect(PayrollIntakeSession.count).to eq(0)
+    end
+
+    it "rejects source dates that do not exactly match the selected pay period" do
+      mismatched_text = spike_text.sub("06/14/2026 - 06/27/2026", "06/15/2026 - 06/28/2026")
+
+      post preview_path, params: { source_type: "spike_email", pasted_text: mismatched_text }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("does not match this pay period")
+      expect(PayrollIntakeSession.count).to eq(0)
     end
 
     it "previews the real Spike email body format with total hours and weekly tips" do
-      pay_period.update!(start_date: Date.new(2026, 6, 14), end_date: Date.new(2026, 6, 27), pay_date: Date.new(2026, 7, 3))
       haane = create(:employee, company: company, first_name: "Ha'ane", last_name: "Akima", pay_rate: 15.00)
       create(:employee, company: company, first_name: "Mia", last_name: "Lahnee Aquino", pay_rate: 15.00)
       create(:employee, company: company, first_name: "Jacqueline", last_name: "Martinez", pay_rate: 15.00)
@@ -73,6 +130,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(haane_row["reported_tips"]).to eq(190.0)
       expect(haane_row["tips_paid_out"]).to eq(190.0)
       expect(haane_row["warnings"]).to be_empty
+      expect(haane_row["errors"].map { |error| error["code"] }).to include("weekly_hours_required")
 
       jacqueline_row = rows.third
       expect(jacqueline_row["week1_tips"]).to eq(124.0)
@@ -352,7 +410,7 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
   def spike_text
     <<~TEXT
       Spike Coffee Roasters Payroll
-      Pay period: 06/01/2026 - 06/14/2026
+      Pay period: 06/14/2026 - 06/27/2026
       Employee,Week 1 Hours,Week 2 Hours,Week 1 Tips,Week 2 Tips
       Alice Barista,38,42,$50.25,$75.75
       Bob Roaster,20,21,$10.00,$15.00
