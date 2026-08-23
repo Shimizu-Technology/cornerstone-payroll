@@ -17,6 +17,7 @@ class CompanyWorkweek < ApplicationRecord
   validates :confirmed_by, :confirmed_at, presence: true, if: :confirmed?
   validates :notes, presence: true, length: { minimum: 5 }, if: :confirmed?
   validate :ends_on_not_before_effective_on
+  validate :date_only_boundary_must_start_at_midnight, if: :will_save_change_to_starts_at_minutes?
 
   scope :effective_on, ->(date) {
     where("effective_on <= ? AND (ends_on IS NULL OR ends_on >= ?)", date, date)
@@ -37,5 +38,11 @@ class CompanyWorkweek < ApplicationRecord
     return if ends_on.blank? || effective_on.blank? || ends_on >= effective_on
 
     errors.add(:ends_on, "must be on or after the effective date")
+  end
+
+  def date_only_boundary_must_start_at_midnight
+    return if starts_at_minutes.to_i.zero?
+
+    errors.add(:starts_at_minutes, "must be midnight until timestamp-based workweek boundaries are supported")
   end
 end

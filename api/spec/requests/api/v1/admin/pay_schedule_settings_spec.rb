@@ -51,6 +51,99 @@ RSpec.describe "Api::V1::Admin::PayScheduleSettings", type: :request do
     expect(company.company_workweeks.last.confirmed_by).to eq(admin_user)
   end
 
+  it "rejects non-midnight workweeks without closing the current configuration" do
+    current_schedule = company.company_pay_schedules.create!(
+      frequency: "biweekly",
+      period_rule: "manual",
+      pay_date_rule: "manual",
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1)
+    )
+    current_workweek = company.company_workweeks.create!(
+      starts_on_weekday: 0,
+      starts_at_minutes: 0,
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1)
+    )
+
+    put "/api/v1/admin/pay_schedule_settings", params: {
+      pay_schedule_settings: {
+        effective_on: "2026-08-10",
+        pay_schedule: {
+          frequency: "biweekly",
+          period_rule: "manual",
+          pay_date_rule: "manual",
+          timezone: "Pacific/Guam",
+          notes: "Confirmed by client"
+        },
+        workweek: {
+          starts_on_weekday: 1,
+          starts_at_minutes: 480,
+          timezone: "Pacific/Guam",
+          notes: "Confirmed by client"
+        }
+      }
+    }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("errors")).to include(/must be midnight/)
+    expect(current_schedule.reload.ends_on).to be_nil
+    expect(current_workweek.reload.ends_on).to be_nil
+    expect(company.company_workweeks.count).to eq(1)
+  end
+
+  it "replaces a legacy non-midnight workweek with a supported midnight configuration" do
+    company.company_pay_schedules.create!(
+      frequency: "biweekly",
+      period_rule: "manual",
+      pay_date_rule: "manual",
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1)
+    )
+    legacy_workweek = company.company_workweeks.create!(
+      starts_on_weekday: 0,
+      starts_at_minutes: 0,
+      timezone: "Pacific/Guam",
+      source: "legacy_system_default",
+      confirmation_status: "needs_confirmation",
+      effective_on: Date.new(2026, 1, 1)
+    )
+    legacy_workweek.update_column(:starts_at_minutes, 480)
+
+    put "/api/v1/admin/pay_schedule_settings", params: {
+      pay_schedule_settings: {
+        effective_on: "2026-08-10",
+        pay_schedule: {
+          frequency: "biweekly",
+          period_rule: "manual",
+          pay_date_rule: "manual",
+          timezone: "Pacific/Guam",
+          notes: "Confirmed replacement schedule"
+        },
+        workweek: {
+          starts_on_weekday: 1,
+          starts_at_minutes: 0,
+          timezone: "Pacific/Guam",
+          notes: "Confirmed midnight replacement"
+        }
+      }
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(legacy_workweek.reload.ends_on).to eq(Date.new(2026, 8, 9))
+    expect(company.company_workweeks.find_by!(ends_on: nil)).to have_attributes(
+      starts_on_weekday: 1,
+      starts_at_minutes: 0,
+      confirmation_status: "confirmed"
+    )
+  end
+
   it "keeps a future-effective configuration from becoming current early" do
     allow_any_instance_of(Api::V1::Admin::PayScheduleSettingsController)
       .to receive(:configuration_date).and_return(Date.new(2026, 8, 3))

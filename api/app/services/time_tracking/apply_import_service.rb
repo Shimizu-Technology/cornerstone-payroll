@@ -19,21 +19,23 @@ module TimeTracking
 
     def apply_locked!
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless @pay_period.can_edit?
-
-      rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
-      mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
-      employee_ids = rows.filter_map do |row|
-        source_user_id = row["source_user_id"].to_s
-        override = mapping_by_source_id[source_user_id] || {}
-        (override[:employee_id] || override["employee_id"] || row["employee_id"]).presence&.to_i
-      end.uniq
-      results = { applied: [], skipped: [], errors: [] }
-      seen_employee_ids = Set.new
-      current_import_source = import_source_key
-      excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
+      results = nil
 
       @import.with_lock(requires_new: true) do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
+        validate_preview_provenance!
+
+        rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
+        mapping_by_source_id = @mappings.index_by { |m| (m[:source_user_id] || m["source_user_id"]).to_s }
+        employee_ids = rows.filter_map do |row|
+          source_user_id = row["source_user_id"].to_s
+          override = mapping_by_source_id[source_user_id] || {}
+          (override[:employee_id] || override["employee_id"] || row["employee_id"]).presence&.to_i
+        end.uniq
+        results = { applied: [], skipped: [], errors: [] }
+        seen_employee_ids = Set.new
+        current_import_source = import_source_key
+        excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
         employees_by_id = Employee.active.includes(:employee_wage_rates).where(id: employee_ids, company_id: @company.id).index_by(&:id)
 
@@ -135,6 +137,29 @@ module TimeTracking
       end
 
       results
+    end
+
+    def validate_preview_provenance!
+      payload = @import.processed_payload
+      unless payload["validation_version"] == "time_summary_v1" && payload["schema_version"] == PayloadValidator::CONTRACT_VERSION
+        raise ArgumentError, "Refresh this time import preview before applying it"
+      end
+
+      workweek = @pay_period.resolved_company_workweek
+      snapshot = payload["legal_workweek"]
+      unless workweek&.confirmed? && workweek.starts_at_minutes.to_i.zero? &&
+             snapshot.is_a?(Hash) && snapshot["company_workweek_id"].to_i == workweek.id &&
+             snapshot["starts_on_weekday"].to_i == workweek.starts_on_weekday &&
+             snapshot["starts_at_minutes"].to_i == workweek.starts_at_minutes &&
+             snapshot["timezone"].to_s == workweek.timezone.to_s
+        raise ArgumentError, "The legal workweek changed; refresh this time import preview before applying it"
+      end
+
+      unless payload["start_date"].to_s == @import.start_date.iso8601 &&
+             payload["end_date"].to_s == @import.end_date.iso8601 &&
+             @import.start_date >= @pay_period.start_date && @import.end_date <= @pay_period.end_date
+        raise ArgumentError, "The pay period dates changed; refresh this time import preview before applying it"
+      end
     end
 
     def resolved_warning?(warning, employee_id)
