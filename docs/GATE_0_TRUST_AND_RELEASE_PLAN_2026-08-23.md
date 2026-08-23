@@ -93,9 +93,9 @@ The covered mutation surface is:
 - CSV timecard import apply; and
 - OCR timecard apply.
 
-Nested row-level work follows `pay_period -> import/session -> payroll item`. Operations that intentionally rescue row-level failures use a savepoint so a rescued exception cannot commit half of an import or edit inside the outer lifecycle transaction. Commit owns status, YTD and loan effects, liability posting, check assignment, optional FIT check creation, correction audit, and tax-sync scheduling as one transaction.
+Nested editable work follows `pay_period -> import/session -> payroll item`. Commit and void take shared financial rows in the deterministic order `pay_period -> employee YTDs by employee ID -> company YTD -> employee loans by employee and loan ID -> company check sequence -> payroll items`. The check-number worksheet also takes `pay_period -> company` so it cannot invert commit's locks. Every loan balance transition locks and reloads the loan before calculating its before/after values. Operations that intentionally rescue row-level failures use a savepoint so a rescued exception cannot commit half of an import or edit inside the outer lifecycle transaction. Commit owns status, YTD and loan effects, liability posting, check assignment, optional FIT check creation, correction audit, and tax-sync scheduling as one transaction.
 
-Acceptance requires real PostgreSQL competing-thread tests for commit-versus-commit and commit-versus-unapprove. The winner commits once; the loser must reload the final state and receive an invalid-transition result. Final status, YTD totals, liabilities, loan effects, and check audit events must agree.
+Acceptance requires real PostgreSQL competing-thread tests for commit-versus-commit, commit-versus-unapprove, commit-versus-check-worksheet, payment-versus-payment, and payment-versus-loan-addition. The winner commits once; stale lifecycle transitions must reload the final state and receive an invalid-transition result. Final status, YTD totals, liabilities, loan balances, and check audit events must agree.
 
 ## Required browser and negative tests
 

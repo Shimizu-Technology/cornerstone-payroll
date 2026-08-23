@@ -102,6 +102,7 @@ class PayPeriodLifecycleService
     # pay-period voids.
     employee_ytds.values.sort_by(&:employee_id).each(&:lock!)
     company_ytd.lock!
+    EmployeeLoan.where(employee_id: employee_ids).order(:employee_id, :id).lock.load
 
     committed_items.each do |item|
       PayrollCalculator.for(item.employee, item).apply_loan_payments!
