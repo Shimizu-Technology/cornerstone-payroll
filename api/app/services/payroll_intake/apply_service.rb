@@ -29,6 +29,9 @@ module PayrollIntake
 
           session.with_lock(requires_new: true) do
             raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+            PayrollIntake::WorkweekEvidence.new(pay_period: pay_period).validate_snapshot!(
+              session.evidence_snapshot.to_h["workweek"]
+            )
 
             rows = session.rows.includes(:employee).to_a
             duplicate_employee_ids = duplicate_employee_ids_for(rows, overrides_by_key, excluded_employee_ids)
@@ -64,7 +67,18 @@ module PayrollIntake
                 next
               end
 
-              values = values_for(row, override)
+              unresolved_errors = unresolved_validation_errors(row, override, employee)
+              if unresolved_errors.any?
+                results[:errors] << {
+                  row_id: row.id,
+                  employee_id: employee.id,
+                  source_employee_name: row.source_employee_name,
+                  error: unresolved_errors.join(" ")
+                }
+                next
+              end
+
+              values = validated_values_for(row, override)
               if values[:tips_paid_out].positive? && values[:reported_tips] < values[:tips_paid_out]
                 values[:reported_tips] = values[:tips_paid_out]
               end
@@ -87,7 +101,17 @@ module PayrollIntake
                 applied_payroll_item: payroll_item,
                 status: "applied",
                 excluded: false,
-                staff_overrides: override
+                staff_overrides: override,
+                week1_hours: values[:week1_hours],
+                week2_hours: values[:week2_hours],
+                regular_hours: values[:regular_hours],
+                overtime_hours: values[:overtime_hours],
+                week1_tips: values[:week1_tips],
+                week2_tips: values[:week2_tips],
+                reported_tips: values[:reported_tips],
+                tips_paid_out: values[:tips_paid_out],
+                loan_deduction: values[:loan_deduction],
+                validation_errors: []
               )
 
               results[:applied] << {
@@ -99,7 +123,7 @@ module PayrollIntake
                 reported_tips: payroll_item.reported_tips.to_f,
                 tips_paid_out: payroll_item.tips_paid_out.to_f
               }
-            rescue ActiveRecord::RecordInvalid => e
+            rescue ActiveRecord::RecordInvalid, ArgumentError => e
               results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: e.message }
             end
 
@@ -175,11 +199,58 @@ module PayrollIntake
       }
     end
 
+    def validated_values_for(row, override)
+      values = values_for(row, override)
+      weekly_total = values.fetch(:week1_hours) + values.fetch(:week2_hours)
+      if values.fetch(:week1_hours) > 168 || values.fetch(:week2_hours) > 168
+        raise ArgumentError, "Week 1 and Week 2 hours cannot exceed 168 hours"
+      end
+      unless reconciles?(weekly_total, row.total_hours)
+        raise ArgumentError, "Week 1 + Week 2 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+      end
+
+      regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(
+        values.fetch(:week1_hours),
+        values.fetch(:week2_hours)
+      )
+      unless reconciles?(values.fetch(:regular_hours), regular_hours) && reconciles?(values.fetch(:overtime_hours), overtime_hours)
+        raise ArgumentError,
+              "Regular/overtime overrides must match Payroll's legal weekly calculation " \
+              "(#{format('%.2f', regular_hours)} regular / #{format('%.2f', overtime_hours)} overtime)"
+      end
+
+      values.merge(regular_hours: regular_hours, overtime_hours: overtime_hours)
+    end
+
+    def unresolved_validation_errors(row, override, employee)
+      Array(row.errors_payload).filter_map do |payload|
+        error = payload.respond_to?(:with_indifferent_access) ? payload.with_indifferent_access : {}
+        code = error[:code].to_s
+        next if code == "unmatched_employee" && employee.present?
+        next if code.in?(%w[weekly_hours_required incomplete_weekly_hours]) && repaired_weekly_hours?(row, override)
+
+        error[:message].presence || "Resolve the stored payroll intake validation error before applying."
+      end
+    end
+
+    def repaired_weekly_hours?(row, override)
+      return false unless override.key?(:week1_hours) && override.key?(:week2_hours)
+
+      week1 = decimal_override(override, :week1_hours, row.week1_hours)
+      week2 = decimal_override(override, :week2_hours, row.week2_hours)
+      reconciles?(week1 + week2, row.total_hours)
+    end
+
     def decimal_override(override, key, fallback)
       value = override.key?(key) ? override[key] : fallback
-      BigDecimal(value.to_s.presence || "0").round(2).to_f
-    rescue ArgumentError
-      0.0
+      number = BigDecimal(value.to_s, exception: false)
+      raise ArgumentError, "#{key.to_s.humanize} must be a finite non-negative number" unless number&.finite? && !number.negative?
+
+      number.round(2).to_f
+    end
+
+    def reconciles?(left, right)
+      (BigDecimal(left.to_s) - BigDecimal(right.to_s)).abs <= BigDecimal("0.01")
     end
 
     def overwrite_error_for(payroll_item)
