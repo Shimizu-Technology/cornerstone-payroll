@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class EmployeeChangeRequestsController < BaseController
+        SENSITIVE_PAYLOAD_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
+
         before_action :require_admin_or_manager!
         before_action :set_change_request, only: [ :show, :approve, :reject ]
 
@@ -71,6 +73,7 @@ module Api
           payload = {
             id: change_request.id,
             status: change_request.status,
+            request_kind: change_request.request_kind,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,
@@ -84,12 +87,39 @@ module Api
           }
 
           if include_payloads
-            payload[:proposed_changes] = change_request.proposed_changes
-            payload[:original_values] = change_request.original_values
-            payload[:direct_changes_applied] = change_request.direct_changes_applied
+            payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
+            payload[:original_values] = sanitize_payload(change_request.original_values)
+            payload[:direct_changes_applied] = sanitize_payload(change_request.direct_changes_applied)
           end
 
           payload
+        end
+
+        def sanitize_payload(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, nested_value), sanitized|
+              sanitized[key] = if SENSITIVE_PAYLOAD_KEYS.include?(key.to_s)
+                masked_sensitive_value(key, nested_value)
+              else
+                sanitize_payload(nested_value)
+              end
+            end
+          when Array
+            value.map { |nested_value| sanitize_payload(nested_value) }
+          else
+            value
+          end
+        end
+
+        def masked_sensitive_value(key, value)
+          return value if value.to_s.start_with?("***-**-", "Ending in ")
+
+          digits = value.to_s.gsub(/\D/, "")
+          return "[REDACTED]" if digits.blank?
+          return "***-**-#{digits.last(4)}" if %w[ssn ssn_encrypted].include?(key.to_s)
+
+          "Ending in #{digits.last(4)}"
         end
       end
     end

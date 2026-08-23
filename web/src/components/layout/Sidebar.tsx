@@ -69,6 +69,7 @@ const portalNavigation: NavItem[] = [
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Documents', href: '/documents', icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Change Requests', href: '/change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const toolsNavigation: NavItem[] = [
@@ -98,6 +99,7 @@ const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Client Changes', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 function FloatingTooltip({ anchorRef, label, visible }: { anchorRef: React.RefObject<HTMLElement | null>; label: string; visible: boolean }) {

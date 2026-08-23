@@ -65,6 +65,69 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
       expect(change_request.reload.review_notes).to eq("First review")
     end
 
+    it "blocks approval when the reviewed source values changed after submission" do
+      employee.update!(pay_rate: 19.75)
+
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "Approve stale request" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Employee data changed after this request was submitted: pay_rate")
+      expect(employee.reload.pay_rate.to_f).to eq(19.75)
+      expect(change_request.reload.status).to eq("pending")
+      expect(change_request.reviewed_at).to be_nil
+    end
+
+    it "never exposes a legacy plaintext SSN in the admin review payload" do
+      change_request.update!(
+        proposed_changes: { ssn_encrypted: "123-45-6789" },
+        original_values: { ssn_encrypted: "987-65-4321" }
+      )
+
+      get "/api/v1/admin/employee_change_requests/#{change_request.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "proposed_changes", "ssn_encrypted")).to eq("***-**-6789")
+      expect(response.parsed_body.dig("data", "original_values", "ssn_encrypted")).to eq("***-**-4321")
+      expect(response.body).not_to include("123-45-6789", "987-65-4321")
+    end
+
+    it "fails closed when a legacy request lacks an encrypted identifier payload" do
+      original_ssn = employee.ssn_encrypted
+      change_request.update!(
+        proposed_changes: { ssn_encrypted: "123-45-6789" },
+        original_values: { ssn_encrypted: original_ssn }
+      )
+
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "Approve legacy request" }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("must be resubmitted securely: ssn_encrypted")
+      expect(employee.reload.ssn_encrypted).to eq(original_ssn)
+      expect(change_request.reload.status).to eq("pending")
+    end
+
+    it "applies an encrypted SSN replacement without returning the full identifier" do
+      original_ssn = employee.ssn_encrypted
+      change_request.update!(
+        proposed_changes: { ssn_encrypted: "***-**-6789" },
+        original_values: { ssn_encrypted: "***-**-#{employee.ssn_last_four}" },
+        sensitive_payload: {
+          proposed: { ssn_encrypted: "123-45-6789" },
+          original: { ssn_encrypted: original_ssn }
+        }
+      )
+
+      patch "/api/v1/admin/employee_change_requests/#{change_request.id}/approve",
+        params: { review_notes: "Identity document verified" }
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload.ssn_encrypted).to eq("123-45-6789")
+      expect(response.parsed_body.dig("data", "proposed_changes", "ssn_encrypted")).to eq("***-**-6789")
+      expect(response.body).not_to include("123-45-6789")
+    end
+
     it "rejects unsupported employee attributes from proposed changes" do
       change_request.update!(
         proposed_changes: {
@@ -115,7 +178,7 @@ RSpec.describe "Api::V1::Admin::EmployeeChangeRequests", type: :request do
         params: { review_notes: "Update one rate only" }
 
       expect(response).to have_http_status(:ok)
-      expect(employee.reload.employee_wage_rates.order(:label).pluck(:label, :rate).map { |label, rate| [label, rate.to_f] }).to eq([
+      expect(employee.reload.employee_wage_rates.order(:label).pluck(:label, :rate).map { |label, rate| [ label, rate.to_f ] }).to eq([
         [ "Overtime", 27.0 ],
         [ "Regular", 19.25 ]
       ])

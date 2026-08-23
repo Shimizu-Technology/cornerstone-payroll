@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -9,12 +10,17 @@ import { clientEmployeeChangeRequestsApi } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 
 export function ClientChangeRequests() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeState = location.state as { portalNotice?: string; selectedRequestId?: number | null } | null;
   const [requests, setRequests] = useState<EmployeeChangeRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState<EmployeeChangeRequest | null>(null);
+  const [notice, setNotice] = useState<string | null>(routeState?.portalNotice || null);
+  const [requestedSelection] = useState<number | null>(routeState?.selectedRequestId || null);
 
   const load = useCallback(async () => {
     try {
@@ -25,17 +31,27 @@ export function ClientChangeRequests() {
         status: status || undefined,
       });
       setRequests(response.data);
-      setSelected((current) => response.data.find((request) => request.id === current?.id) || response.data[0] || null);
+      const nextSelection = response.data.find((request) => request.id === requestedSelection) || response.data[0] || null;
+      setSelected(nextSelection);
+      if (nextSelection) {
+        const detail = await clientEmployeeChangeRequestsApi.get(nextSelection.id);
+        setSelected(detail.data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load change requests');
     } finally {
       setLoading(false);
     }
-  }, [search, status]);
+  }, [requestedSelection, search, status]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!routeState) return;
+    navigate('.', { replace: true, state: null });
+  }, [navigate, routeState]);
 
   const loadRequest = async (id: number) => {
     const response = await clientEmployeeChangeRequestsApi.get(id);
@@ -47,6 +63,12 @@ export function ClientChangeRequests() {
       <Header title="Change Requests" description="Track payroll-sensitive updates submitted for payroll team approval." />
 
       <div className="p-6 lg:p-8 space-y-6">
+        {notice && (
+          <div role="status" className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <span>{notice}</span>
+            <button type="button" onClick={() => setNotice(null)} className="font-medium text-emerald-700 hover:text-emerald-900">Dismiss</button>
+          </div>
+        )}
         {error && <div className="rounded-lg border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700">{error}</div>}
 
         <div className="flex flex-col gap-4 md:flex-row">
@@ -72,6 +94,7 @@ export function ClientChangeRequests() {
                     <TableRow>
                       <TableHead>Employee</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Type</TableHead>
                       <TableHead>Requested By</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
@@ -81,6 +104,7 @@ export function ClientChangeRequests() {
                       <TableRow key={request.id} className="cursor-pointer hover:bg-primary-50/60" onClick={() => void loadRequest(request.id)}>
                         <TableCell className="font-medium text-gray-900">{request.employee_name}</TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
+                        <TableCell>{request.request_kind === 'create' ? 'New worker' : 'Update'}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
                         <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
                       </TableRow>
@@ -108,6 +132,7 @@ export function ClientChangeRequests() {
                     <p className="text-sm font-medium text-gray-900">Employee</p>
                     <p className="text-sm text-gray-600">{selected.employee_name}</p>
                   </div>
+                  <DetailBlock title="Request Type" value={selected.request_kind === 'create' ? 'New worker approval' : 'Employee update'} />
                   <DetailBlock title="Request Notes" value={selected.request_notes} />
                   <DetailBlock title="Review Notes" value={selected.review_notes} />
                   <JsonBlock title="Original Values" value={selected.original_values} />
