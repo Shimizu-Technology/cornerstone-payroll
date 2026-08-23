@@ -4,7 +4,7 @@ Last reviewed: August 23, 2026
 
 This is the release gate for payroll and compliance workloads. Passing automated tests is necessary but does not authorize production use by itself. The release owner must attach evidence for every applicable control below.
 
-## Automated configuration gate
+## Automated configuration and dependency gate
 
 Run in the release environment:
 
@@ -15,7 +15,17 @@ RAILS_ENV=production bin/rails production:readiness
 
 When any external time source is active, `TIME_TRACKING_ALLOWED_HOSTS` must list each exact public HTTPS hostname Payroll may contact. Do not use wildcard domains, IP ranges, internal hostnames, or non-standard ports.
 
-The command fails closed unless production authentication, forced TLS, durable storage/cache/jobs/cable, frontend origins, Clerk, R2, email, encryption, and an MFA-policy attestation are configured.
+The command validates the effective Rails configuration rather than trusting feature-toggle strings. In production it also proves:
+
+- primary, cache, queue, and cable database connectivity and current migrations;
+- a cache write/read/delete round trip;
+- a recent Solid Queue process heartbeat;
+- an R2 upload/read/delete round trip under the isolated `production-readiness/` prefix;
+- Clerk Backend API authentication;
+- Resend API authentication plus verified, sending-enabled domains matching every effective application sender; and
+- public DNS resolution for every active time source.
+
+The R2 and cache probes create random, non-customer test values and remove their exact keys in an `ensure` path. The command sends no email, creates no payroll/customer row, and never prints provider responses or secret-bearing exception messages. Its final `EVIDENCE` line is safe to retain with release artifacts.
 
 `REQUIRE_MFA=true` is an operational attestation: MFA must also be enforced and verified in the Clerk production dashboard. The application cannot prove a provider-side policy merely from an environment variable.
 
@@ -23,6 +33,7 @@ The command fails closed unless production authentication, forced TLS, durable s
 
 - [ ] Production and staging use separate databases, Clerk instances/keys, R2 buckets, and email credentials.
 - [ ] `AUTH_ENABLED=true`; test/bypass identities are unavailable in production.
+- [ ] Clerk uses production (`pk_live_`/`sk_live_`) keys. A development instance is not accepted for a live payroll tenant.
 - [ ] Clerk requires MFA for privileged firm users, and at least two administrators have tested enrollment and recovery.
 - [ ] Roles are least-privilege; a client user cannot access another company by changing an ID in a URL or request.
 - [ ] TLS is forced end-to-end; secure cookies and HSTS are visible from the public endpoint.
@@ -56,3 +67,5 @@ The command fails closed unless production authentication, forced TLS, durable s
 ## Go/no-go rule
 
 Any failed automated check, missing required evidence, cross-tenant access defect, unexplained payroll variance, or filing blocker is a no-go. The release owner records the failure, assigns an owner, and reruns the complete gate after remediation.
+
+Do not change Clerk keys as an isolated environment edit. A production-instance cutover requires a maintenance window, an inventory of current privileged users, production-instance invitations or migration, MFA enrollment/recovery verification for at least two administrators, frontend and backend key changes as one release, and a tested rollback path. Silent lockout is a failed release.
