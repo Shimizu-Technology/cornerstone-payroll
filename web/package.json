@@ -13,8 +13,9 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gate": "./scripts/gate.sh",
-    "test:e2e": "playwright test",
-    "test:e2e:staging": "E2E_BASE_URL=${E2E_BASE_URL:?Set E2E_BASE_URL} playwright test e2e/authenticated-payroll-smoke.spec.ts"
+    "test:e2e": "playwright test --project=public",
+    "test:e2e:public": "playwright test --project=public",
+    "test:e2e:release": "E2E_RELEASE_LANE=true playwright test --project=gate0-release"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.61.1",

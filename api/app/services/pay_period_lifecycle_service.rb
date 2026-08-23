@@ -93,7 +93,8 @@ class PayPeriodLifecycleService
     employee_ids.each do |employee_id|
       employee_ytds[employee_id] ||= EmployeeYtdTotal.create_or_find_by!(employee_id: employee_id, year: year)
     end
-    company_ytd = CompanyYtdTotal.create_or_find_by!(company_id: pay_period.company_id, year: year)
+    company_ytd = CompanyYtdTotal.find_by(company_id: pay_period.company_id, year: year) ||
+      CompanyYtdTotal.create_or_find_by!(company_id: pay_period.company_id, year: year)
 
     # Acquire every shared aggregate row before applying any effect. If the
     # company row were locked between employee rows, two different pay periods

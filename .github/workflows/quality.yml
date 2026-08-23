@@ -59,7 +59,63 @@ jobs:
       - run: npm audit --audit-level=moderate
       - run: npm run gate
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
+      - run: npm run test:e2e:public
         env:
           VITE_AUTH_ENABLED: "false"
           VITE_CLERK_PUBLISHABLE_KEY: ""
+
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cornerstone_payroll_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      RAILS_ENV: test
+      AUTH_ENABLED: "false"
+      E2E_TEST_MODE: "true"
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_test
+      E2E_FIXTURE_PATH: ${{ github.workspace }}/web/.e2e-fixtures/release.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.7"
+          bundler-cache: true
+          working-directory: api
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: bundle exec rails db:schema:load db:seed
+        working-directory: api
+      - run: bundle exec rails e2e:seed
+        working-directory: api
+      - run: npm ci
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm run test:e2e:release
+        working-directory: web
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate0-browser-evidence
+          path: |
+            web/playwright-report
+            web/test-results
+            web/.e2e-fixtures/release.json
+          if-no-files-found: warn
+          retention-days: 14
