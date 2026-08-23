@@ -12,6 +12,12 @@ module TimeTracking
     end
 
     def call
+      @pay_period.with_lock { apply_locked! }
+    end
+
+    private
+
+    def apply_locked!
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless @pay_period.can_edit?
 
       rows = Array(@import.processed_payload["rows"] || @import.processed_payload[:rows])
@@ -26,7 +32,7 @@ module TimeTracking
       current_import_source = import_source_key
       excluded_employee_ids = @pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
-      @import.with_lock do
+      @import.with_lock(requires_new: true) do
         raise ArgumentError, "Only previewed time tracking imports can be applied" unless @import.status == "previewed"
 
         employees_by_id = Employee.active.includes(:employee_wage_rates).where(id: employee_ids, company_id: @company.id).index_by(&:id)
@@ -130,8 +136,6 @@ module TimeTracking
 
       results
     end
-
-    private
 
     def resolved_warning?(warning, employee_id)
       warning_code = warning.respond_to?(:[]) ? warning["code"] || warning[:code] : nil
