@@ -106,28 +106,31 @@ class ClientEmployeeUpdateService
   end
 
   def update!
-    direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
-    approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
-    if attrs.key?(WAGE_RATES_KEY)
-      normalized_wage_rates = normalized_wage_rates_payload(attrs[WAGE_RATES_KEY])
-      approval_attrs[WAGE_RATES_KEY] = normalized_wage_rates if wage_rates_changed?(normalized_wage_rates)
-    end
-
-    request_kind = employee.portal_pending_approval? ? "create" : "update"
-    if request_kind == "create" && approval_attrs.present?
-      approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)
-    end
-
-    validate_candidate!(direct_attrs.merge(approval_attrs)) if direct_attrs.present? || approval_attrs.present?
-    employee.require_ssn_confirmation = false
-    employee.ssn_confirmation = nil
-
-    direct_before = original_values_for(direct_attrs.keys)
-    approval_before = original_values_for(approval_attrs.keys)
+    direct_attrs = {}
+    approval_attrs = {}
+    direct_before = {}
+    approval_before = {}
     change_request = nil
 
     ActiveRecord::Base.transaction do
       employee.lock!
+      direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
+      approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
+      if attrs.key?(WAGE_RATES_KEY)
+        normalized_wage_rates = normalized_wage_rates_payload(attrs[WAGE_RATES_KEY])
+        approval_attrs[WAGE_RATES_KEY] = normalized_wage_rates if wage_rates_changed?(normalized_wage_rates)
+      end
+
+      request_kind = employee.portal_pending_approval? ? "create" : "update"
+      if request_kind == "create" && approval_attrs.present?
+        approval_attrs = approval_attrs.merge(status: "active", portal_pending_approval: false)
+      end
+
+      validate_candidate!(direct_attrs.merge(approval_attrs)) if direct_attrs.present? || approval_attrs.present?
+      employee.require_ssn_confirmation = false
+      employee.ssn_confirmation = nil
+      direct_before = original_values_for(direct_attrs.keys)
+      approval_before = original_values_for(approval_attrs.keys)
       ensure_no_pending_request! if approval_attrs.present?
       employee.update!(direct_attrs) if direct_attrs.present?
       change_request = create_change_request!(
@@ -193,11 +196,17 @@ class ClientEmployeeUpdateService
 
   def normalized_wage_rates_payload(raw_rates)
     raw = Array(raw_rates)
-    normalized = EmployeeWageRateSyncService.normalize_payload(raw_rates).map { |rate| rate.except(:id) }
+    normalized = EmployeeWageRateSyncService.normalize_payload(raw_rates)
     labels = normalized.map { |rate| rate[:label].to_s.downcase }
+    supplied_ids = normalized.filter_map { |rate| rate[:id] }
+    owned_ids = employee.persisted? ? employee.employee_wage_rates.where(id: supplied_ids).pluck(:id) : []
 
     if normalized.length != raw.length || labels.uniq.length != labels.length || normalized.any? { |rate| rate[:rate].nil? || rate[:rate].negative? }
       employee.errors.add(:wage_rates, "must contain unique labels and non-negative rates")
+      raise ActiveRecord::RecordInvalid, employee
+    end
+    if supplied_ids.sort != owned_ids.sort
+      employee.errors.add(:wage_rates, "must reference rates belonging to this employee")
       raise ActiveRecord::RecordInvalid, employee
     end
 
@@ -210,6 +219,7 @@ class ClientEmployeeUpdateService
   def current_wage_rates_payload
     employee.active_wage_rates.map do |rate|
       {
+        id: rate.id,
         label: rate.label,
         rate: rate.rate.to_f,
         is_primary: rate.is_primary,

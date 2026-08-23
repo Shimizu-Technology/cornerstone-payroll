@@ -176,6 +176,7 @@ class EmployeeChangeRequest < ApplicationRecord
   def current_wage_rates_payload
     employee.active_wage_rates.map do |rate|
       {
+        id: rate.id,
         label: rate.label,
         rate: rate.rate.to_f,
         is_primary: rate.is_primary,

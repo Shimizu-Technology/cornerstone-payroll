@@ -4,6 +4,8 @@ module Api
   module V1
     module Client
       class EmployeesController < BaseController
+        SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
+
         before_action :set_employee, only: [ :show, :update ]
 
         def index
@@ -253,12 +255,29 @@ module Api
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,
             requested_by_name: change_request.requested_by&.name,
-            proposed_changes: change_request.proposed_changes,
-            original_values: change_request.original_values,
-            direct_changes_applied: change_request.direct_changes_applied,
+            proposed_changes: redact_change_request_payload(change_request.proposed_changes),
+            original_values: redact_change_request_payload(change_request.original_values),
+            direct_changes_applied: redact_change_request_payload(change_request.direct_changes_applied),
             request_notes: change_request.request_notes,
             created_at: change_request.created_at
           }
+        end
+
+        def redact_change_request_payload(value)
+          case value
+          when Hash
+            value.each_with_object({}) do |(key, nested_value), redacted|
+              redacted[key] = if SENSITIVE_CHANGE_REQUEST_KEYS.include?(key.to_s)
+                "[REDACTED]"
+              else
+                redact_change_request_payload(nested_value)
+              end
+            end
+          when Array
+            value.map { |nested_value| redact_change_request_payload(nested_value) }
+          else
+            value
+          end
         end
 
         def normalize_custom_earnings(entries)
