@@ -8,14 +8,33 @@ module Api
 
         before_action :require_staff_access!
         before_action :enforce_company_access!
+        before_action :enforce_high_impact_role_policy!
 
         private
 
         # Allow organization admins, managers, and accountants to access the admin namespace.
         def require_staff_access!
-          unless current_user&.staff_member?
+          unless StaffRolePolicy.allowed?(current_user, :staff_workspace)
             render json: { error: "Staff access required" }, status: :forbidden
           end
+        end
+
+        def enforce_high_impact_role_policy!
+          capability = StaffRolePolicy.capability_for(
+            controller_path: controller_path,
+            action_name: action_name
+          )
+          return unless capability
+
+          require_capability!(capability)
+        end
+
+        def require_capability!(capability, error: nil)
+          return if StaffRolePolicy.allowed?(current_user, capability)
+
+          render json: {
+            error: error || StaffRolePolicy.error_message(capability)
+          }, status: :forbidden
         end
 
         # Staff must stay inside the companies granted by their platform role.
@@ -33,9 +52,7 @@ module Api
         end
 
         def require_manager_or_admin!
-          unless current_user&.organization_admin? || current_user&.manager?
-            render json: { error: "Manager or admin access required" }, status: :forbidden
-          end
+          require_capability!(:manage_client_configuration)
         end
       end
     end

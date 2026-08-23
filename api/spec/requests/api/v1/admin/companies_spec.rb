@@ -182,6 +182,7 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     it "returns validation errors when no organization can be assigned" do
       platform_admin = instance_double(
         User,
+        role: "super_admin",
         staff_member?: true,
         organization_admin?: true,
         super_admin?: true,

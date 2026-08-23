@@ -78,7 +78,7 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isClient } = useAuth();
+  const { isAdmin, isSuperAdmin, isManager, isClient } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -204,49 +204,51 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         });
       }
 
-      add({
-        id: 'pay-schedule-settings',
-        label: 'Pay Schedule',
-        description: 'Confirm payroll cadence and the legal overtime workweek.',
-        group: 'Settings',
-        keywords: ['pay schedule', 'workweek', 'frequency', 'pay date'],
-        icon: <CalendarDays className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/pay-schedule-settings',
-      });
+      if (isManager) {
+        add({
+          id: 'pay-schedule-settings',
+          label: 'Pay Schedule',
+          description: 'Confirm payroll cadence and the legal overtime workweek.',
+          group: 'Settings',
+          keywords: ['pay schedule', 'workweek', 'frequency', 'pay date'],
+          icon: <CalendarDays className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/pay-schedule-settings',
+        });
 
-      add({
-        id: 'check-settings',
-        label: 'Check Settings',
-        description: 'Adjust check stock, printer profiles, and check layout.',
-        group: 'Settings',
-        keywords: ['printer', 'checks', 'layout'],
-        icon: <Printer className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/check-settings',
-      });
+        add({
+          id: 'check-settings',
+          label: 'Check Settings',
+          description: 'Adjust check stock, printer profiles, and check layout.',
+          group: 'Settings',
+          keywords: ['printer', 'checks', 'layout'],
+          icon: <Printer className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/check-settings',
+        });
 
-      add({
-        id: 'payroll-reminders',
-        label: 'Payroll Reminders',
-        description: 'Configure payroll reminder recipients and timing.',
-        group: 'Settings',
-        keywords: ['reminders', 'notifications', 'email'],
-        icon: <Bell className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/payroll-reminders',
-      });
+        add({
+          id: 'payroll-reminders',
+          label: 'Payroll Reminders',
+          description: 'Configure payroll reminder recipients and timing.',
+          group: 'Settings',
+          keywords: ['reminders', 'notifications', 'email'],
+          icon: <Bell className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/payroll-reminders',
+        });
 
-      add({
-        id: 'payroll-fields',
-        label: 'Payroll Fields',
-        description: 'Manage reusable client-wide additions, deductions, and employer contributions.',
-        group: 'Settings',
-        keywords: ['payroll fields', 'deductions', 'additions', 'employer contributions', '401k', 'rent', 'benefits'],
-        icon: <SlidersHorizontal className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/payroll-fields',
-      });
+        add({
+          id: 'payroll-fields',
+          label: 'Payroll Fields',
+          description: 'Manage reusable client-wide additions, deductions, and employer contributions.',
+          group: 'Settings',
+          keywords: ['payroll fields', 'deductions', 'additions', 'employer contributions', '401k', 'rent', 'benefits'],
+          icon: <SlidersHorizontal className="h-4 w-4" />,
+          kind: 'navigation',
+          href: '/payroll-fields',
+        });
+      }
 
       if (isAdmin) {
         add({
@@ -405,7 +407,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isSuperAdmin]);
+  }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isManager, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

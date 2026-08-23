@@ -229,4 +229,67 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(company.reload.active_printer_profile_id).to be_nil
     end
   end
+
+  describe "accountant mutation boundaries" do
+    let!(:accountant) do
+      User.create!(
+        company: company,
+        organization: organization,
+        email: "printer-accountant@example.com",
+        name: "Printer Accountant",
+        role: "accountant",
+        active: true
+      )
+    end
+    let!(:profile) do
+      PrinterProfile.create!(
+        organization: organization,
+        name: "Protected Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0.125,
+        check_offset_y: -0.025
+      )
+    end
+
+    before do
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user).and_return(accountant)
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user_id).and_return(accountant.id)
+    end
+
+    it "allows read-only printer-profile access" do
+      get "/api/v1/admin/printer_profiles"
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/admin/printer_profiles/#{profile.id}"
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "denies every printer-profile mutation without persisting changes" do
+      original_profile = profile.attributes.slice("name", "check_offset_x", "check_offset_y")
+      original_company = company.attributes.slice(
+        "check_stock_type", "check_offset_x", "check_offset_y", "active_printer_profile_id"
+      )
+
+      requests = [
+        -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
+        -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
+        -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" },
+        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply" },
+        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" },
+        -> { post "/api/v1/admin/printer_profiles/clear_active" }
+      ]
+
+      requests.each do |request|
+        request.call
+
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      end
+
+      expect(organization.printer_profiles.count).to eq(1)
+      expect(profile.reload.attributes.slice(*original_profile.keys)).to eq(original_profile)
+      expect(company.reload.attributes.slice(*original_company.keys)).to eq(original_company)
+      expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
+  end
 end

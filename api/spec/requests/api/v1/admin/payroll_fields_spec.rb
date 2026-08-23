@@ -25,6 +25,24 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
   end
 
   describe "POST /api/v1/admin/payroll_fields" do
+    it "keeps accountants from changing reusable payroll definitions" do
+      accountant = create(:user, company: company, organization: company.organization, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::PayrollFieldsController)
+        .to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/payroll_fields", params: {
+        payroll_field: {
+          name: "Unauthorized Field",
+          kind: "deduction",
+          tax_treatment: "post_tax_deduction",
+          category: "other"
+        }
+      }
+
+      expect(response).to have_http_status(:forbidden)
+      expect(PayrollFieldDefinition.where(name: "Unauthorized Field")).not_to exist
+    end
+
     it "creates a company-scoped payroll field" do
       post "/api/v1/admin/payroll_fields", params: {
         payroll_field: {
