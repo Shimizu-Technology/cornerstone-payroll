@@ -189,25 +189,29 @@ RSpec.describe PayrollImport::NameMatcher do
     end
   end
 
-  # ── Integration: real DB employees + PP20 PDF names ───────────────────────
-
-  describe "integration with real DB employees", :db do
-    let(:real_employees) { Employee.where(company: Company.find_by(name: "MoSa's Joint")) rescue [] }
-    let(:real_matcher) { described_class.new(real_employees) }
-
-    before do
-      skip "No MoSa employees in DB" if real_employees.empty?
+  describe "integration with persisted deidentified employees" do
+    let(:organization) { create(:organization) }
+    let(:company) { create(:company, organization: organization) }
+    let!(:persisted_employees) do
+      [
+        create(:employee, company: company, first_name: "Avery", last_name: "Example"),
+        create(:employee, company: company, first_name: "Casey", last_name: "Fixture"),
+        create(:employee, company: company, first_name: "Jordan", last_name: "Boundary-Safe")
+      ]
     end
 
-    it "matches all employees in PP20 PDF without unmatched names" do
-      pp20_path = Rails.root.join("../data/mosa-2025/raw/payroll_2025-10-06_00-00_to_2025-10-19_23-59.pdf").to_s
-      skip "PP20 PDF not found" unless File.exist?(pp20_path)
+    it "matches every name parsed from a generated Revel-shaped PDF" do
+      pdf_path = build_revel_pdf([
+        { name: "Example, Avery", regular_hours: 40.0, regular_pay: 800.0 },
+        { name: "Fixture, Casey R.", regular_hours: 32.5, regular_pay: 650.0 },
+        { name: "Boundary-Safe, Jordan", regular_hours: 44.0, regular_pay: 1_100.0 }
+      ])
+      matcher = described_class.new(persisted_employees)
+      records = PayrollImport::RevelPdfParser.parse(pdf_path)
+      unmatched = records.reject { |record| matcher.match_pdf_name(record[:employee_name]) }
 
-      records = PayrollImport::RevelPdfParser.parse(pp20_path)
-      unmatched = records.reject { |r| real_matcher.match_pdf_name(r[:employee_name]) }
-
-      expect(unmatched).to be_empty,
-        "Unmatched PP20 employees: #{unmatched.map { |r| r[:employee_name] }.join(', ')}"
+      expect(records.length).to eq(3)
+      expect(unmatched).to be_empty
     end
   end
 end

@@ -3,243 +3,147 @@
 require "rails_helper"
 
 RSpec.describe PayrollImport::RevelPdfParser do
-  let(:raw_dir) { Rails.root.join("../data/mosa-2025/raw").to_s }
-
-  # ── Unit helpers ───────────────────────────────────────────────────────────
-
-  # Build a fake fixed-width PDF line with the given employee name
-  # padded to COLUMNS spec (totals at typical positions)
-  def build_pdf_line(name, reg_h = 40.0, reg_pay = 600.0, total_h = nil, total_pay = nil)
-    total_h   ||= reg_h
-    total_pay ||= reg_pay
-
-    line = name.ljust(40)           # employee (0..39)
-    line += "-".ljust(20)           # role (40..59)
-    line += "-".ljust(20)           # ext_id (60..79)
-    line += "-".ljust(20)           # wage (80..99)
-    line += reg_h.to_s.rjust(15) + " " * 5     # regular_hours (100..119)
-    line += "-".ljust(20)           # overtime_hours (120..139)
-    line += "-".ljust(20)           # doubletime_hours (140..159)
-    line += reg_pay.to_s.rjust(15) + " " * 5   # regular_pay (160..179)
-    line += "-".ljust(20)           # overtime_pay (180..199)
-    line += "-".ljust(20)           # doubletime_pay (200..219)
-    line += total_h.to_s.rjust(15) + " " * 5   # total_hours (220..239)
-    line += total_pay.to_s.rjust(15) + " " * 5 # total_pay (240..259)
-    line += "-".ljust(20)           # fees (260..279)
-    line
+  let(:rows) do
+    [
+      { name: "Example, Avery", regular_hours: 40.0, regular_pay: 800.0 },
+      { name: "Fixture, Casey R.", regular_hours: 32.5, regular_pay: 650.0 },
+      {
+        name: "Boundary-Safe, Jordan",
+        regular_hours: 40.0,
+        regular_pay: 1_000.0,
+        overtime_hours: 4.0,
+        overtime_pay: 150.0
+      }
+    ]
   end
-
-  # ── Parser instantiation ───────────────────────────────────────────────────
+  let(:fixture_pdf) { build_revel_pdf(rows) }
+  let(:parser) { described_class.new(fixture_pdf) }
 
   describe ".parse" do
-    context "when file does not exist" do
-      it "raises ArgumentError" do
-        expect {
-          described_class.parse("/tmp/nonexistent_abc123.pdf")
-        }.to raise_error(ArgumentError, /File not found/)
-      end
+    it "rejects a missing file" do
+      expect { described_class.parse("/tmp/nonexistent_abc123.pdf") }
+        .to raise_error(ArgumentError, /File not found/)
     end
 
-    context "when file has wrong extension" do
-      let(:txt_file) { Tempfile.new(["test", ".txt"]).tap { |f| f.write("data"); f.close } }
+    it "rejects a non-PDF extension" do
+      file = Tempfile.new([ "revel-wrong-extension", ".txt" ])
+      file.write("not a PDF")
+      file.close
 
-      it "raises ArgumentError" do
-        expect {
-          described_class.parse(txt_file.path)
-        }.to raise_error(ArgumentError, /not a PDF/)
+      expect { described_class.parse(file.path) }.to raise_error(ArgumentError, /not a PDF/)
+    ensure
+      file&.unlink
+    end
+
+    it "parses a deidentified, production-shaped PDF through PDF::Reader" do
+      records = described_class.parse(fixture_pdf)
+
+      expect(records.map { |record| record[:employee_name] })
+        .to eq([ "Example, Avery", "Fixture, Casey R.", "Boundary-Safe, Jordan" ])
+      expect(records.sum { |record| record[:total_hours] }).to eq(116.5)
+      expect(records.sum { |record| record[:total_pay] }).to eq(2_600.0)
+      expect(records.last).to include(
+        regular_hours: 40.0,
+        overtime_hours: 4.0,
+        regular_pay: 1_000.0,
+        overtime_pay: 150.0,
+        total_hours: 44.0,
+        total_pay: 1_150.0
+      )
+    end
+
+    it "returns the complete downstream import shape with numeric, plausible values" do
+      required_keys = %i[
+        employee_name regular_hours overtime_hours regular_pay overtime_pay
+        total_hours total_pay hourly_rate
+      ]
+
+      described_class.parse(fixture_pdf).each do |record|
+        expect(record.keys).to include(*required_keys)
+        expect(record[:total_hours]).to be_a(Numeric)
+        expect(record[:total_pay]).to be_a(Numeric)
+        expect(record[:total_hours]).to be_between(0, 200)
+        expect(record[:total_pay]).to be >= 0
       end
     end
   end
 
-  # ── Fixed column parsing ──────────────────────────────────────────────────
-
-  describe "#parse (unit — fixed-width column logic)" do
-    let(:fixture_pdf) { File.join(raw_dir, "payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf") }
-    let(:parser) { described_class.new(fixture_pdf) }
-
-    before do
-      skip "Fixture PDF not found: #{File.basename(fixture_pdf)}" unless File.exist?(fixture_pdf)
+  describe "fallback parsing" do
+    it "flags fixed-column values that require the flexible parser" do
+      expect(parser.send(:implausible_fixed_parse?, employee: "Fixture, Casey", total_hours: 224.41, total_pay: 224.41)).to be(true)
+      expect(parser.send(:implausible_fixed_parse?, employee: "", total_hours: 40.0, total_pay: 400.0)).to be(true)
+      expect(parser.send(:implausible_fixed_parse?, employee: "Example, Avery", total_hours: 0.0, total_pay: 400.0)).to be(true)
+      expect(parser.send(:implausible_fixed_parse?, employee: "Example, Avery", total_hours: 80.0, total_pay: 1_200.0)).to be(false)
     end
 
-    it "is callable via class method" do
-      expect(described_class).to respond_to(:parse)
-    end
+    it "right-aligns a compressed Revel row into realistic payroll columns" do
+      line = "Compressed, Rowan".ljust(40) + "- - - 24.26 - - 224.41 - - 24.26 224.41 -"
+      values = parser.send(:parse_flexible_columns, line)
 
-    it "returns an array" do
-      records = described_class.parse(fixture_pdf)
-      expect(records).to be_an(Array)
-    end
-
-    it "returns hashes with required keys" do
-      records = described_class.parse(fixture_pdf)
-      expect(records).not_to be_empty
-      required_keys = %i[employee_name regular_hours overtime_hours regular_pay overtime_pay total_hours total_pay hourly_rate]
-      records.each do |r|
-        required_keys.each { |k| expect(r).to have_key(k), "Missing key #{k} in #{r.inspect}" }
-      end
-    end
-
-    it "parses employees with valid numeric fields" do
-      records = described_class.parse(fixture_pdf)
-      records.each do |r|
-        expect(r[:total_hours]).to be_a(Numeric), "expected Numeric total_hours for #{r[:employee_name]}"
-        expect(r[:total_pay]).to be_a(Numeric), "expected Numeric total_pay for #{r[:employee_name]}"
-        expect(r[:total_hours]).to be >= 0
-        expect(r[:total_pay]).to be >= 0
-      end
-    end
-
-    it "does not include any record exceeding the 200h outlier threshold" do
-      records = described_class.parse(fixture_pdf)
-      outliers = records.select { |r| r[:total_hours].to_f > 200.0 }
-      expect(outliers).to be_empty, "Unexpected outlier rows: #{outliers.map { |r| r[:employee_name] }}"
+      expect(values).to include(
+        employee: "Compressed, Rowan",
+        regular_hours: 24.26,
+        regular_pay: 224.41,
+        total_hours: 24.26,
+        total_pay: 224.41
+      )
+      expect(values[:total_hours]).to be < 200
     end
   end
 
-  # ── Fallback parser edge cases ─────────────────────────────────────────────
-
-  describe "fallback parser (compressed-layout lines)" do
-    let(:fixture_pdf) { File.join(raw_dir, "payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf") }
-
-    let(:parser_instance) do
-      # We need to access private methods — use send
-      described_class.new(fixture_pdf)
-    end
-
-    before do
-      skip "Fixture PDF not found: #{File.basename(fixture_pdf)}" unless File.exist?(fixture_pdf)
-    end
-
-    it "detects implausible parse when total_hours > 200" do
-      implausible = { employee: "Thomas, Natalie", total_hours: 224.41, total_pay: 224.41 }
-      expect(parser_instance.send(:implausible_fixed_parse?, implausible)).to be true
-    end
-
-    it "detects implausible parse when employee is blank" do
-      blank_emp = { employee: "", total_hours: 40.0, total_pay: 400.0 }
-      expect(parser_instance.send(:implausible_fixed_parse?, blank_emp)).to be true
-    end
-
-    it "detects implausible parse when total_pay > 0 but hours = 0" do
-      zero_hours = { employee: "Smith, John", total_hours: 0.0, total_pay: 400.0 }
-      expect(parser_instance.send(:implausible_fixed_parse?, zero_hours)).to be true
-    end
-
-    it "considers valid parse plausible" do
-      valid = { employee: "Smith, John", total_hours: 80.0, total_pay: 1200.0 }
-      expect(parser_instance.send(:implausible_fixed_parse?, valid)).to be false
-    end
-
-    # Regression: PP09 Thomas, Natalie 224.41h was the last known outlier
-    # After fix (threshold 240→200), the flexible parser should produce 24.26h
-    it "PP09 regression: flexible parser produces realistic hours for compressed layout" do
-      pp09_path = File.join(raw_dir, "payroll_2025-05-05_00-00_to_2025-05-18_23-59.pdf")
-      skip "PP09 file not found" unless File.exist?(pp09_path)
-
-      records = described_class.parse(pp09_path)
-      natalie = records.find { |r| r[:employee_name] =~ /Thomas.*Natalie|Natalie.*Thomas/i }
-
-      if natalie
-        expect(natalie[:total_hours]).to be < 200.0, "Thomas, Natalie should not have outlier hours"
-        expect(natalie[:total_hours]).to be_between(20.0, 40.0)
-      end
-    end
-  end
-
-  # ── Name normalization ─────────────────────────────────────────────────────
-
-  describe "#normalize_name (private)" do
-    let(:fixture_pdf) { File.join(raw_dir, "payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf") }
-
-    let(:parser_instance) do
-      described_class.new(fixture_pdf)
-    end
-
-    before do
-      skip "Fixture PDF not found: #{File.basename(fixture_pdf)}" unless File.exist?(fixture_pdf)
-    end
-
+  describe "name normalization and multiline extraction" do
     {
-      "Belleza, Vincent"      => "Belleza, Vincent",
-      "Belleza,"              => "Belleza",         # trailing comma stripped
-      "Camacho, Zachary"      => "Camacho, Zachary",
-      "Arthur, Juile R."      => "Arthur, Juile R.",
-      "Young  Paul"           => "Paul, Young",    # no comma → reversed
+      "Example, Avery" => "Example, Avery",
+      "Example," => "Example",
+      "Fixture, Casey R." => "Fixture, Casey R.",
+      "Young  Paul" => "Young Paul"
     }.each do |input, expected|
-      it "normalizes '#{input}' → '#{expected}'" do
-        result = parser_instance.send(:normalize_name, input)
-        expect(result).to eq(expected)
+      it "normalizes #{input.inspect}" do
+        expect(parser.send(:normalize_name, input)).to eq(expected)
       end
+    end
+
+    it "merges a last-name line with a following first-name payroll row" do
+      data_row = revel_row(name: "Avery", regular_hours: 40, regular_pay: 800)
+      lines = [ RevelPdfFixtureHelper::REVEL_HEADER, "Example,", data_row, "Totals 40.00 800.00" ]
+
+      employee_lines = parser.send(:find_employee_lines, lines, 0)
+      records = parser.send(:parse_employee_lines, employee_lines)
+
+      expect(records.one?).to be(true)
+      expect(records.first).to include(employee_name: "Example, Avery", total_hours: 40.0, total_pay: 800.0)
     end
   end
 
-  # ── Multi-line name merging ────────────────────────────────────────────────
-
-  describe "multi-line name handling" do
-    it "parses all 25+ known pay period PDFs without error" do
-      pdfs = Dir.glob(File.join(raw_dir, "payroll_*.pdf"))
-      skip "No payroll PDFs found in #{raw_dir}" if pdfs.empty?
-
-      pdfs.each do |pdf_path|
-        expect {
-          records = described_class.parse(pdf_path)
-          expect(records).to be_an(Array), "Expected array from #{File.basename(pdf_path)}"
-          expect(records.length).to be > 0, "Empty records from #{File.basename(pdf_path)}"
-        }.not_to raise_error
-      end
+  describe "deidentified corpus regression" do
+    let(:corpora) do
+      [
+        [
+          { name: "Alpha, Ana", regular_hours: 40.0, regular_pay: 720.0 },
+          { name: "Beta, Ben", regular_hours: 38.0, regular_pay: 760.0 }
+        ],
+        [
+          { name: "Gamma, Gia", regular_hours: 40.0, regular_pay: 1_000.0, overtime_hours: 6.0, overtime_pay: 225.0 },
+          { name: "Delta, Dev", regular_hours: 20.0, regular_pay: 500.0 },
+          { name: "Epsilon, Eli", regular_hours: 0.0, regular_pay: 0.0, overtime_hours: 8.0, overtime_pay: 300.0 }
+        ],
+        [
+          { name: "Zeta, Zoe", regular_hours: 80.0, regular_pay: 1_600.0 },
+          { name: "Eta, Evan", regular_hours: 41.5, regular_pay: 1_037.5 }
+        ]
+      ]
     end
 
-    it "all employees in all PDFs have non-blank names" do
-      pdfs = Dir.glob(File.join(raw_dir, "payroll_*.pdf"))
-      skip "No payroll PDFs found in #{raw_dir}" if pdfs.empty?
+    it "parses every generated report with exact counts, totals, and no blank or outlier rows" do
+      corpora.each do |corpus|
+        records = described_class.parse(build_revel_pdf(corpus))
 
-      pdfs.each do |pdf_path|
-        records = described_class.parse(pdf_path)
-        blank_names = records.select { |r| r[:employee_name].to_s.strip.empty? }
-        expect(blank_names).to be_empty,
-          "#{File.basename(pdf_path)} has #{blank_names.length} blank-name rows"
-      end
-    end
-  end
-
-  # ── Real-data smoke tests ─────────────────────────────────────────────────
-
-  describe "real data smoke tests" do
-    {
-      "PP20 (Oct 6–19, previously missing)" =>
-        ["payroll_2025-10-06_00-00_to_2025-10-19_23-59.pdf", 45..55, 28_000.0..32_000.0],
-      "PP00 (Dec 30–Jan 11)" =>
-        ["payroll_2024-12-30_00-00_to_2025-01-12_23-59.pdf", 38..50, 28_000.0..36_000.0],
-      "PP25 (Dec 15–27)" =>
-        ["payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf", 40..55, 25_000.0..36_000.0]
-    }.each do |label, (filename, emp_range, pay_range)|
-      context label do
-        let(:pdf_path) { File.join(raw_dir, filename) }
-
-        before { skip "File not found: #{filename}" unless File.exist?(pdf_path) }
-
-        it "parses without error" do
-          expect { described_class.parse(pdf_path) }.not_to raise_error
-        end
-
-        it "returns expected employee count (#{emp_range})" do
-          records = described_class.parse(pdf_path)
-          expect(records.length).to be_between(emp_range.min, emp_range.max),
-            "Expected #{emp_range} employees, got #{records.length}"
-        end
-
-        it "total gross pay in expected range (#{pay_range})" do
-          records = described_class.parse(pdf_path)
-          total = records.sum { |r| r[:total_pay].to_f }
-          expect(total).to be_between(pay_range.min, pay_range.max),
-            "Total gross $#{total.round(2)} outside expected range #{pay_range}"
-        end
-
-        it "no outlier rows (>200h)" do
-          records = described_class.parse(pdf_path)
-          outliers = records.select { |r| r[:total_hours].to_f > 200.0 }
-          expect(outliers).to be_empty
-        end
+        expect(records.length).to eq(corpus.length)
+        expect(records.sum { |record| record[:total_hours] })
+          .to eq(corpus.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours) + row.fetch(:overtime_hours, 0.0)) })
+        expect(records.sum { |record| record[:total_pay] })
+          .to eq(corpus.sum { |row| row.fetch(:total_pay, row.fetch(:regular_pay) + row.fetch(:overtime_pay, 0.0)) })
+        expect(records).to all(satisfy { |record| record[:employee_name].present? && record[:total_hours] <= 200 })
       end
     end
   end

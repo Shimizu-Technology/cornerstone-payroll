@@ -99,6 +99,38 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     expect(payroll_item.check_events.where(event_type: "renumbered").count).to eq(1)
   end
 
+  it "reuses annual YTD aggregates across sequential pay-period commits" do
+    second_period = create(
+      :pay_period,
+      company: company,
+      status: "approved",
+      approved_at: Time.current,
+      approved_by_id: actor.id,
+      start_date: pay_period.start_date + 14.days,
+      end_date: pay_period.end_date + 14.days,
+      pay_date: pay_period.pay_date + 14.days
+    )
+    create(
+      :payroll_item,
+      company: company,
+      pay_period: second_period,
+      employee: employee,
+      gross_pay: 800,
+      net_pay: 671.80,
+      withholding_tax: 70,
+      social_security_tax: 49.60,
+      medicare_tax: 11.60,
+      employer_social_security_tax: 49.60,
+      employer_medicare_tax: 11.60
+    )
+
+    described_class.new(pay_period: pay_period, actor: actor).commit!
+    described_class.new(pay_period: second_period, actor: actor).commit!
+
+    expect(EmployeeYtdTotal.find_by!(employee: employee, year: pay_period.pay_date.year).gross_pay).to eq(2_000)
+    expect(CompanyYtdTotal.find_by!(company: company, year: pay_period.pay_date.year).gross_pay).to eq(2_000)
+  end
+
   private
 
   def lifecycle_thread(results, operation)
@@ -196,8 +228,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
   def cleanup_concurrency_records
     company_id = company.id
     employee_id = employee.id
-    pay_period_id = pay_period.id
-    payroll_item_ids = PayrollItem.where(pay_period_id: pay_period_id).pluck(:id)
+    pay_period_ids = PayPeriod.where(company_id: company_id).pluck(:id)
+    payroll_item_ids = PayrollItem.where(pay_period_id: pay_period_ids).pluck(:id)
 
     CheckEvent.where(payroll_item_id: payroll_item_ids).delete_all
     PayrollLiabilityEntry.where(company_id: company_id).delete_all
@@ -206,7 +238,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     PayrollItem.where(id: payroll_item_ids).delete_all
     EmployeeYtdTotal.where(employee_id: employee_id).delete_all
     CompanyYtdTotal.where(company_id: company_id).delete_all
-    PayPeriod.where(id: pay_period_id).delete_all
+    PayPeriod.where(id: pay_period_ids).delete_all
     Employee.where(id: employee_id).delete_all
     Department.where(id: department.id).delete_all
     AuditLog.where(company_id: company_id).delete_all
