@@ -1,37 +1,16 @@
 # frozen_string_literal: true
 
 namespace :production do
-  desc "Fail unless the minimum production safety controls are configured"
+  desc "Fail unless production configuration and live durable dependencies are ready"
   task readiness: :environment do
-    checks = {
-      "RAILS_ENV is production" => Rails.env.production?,
-      "authentication is enabled" => ENV.fetch("AUTH_ENABLED", "true") == "true",
-      "TLS is forced" => ENV.fetch("FORCE_SSL", "true") == "true",
-      "durable Active Storage is selected" => ENV.fetch("ACTIVE_STORAGE_SERVICE", "r2") != "local",
-      "durable cache is enabled" => ENV.fetch("USE_SOLID_CACHE", "true") == "true",
-      "durable jobs are enabled" => ENV.fetch("USE_SOLID_QUEUE", "true") == "true",
-      "durable cable is enabled" => ENV.fetch("USE_SOLID_CABLE", "true") == "true",
-      "MFA policy is attested" => ENV["REQUIRE_MFA"] == "true",
-      "trusted reverse proxies are configured" => ENV["TRUSTED_PROXY_CIDRS"].present?,
-      "allowed frontend origin is configured" => ENV["CORS_ORIGINS"].present?,
-      "mailer URL is configured" => ENV["FRONTEND_URL"].present?,
-      "Clerk keys are configured" => ENV.values_at("CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY").all?(&:present?),
-      "R2 object storage is configured" => ENV.values_at(
-        "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ACCOUNT_ID", "R2_BUCKET_NAME"
-      ).all?(&:present?),
-      "email delivery is configured" => ENV.values_at("RESEND_API_KEY", "MAILER_FROM_EMAIL").all?(&:present?),
-      "time tracking destinations are allowlisted" => TimeTracking::DestinationPolicy.production_configuration_valid?(
-        sources: TimeTrackingSource.active.to_a
-      ),
-      "Active Record encryption is configured" => ActiveRecordEncryptionConfiguration.configured?(
-        Rails.application.config.active_record.encryption
-      )
-    }
+    report = ProductionReadiness.new.run(live: Rails.env.production?)
+    report.checks.each do |check|
+      puts "#{check.passed ? 'PASS' : 'FAIL'}  #{check.name} (#{check.detail})"
+    end
+    puts "EVIDENCE #{JSON.generate(report.as_json)}"
 
-    checks.each { |name, passed| puts "#{passed ? 'PASS' : 'FAIL'}  #{name}" }
-    failures = checks.reject { |_name, passed| passed }
-    abort "Production readiness failed (#{failures.length} control(s))." if failures.any?
+    abort "Production readiness failed (#{report.failures.length} control(s))." unless report.passed?
 
-    puts "Production readiness configuration passed. Complete the manual evidence checklist before release."
+    puts "Production configuration and live dependency probes passed. Complete the manual evidence checklist before release."
   end
 end

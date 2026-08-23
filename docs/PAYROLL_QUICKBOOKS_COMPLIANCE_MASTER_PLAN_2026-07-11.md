@@ -653,7 +653,7 @@ Current gate assessment:
 | Federal Form 941 and filing-authority language | Passed for active changed surfaces | Backward-compatible route names remain where required |
 | Browser smoke infrastructure | Implemented | Public checks and the deterministic authenticated payroll lane run as separate CI jobs |
 | Authenticated production-shaped payroll smoke | Implemented for synthetic release coverage; staging evidence remains open | The required disposable Postgres/Rails/Vite lane has no skips or retries; a representative staging payroll is still required by the production-readiness checklist |
-| Production configuration/readiness command | Implemented | Must be run with actual production configuration and evidence retained |
+| Production configuration/readiness command | Effective configuration and live probes in Gate 0 implementation | Must pass against the deployed revision; the initial 2026-08-23 production run correctly failed and exposed development Clerk keys and incomplete operational configuration |
 | Backup/restore, MFA, R2, mail, monitoring, and operational checklist | Open | Requires manual release-owner signoff in the production-readiness checklist |
 | General pay-component taxability matrix | Partial | Stored committed bases/rule snapshots are delivered; the reusable effective-dated component matrix remains Phase 1 work |
 
