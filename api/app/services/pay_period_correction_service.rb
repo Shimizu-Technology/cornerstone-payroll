@@ -80,6 +80,9 @@ class PayPeriodCorrectionService
       emp_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
       co_ytd = CompanyYtdTotal.find_by(company_id: locked.company_id, year: year)
 
+      emp_ytds.values.sort_by(&:employee_id).each(&:lock!)
+      co_ytd&.lock!
+
       all_items.each do |item|
         emp_ytds[item.employee_id]&.subtract_payroll_item!(item)
         co_ytd&.subtract_payroll_item!(item)

@@ -91,9 +91,17 @@ class PayPeriodLifecycleService
     employee_ids = committed_items.map(&:employee_id).uniq
     employee_ytds = EmployeeYtdTotal.where(employee_id: employee_ids, year: year).index_by(&:employee_id)
     employee_ids.each do |employee_id|
-      employee_ytds[employee_id] ||= EmployeeYtdTotal.find_or_create_by!(employee_id: employee_id, year: year)
+      employee_ytds[employee_id] ||= EmployeeYtdTotal.create_or_find_by!(employee_id: employee_id, year: year)
     end
-    company_ytd = CompanyYtdTotal.find_or_create_by!(company_id: pay_period.company_id, year: year)
+    company_ytd = CompanyYtdTotal.create_or_find_by!(company_id: pay_period.company_id, year: year)
+
+    # Acquire every shared aggregate row before applying any effect. If the
+    # company row were locked between employee rows, two different pay periods
+    # with overlapping employee sets could deadlock (employee A -> company ->
+    # employee B versus employee B -> company). This global order also matches
+    # pay-period voids.
+    employee_ytds.values.sort_by(&:employee_id).each(&:lock!)
+    company_ytd.lock!
 
     committed_items.each do |item|
       PayrollCalculator.for(item.employee, item).apply_loan_payments!
