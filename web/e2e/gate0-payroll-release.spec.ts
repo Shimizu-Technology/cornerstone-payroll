@@ -292,7 +292,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await workflowRow.getByRole('button', { name: 'Enter Hours', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
-    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
 
     let delayNextPrimaryEmployeeResponse = false;
@@ -385,7 +385,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/pay-periods/${fixture.workflow_pay_period_id}`);
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=%2Fcompanies%2F${fixture.company_id}%2Fpay-runs`);
-    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
     await page.goto('/pay-periods/not-a-number');

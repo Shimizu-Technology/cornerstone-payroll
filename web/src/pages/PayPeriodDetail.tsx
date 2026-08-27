@@ -1183,9 +1183,11 @@ export function PayPeriodDetail({
 
   const workflowActions = (
     <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-      <Button variant="outline" onClick={() => navigate(returnTo)}>
-        Back to List
-      </Button>
+      {!embedded && (
+        <Button variant="outline" onClick={() => navigate(returnTo)}>
+          Back to List
+        </Button>
+      )}
       {isCommitted && !isVoided && (
         <Button variant="outline" onClick={openPayDateCorrection}>
           Correct Pay Date
