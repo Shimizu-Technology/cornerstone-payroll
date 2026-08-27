@@ -6,13 +6,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { clientDocumentsApi, clientReportsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
+import { useCompany } from '@/contexts/CompanyContext';
+import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 export function ClientDashboard() {
   const navigate = useNavigate();
+  const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'] | null>(null);
   const [documentCount, setDocumentCount] = useState(0);
+  const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
+  const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
+  const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
+  const payRunHref = (payRunId: number) => activeCompanyId
+    ? payRunPath(activeCompanyId, payRunId, 'overview')
+    : `/pay-periods/${payRunId}`;
 
   useEffect(() => {
     void load();
@@ -40,7 +49,7 @@ export function ClientDashboard() {
       <Header
         title="Client Portal"
         description="Manage employees, review payroll, and securely share documents."
-        actions={<Button onClick={() => navigate('/employees/new')}>Add Employee</Button>}
+        actions={<Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
       />
 
       <div className="p-6 lg:p-8 space-y-8">
@@ -106,13 +115,13 @@ export function ClientDashboard() {
             title="Employees"
             description="Add and update employee records"
             icon={<Users className="h-5 w-5" />}
-            onClick={() => navigate('/employees')}
+            onClick={() => navigate(employeeListHref)}
           />
           <QuickLink
             title="Pay Periods"
             description="Review payroll runs and employee pay"
             icon={<CalendarDays className="h-5 w-5" />}
-            onClick={() => navigate('/pay-periods')}
+            onClick={() => navigate(payRunListHref)}
           />
           <QuickLink
             title="Documents"
@@ -132,7 +141,7 @@ export function ClientDashboard() {
                 <button
                   key={payroll.id}
                   type="button"
-                  onClick={() => navigate(`/pay-periods/${payroll.id}`)}
+                  onClick={() => navigate(payRunHref(payroll.id))}
                   className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60"
                 >
                   <div>
