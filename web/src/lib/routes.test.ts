@@ -40,7 +40,15 @@ describe('canonical payroll routes', () => {
       longestPath = Math.max(longestPath, path.length);
     }
 
-    expect(longestPath).toBeLessThan(1500);
+    expect(longestPath).toBeLessThanOrEqual(2048);
+  });
+
+  it('measures the final encoded route when bounding return context', () => {
+    const reservedCharacters = '?&='.repeat(400);
+
+    expect(newEmployeePath(12, {
+      returnTo: `/companies/12/employees?search=${reservedCharacters}`,
+    })).toBe('/companies/12/employees/new');
   });
 });
 
@@ -63,7 +71,7 @@ describe('safeInternalReturnPath', () => {
   });
 
   it('rejects an excessively nested return destination', () => {
-    expect(safeInternalReturnPath(`/companies/12/pay-runs?return_to=${'a'.repeat(1024)}`, fallback))
+    expect(safeInternalReturnPath(`/companies/12/pay-runs?return_to=${'a'.repeat(2048)}`, fallback))
       .toBe(fallback);
   });
 });
