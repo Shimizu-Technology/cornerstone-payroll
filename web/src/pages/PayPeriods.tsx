@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { currentAppPath, payRunPath } from '@/lib/routes';
 import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
 
@@ -121,7 +122,10 @@ function PayPeriodMobileCard({
 export function PayPeriods() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId } = useCompany();
+  const companyId = activeCompanyId || 1;
+  const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,13 +133,21 @@ export function PayPeriods() {
     const state = location.state as { companySwitchNotice?: string } | null;
     return state?.companySwitchNotice ?? null;
   });
-  const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const statusParam = searchParams.get('status') || '';
+  const statusFilter = ['draft', 'calculated', 'approved', 'committed'].includes(statusParam) ? statusParam : undefined;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<
-    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status'
-  >('pay_period');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const searchTerm = searchParams.get('search') || '';
+  const requestedSort = searchParams.get('sort');
+  const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
+    'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status';
+  const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
+  const yearFilter = searchParams.get('year') || '';
+  const updateViewParam = (key: string, value?: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next);
+  };
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -173,7 +185,7 @@ export function PayPeriods() {
     try {
       if (!silent) setLoading(true);
       setError(null);
-      const response = await payPeriodsApi.list({ status: statusFilter });
+      const response = await payPeriodsApi.list({ status: statusFilter, year: yearFilter ? Number(yearFilter) : undefined });
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
     } catch (err) {
@@ -181,7 +193,7 @@ export function PayPeriods() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, yearFilter]);
 
   useEffect(() => {
     loadPayPeriods();
@@ -586,7 +598,7 @@ export function PayPeriods() {
           <Button
             variant={statusFilter === undefined ? 'primary' : 'outline'}
             size="sm"
-            onClick={() => setStatusFilter(undefined)}
+            onClick={() => updateViewParam('status')}
           >
             All ({Object.values(statusCounts).reduce((a, b) => a + b, 0)})
           </Button>
@@ -595,7 +607,7 @@ export function PayPeriods() {
               key={status}
               variant={statusFilter === status ? 'primary' : 'outline'}
               size="sm"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => updateViewParam('status', status)}
             >
               {payPeriodStatusConfig[status]?.label || status} ({statusCounts[status] || 0})
             </Button>
@@ -608,14 +620,14 @@ export function PayPeriods() {
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => updateViewParam('search', e.target.value)}
               className="pl-10"
             />
           </div>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap">
             <Select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              onChange={(e) => updateViewParam('sort', e.target.value)}
               className="w-full sm:w-44"
             >
               <option value="pay_period">Sort: Pay Period</option>
@@ -626,9 +638,13 @@ export function PayPeriods() {
               <option value="net">Sort: Net Pay</option>
               <option value="status">Sort: Status</option>
             </Select>
+            <Select value={yearFilter} onChange={(e) => updateViewParam('year', e.target.value)} className="w-full sm:w-32">
+              <option value="">All years</option>
+              {Array.from({ length: 6 }, (_, index) => new Date().getFullYear() - index).map((year) => <option key={year} value={year}>{year}</option>)}
+            </Select>
             <Select
               value={sortDirection}
-              onChange={(e) => setSortDirection(e.target.value as typeof sortDirection)}
+              onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"
             >
               <option value="desc">Newest / High</option>
@@ -653,7 +669,7 @@ export function PayPeriods() {
                     key={period.id}
                     period={period}
                     actionInFlight={actionInFlight}
-                    onView={() => navigate(`/pay-periods/${period.id}`)}
+                    onView={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}
                     onEdit={() => openEditModal(period)}
                     onDelete={() => handleDelete(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
@@ -757,7 +773,7 @@ export function PayPeriods() {
                           <div className="flex items-center gap-1 text-sm">
                             <button
                               className="text-gray-500 hover:text-gray-800 hover:underline"
-                              onClick={() => navigate(`/pay-periods/${period.id}`)}
+                              onClick={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}
                             >
                               View
                             </button>
@@ -786,7 +802,7 @@ export function PayPeriods() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => navigate(`/pay-periods/${period.id}`)}
+                              onClick={() => navigate(payRunPath(companyId, period.id, 'work', { returnTo }))}
                             >
                               Enter Hours
                             </Button>

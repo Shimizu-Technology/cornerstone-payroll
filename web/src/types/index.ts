@@ -198,6 +198,7 @@ export interface Employee {
   first_name: string;
   middle_name?: string;
   last_name: string;
+  job_title?: string;
   email?: string;
   ssn?: string | null;
   ssn_last_four?: string | null;
