@@ -29,7 +29,7 @@ export function CompanySwitcher() {
       return;
     }
 
-    const redirect = getCompanySwitchRedirect(location.pathname, companyId);
+    const redirect = getCompanySwitchRedirect(location.pathname, companyId, location.search);
 
     analytics.companySwitch(companyId);
     switchCompany(companyId);

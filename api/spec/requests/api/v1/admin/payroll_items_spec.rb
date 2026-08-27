@@ -29,8 +29,9 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("payroll_item", "id")).to eq(payroll_item.id)
-      expect(response.parsed_body.dig("payroll_item", "employee_id")).to eq(employee.id)
+      json = JSON.parse(response.body)
+      expect(json.dig("payroll_item", "id")).to eq(payroll_item.id)
+      expect(json.dig("payroll_item", "employee_id")).to eq(employee.id)
     end
 
     it "does not reveal a payroll item through another company's pay run" do
@@ -42,8 +43,15 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       get "/api/v1/admin/pay_periods/#{other_pay_period.id}/payroll_items/#{other_item.id}"
 
       expect(response).to have_http_status(:not_found)
-      expect(response.parsed_body).to eq("error" => "Pay period not found")
+      expect(JSON.parse(response.body)).to eq("error" => "Pay period not found", "details" => {})
       expect(response.body).not_to include(other_employee.full_name)
+    end
+
+    it "returns not found when the parent pay period does not exist" do
+      get "/api/v1/admin/pay_periods/0/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:not_found)
+      expect(JSON.parse(response.body)).to eq("error" => "Pay period not found", "details" => {})
     end
   end
 

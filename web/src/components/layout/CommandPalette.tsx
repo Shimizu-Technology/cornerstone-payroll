@@ -460,7 +460,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     if (command.kind === 'company' && command.companyId) {
       if (command.companyId === activeCompanyId) return;
 
-      const redirect = getCompanySwitchRedirect(location.pathname, command.companyId);
+      const redirect = getCompanySwitchRedirect(location.pathname, command.companyId, location.search);
       analytics.companySwitch(command.companyId);
       switchCompany(command.companyId);
 

@@ -200,6 +200,11 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
     await expect(page.getByRole('link', { name: 'Process payroll' }).first()).toBeVisible();
 
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(queueUrl);
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
+
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
     await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Employee workspace' })).toBeVisible();
@@ -209,6 +214,33 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(new RegExp(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/pay-history`));
     await expect(page.getByRole('heading', { name: 'Avery Example' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Employees' })).toHaveAttribute('href', `/companies/${fixture.company_id}/employees`);
+
+    await context.close();
+  });
+
+  test('redirects legacy record URLs without creating back-navigation loops', async ({ browser }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+
+    await page.goto(`/employees/${fixture.employee_id}`);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/overview?return_to=%2Fcompanies%2F${fixture.company_id}%2Femployees`);
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees`);
+
+    await page.goto('/employees/new');
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees/new?return_to=%2Fcompanies%2F${fixture.company_id}%2Femployees`);
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees`);
+
+    await page.goto(`/pay-periods/${fixture.workflow_pay_period_id}`);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=%2Fcompanies%2F${fixture.company_id}%2Fpay-runs`);
+    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
     await context.close();
   });

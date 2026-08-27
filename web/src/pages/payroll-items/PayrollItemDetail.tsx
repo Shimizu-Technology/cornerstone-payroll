@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
+import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +30,7 @@ import {
 import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 
-export function PayrollItemDetail() {
+export function PayrollItemDetail(): ReactElement {
   const { companyId: companyIdParam, id: payRunIdParam, payrollItemId: payrollItemIdParam } = useParams<{
     companyId: string;
     id: string;
@@ -65,7 +66,10 @@ export function PayrollItemDetail() {
         payrollItemsApi.get(payRunId, payrollItemId),
       ]);
       const summaryItem = payRunResponse.pay_period.payroll_items?.find((item) => item.id === payrollItemId);
-      const mergedItem = { ...summaryItem, ...payrollItemResponse.payroll_item } as PayrollItem;
+      const mergedItem: PayrollItem = { ...summaryItem, ...payrollItemResponse.payroll_item };
+      if (!Number.isInteger(mergedItem.employee_id) || mergedItem.employee_id < 1) {
+        throw new Error('This payroll item is not linked to an employee record.');
+      }
       const employeeResponse = await employeesApi.get(mergedItem.employee_id);
       setPayRun(payRunResponse.pay_period);
       setPayrollItem(mergedItem);
@@ -82,7 +86,7 @@ export function PayrollItemDetail() {
   }, [load]);
 
   if (loading) {
-    return <div className="flex min-h-[420px] items-center justify-center" role="status"><span className="inline-flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-600 shadow-sm"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary-600" />Loading payroll item</span></div>;
+    return <WorkspaceLoader label="Loading payroll item" />;
   }
 
   if (!payRun || !payrollItem || !employee || error) {
@@ -176,18 +180,18 @@ export function PayrollItemDetail() {
   );
 }
 
-function RelationshipLink({ icon: Icon, eyebrow, title, detail, href }: { icon: typeof UserRound; eyebrow: string; title: string; detail: string; href: string }) {
+function RelationshipLink({ icon: Icon, eyebrow, title, detail, href }: { icon: typeof UserRound; eyebrow: string; title: string; detail: string; href: string }): ReactElement {
   return <Link to={href} className="group grid min-h-24 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[1.35rem] border border-neutral-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><span><span className="block text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{eyebrow}</span><span className="mt-1 block font-display text-lg font-bold text-neutral-950 group-hover:text-primary-800">{title}</span><span className="mt-1 block text-sm text-neutral-500">{detail}</span></span><ArrowRight className="h-5 w-5 text-neutral-300 transition group-hover:translate-x-1 group-hover:text-primary-700" /></Link>;
 }
 
-function Metric({ icon: Icon, label, value, detail }: { icon: typeof Banknote; label: string; value: string; detail: string }) {
+function Metric({ icon: Icon, label, value, detail }: { icon: typeof Banknote; label: string; value: string; detail: string }): ReactElement {
   return <Card><CardContent className="p-5"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-1 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
 }
 
-function ContextRow({ icon: Icon, label, value }: { icon: typeof Banknote; label: string; value: string }) {
+function ContextRow({ icon: Icon, label, value }: { icon: typeof Banknote; label: string; value: string }): ReactElement {
   return <div className="flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-neutral-100 text-neutral-600"><Icon className="h-4 w-4" /></span><div><p className="text-xs font-bold uppercase tracking-[0.1em] text-neutral-400">{label}</p><p className="mt-1 text-sm font-semibold capitalize text-neutral-800">{value}</p></div></div>;
 }
 
-function ComponentList({ title, entries }: { title: string; entries: Array<{ label: string; amount: number }> }) {
+function ComponentList({ title, entries }: { title: string; entries: Array<{ label: string; amount: number }> }): ReactElement {
   return <section><h2 className="text-sm font-bold text-neutral-950">{title}</h2>{entries.length ? <div className="mt-3 space-y-2">{entries.map((entry, index) => <div key={`${entry.label}-${index}`} className="flex items-center justify-between gap-3 rounded-xl bg-neutral-50 px-3 py-2 text-sm"><span className="font-medium text-neutral-700">{entry.label}</span><span className="font-semibold tabular-nums text-neutral-950">{formatCurrency(Number(entry.amount || 0))}</span></div>)}</div> : <p className="mt-3 text-sm text-neutral-500">None applied.</p>}</section>;
 }
