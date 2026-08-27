@@ -23,6 +23,7 @@ export function WorkspaceTabs({ label, tabs }: WorkspaceTabsProps): ReactElement
           <NavLink
             key={id}
             to={href}
+            preventScrollReset
             className={({ isActive }) => [
               'inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
               isActive

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { reportsApi, transmittalApi } from '@/services/api';
@@ -1119,6 +1120,7 @@ function PdfPreviewModal({
 }
 
 export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: ReportsDownloadPanelProps) {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [payrollPreviewState, setPayrollPreviewState] = useState<{
@@ -1180,7 +1182,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
   const handlePreview = async (reportKey: ReportKey, label: string, transmittalOpts?: TransmittalOptions) => {
     if (reportKey === 'transmittalLog' && !transmittalOpts) {
-      window.location.assign(`/tools/transmittals?pay_period_id=${payPeriodId}`);
+      navigate(`/tools/transmittals?pay_period_id=${payPeriodId}`);
       return;
     }
     if (reportKey === 'payrollRegister') {
@@ -1229,7 +1231,7 @@ export function ReportsDownloadPanel({ payPeriodId, payPeriodStatus, payDate }: 
 
   const handleDownload = async (reportKey: ReportKey, transmittalOpts?: TransmittalOptions) => {
     if (reportKey === 'transmittalLog' && !transmittalOpts) {
-      window.location.assign(`/tools/transmittals?pay_period_id=${payPeriodId}`);
+      navigate(`/tools/transmittals?pay_period_id=${payPeriodId}`);
       return;
     }
     if (needsTransmittalEditor(reportKey) && !transmittalOpts) {
