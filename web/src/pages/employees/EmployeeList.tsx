@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { 
   Plus, 
@@ -84,6 +84,10 @@ export function EmployeeList() {
   });
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const employeeRequestIdRef = useRef(0);
+  const departmentRequestIdRef = useRef(0);
+  const companyIdRef = useRef(companyId);
+  companyIdRef.current = companyId;
 
   const search = searchParams.get('search') || '';
   const status = searchParams.get('status') ?? 'active';
@@ -93,7 +97,11 @@ export function EmployeeList() {
   const sortDirection = (searchParams.get('sort_direction') as 'asc' | 'desc' | null) ?? 'asc';
   const page = parseInt(searchParams.get('page') || '1', 10);
 
-  const fetchEmployees = useCallback(async () => {
+  const fetchEmployees = useCallback(async (): Promise<void> => {
+    const requestedCompanyId = companyId;
+    if (requestedCompanyId !== companyIdRef.current) return;
+    const requestId = ++employeeRequestIdRef.current;
+
     setIsLoading(true);
     setError(null);
     try {
@@ -121,22 +129,32 @@ export function EmployeeList() {
             sort_by: sortBy,
             sort_direction: sortDirection,
           });
+      if (requestId !== employeeRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setEmployees(payload.data);
       setMeta(payload.meta);
     } catch (err) {
+      if (requestId !== employeeRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load employees');
     } finally {
-      setIsLoading(false);
+      if (requestId === employeeRequestIdRef.current && requestedCompanyId === companyIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [companyId, departmentId, employmentType, isClient, page, search, sortBy, sortDirection, status]);
 
-  const fetchDepartments = useCallback(async () => {
+  const fetchDepartments = useCallback(async (): Promise<void> => {
+    const requestedCompanyId = companyId;
+    if (requestedCompanyId !== companyIdRef.current) return;
+    const requestId = ++departmentRequestIdRef.current;
+
     try {
       const response = isClient
         ? await clientDepartmentsApi.list({ active: true })
         : await departmentsApi.list({ company_id: companyId, active: true });
+      if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setDepartments(response.data);
     } catch (err) {
+      if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       console.error('Failed to load departments:', err);
     }
   }, [companyId, isClient]);
@@ -182,7 +200,7 @@ export function EmployeeList() {
     return () => window.clearTimeout(timer);
   }, [saveNotice]);
 
-  const updateFilter = (key: string, value: string): void => {
+  const updateFilter = (key: string, value: string, replace = false): void => {
     const newParams = new URLSearchParams(searchParams);
     if (value) {
       newParams.set(key, value);
@@ -192,11 +210,11 @@ export function EmployeeList() {
     if (key !== 'page') {
       newParams.delete('page');
     }
-    setSearchParams(newParams);
+    setSearchParams(newParams, { replace });
   };
 
   const handleSearch = (value: string): void => {
-    updateFilter('search', value);
+    updateFilter('search', value, true);
   };
 
   const toggleSort = (column: 'name' | 'department' | 'rate' | 'status') => {
