@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactElement } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -34,6 +34,8 @@ import {
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
+const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
+
 const tabs: Array<{ id: PayRunWorkspaceTab; label: string; icon: typeof ClipboardList }> = [
   { id: 'overview', label: 'Overview', icon: ClipboardList },
   { id: 'work', label: 'Process payroll', icon: Banknote },
@@ -66,6 +68,9 @@ export function PayRunWorkspace(): ReactElement {
   const [payRun, setPayRun] = useState<(PayPeriod & { payroll_items?: PayrollItem[] }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
+    activeTab === 'work' ? payRunId : null,
+  );
 
   const load = useCallback(async () => {
     if (!Number.isInteger(payRunId) || payRunId < 1) {
@@ -89,6 +94,16 @@ export function PayRunWorkspace(): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (activeTab === 'work') setMountedProcessingPayRunId(payRunId);
+  }, [activeTab, payRunId]);
+
+  const handlePayRunChange = useCallback((updated: PayPeriod) => {
+    setPayRun((current) => current?.id === updated.id
+      ? { ...current, ...updated, payroll_items: updated.payroll_items ?? current.payroll_items }
+      : current);
+  }, []);
 
   const payRunListFallback = payRunsPath(companyId);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunListFallback);
@@ -125,9 +140,9 @@ export function PayRunWorkspace(): ReactElement {
   return (
     <div>
       <Header
-        title={formatDateRange(payRun.start_date, payRun.end_date)}
+        title={`Pay Period: ${formatDateRange(payRun.start_date, payRun.end_date)}`}
         description={`Pay date ${formatDate(payRun.pay_date)} · ${runPurposeLabels[payRun.run_purpose] || payRun.run_purpose}`}
-        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link><Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })}><Banknote className="h-4 w-4" />Open processing</Link></div>}
+        actions={<div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end"><Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>{activeTab !== 'work' && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white transition hover:bg-primary-800" to={payRunPath(companyId, payRunId, 'work', { returnTo })} preventScrollReset><Banknote className="h-4 w-4" />Open processing</Link>}</div>}
       />
 
       <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Pay run identity">
@@ -140,19 +155,21 @@ export function PayRunWorkspace(): ReactElement {
 
       <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.map((tab) => ({ ...tab, href: payRunPath(companyId, payRunId, tab.id, { returnTo }), count: tab.id === 'checks' ? items.filter((item) => item.check_number).length : undefined }))} />
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
         {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} />}
         {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} />}
         {activeTab === 'activity' && <PayRunActivity payRun={payRun} />}
-        {activeTab === 'work' && (
-          <Card>
-            <CardContent className="p-6">
-              <p className="text-sm text-neutral-600">Payroll processing opens in the dedicated processing view.</p>
-              <Link className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={payRunPath(companyId, payRunId, 'work', { returnTo })}>
-                <Banknote className="h-4 w-4" />Open processing
-              </Link>
-            </CardContent>
-          </Card>
+        {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
+          <section hidden={activeTab !== 'work'} aria-label="Process payroll workspace">
+            <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
+              <PayPeriodDetail
+                key={payRunId}
+                embedded
+                initialPayPeriod={payRun}
+                onPayPeriodChange={handlePayRunChange}
+              />
+            </Suspense>
+          </section>
         )}
       </main>
     </div>

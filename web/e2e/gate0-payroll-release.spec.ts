@@ -265,7 +265,28 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await workflowRow.getByRole('button', { name: 'View', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
-    await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
+    const payRunIdentity = page.getByLabel('Pay run identity');
+    await expect(payRunIdentity).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
+    await payRunIdentity.evaluate((element) => element.setAttribute('data-workspace-shell-probe', 'preserved'));
+    await page.evaluate(() => {
+      (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe = 'preserved';
+    });
+
+    const workspaceNavigation = page.getByRole('navigation', { name: 'Pay-run workspace sections' });
+    await workspaceNavigation.getByRole('link', { name: 'Process payroll' }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await expect(page.getByLabel('Payroll processing actions')).toBeVisible();
+    await expect(payRunIdentity).toHaveAttribute('data-workspace-shell-probe', 'preserved');
+    expect(await page.evaluate(() => (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe)).toBe('preserved');
+
+    const processingSearch = page.getByPlaceholder('Search employees...');
+    await processingSearch.fill('Avery');
+    await workspaceNavigation.getByRole('link', { name: 'Overview' }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await expect(payRunIdentity).toHaveAttribute('data-workspace-shell-probe', 'preserved');
+    await workspaceNavigation.getByRole('link', { name: 'Process payroll' }).click();
+    await expect(processingSearch).toHaveValue('Avery');
+    await workspaceNavigation.getByRole('link', { name: 'Overview' }).click();
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
 
