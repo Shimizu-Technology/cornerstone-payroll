@@ -242,6 +242,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('button', { name: 'Back to List', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
+    await page.goto('/pay-periods/not-a-number');
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
+
     await context.close();
   });
 

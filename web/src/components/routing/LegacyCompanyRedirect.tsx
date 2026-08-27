@@ -34,8 +34,9 @@ export function LegacyCompanyRedirect({ destination, clientMode = false }: Legac
   const payRunList = payRunsPath(activeCompanyId);
   const recordFallback = destination === 'pay-run' ? payRunList : employeeList;
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), recordFallback);
-  let target = employeesPath(activeCompanyId, location.search);
+  let target = recordFallback;
 
+  if (destination === 'employees') target = employeesPath(activeCompanyId, location.search);
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
   if (destination === 'employee' && Number.isInteger(recordId)) {
     target = clientMode
