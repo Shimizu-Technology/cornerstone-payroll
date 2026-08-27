@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  correctionRunPath,
   employeeEditPath,
   employeePath,
   employeesPath,
@@ -27,6 +28,17 @@ describe('canonical payroll routes', (): void => {
     expect(payRunPath(12, 91, 'overview', {
       returnTo: '/companies/12/pay-runs?status=draft&year=2026',
     })).toBe('/companies/12/pay-runs/91/overview?return_to=%2Fcompanies%2F12%2Fpay-runs%3Fstatus%3Ddraft%26year%3D2026');
+  });
+
+  it('preserves filtered list context across canonical and legacy correction links', (): void => {
+    const returnTo = '/companies/12/pay-runs?status=committed&year=2026';
+
+    expect(correctionRunPath(12, 91, { returnTo })).toBe(
+      `/companies/12/pay-runs/91/work?return_to=${encodeURIComponent(returnTo)}`,
+    );
+    expect(correctionRunPath(undefined, 91, { returnTo })).toBe(
+      `/pay-periods/91?return_to=${encodeURIComponent(returnTo)}`,
+    );
   });
 
   it('bounds circular record navigation instead of nesting return destinations forever', (): void => {

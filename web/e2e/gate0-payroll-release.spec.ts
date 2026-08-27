@@ -118,6 +118,43 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantContext.close();
   });
 
+  test('hides prior-company dashboard data while a company switch is loading', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+      },
+    });
+    const page = await context.newPage();
+    let markBoundaryRequestStarted: (() => void) | undefined;
+    let releaseBoundaryResponse: (() => void) | undefined;
+    const boundaryRequestStarted = new Promise<void>((resolve): void => { markBoundaryRequestStarted = resolve; });
+    const boundaryResponseReleased = new Promise<void>((resolve): void => { releaseBoundaryResponse = resolve; });
+
+    await page.route('**/api/v1/admin/reports/dashboard', async (route): Promise<void> => {
+      if (route.request().headers()['x-company-id'] !== String(fixture.other_company_id)) {
+        await route.continue();
+        return;
+      }
+
+      markBoundaryRequestStarted?.();
+      const response = await route.fetch();
+      await boundaryResponseReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.goto('/app');
+    await expect(page.getByText('2 total records')).toBeVisible();
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await boundaryRequestStarted;
+    await expect(page.getByText('2 total records')).toHaveCount(0);
+    await expect(page.getByText('1 total records')).toHaveCount(0);
+
+    releaseBoundaryResponse?.();
+    await expect(page.getByText('1 total records')).toBeVisible();
+    await context.close();
+  });
+
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {
     const me = await adminApi.get('auth/me');
     expect(me.ok()).toBeTruthy();
@@ -391,6 +428,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto('/pay-periods/not-a-number');
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
 
+    await page.goto('/pay-periods/123abc');
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs`);
+
     await context.close();
   });
 
@@ -503,6 +543,25 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(listUrl);
 
     await context.close();
+  });
+
+  test('preserves a filtered pay-run return path when opening a correction workspace', async ({ page }): Promise<void> => {
+    const voidResponse = await adminApi.post(
+      `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
+      { data: { reason: 'Verify filtered correction navigation' } },
+    );
+    expect(voidResponse.ok()).toBeTruthy();
+
+    const filteredReturnTo = `/companies/${fixture.company_id}/pay-runs?status=committed&year=2026`;
+    await page.goto(
+      `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(filteredReturnTo)}`,
+    );
+    await page.getByRole('button', { name: 'Create Correction Run', exact: true }).click();
+    await page.getByLabel(/Reason for correction/).fill('Correct payroll while preserving filtered queue context');
+    await page.getByRole('dialog').getByRole('button', { name: 'Create Correction Run', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(
+      `/companies/${fixture.company_id}/pay-runs/\\d+/work\\?return_to=${encodeURIComponent(filteredReturnTo)}`,
+    ));
   });
 
   test('applies time to an editable period and rejects a second import after commit', async () => {

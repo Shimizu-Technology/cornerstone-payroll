@@ -28,7 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
-import { countActivePayrollChecks } from '@/lib/pay-run-filters';
+import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
@@ -275,7 +275,7 @@ export function PayPeriodDetail({
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const companyId = Number(companyIdParam);
-  const payRunId = Number(id);
+  const payRunId = parsePayRunId(id) ?? 0;
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
   const currentPath = currentAppPath(location.pathname, location.search);
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
@@ -424,18 +424,24 @@ export function PayPeriodDetail({
   }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
   useEffect(() => {
-    if (id) {
-      // Reset cross-pay-period observer state so divergence indicators don't
-      // momentarily render against the previous period's checks while the
-      // new panel loads.
-      setNonEmployeeChecks([]);
-      setSupplementals([]);
-      setComparison(null);
-      setComparisonError(null);
-      tipsLoansVisibilityModeRef.current = 'auto';
-      loadPayPeriod(parseInt(id));
+    // Reset cross-pay-period observer state so divergence indicators don't
+    // momentarily render against the previous period's checks while the
+    // new panel loads.
+    setNonEmployeeChecks([]);
+    setSupplementals([]);
+    setComparison(null);
+    setComparisonError(null);
+    tipsLoansVisibilityModeRef.current = 'auto';
+
+    if (payRunId < 1) {
+      setPayPeriod(null);
+      setError('This pay-run processing link is invalid.');
+      setLoading(false);
+      return;
     }
-  }, [id, loadPayPeriod]);
+
+    void loadPayPeriod(payRunId);
+  }, [loadPayPeriod, payRunId]);
 
   useEffect(() => {
     if (payPeriod) onPayPeriodChange?.(payPeriod);
@@ -2938,6 +2944,7 @@ export function PayPeriodDetail({
             <div className="p-4">
               <CorrectionPanel
                 payPeriod={payPeriod}
+                returnTo={returnTo}
                 onPayPeriodChange={(updated) => {
                   setPayPeriod(updated);
                   if (updated.payroll_items) {

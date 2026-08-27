@@ -33,7 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
-import { payRunPath } from '@/lib/routes';
+import { correctionRunPath } from '@/lib/routes';
 import type { PayPeriod, PayPeriodCorrectionEvent } from '@/types';
 
 // ----------------------------------------------------------------
@@ -41,10 +41,6 @@ import type { PayPeriod, PayPeriodCorrectionEvent } from '@/types';
 // ----------------------------------------------------------------
 
 const MIN_REASON_LENGTH = 10;
-
-function correctionRunPath(companyId: number | undefined, payRunId: number): string {
-  return companyId ? payRunPath(companyId, payRunId, 'work') : `/pay-periods/${payRunId}`;
-}
 
 /** Guard against placeholder / low-quality reasons. */
 const PLACEHOLDER_PATTERNS = [
@@ -107,15 +103,21 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 
 interface CorrectionPanelProps {
   payPeriod: PayPeriod;
+  returnTo: string;
   onPayPeriodChange: (updated: PayPeriod) => void;
 }
 
 export function CorrectionPanel({
   payPeriod,
+  returnTo,
   onPayPeriodChange,
 }: CorrectionPanelProps): ReactElement {
   const navigate = useNavigate();
-  const processingPath = (payRunId: number): string => correctionRunPath(payPeriod.company_id, payRunId);
+  const processingPath = (payRunId: number): string => correctionRunPath(
+    payPeriod.company_id,
+    payRunId,
+    { returnTo },
+  );
 
   // ---------- Void modal ----------
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -499,6 +501,7 @@ export function CorrectionPanel({
                     total={historyEvents.length}
                     deletedRunIds={deletedRunIds}
                     companyId={payPeriod.company_id}
+                    returnTo={returnTo}
                   />
                 ));
               })()}
@@ -848,9 +851,10 @@ interface CorrectionEventRowProps {
   total: number;
   deletedRunIds: Set<number>;
   companyId?: number;
+  returnTo: string;
 }
 
-function CorrectionEventRow({ event, index, total, deletedRunIds, companyId }: CorrectionEventRowProps) {
+function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, returnTo }: CorrectionEventRowProps) {
   const navigate = useNavigate();
   const label   = ACTION_LABELS[event.action_type] ?? event.action_type;
   const variant = ACTION_BADGE_VARIANTS[event.action_type] ?? 'default';
@@ -912,7 +916,7 @@ function CorrectionEventRow({ event, index, total, deletedRunIds, companyId }: C
               <span>→ Correction run:</span>
               <button
                 className="underline text-blue-600 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 rounded"
-                onClick={() => navigate(correctionRunPath(companyId, linkedRunId))}
+                onClick={() => navigate(correctionRunPath(companyId, linkedRunId, { returnTo }))}
               >
                 Period #{linkedRunId}
               </button>
