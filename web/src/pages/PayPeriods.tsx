@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -143,12 +143,15 @@ export function PayPeriods() {
     'pay_period' | 'pay_date' | 'processed' | 'employees' | 'gross' | 'net' | 'status';
   const sortDirection = searchParams.get('direction') === 'asc' ? 'asc' : 'desc';
   const yearFilter = searchParams.get('year') || '';
-  const updateViewParam = (key: string, value?: string) => {
+  const updateViewParam = (key: string, value?: string, replace = false): void => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
-    setSearchParams(next);
+    setSearchParams(next, { replace });
   };
+  const loadRequestIdRef = useRef(0);
+  const activeCompanyIdRef = useRef(activeCompanyId);
+  activeCompanyIdRef.current = activeCompanyId;
   
   // Modal state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -182,19 +185,26 @@ export function PayPeriods() {
   });
 
   // Load pay periods
-  const loadPayPeriods = useCallback(async (silent = false) => {
+  const loadPayPeriods = useCallback(async (silent = false): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+
     try {
       if (!silent) setLoading(true);
       setError(null);
       const response = await payPeriodsApi.list({ status: statusFilter, year: parsePayRunYear(yearFilter) });
+      if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
     } catch (err) {
+      if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
-      if (!silent) setLoading(false);
+      if (requestId === loadRequestIdRef.current && requestedCompanyId === activeCompanyIdRef.current && !silent) {
+        setLoading(false);
+      }
     }
-  }, [statusFilter, yearFilter]);
+  }, [activeCompanyId, statusFilter, yearFilter]);
 
   useEffect(() => {
     loadPayPeriods();
@@ -621,7 +631,7 @@ export function PayPeriods() {
             <Input
               placeholder="Search pay periods..."
               value={searchTerm}
-              onChange={(e) => updateViewParam('search', e.target.value)}
+              onChange={(e) => updateViewParam('search', e.target.value, true)}
               className="pl-10"
             />
           </div>

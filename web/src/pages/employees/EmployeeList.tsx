@@ -61,11 +61,13 @@ export function EmployeeList() {
   const { activeCompanyId } = useCompany();
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const returnTo = currentAppPath(location.pathname, location.search);
-  const openEmployee = (employeeId: number) => navigate(
-    isClient
-      ? employeeEditPath(companyId, employeeId, { returnTo })
-      : employeePath(companyId, employeeId, 'overview', { returnTo })
-  );
+  const openEmployee = (employeeId: number): void => {
+    void navigate(
+      isClient
+        ? employeeEditPath(companyId, employeeId, { returnTo })
+        : employeePath(companyId, employeeId, 'overview', { returnTo })
+    );
+  };
   
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<(Department & { employee_count: number })[]>([]);
