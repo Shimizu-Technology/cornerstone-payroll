@@ -1485,6 +1485,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
 
+      expect(report.dig("history", 0, "payroll_item_id")).to eq(employee.payroll_items.first.id)
       expect(report.dig("history", 0, "custom_earnings_total").to_f).to eq(50.00)
       expect(report.dig("history", 0, "custom_deductions_total").to_f).to eq(40.00)
       expect(report.dig("ytd", "custom_earnings_total").to_f).to eq(50.00)

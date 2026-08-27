@@ -24,6 +24,29 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(admin_user)
   end
 
+  describe "GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
+    it "returns the exact payroll item within the active company" do
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payroll_item", "id")).to eq(payroll_item.id)
+      expect(response.parsed_body.dig("payroll_item", "employee_id")).to eq(employee.id)
+    end
+
+    it "does not reveal a payroll item through another company's pay run" do
+      other_company = create(:company, organization: organization)
+      other_employee = create(:employee, company: other_company)
+      other_pay_period = create(:pay_period, company: other_company, status: "calculated")
+      other_item = create(:payroll_item, company: other_company, employee: other_employee, pay_period: other_pay_period)
+
+      get "/api/v1/admin/pay_periods/#{other_pay_period.id}/payroll_items/#{other_item.id}"
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body).to eq("error" => "Pay period not found")
+      expect(response.body).not_to include(other_employee.full_name)
+    end
+  end
+
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items" do
     let(:create_params) do
       {
