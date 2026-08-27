@@ -5,13 +5,16 @@ interface ReturnContext {
   returnTo?: string;
 }
 
+// Leave room for percent-encoding and the destination route under common 2 KB URL limits.
+const MAX_RETURN_PATH_LENGTH = 1024;
+
 function normalizeQuery(query: string): string {
   if (!query || query === '?') return '';
   return query.startsWith('?') ? query : `?${query}`;
 }
 
 function withReturnContext(path: string, context: ReturnContext = {}): string {
-  if (!context.returnTo) return path;
+  if (!context.returnTo || context.returnTo.length > MAX_RETURN_PATH_LENGTH) return path;
 
   const params = new URLSearchParams({ return_to: context.returnTo });
   return `${path}?${params.toString()}`;
@@ -68,7 +71,13 @@ export function payrollItemPath(
 }
 
 export function safeInternalReturnPath(value: string | null, fallback: string): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return fallback;
+  if (
+    !value
+    || value.length > MAX_RETURN_PATH_LENGTH
+    || !value.startsWith('/')
+    || value.startsWith('//')
+    || value.includes('\\')
+  ) return fallback;
 
   try {
     const internalOrigin = 'https://cornerstone-payroll.local';
