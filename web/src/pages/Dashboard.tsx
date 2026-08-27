@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,21 @@ import { Header } from '@/components/layout/Header';
 import { formatCurrency, payPeriodStatusConfig } from '@/lib/utils';
 import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
+import { useCompany } from '@/contexts/CompanyContext';
+import { newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
+
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  loading?: boolean;
+  icon: React.ReactNode;
+}
+
+interface DashboardPayload {
+  companyId: number | null;
+  stats: DashboardResponse['stats'];
+}
 
 function StatCard({
   title,
@@ -15,13 +30,7 @@ function StatCard({
   subtitle,
   loading,
   icon,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  loading?: boolean;
-  icon: React.ReactNode;
-}) {
+}: StatCardProps): ReactElement {
   return (
     <Card className="group overflow-hidden hover:-translate-y-0.5 hover:border-primary-200/80">
       <CardContent className="pt-6">
@@ -40,27 +49,39 @@ function StatCard({
   );
 }
 
-export function Dashboard() {
+export function Dashboard(): ReactElement {
   const navigate = useNavigate();
+  const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardResponse['stats'] | null>(null);
+  const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
+  useEffect((): (() => void) => {
+    let cancelled = false;
+    const requestedCompanyId = activeCompanyId;
 
-  const loadDashboard = async () => {
-    try {
+    const loadDashboard = async (): Promise<void> => {
       setLoading(true);
-      const response = await reportsApi.dashboard();
-      setStats(response.stats);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
+      setError(null);
+      setDashboardPayload(null);
+      try {
+        const response = await reportsApi.dashboard();
+        if (!cancelled) {
+          setDashboardPayload({ companyId: requestedCompanyId, stats: response.stats });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadDashboard();
+    return (): void => { cancelled = true; };
+  }, [activeCompanyId]);
 
   const currentPayPeriod = stats?.current_pay_period;
   const statusConfig = currentPayPeriod ? payPeriodStatusConfig[currentPayPeriod.status as PayPeriodStatus] : null;
@@ -74,13 +95,18 @@ export function Dashboard() {
     : null;
   const payPeriodSteps = ['draft', 'calculated', 'approved', 'committed'];
   const activeStepIndex = currentPayPeriod ? payPeriodSteps.indexOf(currentPayPeriod.status) : -1;
+  const payRunsHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
+  const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
+  const payRunHref = (payRunId: number, tab: 'overview' | 'work' = 'overview'): string => (
+    activeCompanyId ? payRunPath(activeCompanyId, payRunId, tab) : `/pay-periods/${payRunId}`
+  );
 
   return (
     <div>
       <Header
         title="Home"
         description="Your payroll command center"
-        actions={<Button onClick={() => navigate('/pay-periods')}>Manage Pay Periods</Button>}
+        actions={<Button onClick={() => navigate(payRunsHref)}>Manage Pay Periods</Button>}
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
@@ -106,12 +132,12 @@ export function Dashboard() {
                   Start with the current period, then move through checks, reports, and Guam compliance from one operational workspace.
                 </p>
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center [&>button]:w-full sm:[&>button]:w-auto">
-                  <Button onClick={() => navigate(currentPayPeriod ? `/pay-periods/${currentPayPeriod.id}` : '/pay-periods')}>
+                  <Button onClick={() => navigate(currentPayPeriod ? payRunHref(currentPayPeriod.id, 'work') : payRunsHref)}>
                     {currentPayPeriod ? 'Continue pay cycle' : 'Create pay period'}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                   <Button variant="secondary" onClick={() => navigate('/reports')}>Open reports</Button>
-                  <Button variant="ghost" onClick={() => navigate('/employees/new')}>Add employee</Button>
+                  <Button variant="ghost" onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
                 </div>
               </div>
 
@@ -230,9 +256,9 @@ export function Dashboard() {
                     </div>
                   </div>
                   <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
-                    <Button size="sm" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Open period</Button>
+                    <Button size="sm" onClick={() => navigate(payRunHref(currentPayPeriod.id))}>Open period</Button>
                     {currentPayPeriod.status === 'draft' && (
-                      <Button size="sm" variant="secondary" onClick={() => navigate(`/pay-periods/${currentPayPeriod.id}`)}>Process payroll</Button>
+                      <Button size="sm" variant="secondary" onClick={() => navigate(payRunHref(currentPayPeriod.id, 'work'))}>Process payroll</Button>
                     )}
                   </div>
                 </div>
@@ -242,7 +268,7 @@ export function Dashboard() {
                 <CalendarCheck2 className="mb-3 h-7 w-7 text-neutral-400" />
                 <p className="font-display text-lg font-bold text-neutral-900">No active pay period</p>
                 <p className="mt-1 max-w-md text-sm text-neutral-500">Create a pay period to start collecting hours, deductions, checks, and reports.</p>
-                <Button className="mt-5" onClick={() => navigate('/pay-periods')}>
+                <Button className="mt-5" onClick={() => navigate(payRunsHref)}>
                   Create pay period
                 </Button>
               </div>
@@ -261,7 +287,7 @@ export function Dashboard() {
                   <div
                     key={payroll.id}
                     className="-mx-2 flex cursor-pointer flex-col gap-2 rounded-xl border border-transparent px-3 py-3 transition-all hover:border-primary-200 hover:bg-primary-50/60 sm:flex-row sm:items-center sm:justify-between"
-                    onClick={() => navigate(`/pay-periods/${payroll.id}`)}
+                    onClick={() => navigate(payRunHref(payroll.id))}
                   >
                     <div>
                       <p className="font-medium text-neutral-900">{payroll.period_description}</p>
@@ -279,8 +305,8 @@ export function Dashboard() {
 
         <div className="mt-8 grid gap-5 md:grid-cols-3">
           {[
-            { title: 'Add Employee', body: 'Register a worker before the next run.', icon: <UserPlus2 className="h-5 w-5" />, href: '/employees/new', tone: 'primary' },
-            { title: 'Run Payroll', body: 'Open pay periods and continue processing.', icon: <Wallet className="h-5 w-5" />, href: '/pay-periods', tone: 'success' },
+            { title: 'Add Employee', body: 'Register a worker before the next run.', icon: <UserPlus2 className="h-5 w-5" />, href: newEmployeeHref, tone: 'primary' },
+            { title: 'Run Payroll', body: 'Open pay periods and continue processing.', icon: <Wallet className="h-5 w-5" />, href: payRunsHref, tone: 'success' },
             { title: 'Guam Reports', body: 'Export registers, tax summaries, and compliance packets.', icon: <Landmark className="h-5 w-5" />, href: '/reports', tone: 'accent' },
           ].map((action) => (
             <Card key={action.title} className="group cursor-pointer overflow-hidden hover:-translate-y-1 hover:border-primary-200" onClick={() => navigate(action.href)}>

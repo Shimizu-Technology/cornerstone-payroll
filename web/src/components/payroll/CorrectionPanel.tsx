@@ -25,6 +25,7 @@ import {
   useId,
   useRef,
   useState,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router';
@@ -32,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
+import { correctionRunPath } from '@/lib/routes';
 import type { PayPeriod, PayPeriodCorrectionEvent } from '@/types';
 
 // ----------------------------------------------------------------
@@ -101,14 +103,21 @@ const ACTION_DESCRIPTIONS: Record<string, string> = {
 
 interface CorrectionPanelProps {
   payPeriod: PayPeriod;
+  returnTo: string;
   onPayPeriodChange: (updated: PayPeriod) => void;
 }
 
 export function CorrectionPanel({
   payPeriod,
+  returnTo,
   onPayPeriodChange,
-}: CorrectionPanelProps) {
+}: CorrectionPanelProps): ReactElement {
   const navigate = useNavigate();
+  const processingPath = (payRunId: number): string => correctionRunPath(
+    payPeriod.company_id,
+    payRunId,
+    { returnTo },
+  );
 
   // ---------- Void modal ----------
   const [showVoidModal, setShowVoidModal] = useState(false);
@@ -209,7 +218,7 @@ export function CorrectionPanel({
       onPayPeriodChange(response.source_pay_period);
       setShowCorrectionModal(false);
       setCorrectionReason('');
-      navigate(`/pay-periods/${response.correction_run.id}`);
+      navigate(processingPath(response.correction_run.id));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create correction run.';
       setCorrectionError(buildErrorWithRecovery(msg));
@@ -240,7 +249,7 @@ export function CorrectionPanel({
       setDeleteDraftReason('');
       setHistoryEvents(null);
       setHistoryOpen(false);
-      navigate(`/pay-periods/${response.source_pay_period.id}`);
+      navigate(processingPath(response.source_pay_period.id));
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'Failed to delete draft correction run.';
@@ -337,7 +346,7 @@ export function CorrectionPanel({
                   <button
                     className="font-medium underline text-red-800 hover:text-red-900 focus:outline-none focus:ring-2 focus:ring-red-400 rounded"
                     onClick={() =>
-                      navigate(`/pay-periods/${payPeriod.superseded_by_id}`)
+                      navigate(processingPath(payPeriod.superseded_by_id!))
                     }
                   >
                     View correction run →
@@ -367,7 +376,7 @@ export function CorrectionPanel({
                 <button
                   className="underline hover:text-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-400 rounded"
                   onClick={() =>
-                    navigate(`/pay-periods/${payPeriod.source_pay_period_id}`)
+                    navigate(processingPath(payPeriod.source_pay_period_id!))
                   }
                 >
                   source period #{payPeriod.source_pay_period_id}
@@ -491,6 +500,8 @@ export function CorrectionPanel({
                     index={idx + 1}
                     total={historyEvents.length}
                     deletedRunIds={deletedRunIds}
+                    companyId={payPeriod.company_id}
+                    returnTo={returnTo}
                   />
                 ));
               })()}
@@ -839,9 +850,11 @@ interface CorrectionEventRowProps {
   index: number;
   total: number;
   deletedRunIds: Set<number>;
+  companyId?: number;
+  returnTo: string;
 }
 
-function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEventRowProps) {
+function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, returnTo }: CorrectionEventRowProps): ReactElement {
   const navigate = useNavigate();
   const label   = ACTION_LABELS[event.action_type] ?? event.action_type;
   const variant = ACTION_BADGE_VARIANTS[event.action_type] ?? 'default';
@@ -903,7 +916,7 @@ function CorrectionEventRow({ event, index, total, deletedRunIds }: CorrectionEv
               <span>→ Correction run:</span>
               <button
                 className="underline text-blue-600 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-400 rounded"
-                onClick={() => navigate(`/pay-periods/${linkedRunId}`)}
+                onClick={() => navigate(correctionRunPath(companyId, linkedRunId, { returnTo }))}
               >
                 Period #{linkedRunId}
               </button>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card } from '@/components/ui/card';
@@ -10,9 +10,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
+import { currentAppPath, payRunPath } from '@/lib/routes';
 
-export function ClientPayPeriods() {
+export function ClientPayPeriods(): ReactElement {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { companyId: companyIdParam } = useParams<{ companyId: string }>();
+  const companyId = Number(companyIdParam);
+  const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +106,7 @@ export function ClientPayPeriods() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/pay-periods/${period.id}`)}>
+                      <Button variant="ghost" size="sm" onClick={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}>
                         View
                       </Button>
                     </TableCell>

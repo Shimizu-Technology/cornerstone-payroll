@@ -37,6 +37,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
+import { employeesPath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -219,7 +220,7 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const { user, signOut } = useAuth();
-  const { canViewClientManagement } = useCompany();
+  const { activeCompanyId, canViewClientManagement } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const canManageClientConfiguration = isAdmin || user?.role === 'manager';
@@ -231,7 +232,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const [collapseTooltipVisible, setCollapseTooltipVisible] = useState(false);
   const [commandTooltipVisible, setCommandTooltipVisible] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const primaryNavigation = isClient ? portalNavigation : clientNavigation;
+  const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item) => {
+    if (!activeCompanyId) return item;
+    if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
+    if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
+    return item;
+  });
 
   useEffect(() => {
     if (!userMenuOpen) return;

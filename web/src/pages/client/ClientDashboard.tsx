@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -6,41 +6,70 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { clientDocumentsApi, clientReportsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
+import { useCompany } from '@/contexts/CompanyContext';
+import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
-export function ClientDashboard() {
+type ClientDashboardStats = Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'];
+
+interface ClientDashboardPayload {
+  companyId: number | null;
+  stats: ClientDashboardStats;
+  documentCount: number;
+}
+
+export function ClientDashboard(): ReactElement {
   const navigate = useNavigate();
+  const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'] | null>(null);
-  const [documentCount, setDocumentCount] = useState(0);
+  const [dashboardPayload, setDashboardPayload] = useState<ClientDashboardPayload | null>(null);
+  const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
+  const documentCount = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.documentCount : 0;
+  const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
+  const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
+  const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
+  const payRunHref = (payRunId: number): string => activeCompanyId
+    ? payRunPath(activeCompanyId, payRunId, 'overview')
+    : `/pay-periods/${payRunId}`;
 
-  useEffect(() => {
-    void load();
-  }, []);
+  useEffect((): (() => void) => {
+    let cancelled = false;
+    const requestedCompanyId = activeCompanyId;
 
-  const load = async () => {
-    try {
+    const load = async (): Promise<void> => {
       setLoading(true);
       setError(null);
-      const [dashboard, documents] = await Promise.all([
-        clientReportsApi.dashboard(),
-        clientDocumentsApi.list(),
-      ]);
-      setStats(dashboard.stats);
-      setDocumentCount(documents.data.length);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load portal dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
+      setDashboardPayload(null);
+      try {
+        const [dashboard, documents] = await Promise.all([
+          clientReportsApi.dashboard(),
+          clientDocumentsApi.list(),
+        ]);
+        if (cancelled) return;
+        setDashboardPayload({
+          companyId: requestedCompanyId,
+          stats: dashboard.stats,
+          documentCount: documents.data.length,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load portal dashboard');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    return (): void => { cancelled = true; };
+  }, [activeCompanyId]);
 
   return (
     <div>
       <Header
         title="Client Portal"
         description="Manage employees, review payroll, and securely share documents."
-        actions={<Button onClick={() => navigate('/employees/new')}>Add Employee</Button>}
+        actions={<Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
       />
 
       <div className="p-6 lg:p-8 space-y-8">
@@ -106,13 +135,13 @@ export function ClientDashboard() {
             title="Employees"
             description="Add and update employee records"
             icon={<Users className="h-5 w-5" />}
-            onClick={() => navigate('/employees')}
+            onClick={() => navigate(employeeListHref)}
           />
           <QuickLink
             title="Pay Periods"
             description="Review payroll runs and employee pay"
             icon={<CalendarDays className="h-5 w-5" />}
-            onClick={() => navigate('/pay-periods')}
+            onClick={() => navigate(payRunListHref)}
           />
           <QuickLink
             title="Documents"
@@ -132,7 +161,7 @@ export function ClientDashboard() {
                 <button
                   key={payroll.id}
                   type="button"
-                  onClick={() => navigate(`/pay-periods/${payroll.id}`)}
+                  onClick={() => navigate(payRunHref(payroll.id))}
                   className="flex w-full items-center justify-between rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60"
                 >
                   <div>
@@ -152,17 +181,19 @@ export function ClientDashboard() {
   );
 }
 
+interface PortalStatProps {
+  label: string;
+  value: string;
+  sublabel?: string;
+  icon: React.ReactNode;
+}
+
 function PortalStat({
   label,
   value,
   sublabel,
   icon,
-}: {
-  label: string;
-  value: string;
-  sublabel?: string;
-  icon: React.ReactNode;
-}) {
+}: PortalStatProps): ReactElement {
   return (
     <Card>
       <CardContent className="pt-6">
@@ -177,17 +208,19 @@ function PortalStat({
   );
 }
 
+interface QuickLinkProps {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
 function QuickLink({
   title,
   description,
   icon,
   onClick,
-}: {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-}) {
+}: QuickLinkProps): ReactElement {
   return (
     <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={onClick}>
       <CardContent className="pt-6">

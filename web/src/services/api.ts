@@ -1947,6 +1947,7 @@ export const reportsApi = {
     api.get<{ report: {
       employee: { id: number; name: string; employment_type: string; pay_rate: number };
       history: {
+        payroll_item_id: number;
         pay_period_id: number;
         pay_date: string;
         period_description: string;
