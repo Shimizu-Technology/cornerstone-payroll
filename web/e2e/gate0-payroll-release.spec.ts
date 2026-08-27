@@ -195,6 +195,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Pay Periods' })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
 
+    await page.goto(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+    await expect(page.getByText('Switched clients. Showing pay periods for the selected client.')).toBeVisible();
+
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+
     const queueUrl = page.url();
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
     await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
