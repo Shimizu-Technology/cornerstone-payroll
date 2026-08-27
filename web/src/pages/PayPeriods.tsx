@@ -186,8 +186,9 @@ export function PayPeriods() {
 
   // Load pay periods
   const loadPayPeriods = useCallback(async (silent = false): Promise<void> => {
-    const requestId = ++loadRequestIdRef.current;
     const requestedCompanyId = activeCompanyId;
+    if (requestedCompanyId !== activeCompanyIdRef.current) return;
+    const requestId = ++loadRequestIdRef.current;
 
     try {
       if (!silent) setLoading(true);
