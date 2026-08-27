@@ -205,8 +205,8 @@ export function PayPeriods() {
     if (!state?.companySwitchNotice) return;
 
     setSwitchNotice(state.companySwitchNotice);
-    navigate('.', { replace: true, state: null });
-  }, [location.state, navigate]);
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
+  }, [location.pathname, location.search, location.state, navigate]);
 
   useEffect(() => {
     if (!switchNotice) return;
