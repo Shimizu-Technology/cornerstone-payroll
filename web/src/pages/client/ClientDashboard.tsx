@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -9,7 +9,7 @@ import { formatCurrency } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
-export function ClientDashboard() {
+export function ClientDashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
@@ -19,30 +19,36 @@ export function ClientDashboard() {
   const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
   const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
   const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
-  const payRunHref = (payRunId: number) => activeCompanyId
+  const payRunHref = (payRunId: number): string => activeCompanyId
     ? payRunPath(activeCompanyId, payRunId, 'overview')
     : `/pay-periods/${payRunId}`;
 
-  useEffect(() => {
-    void load();
-  }, []);
+  useEffect((): (() => void) => {
+    let cancelled = false;
 
-  const load = async () => {
-    try {
+    const load = async (): Promise<void> => {
       setLoading(true);
       setError(null);
-      const [dashboard, documents] = await Promise.all([
-        clientReportsApi.dashboard(),
-        clientDocumentsApi.list(),
-      ]);
-      setStats(dashboard.stats);
-      setDocumentCount(documents.data.length);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load portal dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const [dashboard, documents] = await Promise.all([
+          clientReportsApi.dashboard(),
+          clientDocumentsApi.list(),
+        ]);
+        if (cancelled) return;
+        setStats(dashboard.stats);
+        setDocumentCount(documents.data.length);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load portal dashboard');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    return (): void => { cancelled = true; };
+  }, [activeCompanyId]);
 
   return (
     <div>
@@ -161,17 +167,19 @@ export function ClientDashboard() {
   );
 }
 
+interface PortalStatProps {
+  label: string;
+  value: string;
+  sublabel?: string;
+  icon: React.ReactNode;
+}
+
 function PortalStat({
   label,
   value,
   sublabel,
   icon,
-}: {
-  label: string;
-  value: string;
-  sublabel?: string;
-  icon: React.ReactNode;
-}) {
+}: PortalStatProps): ReactElement {
   return (
     <Card>
       <CardContent className="pt-6">
@@ -186,17 +194,19 @@ function PortalStat({
   );
 }
 
+interface QuickLinkProps {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+}
+
 function QuickLink({
   title,
   description,
   icon,
   onClick,
-}: {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-}) {
+}: QuickLinkProps): ReactElement {
   return (
     <Card className="cursor-pointer hover:-translate-y-0.5 hover:border-primary-300" onClick={onClick}>
       <CardContent className="pt-6">

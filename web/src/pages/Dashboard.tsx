@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import { ArrowRight, Banknote, CalendarCheck2, CheckCircle2, ClipboardCheck, FileBarChart2, Landmark, UserPlus2, Users, Wallet } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,19 +11,21 @@ import type { PayPeriodStatus } from '@/types';
 import { useCompany } from '@/contexts/CompanyContext';
 import { newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
+interface StatCardProps {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  loading?: boolean;
+  icon: React.ReactNode;
+}
+
 function StatCard({
   title,
   value,
   subtitle,
   loading,
   icon,
-}: {
-  title: string;
-  value: string | number;
-  subtitle?: string;
-  loading?: boolean;
-  icon: React.ReactNode;
-}) {
+}: StatCardProps): ReactElement {
   return (
     <Card className="group overflow-hidden hover:-translate-y-0.5 hover:border-primary-200/80">
       <CardContent className="pt-6">
@@ -42,28 +44,34 @@ function StatCard({
   );
 }
 
-export function Dashboard() {
+export function Dashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardResponse['stats'] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDashboard();
-  }, []);
+  useEffect((): (() => void) => {
+    let cancelled = false;
 
-  const loadDashboard = async () => {
-    try {
+    const loadDashboard = async (): Promise<void> => {
       setLoading(true);
-      const response = await reportsApi.dashboard();
-      setStats(response.stats);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
-    } finally {
-      setLoading(false);
-    }
-  };
+      setError(null);
+      try {
+        const response = await reportsApi.dashboard();
+        if (!cancelled) setStats(response.stats);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadDashboard();
+    return (): void => { cancelled = true; };
+  }, [activeCompanyId]);
 
   const currentPayPeriod = stats?.current_pay_period;
   const statusConfig = currentPayPeriod ? payPeriodStatusConfig[currentPayPeriod.status as PayPeriodStatus] : null;
@@ -79,7 +87,7 @@ export function Dashboard() {
   const activeStepIndex = currentPayPeriod ? payPeriodSteps.indexOf(currentPayPeriod.status) : -1;
   const payRunsHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
   const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
-  const payRunHref = (payRunId: number, tab: 'overview' | 'work' = 'overview') => (
+  const payRunHref = (payRunId: number, tab: 'overview' | 'work' = 'overview'): string => (
     activeCompanyId ? payRunPath(activeCompanyId, payRunId, tab) : `/pay-periods/${payRunId}`
   );
 
