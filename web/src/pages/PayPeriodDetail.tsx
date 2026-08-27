@@ -281,6 +281,7 @@ export function PayPeriodDetail({
   const currentPath = currentAppPath(location.pathname, location.search);
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const initialPayPeriodRef = useRef(initialPayPeriod);
+  const loadRequestIdRef = useRef(0);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollFields, setPayrollFields] = useState<PayrollFieldDefinition[]>([]);
@@ -383,7 +384,10 @@ export function PayPeriodDetail({
     return allEmployees;
   }, []);
 
-  const loadPayPeriod = useCallback(async (periodId: number, silent = false) => {
+  const loadPayPeriod = useCallback(async (periodId: number, silent = false): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+
     try {
       if (!silent) setLoading(true);
       setError(null);
@@ -401,7 +405,9 @@ export function PayPeriodDetail({
           : payPeriodsApi.get(periodId),
         loadAllActiveEmployees(),
         payPeriodsApi.liabilities(periodId).catch((err) => {
-          setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+          if (isCurrentRequest()) {
+            setLiabilityError(err instanceof Error ? err.message : 'Failed to load payroll liabilities');
+          }
           return null;
         }),
         payPeriodsApi.payrollFieldInputs(periodId).catch((err) => {
@@ -410,6 +416,7 @@ export function PayPeriodDetail({
         }),
       ]);
 
+      if (!isCurrentRequest()) return;
       setPayPeriod(ppResponse.pay_period);
       setPayrollItems(ppResponse.pay_period.payroll_items || []);
       setEmployees(empResponse);
@@ -418,17 +425,23 @@ export function PayPeriodDetail({
       setHoursMap(buildHoursMap(ppResponse.pay_period.payroll_items || [], empResponse));
       syncDerivedPayrollState(ppResponse.pay_period.payroll_items || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      if (isCurrentRequest()) {
+        setError(err instanceof Error ? err.message : 'Failed to load pay period');
+      }
     } finally {
-      setLiabilityLoading(false);
-      if (!silent) setLoading(false);
+      if (isCurrentRequest()) {
+        setLiabilityLoading(false);
+        if (!silent) setLoading(false);
+      }
     }
   }, [loadAllActiveEmployees, syncDerivedPayrollState, syncPayrollFieldInputs]);
 
-  useEffect(() => {
+  useEffect((): (() => void) => {
     // Reset cross-pay-period observer state so divergence indicators don't
     // momentarily render against the previous period's checks while the
     // new panel loads.
+    setPayPeriod(null);
+    setPayrollItems([]);
     setNonEmployeeChecks([]);
     setSupplementals([]);
     setComparison(null);
@@ -439,10 +452,16 @@ export function PayPeriodDetail({
       setPayPeriod(null);
       setError('This pay-run processing link is invalid.');
       setLoading(false);
-      return;
+      return (): void => {
+        loadRequestIdRef.current += 1;
+      };
     }
 
     void loadPayPeriod(payRunId);
+
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [loadPayPeriod, payRunId]);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactElement } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   Activity,
   ArrowLeft,
@@ -69,12 +69,17 @@ export function PayRunWorkspace(): ReactElement {
   const [payRun, setPayRun] = useState<(PayPeriod & { payroll_items?: PayrollItem[] }) | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestIdRef = useRef(0);
   const [mountedProcessingPayRunId, setMountedProcessingPayRunId] = useState<number | null>(
     activeTab === 'work' ? payRunId : null,
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
+    const requestId = ++loadRequestIdRef.current;
+    const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
+
     if (!Number.isInteger(payRunId) || payRunId < 1) {
+      setPayRun(null);
       setError('This pay-run workspace link is invalid.');
       setLoading(false);
       return;
@@ -82,18 +87,25 @@ export function PayRunWorkspace(): ReactElement {
 
     setLoading(true);
     setError(null);
+    setPayRun(null);
     try {
       const response = await payPeriodsApi.get(payRunId);
-      setPayRun(response.pay_period);
+      if (isCurrentRequest()) setPayRun(response.pay_period);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load this pay-run workspace.');
+      if (isCurrentRequest()) {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load this pay-run workspace.');
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
   }, [payRunId]);
 
-  useEffect(() => {
+  useEffect((): (() => void) => {
     void load();
+
+    return (): void => {
+      loadRequestIdRef.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {
