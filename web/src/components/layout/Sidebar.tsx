@@ -242,8 +242,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       ))
   ).map((item) => {
     if (!activeCompanyId) return item;
-    if (item.name === 'Employees') return { ...item, href: employeesPath(activeCompanyId) };
-    if (item.name === 'Pay Periods') return { ...item, href: payRunsPath(activeCompanyId) };
+    if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
+    if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
     return item;
   });
 

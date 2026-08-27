@@ -13,10 +13,12 @@ import {
 describe('canonical payroll routes', () => {
   it('builds company-scoped list and record routes', () => {
     expect(employeesPath(12, '?status=active')).toBe('/companies/12/employees?status=active');
+    expect(employeesPath(12, 'status=active')).toBe('/companies/12/employees?status=active');
     expect(newEmployeePath(12)).toBe('/companies/12/employees/new');
     expect(employeePath(12, 44, 'pay-history')).toBe('/companies/12/employees/44/pay-history');
     expect(employeeEditPath(12, 44)).toBe('/companies/12/employees/44/edit');
     expect(payRunsPath(12, '?status=draft')).toBe('/companies/12/pay-runs?status=draft');
+    expect(payRunsPath(12, 'status=draft')).toBe('/companies/12/pay-runs?status=draft');
     expect(payRunPath(12, 91, 'checks')).toBe('/companies/12/pay-runs/91/checks');
     expect(payrollItemPath(12, 91, 305)).toBe('/companies/12/pay-runs/91/payroll-items/305');
   });

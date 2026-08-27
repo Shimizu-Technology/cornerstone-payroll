@@ -1,21 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import { AlertTriangle, Building2 } from 'lucide-react';
 import { Link, Outlet, useParams } from 'react-router';
+import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath, payRunsPath } from '@/lib/routes';
 
-function ScopeLoader() {
-  return (
-    <div className="flex min-h-[360px] items-center justify-center px-6 py-12" role="status">
-      <div className="inline-flex items-center gap-3 rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-600 shadow-sm">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary-600" />
-        Opening client workspace
-      </div>
-    </div>
-  );
+function ScopeLoader(): ReactElement {
+  return <WorkspaceLoader label="Opening client workspace" minHeightClassName="min-h-[360px]" />;
 }
 
-export function CompanyScopedRoute() {
+export function CompanyScopedRoute(): ReactElement {
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
   const { companies, activeCompanyId, loading, switchCompany } = useCompany();
   const companyId = Number(companyIdParam);
