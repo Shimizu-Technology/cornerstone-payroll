@@ -31,7 +31,7 @@ import {
   safeInternalReturnPath,
   type PayRunWorkspaceTab,
 } from '@/lib/routes';
-import { countActivePayrollChecks } from '@/lib/pay-run-filters';
+import { countActivePayrollChecks, parsePayRunId } from '@/lib/pay-run-filters';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
@@ -62,7 +62,7 @@ export function PayRunWorkspace(): ReactElement {
     tab?: string;
   }>();
   const companyId = Number(companyIdParam);
-  const payRunId = Number(idParam);
+  const payRunId = parsePayRunId(idParam) ?? 0;
   const activeTab = tabIds.has(tabParam as PayRunWorkspaceTab) ? tabParam as PayRunWorkspaceTab : 'overview';
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -157,9 +157,9 @@ export function PayRunWorkspace(): ReactElement {
       <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.map((tab) => ({ ...tab, href: payRunPath(companyId, payRunId, tab.id, { returnTo }), count: tab.id === 'checks' ? countActivePayrollChecks(items) : undefined }))} />
 
       <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
-        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} />}
-        {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} />}
-        {activeTab === 'activity' && <PayRunActivity payRun={payRun} />}
+        {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} />}
+        {activeTab === 'checks' && <PayRunChecks companyId={companyId} payRun={payRun} items={items} returnTo={currentPath} workspaceReturnTo={returnTo} />}
+        {activeTab === 'activity' && <PayRunActivity companyId={companyId} payRun={payRun} workspaceReturnTo={returnTo} />}
         {(mountedProcessingPayRunId === payRunId || activeTab === 'work') && (
           <section hidden={activeTab !== 'work'} aria-label="Process payroll workspace">
             <Suspense fallback={<WorkspaceLoader label="Loading payroll processing tools" minHeightClassName="min-h-[24rem]" />}>
@@ -182,9 +182,10 @@ interface PayRunOverviewProps {
   payRun: PayPeriod;
   items: PayrollItem[];
   returnTo: string;
+  workspaceReturnTo: string;
 }
 
-function PayRunOverview({ companyId, payRun, items, returnTo }: PayRunOverviewProps): ReactElement {
+function PayRunOverview({ companyId, payRun, items, returnTo, workspaceReturnTo }: PayRunOverviewProps): ReactElement {
   const totalGross = items.reduce((sum, item) => sum + Number(item.gross_pay || 0), 0);
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
   const sourceCount = new Set(items.map((item) => item.import_source || item.timekeeping_source || 'manual')).size;
@@ -201,7 +202,7 @@ function PayRunOverview({ companyId, payRun, items, returnTo }: PayRunOverviewPr
         <Card>
           <CardHeader className="flex-row items-center justify-between gap-3"><div><CardTitle>Payroll records</CardTitle><p className="mt-1 text-sm text-neutral-500">Open an employee or the exact calculated result.</p></div><Link className="text-sm font-bold text-primary-700 hover:text-primary-900" to={payRunPath(companyId, payRun.id, 'work', { returnTo })}>Process payroll</Link></CardHeader>
           <CardContent className="p-0">
-            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div><Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-3 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></div></div>)}</div> : <p className="px-6 py-10 text-center text-sm text-neutral-500">No payroll items have been created for this run.</p>}
+            {items.length ? <div className="divide-y divide-neutral-100">{items.slice(0, 10).map((item) => <div key={item.id} className="grid gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-6"><div><Link className="font-semibold text-neutral-950 hover:text-primary-800" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link><p className="mt-1 text-xs capitalize text-neutral-500">{item.employment_type} · {item.import_source || item.timekeeping_source || 'manual input'}</p></div><div className="flex items-center gap-4"><div className="text-right"><p className="font-semibold text-neutral-950">{formatCurrency(Number(item.net_pay || 0))}</p><p className="text-xs text-neutral-500">{formatCurrency(Number(item.gross_pay || 0))} gross</p></div><Link aria-label={`Open payroll item for ${item.employee_name}`} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-neutral-300 px-3 text-sm font-bold text-primary-700 hover:border-primary-300 hover:bg-primary-50" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></div></div>)}</div> : <WorkspaceEmptyState icon={UsersRound} message="No payroll records have been added to this run yet." actionLabel="Process payroll" actionHref={payRunPath(companyId, payRun.id, 'work', { returnTo: workspaceReturnTo })} />}
           </CardContent>
         </Card>
         <div className="space-y-6">
@@ -218,24 +219,27 @@ interface PayRunChecksProps {
   payRun: PayPeriod;
   items: PayrollItem[];
   returnTo: string;
+  workspaceReturnTo: string;
 }
 
-function PayRunChecks({ companyId, payRun, items, returnTo }: PayRunChecksProps): ReactElement {
+function PayRunChecks({ companyId, payRun, items, returnTo, workspaceReturnTo }: PayRunChecksProps): ReactElement {
   return (
     <Card>
       <CardHeader><CardTitle>Checks and payment records</CardTitle><p className="mt-1 text-sm text-neutral-500">Check identity stays attached to the exact payroll item.</p></CardHeader>
       <CardContent className="p-0">
-        {items.length ? <Table><TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Check</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader><TableBody striped>{items.map((item) => <TableRow key={item.id}><TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell><TableCell>{item.check_number || 'Not assigned'}</TableCell><TableCell><Badge variant={item.voided ? 'danger' : item.check_printed_at ? 'success' : 'default'}>{item.voided ? 'Voided' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending'}</Badge></TableCell><TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell><TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell><TableCell className="text-right"><Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell></TableRow>)}</TableBody></Table> : <p className="px-6 py-10 text-center text-sm text-neutral-500">No payroll checks or payment records are available.</p>}
+        {items.length ? <Table><TableHeader><TableRow><TableHead>Employee</TableHead><TableHead>Check</TableHead><TableHead>Status</TableHead><TableHead>Gross</TableHead><TableHead>Net</TableHead><TableHead className="text-right">Record</TableHead></TableRow></TableHeader><TableBody striped>{items.map((item) => <TableRow key={item.id}><TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={employeePath(companyId, item.employee_id, 'overview', { returnTo })}>{item.employee_name}</Link></TableCell><TableCell>{item.check_number || 'Not assigned'}</TableCell><TableCell><Badge variant={item.voided ? 'danger' : item.check_printed_at ? 'success' : 'default'}>{item.voided ? 'Voided' : item.check_printed_at ? 'Printed' : item.check_number ? 'Assigned' : 'Pending'}</Badge></TableCell><TableCell>{formatCurrency(Number(item.gross_pay || 0))}</TableCell><TableCell>{formatCurrency(Number(item.net_pay || 0))}</TableCell><TableCell className="text-right"><Link className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRun.id, item.id, { returnTo })}>Open <ArrowRight className="h-4 w-4" /></Link></TableCell></TableRow>)}</TableBody></Table> : <WorkspaceEmptyState icon={Printer} message="No checks or payment records are available for this run." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}
       </CardContent>
     </Card>
   );
 }
 
 interface PayRunActivityProps {
+  companyId: number;
   payRun: PayPeriod;
+  workspaceReturnTo: string;
 }
 
-function PayRunActivity({ payRun }: PayRunActivityProps): ReactElement {
+function PayRunActivity({ companyId, payRun, workspaceReturnTo }: PayRunActivityProps): ReactElement {
   const lifecycle = payRun.lifecycle || {};
   const events = [
     { label: 'Created', event: lifecycle.created, icon: ClipboardList },
@@ -244,7 +248,28 @@ function PayRunActivity({ payRun }: PayRunActivityProps): ReactElement {
     { label: 'Approval rolled back', event: lifecycle.unapproved, icon: RefreshCw },
     { label: 'Committed', event: lifecycle.committed, icon: CalendarCheck2 },
   ].filter((item) => item.event?.timestamp);
-  return <Card><CardHeader><CardTitle>Pay-run activity</CardTitle><p className="mt-1 text-sm text-neutral-500">Authoritative lifecycle evidence for this run.</p></CardHeader><CardContent>{events.length ? <ol className="space-y-5">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="grid gap-3 border-l-2 border-primary-100 pl-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><div><p className="font-semibold text-neutral-950">{label}</p><p className="mt-1 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p></div><p className="text-sm font-medium text-neutral-600 sm:text-right">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <p className="text-sm text-neutral-500">No lifecycle events have been recorded.</p>}</CardContent></Card>;
+  return <Card><CardHeader><CardTitle>Pay-run activity</CardTitle><p className="mt-1 text-sm text-neutral-500">Authoritative lifecycle evidence for this run.</p></CardHeader><CardContent>{events.length ? <ol className="space-y-5">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="grid gap-3 border-l-2 border-primary-100 pl-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><div><p className="font-semibold text-neutral-950">{label}</p><p className="mt-1 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p></div><p className="text-sm font-medium text-neutral-600 sm:text-right">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <WorkspaceEmptyState icon={Activity} message="No lifecycle activity has been recorded for this run yet." actionLabel="Back to overview" actionHref={payRunPath(companyId, payRun.id, 'overview', { returnTo: workspaceReturnTo })} />}</CardContent></Card>;
+}
+
+interface WorkspaceEmptyStateProps {
+  icon: typeof ClipboardList;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+}
+
+function WorkspaceEmptyState({ icon: Icon, message, actionLabel, actionHref }: WorkspaceEmptyStateProps): ReactElement {
+  return (
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+        <Icon className="h-5 w-5" />
+      </span>
+      <p className="mt-4 max-w-md text-sm leading-6 text-neutral-500">{message}</p>
+      <Link className="mt-4 inline-flex min-h-11 items-center rounded-full border border-neutral-300 bg-white px-4 text-sm font-bold text-primary-700 transition hover:border-primary-300 hover:bg-primary-50" to={actionHref} preventScrollReset>
+        {actionLabel}
+      </Link>
+    </div>
+  );
 }
 
 interface MetricProps {
