@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { AlertCircle, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -43,6 +43,18 @@ const RUN_PURPOSE_LABELS: Record<PayRunPurpose, string> = {
   adjustment: 'Adjustment',
 };
 
+interface PayPeriodMobileCardProps {
+  period: PayPeriod;
+  actionInFlight: string | null;
+  onView: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onRun: () => void;
+  onApprove: () => void;
+  onCommit: () => void;
+  onEnterHours: () => void;
+}
+
 function PayPeriodMobileCard({
   period,
   actionInFlight,
@@ -53,17 +65,7 @@ function PayPeriodMobileCard({
   onApprove,
   onCommit,
   onEnterHours,
-}: {
-  period: PayPeriod;
-  actionInFlight: string | null;
-  onView: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRun: () => void;
-  onApprove: () => void;
-  onCommit: () => void;
-  onEnterHours: () => void;
-}) {
+}: PayPeriodMobileCardProps): ReactElement {
   const statusConfig = payPeriodStatusConfig[period.status];
 
   return (
