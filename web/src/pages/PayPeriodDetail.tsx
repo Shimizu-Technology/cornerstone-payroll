@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactElement } from 'react';
 import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router';
 import { Activity, ArrowRight, Banknote, ClipboardList, Printer } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -28,6 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
+import { countActivePayrollChecks } from '@/lib/pay-run-filters';
 import { payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
@@ -268,7 +269,7 @@ export function PayPeriodDetail({
   embedded = false,
   initialPayPeriod,
   onPayPeriodChange,
-}: PayPeriodDetailProps = {}) {
+}: PayPeriodDetailProps = {}): ReactElement {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -1264,7 +1265,7 @@ export function PayPeriodDetail({
           tabs={[
             { id: 'overview', label: 'Overview', icon: ClipboardList, href: payRunPath(companyId, payRunId, 'overview', { returnTo }) },
             { id: 'work', label: 'Process payroll', icon: Banknote, href: payRunPath(companyId, payRunId, 'work', { returnTo }) },
-            { id: 'checks', label: 'Checks', icon: Printer, href: payRunPath(companyId, payRunId, 'checks', { returnTo }), count: payrollItems.filter((item) => item.check_number && !item.voided).length },
+            { id: 'checks', label: 'Checks', icon: Printer, href: payRunPath(companyId, payRunId, 'checks', { returnTo }), count: countActivePayrollChecks(payrollItems) },
             { id: 'activity', label: 'Activity', icon: Activity, href: payRunPath(companyId, payRunId, 'activity', { returnTo }) },
           ]}
         />

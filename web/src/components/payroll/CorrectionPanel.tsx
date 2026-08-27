@@ -25,6 +25,7 @@ import {
   useId,
   useRef,
   useState,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router';
@@ -112,9 +113,9 @@ interface CorrectionPanelProps {
 export function CorrectionPanel({
   payPeriod,
   onPayPeriodChange,
-}: CorrectionPanelProps) {
+}: CorrectionPanelProps): ReactElement {
   const navigate = useNavigate();
-  const processingPath = (payRunId: number) => correctionRunPath(payPeriod.company_id, payRunId);
+  const processingPath = (payRunId: number): string => correctionRunPath(payPeriod.company_id, payRunId);
 
   // ---------- Void modal ----------
   const [showVoidModal, setShowVoidModal] = useState(false);

@@ -267,8 +267,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
     const payRunIdentity = page.getByLabel('Pay run identity');
     await expect(payRunIdentity).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
-    await payRunIdentity.evaluate((element) => element.setAttribute('data-workspace-shell-probe', 'preserved'));
-    await page.evaluate(() => {
+    await payRunIdentity.evaluate((element): void => element.setAttribute('data-workspace-shell-probe', 'preserved'));
+    await page.evaluate((): void => {
       (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe = 'preserved';
     });
 
@@ -277,7 +277,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
     await expect(page.getByLabel('Payroll processing actions')).toBeVisible();
     await expect(payRunIdentity).toHaveAttribute('data-workspace-shell-probe', 'preserved');
-    expect(await page.evaluate(() => (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe)).toBe('preserved');
+    expect(await page.evaluate((): string | undefined => (window as Window & { __payRunWorkspaceProbe?: string }).__payRunWorkspaceProbe)).toBe('preserved');
 
     const processingSearch = page.getByPlaceholder('Search employees...');
     await processingSearch.fill('Avery');
@@ -404,7 +404,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
     const page = await context.newPage();
     const expectNoPageOverflow = async (): Promise<void> => {
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+      expect(await page.evaluate((): boolean => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     };
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Aug%202%20-%2015%2C%202026`);
@@ -481,6 +481,28 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.reload();
     await expect(page.getByText('Committed', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Reports & Documents')).toBeVisible();
+  });
+
+  test('preserves the client pay-run list context when returning from detail', async ({ browser }): Promise<void> => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.client_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    const listUrl = `/companies/${fixture.company_id}/pay-runs?source=client-dashboard`;
+
+    await page.goto(listUrl);
+    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await page.getByRole('button', { name: 'View', exact: true }).first().click();
+    await expect(page).toHaveURL(new RegExp(
+      `/companies/${fixture.company_id}/pay-runs/\\d+/overview\\?return_to=${encodeURIComponent(listUrl)}`,
+    ));
+    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await expect(page).toHaveURL(listUrl);
+
+    await context.close();
   });
 
   test('applies time to an editable period and rejects a second import after commit', async () => {
