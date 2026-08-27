@@ -236,6 +236,48 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
 
     const queueUrl = page.url();
+    let delayNextPrimaryEmployeeResponse = false;
+    let markDelayedEmployeeRequestStarted: (() => void) | undefined;
+    let releaseDelayedEmployeeResponse: (() => void) | undefined;
+    let markDelayedEmployeeRequestFinished: (() => void) | undefined;
+    const delayedEmployeeRequestStarted = new Promise<void>((resolve) => { markDelayedEmployeeRequestStarted = resolve; });
+    const delayedEmployeeResponseReleased = new Promise<void>((resolve) => { releaseDelayedEmployeeResponse = resolve; });
+    const delayedEmployeeRequestFinished = new Promise<void>((resolve) => { markDelayedEmployeeRequestFinished = resolve; });
+
+    await page.route('**/api/v1/admin/employees**', async (route) => {
+      if (delayNextPrimaryEmployeeResponse && route.request().headers()['x-company-id'] === String(fixture.company_id)) {
+        delayNextPrimaryEmployeeResponse = false;
+        markDelayedEmployeeRequestStarted?.();
+        const response = await route.fetch();
+        await delayedEmployeeResponseReleased;
+        await route.fulfill({ response });
+        markDelayedEmployeeRequestFinished?.();
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await page.goto(`/companies/${fixture.company_id}/employees?status=active`);
+    await expect(page.getByRole('table').getByText('Avery Example')).toBeVisible();
+    delayNextPrimaryEmployeeResponse = true;
+    await page.getByPlaceholder('Search employees...').fill('Avery');
+    await delayedEmployeeRequestStarted;
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/employees?status=active&search=Avery`);
+    await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
+
+    releaseDelayedEmployeeResponse?.();
+    await delayedEmployeeRequestFinished;
+    await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
+    await expect(page.getByText('Avery Example')).toHaveCount(0);
+
+    await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
+    await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees?status=active&search=Avery`);
+    await expect(page.getByRole('table').getByText('Avery Example')).toBeVisible();
+
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
     await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
     await expect(page.getByRole('link', { name: 'Process payroll' }).first()).toBeVisible();
