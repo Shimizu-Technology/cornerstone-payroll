@@ -5,22 +5,27 @@ interface ReturnContext {
   returnTo?: string;
 }
 
-function withReturnContext(path: string, context: ReturnContext = {}) {
+function normalizeQuery(query: string): string {
+  if (!query || query === '?') return '';
+  return query.startsWith('?') ? query : `?${query}`;
+}
+
+function withReturnContext(path: string, context: ReturnContext = {}): string {
   if (!context.returnTo) return path;
 
   const params = new URLSearchParams({ return_to: context.returnTo });
   return `${path}?${params.toString()}`;
 }
 
-export function companyPath(companyId: number) {
+export function companyPath(companyId: number): string {
   return `/companies/${companyId}`;
 }
 
-export function employeesPath(companyId: number, query = '') {
-  return `${companyPath(companyId)}/employees${query}`;
+export function employeesPath(companyId: number, query = ''): string {
+  return `${companyPath(companyId)}/employees${normalizeQuery(query)}`;
 }
 
-export function newEmployeePath(companyId: number, context: ReturnContext = {}) {
+export function newEmployeePath(companyId: number, context: ReturnContext = {}): string {
   return withReturnContext(`${employeesPath(companyId)}/new`, context);
 }
 
@@ -29,16 +34,16 @@ export function employeePath(
   employeeId: number,
   tab: EmployeeWorkspaceTab = 'overview',
   context: ReturnContext = {},
-) {
+): string {
   return withReturnContext(`${employeesPath(companyId)}/${employeeId}/${tab}`, context);
 }
 
-export function employeeEditPath(companyId: number, employeeId: number, context: ReturnContext = {}) {
+export function employeeEditPath(companyId: number, employeeId: number, context: ReturnContext = {}): string {
   return withReturnContext(`${employeesPath(companyId)}/${employeeId}/edit`, context);
 }
 
-export function payRunsPath(companyId: number, query = '') {
-  return `${companyPath(companyId)}/pay-runs${query}`;
+export function payRunsPath(companyId: number, query = ''): string {
+  return `${companyPath(companyId)}/pay-runs${normalizeQuery(query)}`;
 }
 
 export function payRunPath(
@@ -46,7 +51,7 @@ export function payRunPath(
   payRunId: number,
   tab: PayRunWorkspaceTab = 'overview',
   context: ReturnContext = {},
-) {
+): string {
   return withReturnContext(`${payRunsPath(companyId)}/${payRunId}/${tab}`, context);
 }
 
@@ -55,14 +60,14 @@ export function payrollItemPath(
   payRunId: number,
   payrollItemId: number,
   context: ReturnContext = {},
-) {
+): string {
   return withReturnContext(
     `${payRunsPath(companyId)}/${payRunId}/payroll-items/${payrollItemId}`,
     context,
   );
 }
 
-export function safeInternalReturnPath(value: string | null, fallback: string) {
+export function safeInternalReturnPath(value: string | null, fallback: string): string {
   if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return fallback;
 
   try {
@@ -75,6 +80,6 @@ export function safeInternalReturnPath(value: string | null, fallback: string) {
   }
 }
 
-export function currentAppPath(pathname: string, search = '') {
+export function currentAppPath(pathname: string, search = ''): string {
   return `${pathname}${search}`;
 }

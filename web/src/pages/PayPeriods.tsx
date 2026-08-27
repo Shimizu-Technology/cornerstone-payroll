@@ -28,6 +28,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { comparePayPeriodsByPeriod, formatCurrency, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
+import { parsePayRunYear } from '@/lib/pay-run-filters';
 import { currentAppPath, payRunPath } from '@/lib/routes';
 import { companiesApi, payPeriodsApi, payScheduleSettingsApi } from '@/services/api';
 import type { PayPeriod, PayRunPurpose } from '@/types';
@@ -185,7 +186,7 @@ export function PayPeriods() {
     try {
       if (!silent) setLoading(true);
       setError(null);
-      const response = await payPeriodsApi.list({ status: statusFilter, year: yearFilter ? Number(yearFilter) : undefined });
+      const response = await payPeriodsApi.list({ status: statusFilter, year: parsePayRunYear(yearFilter) });
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
     } catch (err) {

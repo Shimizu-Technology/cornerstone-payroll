@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router';
 
@@ -9,7 +10,12 @@ export interface WorkspaceTab {
   count?: number;
 }
 
-export function WorkspaceTabs({ label, tabs }: { label: string; tabs: WorkspaceTab[] }) {
+interface WorkspaceTabsProps {
+  label: string;
+  tabs: WorkspaceTab[];
+}
+
+export function WorkspaceTabs({ label, tabs }: WorkspaceTabsProps): ReactElement {
   return (
     <nav aria-label={label} className="overflow-x-auto border-b border-neutral-200 bg-white px-4 sm:px-6 lg:px-8">
       <div className="flex min-w-max gap-1">

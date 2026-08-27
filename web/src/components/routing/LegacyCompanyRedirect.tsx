@@ -1,4 +1,6 @@
+import type { ReactElement } from 'react';
 import { Navigate, useLocation, useParams } from 'react-router';
+import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { useCompany } from '@/contexts/CompanyContext';
 import {
   employeeEditPath,
@@ -7,25 +9,31 @@ import {
   newEmployeePath,
   payRunPath,
   payRunsPath,
+  safeInternalReturnPath,
 } from '@/lib/routes';
 
 type LegacyDestination = 'employees' | 'new-employee' | 'employee' | 'pay-runs' | 'pay-run';
 
-export function LegacyCompanyRedirect({ destination, clientMode = false }: { destination: LegacyDestination; clientMode?: boolean }) {
+interface LegacyCompanyRedirectProps {
+  destination: LegacyDestination;
+  clientMode?: boolean;
+}
+
+export function LegacyCompanyRedirect({ destination, clientMode = false }: LegacyCompanyRedirectProps): ReactElement {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const { activeCompanyId, loading } = useCompany();
 
   if (loading || !activeCompanyId) {
-    return (
-      <div className="flex min-h-[320px] items-center justify-center" role="status">
-        <span className="text-sm font-semibold text-neutral-500">Resolving client workspace…</span>
-      </div>
-    );
+    return <WorkspaceLoader label="Resolving client workspace" minHeightClassName="min-h-[320px]" />;
   }
 
   const recordId = Number(id);
-  const returnTo = `${location.pathname}${location.search}`;
+  const searchParams = new URLSearchParams(location.search);
+  const employeeList = employeesPath(activeCompanyId);
+  const payRunList = payRunsPath(activeCompanyId);
+  const recordFallback = destination === 'pay-run' ? payRunList : employeeList;
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), recordFallback);
   let target = employeesPath(activeCompanyId, location.search);
 
   if (destination === 'new-employee') target = newEmployeePath(activeCompanyId, { returnTo });
