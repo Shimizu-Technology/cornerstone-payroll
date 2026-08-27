@@ -195,7 +195,12 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     }, nextPath);
     await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toBeVisible();
 
+    const delayedResponseDelivered = page.waitForResponse(
+      (response): boolean => response.url().includes(`/api/v1/admin/pay_periods/${delayedPayRunId}`),
+    );
     releaseDelayedResponse?.();
+    await delayedResponseDelivered;
+    await waitForUiCommit(page);
     await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toBeVisible();
     await expect(page.getByText(`Pay run #${delayedPayRunId}`, { exact: true })).toHaveCount(0);
 
