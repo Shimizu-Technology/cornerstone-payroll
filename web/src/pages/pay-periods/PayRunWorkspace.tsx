@@ -31,6 +31,7 @@ import {
   safeInternalReturnPath,
   type PayRunWorkspaceTab,
 } from '@/lib/routes';
+import { countActivePayrollChecks } from '@/lib/pay-run-filters';
 import { payPeriodsApi } from '@/services/api';
 import type { PayPeriod, PayrollItem } from '@/types';
 
@@ -153,7 +154,7 @@ export function PayRunWorkspace(): ReactElement {
         </div>
       </section>
 
-      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.map((tab) => ({ ...tab, href: payRunPath(companyId, payRunId, tab.id, { returnTo }), count: tab.id === 'checks' ? items.filter((item) => item.check_number).length : undefined }))} />
+      <WorkspaceTabs label="Pay-run workspace sections" tabs={tabs.map((tab) => ({ ...tab, href: payRunPath(companyId, payRunId, tab.id, { returnTo }), count: tab.id === 'checks' ? countActivePayrollChecks(items) : undefined }))} />
 
       <main className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
         {activeTab === 'overview' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} />}
@@ -176,7 +177,14 @@ export function PayRunWorkspace(): ReactElement {
   );
 }
 
-function PayRunOverview({ companyId, payRun, items, returnTo }: { companyId: number; payRun: PayPeriod; items: PayrollItem[]; returnTo: string }): ReactElement {
+interface PayRunOverviewProps {
+  companyId: number;
+  payRun: PayPeriod;
+  items: PayrollItem[];
+  returnTo: string;
+}
+
+function PayRunOverview({ companyId, payRun, items, returnTo }: PayRunOverviewProps): ReactElement {
   const totalGross = items.reduce((sum, item) => sum + Number(item.gross_pay || 0), 0);
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
   const sourceCount = new Set(items.map((item) => item.import_source || item.timekeeping_source || 'manual')).size;
@@ -205,7 +213,14 @@ function PayRunOverview({ companyId, payRun, items, returnTo }: { companyId: num
   );
 }
 
-function PayRunChecks({ companyId, payRun, items, returnTo }: { companyId: number; payRun: PayPeriod; items: PayrollItem[]; returnTo: string }): ReactElement {
+interface PayRunChecksProps {
+  companyId: number;
+  payRun: PayPeriod;
+  items: PayrollItem[];
+  returnTo: string;
+}
+
+function PayRunChecks({ companyId, payRun, items, returnTo }: PayRunChecksProps): ReactElement {
   return (
     <Card>
       <CardHeader><CardTitle>Checks and payment records</CardTitle><p className="mt-1 text-sm text-neutral-500">Check identity stays attached to the exact payroll item.</p></CardHeader>
@@ -216,7 +231,11 @@ function PayRunChecks({ companyId, payRun, items, returnTo }: { companyId: numbe
   );
 }
 
-function PayRunActivity({ payRun }: { payRun: PayPeriod }): ReactElement {
+interface PayRunActivityProps {
+  payRun: PayPeriod;
+}
+
+function PayRunActivity({ payRun }: PayRunActivityProps): ReactElement {
   const lifecycle = payRun.lifecycle || {};
   const events = [
     { label: 'Created', event: lifecycle.created, icon: ClipboardList },
@@ -228,10 +247,22 @@ function PayRunActivity({ payRun }: { payRun: PayPeriod }): ReactElement {
   return <Card><CardHeader><CardTitle>Pay-run activity</CardTitle><p className="mt-1 text-sm text-neutral-500">Authoritative lifecycle evidence for this run.</p></CardHeader><CardContent>{events.length ? <ol className="space-y-5">{events.map(({ label, event, icon: Icon }) => <li key={`${label}-${event?.timestamp}`} className="grid gap-3 border-l-2 border-primary-100 pl-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary-50 text-primary-700"><Icon className="h-4 w-4" /></span><div><p className="font-semibold text-neutral-950">{label}</p><p className="mt-1 text-sm text-neutral-500">{event?.actor_name ? `by ${event.actor_name}` : 'Actor not recorded'}</p></div><p className="text-sm font-medium text-neutral-600 sm:text-right">{formatGuamDateTime(event?.timestamp)}</p></li>)}</ol> : <p className="text-sm text-neutral-500">No lifecycle events have been recorded.</p>}</CardContent></Card>;
 }
 
-function Metric({ icon: Icon, label, value, detail }: { icon: typeof Banknote; label: string; value: string; detail: string }): ReactElement {
+interface MetricProps {
+  icon: typeof Banknote;
+  label: string;
+  value: string;
+  detail: string;
+}
+
+function Metric({ icon: Icon, label, value, detail }: MetricProps): ReactElement {
   return <Card><CardContent className="p-5"><span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-50 text-primary-700"><Icon className="h-5 w-5" /></span><p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-2 font-display text-2xl font-extrabold tracking-tight text-neutral-950">{value}</p><p className="mt-1 text-sm text-neutral-500">{detail}</p></CardContent></Card>;
 }
 
-function ContextRow({ label, value }: { label: string; value: string }): ReactElement {
+interface ContextRowProps {
+  label: string;
+  value: string;
+}
+
+function ContextRow({ label, value }: ContextRowProps): ReactElement {
   return <div><p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-400">{label}</p><p className="mt-1 text-sm font-semibold capitalize text-neutral-800">{value}</p></div>;
 }

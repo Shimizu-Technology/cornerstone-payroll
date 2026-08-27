@@ -4,3 +4,12 @@ export function parsePayRunYear(value: string | null): number | undefined {
   const year = Number(value);
   return year >= 1900 && year <= 9999 ? year : undefined;
 }
+
+interface PayrollCheckStatus {
+  check_number?: string | null;
+  voided?: boolean;
+}
+
+export function countActivePayrollChecks(items: PayrollCheckStatus[]): number {
+  return items.filter((item) => Boolean(item.check_number) && !item.voided).length;
+}

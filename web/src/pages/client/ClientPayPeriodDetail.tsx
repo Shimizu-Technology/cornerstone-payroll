@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,12 +9,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDateRange } from '@/lib/utils';
 import type { PayrollItem } from '@/types';
-import { payRunsPath } from '@/lib/routes';
+import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 
-export function ClientPayPeriodDetail() {
+export function ClientPayPeriodDetail(): ReactElement {
   const navigate = useNavigate();
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
+  const [searchParams] = useSearchParams();
   const companyId = Number(companyIdParam);
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [payPeriod, setPayPeriod] = useState<Awaited<ReturnType<typeof clientPayPeriodsApi.get>>['pay_period'] | null>(null);
@@ -60,7 +62,7 @@ export function ClientPayPeriodDetail() {
       <Header
         title={payPeriod ? `Pay Period: ${formatDateRange(payPeriod.start_date, payPeriod.end_date)}` : 'Pay Period'}
         description={payPeriod ? `Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString()}` : 'Review employee payroll for this period.'}
-        actions={<Button variant="outline" onClick={() => navigate(payRunsPath(companyId))}>Back to List</Button>}
+        actions={<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button>}
       />
 
       <div className="p-6 lg:p-8 space-y-6">
@@ -122,7 +124,12 @@ export function ClientPayPeriodDetail() {
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+interface SummaryCardProps {
+  label: string;
+  value: string;
+}
+
+function SummaryCard({ label, value }: SummaryCardProps): ReactElement {
   return (
     <Card>
       <CardContent className="pt-6">
@@ -133,7 +140,11 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PayrollItemRow({ item }: { item: PayrollItem }) {
+interface PayrollItemRowProps {
+  item: PayrollItem;
+}
+
+function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
   return (
     <TableRow>
       <TableCell stickyLeft className="bg-inherit">
