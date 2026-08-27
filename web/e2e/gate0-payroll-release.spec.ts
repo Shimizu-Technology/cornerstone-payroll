@@ -180,6 +180,70 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(body).not.toMatch(/shared[_ -]?secret/i);
   });
 
+  test('keeps company, queue, and relationship context across canonical payroll records', async ({ browser }) => {
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+
+    await page.goto(`/pay-periods?status=draft&sort=pay_date&direction=asc`);
+    await expect(page).toHaveURL(new RegExp(`/companies/${fixture.company_id}/pay-runs\\?`));
+    await expect(page).toHaveURL(/status=draft/);
+    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Pay Periods' })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
+
+    const queueUrl = page.url();
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
+    await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
+    await expect(page.getByRole('link', { name: 'Process payroll' }).first()).toBeVisible();
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
+    await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Employee workspace' })).toBeVisible();
+    await expect(page.getByText('Source pay run')).toBeVisible();
+
+    await page.getByRole('link', { name: 'Employee workspace' }).click();
+    await expect(page).toHaveURL(new RegExp(`/companies/${fixture.company_id}/employees/${fixture.employee_id}/pay-history`));
+    await expect(page.getByRole('heading', { name: 'Avery Example' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Employees' })).toHaveAttribute('href', `/companies/${fixture.company_id}/employees`);
+
+    await context.close();
+  });
+
+  test('keeps connected payroll records usable on a mobile viewport', async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    const expectNoPageOverflow = async () => {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+    };
+
+    await page.goto(`/pay-periods?status=draft`);
+    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'View' }).first()).toBeVisible();
+    await expectNoPageOverflow();
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview`);
+    await expect(page.getByLabel('Pay run identity')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open payroll item for Avery Example' })).toBeVisible();
+    await expectNoPageOverflow();
+
+    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
+    await expect(page.getByRole('link', { name: 'Employee workspace' })).toBeVisible();
+    await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toBeVisible();
+    await expectNoPageOverflow();
+
+    await context.close();
+  });
+
   test('calculates, reviews, rolls back approval, commits, and rejects a retry or edit after commit', async ({ page }) => {
     await page.goto(`/pay-periods/${fixture.workflow_pay_period_id}`);
     await expect(page.getByRole('heading', { name: /Pay Period:/i })).toBeVisible();

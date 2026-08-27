@@ -30,6 +30,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
+import { employeesPath, newEmployeePath, payRunsPath } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 
 type CommandPaletteMode = 'all' | 'companies';
@@ -80,6 +81,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
   const location = useLocation();
   const { isAdmin, isSuperAdmin, isManager, isClient } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
+  const activeCompanyId = activeCompany?.id;
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -108,7 +110,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       keywords: ['workers', 'staff', 'employee list'],
       icon: <Users className="h-4 w-4" />,
       kind: 'navigation',
-      href: '/employees',
+      href: activeCompanyId ? employeesPath(activeCompanyId) : '/employees',
     });
 
     add({
@@ -130,7 +132,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       keywords: ['payroll', 'run payroll', 'periods'],
       icon: <CalendarDays className="h-4 w-4" />,
       kind: 'navigation',
-      href: '/pay-periods',
+      href: activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods',
     });
 
     if (!isClient) {
@@ -354,7 +356,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         keywords: ['new employee', 'hire', 'contractor'],
         icon: <Users className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/employees/new',
+        href: activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new',
       });
 
       add({
@@ -399,7 +401,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
           description: `${company.active_employees} active employees · ${company.pay_frequency}`,
           group: 'Switch client',
           keywords: ['client', 'company', 'switch', company.name],
-          icon: company.id === activeCompany?.id ? <Check className="h-4 w-4" /> : <Building2 className="h-4 w-4" />,
+          icon: company.id === activeCompanyId ? <Check className="h-4 w-4" /> : <Building2 className="h-4 w-4" />,
           kind: 'company',
           companyId: company.id,
         });
@@ -407,7 +409,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompanyId, canSwitchCompany, companies, isAdmin, isClient, isManager, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,
@@ -456,9 +458,9 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     onOpenChange(false);
 
     if (command.kind === 'company' && command.companyId) {
-      if (command.companyId === activeCompany?.id) return;
+      if (command.companyId === activeCompanyId) return;
 
-      const redirect = getCompanySwitchRedirect(location.pathname);
+      const redirect = getCompanySwitchRedirect(location.pathname, command.companyId);
       analytics.companySwitch(command.companyId);
       switchCompany(command.companyId);
 

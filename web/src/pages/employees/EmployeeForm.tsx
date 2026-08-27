@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeS
 import { EmployeeWorkProfilePanel } from '@/components/employees/EmployeeWorkProfilePanel';
 import { employeesApi, departmentsApi, employeeWageRatesApi, clientEmployeesApi, clientDepartmentsApi, employeePayrollFieldsApi, payrollFieldsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import type { Department, Employee, EmployeeFormData, FilingStatus, EmploymentType, PayFrequency, ContractorType, ContractorPayType, EmployeeWageRate, PayrollAdjustmentTreatment, EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldCategory, PayrollFieldReportingGroup, PayrollFieldAmountType } from '@/types';
 
 const initialFormData: EmployeeFormData = {
@@ -198,11 +200,14 @@ const normalizeEmployeeMonetaryFields = (form: EmployeeFormData): EmployeeFormDa
 export function EmployeeForm() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const isEditing = Boolean(id);
   const { user, isClient, isSuperAdmin, isManager } = useAuth();
+  const { activeCompanyId } = useCompany();
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
-  const companyId = user?.company_id ?? DEV_COMPANY_ID;
+  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
 
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
@@ -808,7 +813,12 @@ export function EmployeeForm() {
         }
       }
 
-      navigate(isClient && portalChangeRequestId ? '/change-requests' : '/employees', {
+      const saveDestination = isClient && portalChangeRequestId
+        ? '/change-requests'
+        : isEditing
+          ? returnTo
+          : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
+      navigate(saveDestination, {
         state: portalNotice ? { portalNotice, selectedRequestId: portalChangeRequestId } : null,
       });
     } catch (err) {
@@ -851,7 +861,7 @@ export function EmployeeForm() {
         title={isEditing ? `Edit ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : 'Add Employee / Contractor'}
         description={isEditing ? `Update ${form.employment_type === 'contractor' ? 'contractor' : 'employee'} information` : 'Add a new employee or 1099 contractor'}
         actions={
-          <Button variant="outline" onClick={() => navigate('/employees')}>
+          <Button variant="outline" onClick={() => navigate(returnTo)}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
@@ -1172,7 +1182,7 @@ export function EmployeeForm() {
                         </div>
                         <div className="space-y-2">
                           {loadedEmployee.classification_history.previous_employee && (
-                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.previous_employee?.id}`)}>
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(employeePath(companyId, loadedEmployee.classification_history?.previous_employee?.id || 0, 'activity', { returnTo }))}>
                               <span className="font-semibold text-primary-700">Prior {loadedEmployee.classification_history.previous_employee.tax_classification.toUpperCase()} record</span>
                               <span className="ml-2 text-neutral-500">{loadedEmployee.classification_history.previous_employee.hire_date || 'Start unknown'} – {loadedEmployee.classification_history.previous_employee.termination_date || 'End unknown'}</span>
                             </button>
@@ -1182,7 +1192,7 @@ export function EmployeeForm() {
                             <span className="ml-2">{loadedEmployee.hire_date || 'Start unknown'} – {loadedEmployee.termination_date || 'Present'}</span>
                           </div>
                           {loadedEmployee.classification_history.next_employee && (
-                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(`/employees/${loadedEmployee.classification_history?.next_employee?.id}`)}>
+                            <button type="button" className="block w-full rounded-lg px-2 py-1.5 text-left text-xs hover:bg-primary-50" onClick={() => navigate(employeePath(companyId, loadedEmployee.classification_history?.next_employee?.id || 0, 'activity', { returnTo }))}>
                               <span className="font-semibold text-primary-700">Successor {loadedEmployee.classification_history.next_employee.tax_classification.toUpperCase()} record</span>
                               <span className="ml-2 text-neutral-500">Starts {loadedEmployee.classification_history.next_employee.hire_date || 'unknown'}</span>
                             </button>
@@ -2031,7 +2041,7 @@ export function EmployeeForm() {
             Required fields are marked <span className="font-semibold text-danger-600">*</span>
           </p>
           <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 sm:flex sm:justify-end">
-            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate('/employees')} disabled={isSaving}>
+            <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate(returnTo)} disabled={isSaving}>
               Cancel
             </Button>
             <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving}>
@@ -2079,7 +2089,7 @@ export function EmployeeForm() {
           onOpenChange={setClassificationTransitionOpen}
           onTransitioned={(newEmployee) => {
             setLoadedEmployee(newEmployee);
-            navigate(`/employees/${newEmployee.id}`, { replace: true });
+            navigate(employeePath(companyId, newEmployee.id, 'activity', { returnTo }), { replace: true });
           }}
         />
       )}

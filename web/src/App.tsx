@@ -5,13 +5,18 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider } from '@/contexts/CompanyContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
+import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
+import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 
 const Dashboard = lazy(() => import('@/pages/Dashboard').then((module) => ({ default: module.Dashboard })));
 const EmployeeList = lazy(() => import('@/pages/employees/EmployeeList').then((module) => ({ default: module.EmployeeList })));
 const EmployeeForm = lazy(() => import('@/pages/employees/EmployeeForm').then((module) => ({ default: module.EmployeeForm })));
+const EmployeeWorkspace = lazy(() => import('@/pages/employees/EmployeeWorkspace').then((module) => ({ default: module.EmployeeWorkspace })));
 const Departments = lazy(() => import('@/pages/Departments').then((module) => ({ default: module.Departments })));
 const PayPeriods = lazy(() => import('@/pages/PayPeriods').then((module) => ({ default: module.PayPeriods })));
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
+const PayRunWorkspace = lazy(() => import('@/pages/pay-periods/PayRunWorkspace').then((module) => ({ default: module.PayRunWorkspace })));
+const PayrollItemDetail = lazy(() => import('@/pages/payroll-items/PayrollItemDetail').then((module) => ({ default: module.PayrollItemDetail })));
 const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
 const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard').then((module) => ({ default: module.ClientDashboard })));
@@ -276,12 +281,22 @@ function AppRoutes() {
         }
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
-        <Route path="employees" element={<EmployeeList />} />
-        <Route path="employees/new" element={<EmployeeForm />} />
-        <Route path="employees/:id" element={<EmployeeForm />} />
+        <Route path="employees" element={<LegacyCompanyRedirect destination="employees" />} />
+        <Route path="employees/new" element={<LegacyCompanyRedirect destination="new-employee" />} />
+        <Route path="employees/:id" element={<LegacyCompanyRedirect destination="employee" clientMode={isClient} />} />
         <Route path="departments" element={<Departments />} />
-        <Route path="pay-periods" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
-        <Route path="pay-periods/:id" element={isClient ? <ClientPayPeriodDetail /> : <PayPeriodDetail />} />
+        <Route path="pay-periods" element={<LegacyCompanyRedirect destination="pay-runs" />} />
+        <Route path="pay-periods/:id" element={<LegacyCompanyRedirect destination="pay-run" clientMode={isClient} />} />
+        <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+          <Route path="employees" element={<EmployeeList />} />
+          <Route path="employees/new" element={<EmployeeForm />} />
+          <Route path="employees/:id/edit" element={<EmployeeForm />} />
+          <Route path="employees/:id/:tab?" element={isClient ? <EmployeeForm /> : <EmployeeWorkspace />} />
+          <Route path="pay-runs" element={isClient ? <ClientPayPeriods /> : <PayPeriods />} />
+          <Route path="pay-runs/:id/payroll-items/:payrollItemId" element={<StaffOnlyRoute><PayrollItemDetail /></StaffOnlyRoute>} />
+          <Route path="pay-runs/:id/work" element={isClient ? <ClientPayPeriodDetail /> : <PayPeriodDetail />} />
+          <Route path="pay-runs/:id/:tab?" element={isClient ? <ClientPayPeriodDetail /> : <PayRunWorkspace />} />
+        </Route>
         <Route path="checks-payments" element={<StaffOnlyRoute><ChecksPayments /></StaffOnlyRoute>} />
         <Route path="pay-periods/:id/form-500" element={<StaffOnlyRoute><Form500Page /></StaffOnlyRoute>} />
         <Route path="payroll/run" element={<Navigate to="/pay-periods" replace />} />

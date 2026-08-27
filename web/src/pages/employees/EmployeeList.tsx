@@ -35,6 +35,8 @@ import {
 } from '@/lib/utils';
 import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
+import { currentAppPath, employeeEditPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
 import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
 
@@ -56,7 +58,14 @@ export function EmployeeList() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, isClient } = useAuth();
-  const companyId = user?.company_id ?? DEV_COMPANY_ID;
+  const { activeCompanyId } = useCompany();
+  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const returnTo = currentAppPath(location.pathname, location.search);
+  const openEmployee = (employeeId: number) => navigate(
+    isClient
+      ? employeeEditPath(companyId, employeeId, { returnTo })
+      : employeePath(companyId, employeeId, 'overview', { returnTo })
+  );
   
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<(Department & { employee_count: number })[]>([]);
@@ -233,7 +242,7 @@ export function EmployeeList() {
                 Bulk Import
               </Button>
             )}
-            <Button onClick={() => navigate('/employees/new')}>
+            <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
               <Plus className="w-4 h-4 mr-2" />
               Add Employee
             </Button>
@@ -348,7 +357,7 @@ export function EmployeeList() {
             </p>
             {!hasActiveFilters && (
               <div className="mt-6">
-                <Button onClick={() => navigate('/employees/new')}>
+                <Button onClick={() => navigate(newEmployeePath(companyId, { returnTo }))}>
                   <Plus className="w-4 h-4 mr-2" />
                   Add Employee
                 </Button>
@@ -382,7 +391,7 @@ export function EmployeeList() {
                               key={employee.id}
                               employee={employee}
                               departments={departments}
-                              onEdit={() => navigate(`/employees/${employee.id}`)}
+                              onEdit={() => openEmployee(employee.id)}
                             />
                           ))}
                         </div>
@@ -433,7 +442,7 @@ export function EmployeeList() {
                                 employee={employee}
                                 departments={departments}
                                 rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
-                                onEdit={() => navigate(`/employees/${employee.id}`)}
+                                onEdit={() => openEmployee(employee.id)}
                               />
                             ))}
                             </TableBody>

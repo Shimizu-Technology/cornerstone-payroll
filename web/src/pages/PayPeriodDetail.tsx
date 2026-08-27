@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useParams, useNavigate } from 'react-router';
+import { Link, useParams, useNavigate, useLocation, useSearchParams } from 'react-router';
+import { Activity, ArrowRight, Banknote, ClipboardList, Printer } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +43,8 @@ import { PayrollLiabilityPanel } from '@/components/payroll/PayrollLiabilityPane
 import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
 import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
+import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
+import { currentAppPath, employeePath, payrollItemPath, payRunPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import type { PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, TaxSyncStatus, NonEmployeeCheck, SupplementalPayPeriodSummary, PayrollAdjustmentTreatment, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, PayRunPurpose } from '@/types';
 
 interface HoursEntry {
@@ -255,8 +258,14 @@ const taxSyncStatusConfig: Record<TaxSyncStatus, { label: string; variant: 'defa
 };
 
 export function PayPeriodDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const companyId = Number(companyIdParam);
+  const payRunId = Number(id);
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), payRunsPath(companyId));
+  const currentPath = currentAppPath(location.pathname, location.search);
   const [payPeriod, setPayPeriod] = useState<PayPeriod | null>(null);
   const [payrollItems, setPayrollItems] = useState<PayrollItem[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -1148,7 +1157,7 @@ export function PayPeriodDetail() {
         description={`Pay Date: ${new Date(payPeriod.pay_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`}
         actions={
           <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-            <Button variant="outline" onClick={() => navigate('/pay-periods')}>
+            <Button variant="outline" onClick={() => navigate(returnTo)}>
               Back to List
             </Button>
             {isCommitted && !isVoided && (
@@ -1200,6 +1209,16 @@ export function PayPeriodDetail() {
             )}
           </div>
         }
+      />
+
+      <WorkspaceTabs
+        label="Pay-run workspace sections"
+        tabs={[
+          { id: 'overview', label: 'Overview', icon: ClipboardList, href: payRunPath(companyId, payRunId, 'overview', { returnTo }) },
+          { id: 'work', label: 'Process payroll', icon: Banknote, href: payRunPath(companyId, payRunId, 'work', { returnTo }) },
+          { id: 'checks', label: 'Checks', icon: Printer, href: payRunPath(companyId, payRunId, 'checks', { returnTo }), count: payrollItems.filter((item) => item.check_number && !item.voided).length },
+          { id: 'activity', label: 'Activity', icon: Activity, href: payRunPath(companyId, payRunId, 'activity', { returnTo }) },
+        ]}
       />
 
       <div className="p-4 space-y-6 sm:p-6 lg:p-8">
@@ -1851,7 +1870,7 @@ export function PayPeriodDetail() {
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                           <div>
                             <div className="flex items-center gap-1.5">
-                              <p className="font-medium text-gray-900">{emp.first_name} {emp.last_name}</p>
+                              <Link className="font-medium text-gray-900 hover:text-primary-700 hover:underline" to={employeePath(companyId, emp.id, 'overview', { returnTo: currentPath })}>{emp.first_name} {emp.last_name}</Link>
                               {additionalEmployeeIds.has(emp.id) && (
                                 <span className="text-[10px] font-medium text-blue-700 bg-blue-100 rounded-full px-1.5 py-0.5">New</span>
                               )}
@@ -2251,7 +2270,7 @@ export function PayPeriodDetail() {
                           <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
                             <div className="flex items-center gap-2">
                               <div>
-                                <p className="font-medium text-gray-900">{item.employee_name}</p>
+                                <Link className="font-medium text-gray-900 hover:text-primary-700 hover:underline" to={employeePath(companyId, item.employee_id, 'overview', { returnTo: currentPath })}>{item.employee_name}</Link>
                                 {(item.department_name || empRecord?.department?.name) && (
                                   <p className="mt-0.5 text-xs text-gray-500">
                                     {item.department_name || empRecord?.department?.name}
@@ -2299,6 +2318,7 @@ export function PayPeriodDetail() {
                                     </span>
                                   )}
                                 </div>
+                                <Link className="mt-1 inline-flex min-h-9 items-center gap-1 text-xs font-bold text-primary-700 hover:text-primary-900" to={payrollItemPath(companyId, payRunId, item.id, { returnTo: currentPath })}>Open payroll item <ArrowRight className="h-3.5 w-3.5" /></Link>
                               </div>
                             </div>
                           </TableCell>
