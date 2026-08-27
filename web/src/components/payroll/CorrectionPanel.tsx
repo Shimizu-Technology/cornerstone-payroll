@@ -854,7 +854,7 @@ interface CorrectionEventRowProps {
   returnTo: string;
 }
 
-function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, returnTo }: CorrectionEventRowProps) {
+function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, returnTo }: CorrectionEventRowProps): ReactElement {
   const navigate = useNavigate();
   const label   = ACTION_LABELS[event.action_type] ?? event.action_type;
   const variant = ACTION_BADGE_VARIANTS[event.action_type] ?? 'default';

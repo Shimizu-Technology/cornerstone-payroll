@@ -155,6 +155,60 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
+  test('keeps only the current pay run actionable when route loads overlap or fail', async ({ page }): Promise<void> => {
+    const delayedPayRunId = fixture.workflow_pay_period_id;
+    const nextPayRunId = fixture.time_import_pay_period_id;
+    let markDelayedRequestStarted: (() => void) | undefined;
+    let releaseDelayedResponse: (() => void) | undefined;
+    let failDelayedPayRun = false;
+    const delayedRequestStarted = new Promise<void>((resolve): void => { markDelayedRequestStarted = resolve; });
+    const delayedResponseReleased = new Promise<void>((resolve): void => { releaseDelayedResponse = resolve; });
+
+    await page.route(`**/api/v1/admin/pay_periods/${delayedPayRunId}`, async (route): Promise<void> => {
+      if (route.request().method() !== 'GET') {
+        await route.continue();
+        return;
+      }
+
+      if (failDelayedPayRun) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Synthetic failed pay-run load' }),
+        });
+        return;
+      }
+
+      markDelayedRequestStarted?.();
+      const response = await route.fetch();
+      await delayedResponseReleased;
+      await route.fulfill({ response });
+    });
+
+    const delayedPath = `/companies/${fixture.company_id}/pay-runs/${delayedPayRunId}/overview`;
+    const nextPath = `/companies/${fixture.company_id}/pay-runs/${nextPayRunId}/overview`;
+    await page.goto(delayedPath);
+    await delayedRequestStarted;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, nextPath);
+    await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toBeVisible();
+
+    releaseDelayedResponse?.();
+    await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toBeVisible();
+    await expect(page.getByText(`Pay run #${delayedPayRunId}`, { exact: true })).toHaveCount(0);
+
+    failDelayedPayRun = true;
+    await page.evaluate((path): void => {
+      window.history.pushState({}, '', path);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, delayedPath);
+    await expect(page.getByRole('heading', { name: 'This pay-run workspace could not be opened' })).toBeVisible();
+    await expect(page.getByText(`Pay run #${nextPayRunId}`, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Open processing' })).toHaveCount(0);
+  });
+
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {
     const me = await adminApi.get('auth/me');
     expect(me.ok()).toBeTruthy();
