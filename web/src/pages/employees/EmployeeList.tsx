@@ -72,6 +72,8 @@ export function EmployeeList() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<(Department & { employee_count: number })[]>([]);
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
+  const [employeeCompanyId, setEmployeeCompanyId] = useState<number | null>(null);
+  const [departmentCompanyId, setDepartmentCompanyId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(() => {
@@ -87,6 +89,8 @@ export function EmployeeList() {
   const employeeRequestIdRef = useRef(0);
   const departmentRequestIdRef = useRef(0);
   const companyIdRef = useRef(companyId);
+  const employeeCompanyIdRef = useRef<number | null>(null);
+  const departmentCompanyIdRef = useRef<number | null>(null);
   companyIdRef.current = companyId;
 
   const search = searchParams.get('search') || '';
@@ -101,6 +105,13 @@ export function EmployeeList() {
     const requestedCompanyId = companyId;
     if (requestedCompanyId !== companyIdRef.current) return;
     const requestId = ++employeeRequestIdRef.current;
+
+    if (employeeCompanyIdRef.current !== requestedCompanyId) {
+      employeeCompanyIdRef.current = null;
+      setEmployeeCompanyId(null);
+      setEmployees([]);
+      setMeta(null);
+    }
 
     setIsLoading(true);
     setError(null);
@@ -132,6 +143,8 @@ export function EmployeeList() {
       if (requestId !== employeeRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setEmployees(payload.data);
       setMeta(payload.meta);
+      employeeCompanyIdRef.current = requestedCompanyId;
+      setEmployeeCompanyId(requestedCompanyId);
     } catch (err) {
       if (requestId !== employeeRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load employees');
@@ -147,12 +160,20 @@ export function EmployeeList() {
     if (requestedCompanyId !== companyIdRef.current) return;
     const requestId = ++departmentRequestIdRef.current;
 
+    if (departmentCompanyIdRef.current !== requestedCompanyId) {
+      departmentCompanyIdRef.current = null;
+      setDepartmentCompanyId(null);
+      setDepartments([]);
+    }
+
     try {
       const response = isClient
         ? await clientDepartmentsApi.list({ active: true })
         : await departmentsApi.list({ company_id: companyId, active: true });
       if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       setDepartments(response.data);
+      departmentCompanyIdRef.current = requestedCompanyId;
+      setDepartmentCompanyId(requestedCompanyId);
     } catch (err) {
       if (requestId !== departmentRequestIdRef.current || requestedCompanyId !== companyIdRef.current) return;
       console.error('Failed to load departments:', err);
@@ -235,9 +256,15 @@ export function EmployeeList() {
     });
   };
 
+  const companyEmployees = useMemo(
+    (): Employee[] => employeeCompanyId === companyId ? employees : [],
+    [companyId, employeeCompanyId, employees],
+  );
+  const companyDepartments = departmentCompanyId === companyId ? departments : [];
+  const companyMeta = employeeCompanyId === companyId ? meta : null;
   const grouped = useMemo(() => {
     const groups: Record<string, Employee[]> = {};
-    for (const emp of employees) {
+    for (const emp of companyEmployees) {
       const type = emp.employment_type || 'hourly';
       if (!groups[type]) groups[type] = [];
       groups[type].push(emp);
@@ -245,7 +272,7 @@ export function EmployeeList() {
     return TYPE_ORDER
       .filter(t => groups[t]?.length)
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
-  }, [employees]);
+  }, [companyEmployees]);
 
   const hasActiveFilters = !!(search || departmentId || employmentType || status !== 'active');
 
@@ -313,7 +340,7 @@ export function EmployeeList() {
               className="w-full sm:w-44"
             >
               <option value="">All Departments</option>
-              {departments.map((dept) => (
+              {companyDepartments.map((dept) => (
                 <option key={dept.id} value={dept.id}>
                   {dept.name} ({dept.employee_count})
                 </option>
@@ -366,7 +393,7 @@ export function EmployeeList() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
           </div>
-        ) : employees.length === 0 ? (
+        ) : companyEmployees.length === 0 ? (
           <div className="text-center py-12">
             <Users className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No employees found</h3>
@@ -410,7 +437,7 @@ export function EmployeeList() {
                             <EmployeeMobileCard
                               key={employee.id}
                               employee={employee}
-                              departments={departments}
+                              departments={companyDepartments}
                               onEdit={() => openEmployee(employee.id)}
                             />
                           ))}
@@ -460,7 +487,7 @@ export function EmployeeList() {
                               <EmployeeTableRow
                                 key={employee.id}
                                 employee={employee}
-                                departments={departments}
+                                departments={companyDepartments}
                                 rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
                                 onEdit={() => openEmployee(employee.id)}
                               />
@@ -475,26 +502,26 @@ export function EmployeeList() {
               })}
             </div>
 
-            {meta && (
+            {companyMeta && (
               <div className="mt-4 flex items-center justify-between">
                 <p className="text-sm text-gray-500">
-                  {meta.total_count} employee{meta.total_count !== 1 ? 's' : ''} total
+                  {companyMeta.total_count} employee{companyMeta.total_count !== 1 ? 's' : ''} total
                 </p>
-                {meta.total_pages > 1 && (
+                {companyMeta.total_pages > 1 && (
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={meta.current_page === 1}
-                      onClick={() => updateFilter('page', String(meta.current_page - 1))}
+                      disabled={companyMeta.current_page === 1}
+                      onClick={() => updateFilter('page', String(companyMeta.current_page - 1))}
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={meta.current_page === meta.total_pages}
-                      onClick={() => updateFilter('page', String(meta.current_page + 1))}
+                      disabled={companyMeta.current_page === companyMeta.total_pages}
+                      onClick={() => updateFilter('page', String(companyMeta.current_page + 1))}
                     >
                       <ChevronRight className="w-4 h-4" />
                     </Button>
