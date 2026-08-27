@@ -184,10 +184,30 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
         'X-E2E-User-Email': fixture.admin_email,
-        'X-Company-Id': String(fixture.company_id),
       },
     });
     const page = await context.newPage();
+    let delayNextPrimaryResponse = false;
+    let markDelayedRequestStarted: (() => void) | undefined;
+    let releaseDelayedResponse: (() => void) | undefined;
+    let markDelayedRequestFinished: (() => void) | undefined;
+    const delayedRequestStarted = new Promise<void>((resolve) => { markDelayedRequestStarted = resolve; });
+    const delayedResponseReleased = new Promise<void>((resolve) => { releaseDelayedResponse = resolve; });
+    const delayedRequestFinished = new Promise<void>((resolve) => { markDelayedRequestFinished = resolve; });
+
+    await page.route('**/api/v1/admin/pay_periods**', async (route) => {
+      if (delayNextPrimaryResponse && route.request().headers()['x-company-id'] === String(fixture.company_id)) {
+        delayNextPrimaryResponse = false;
+        markDelayedRequestStarted?.();
+        const response = await route.fetch();
+        await delayedResponseReleased;
+        await route.fulfill({ response });
+        markDelayedRequestFinished?.();
+        return;
+      }
+
+      await route.continue();
+    });
 
     await page.goto(`/pay-periods?status=draft&sort=pay_date&direction=asc`);
     await expect(page).toHaveURL(new RegExp(`/companies/${fixture.company_id}/pay-runs\\?`));
@@ -195,15 +215,25 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Pay Periods' })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
 
-    await page.goto(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+    await page.goto(`/companies/${fixture.company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug`);
+    await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
+    delayNextPrimaryResponse = true;
+    await page.getByRole('button', { name: /^Draft/ }).click();
+    await delayedRequestStarted;
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
-    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+    await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug&status=draft`);
     await expect(page.getByText('Switched clients. Showing pay periods for the selected client.')).toBeVisible();
+    await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
+
+    releaseDelayedResponse?.();
+    await delayedRequestFinished;
+    await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
 
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
-    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Gate`);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug&status=draft`);
+    await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
 
     const queueUrl = page.url();
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
