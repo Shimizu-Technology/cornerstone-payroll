@@ -28,6 +28,20 @@ describe('canonical payroll routes', () => {
       returnTo: '/companies/12/pay-runs?status=draft&year=2026',
     })).toBe('/companies/12/pay-runs/91/overview?return_to=%2Fcompanies%2F12%2Fpay-runs%3Fstatus%3Ddraft%26year%3D2026');
   });
+
+  it('bounds circular record navigation instead of nesting return destinations forever', () => {
+    let path = '/companies/12/pay-runs?status=draft&year=2026';
+    let longestPath = path.length;
+
+    for (let index = 0; index < 20; index += 1) {
+      path = payRunPath(12, 91, 'overview', { returnTo: path });
+      longestPath = Math.max(longestPath, path.length);
+      path = payrollItemPath(12, 91, 305, { returnTo: path });
+      longestPath = Math.max(longestPath, path.length);
+    }
+
+    expect(longestPath).toBeLessThan(1500);
+  });
 });
 
 describe('safeInternalReturnPath', () => {
@@ -46,5 +60,10 @@ describe('safeInternalReturnPath', () => {
     [null],
   ])('rejects unsafe or invalid return destinations: %s', (value) => {
     expect(safeInternalReturnPath(value, fallback)).toBe(fallback);
+  });
+
+  it('rejects an excessively nested return destination', () => {
+    expect(safeInternalReturnPath(`/companies/12/pay-runs?return_to=${'a'.repeat(1024)}`, fallback))
+      .toBe(fallback);
   });
 });
