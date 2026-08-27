@@ -259,6 +259,21 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
 
     const queueUrl = page.url();
+    const queueLocation = new URL(queueUrl);
+    const queueReturnTo = `${queueLocation.pathname}${queueLocation.search}`;
+    const workflowRow = page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' });
+
+    await workflowRow.getByRole('button', { name: 'View', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(queueUrl);
+
+    await workflowRow.getByRole('button', { name: 'Enter Hours', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
+    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await expect(page).toHaveURL(queueUrl);
+
     let delayNextPrimaryEmployeeResponse = false;
     let rejectNextBoundaryEmployeeResponse = false;
     let markDelayedEmployeeRequestStarted: (() => void) | undefined;
@@ -314,15 +329,6 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/employees?status=active&search=Avery`);
     await expect(page.getByRole('table').getByText('Avery Example')).toBeVisible();
-
-    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
-    await expect(page.getByLabel('Pay run identity')).toContainText(`Pay run #${fixture.workflow_pay_period_id}`);
-    await expect(page.getByRole('link', { name: 'Process payroll' }).first()).toBeVisible();
-
-    await page.getByRole('link', { name: 'Back', exact: true }).click();
-    await expect(page).toHaveURL(queueUrl);
-
-    await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(new URL(queueUrl).pathname + new URL(queueUrl).search)}`);
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/payroll-items/${fixture.workflow_payroll_item_id}`);
     await expect(page.getByText(`Payroll item #${fixture.workflow_payroll_item_id}`)).toBeVisible();
@@ -380,13 +386,22 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     };
 
-    await page.goto(`/pay-periods?status=draft`);
+    await page.goto(`/companies/${fixture.company_id}/pay-runs?status=draft&sort=pay_date&direction=asc&year=2026&search=Aug%202%20-%2015%2C%202026`);
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'View' }).first()).toBeVisible();
     await expectNoPageOverflow();
 
+    const mobileQueueUrl = page.url();
+    const mobileQueueLocation = new URL(mobileQueueUrl);
+    const mobileReturnTo = `${mobileQueueLocation.pathname}${mobileQueueLocation.search}`;
+
+    await page.getByRole('button', { name: 'View', exact: true }).click();
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview?return_to=${encodeURIComponent(mobileReturnTo)}`);
+    await page.getByRole('link', { name: 'Back', exact: true }).click();
+    await expect(page).toHaveURL(mobileQueueUrl);
+
     await page.getByRole('button', { name: 'Enter hours', exact: true }).first().click();
-    await expect(page).toHaveURL(/\/companies\/\d+\/pay-runs\/\d+\/work\?return_to=/);
+    await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(mobileReturnTo)}`);
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview`);
     await expect(page.getByLabel('Pay run identity')).toBeVisible();
