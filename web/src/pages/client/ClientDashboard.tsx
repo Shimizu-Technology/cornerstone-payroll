@@ -9,13 +9,22 @@ import { formatCurrency } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
+type ClientDashboardStats = Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'];
+
+interface ClientDashboardPayload {
+  companyId: number | null;
+  stats: ClientDashboardStats;
+  documentCount: number;
+}
+
 export function ClientDashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'] | null>(null);
-  const [documentCount, setDocumentCount] = useState(0);
+  const [dashboardPayload, setDashboardPayload] = useState<ClientDashboardPayload | null>(null);
+  const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
+  const documentCount = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.documentCount : 0;
   const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
   const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
   const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
@@ -25,18 +34,23 @@ export function ClientDashboard(): ReactElement {
 
   useEffect((): (() => void) => {
     let cancelled = false;
+    const requestedCompanyId = activeCompanyId;
 
     const load = async (): Promise<void> => {
       setLoading(true);
       setError(null);
+      setDashboardPayload(null);
       try {
         const [dashboard, documents] = await Promise.all([
           clientReportsApi.dashboard(),
           clientDocumentsApi.list(),
         ]);
         if (cancelled) return;
-        setStats(dashboard.stats);
-        setDocumentCount(documents.data.length);
+        setDashboardPayload({
+          companyId: requestedCompanyId,
+          stats: dashboard.stats,
+          documentCount: documents.data.length,
+        });
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load portal dashboard');

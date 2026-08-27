@@ -19,6 +19,11 @@ interface StatCardProps {
   icon: React.ReactNode;
 }
 
+interface DashboardPayload {
+  companyId: number | null;
+  stats: DashboardResponse['stats'];
+}
+
 function StatCard({
   title,
   value,
@@ -48,18 +53,23 @@ export function Dashboard(): ReactElement {
   const navigate = useNavigate();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardResponse['stats'] | null>(null);
+  const [dashboardPayload, setDashboardPayload] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
 
   useEffect((): (() => void) => {
     let cancelled = false;
+    const requestedCompanyId = activeCompanyId;
 
     const loadDashboard = async (): Promise<void> => {
       setLoading(true);
       setError(null);
+      setDashboardPayload(null);
       try {
         const response = await reportsApi.dashboard();
-        if (!cancelled) setStats(response.stats);
+        if (!cancelled) {
+          setDashboardPayload({ companyId: requestedCompanyId, stats: response.stats });
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load dashboard');
