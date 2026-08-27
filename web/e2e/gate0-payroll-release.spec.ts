@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -39,6 +39,14 @@ function loadFixture(): Gate0Fixture {
 
 async function responseJson(response: APIResponse): Promise<Record<string, unknown>> {
   return await response.json() as Record<string, unknown>;
+}
+
+async function waitForUiCommit(page: Page): Promise<void> {
+  await page.evaluate((): Promise<void> => new Promise<void>((resolve): void => {
+    requestAnimationFrame((): void => {
+      requestAnimationFrame((): void => resolve());
+    });
+  }));
 }
 
 test.describe('Gate 0 deterministic payroll release lane', () => {
@@ -188,14 +196,25 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
     const page = await context.newPage();
     let delayNextPrimaryResponse = false;
+    let rejectNextBoundaryResponse = false;
     let markDelayedRequestStarted: (() => void) | undefined;
     let releaseDelayedResponse: (() => void) | undefined;
     let markDelayedRequestFinished: (() => void) | undefined;
-    const delayedRequestStarted = new Promise<void>((resolve) => { markDelayedRequestStarted = resolve; });
-    const delayedResponseReleased = new Promise<void>((resolve) => { releaseDelayedResponse = resolve; });
-    const delayedRequestFinished = new Promise<void>((resolve) => { markDelayedRequestFinished = resolve; });
+    const delayedRequestStarted = new Promise<void>((resolve): void => { markDelayedRequestStarted = resolve; });
+    const delayedResponseReleased = new Promise<void>((resolve): void => { releaseDelayedResponse = resolve; });
+    const delayedRequestFinished = new Promise<void>((resolve): void => { markDelayedRequestFinished = resolve; });
 
-    await page.route('**/api/v1/admin/pay_periods**', async (route) => {
+    await page.route('**/api/v1/admin/pay_periods**', async (route): Promise<void> => {
+      if (rejectNextBoundaryResponse && route.request().headers()['x-company-id'] === String(fixture.other_company_id)) {
+        rejectNextBoundaryResponse = false;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Synthetic target-company failure' }),
+        });
+        return;
+      }
+
       if (delayNextPrimaryResponse && route.request().headers()['x-company-id'] === String(fixture.company_id)) {
         delayNextPrimaryResponse = false;
         markDelayedRequestStarted?.();
@@ -220,15 +239,19 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     delayNextPrimaryResponse = true;
     await page.getByRole('button', { name: /^Draft/ }).click();
     await delayedRequestStarted;
+    rejectNextBoundaryResponse = true;
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug&status=draft`);
     await expect(page.getByText('Switched clients. Showing pay periods for the selected client.')).toBeVisible();
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
+    await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
 
     releaseDelayedResponse?.();
     await delayedRequestFinished;
+    await waitForUiCommit(page);
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
+    await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
 
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
@@ -237,14 +260,25 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     const queueUrl = page.url();
     let delayNextPrimaryEmployeeResponse = false;
+    let rejectNextBoundaryEmployeeResponse = false;
     let markDelayedEmployeeRequestStarted: (() => void) | undefined;
     let releaseDelayedEmployeeResponse: (() => void) | undefined;
     let markDelayedEmployeeRequestFinished: (() => void) | undefined;
-    const delayedEmployeeRequestStarted = new Promise<void>((resolve) => { markDelayedEmployeeRequestStarted = resolve; });
-    const delayedEmployeeResponseReleased = new Promise<void>((resolve) => { releaseDelayedEmployeeResponse = resolve; });
-    const delayedEmployeeRequestFinished = new Promise<void>((resolve) => { markDelayedEmployeeRequestFinished = resolve; });
+    const delayedEmployeeRequestStarted = new Promise<void>((resolve): void => { markDelayedEmployeeRequestStarted = resolve; });
+    const delayedEmployeeResponseReleased = new Promise<void>((resolve): void => { releaseDelayedEmployeeResponse = resolve; });
+    const delayedEmployeeRequestFinished = new Promise<void>((resolve): void => { markDelayedEmployeeRequestFinished = resolve; });
 
-    await page.route('**/api/v1/admin/employees**', async (route) => {
+    await page.route('**/api/v1/admin/employees**', async (route): Promise<void> => {
+      if (rejectNextBoundaryEmployeeResponse && route.request().headers()['x-company-id'] === String(fixture.other_company_id)) {
+        rejectNextBoundaryEmployeeResponse = false;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Synthetic target-company failure' }),
+        });
+        return;
+      }
+
       if (delayNextPrimaryEmployeeResponse && route.request().headers()['x-company-id'] === String(fixture.company_id)) {
         delayNextPrimaryEmployeeResponse = false;
         markDelayedEmployeeRequestStarted?.();
@@ -263,13 +297,16 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     delayNextPrimaryEmployeeResponse = true;
     await page.getByPlaceholder('Search employees...').fill('Avery');
     await delayedEmployeeRequestStarted;
+    rejectNextBoundaryEmployeeResponse = true;
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/employees?status=active&search=Avery`);
     await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
+    await expect(page.getByText('Avery Example')).toHaveCount(0);
 
     releaseDelayedEmployeeResponse?.();
     await delayedEmployeeRequestFinished;
+    await waitForUiCommit(page);
     await expect(page.getByRole('heading', { name: 'No employees found' })).toBeVisible();
     await expect(page.getByText('Avery Example')).toHaveCount(0);
 
@@ -339,7 +376,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       },
     });
     const page = await context.newPage();
-    const expectNoPageOverflow = async () => {
+    const expectNoPageOverflow = async (): Promise<void> => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     };
 
@@ -347,6 +384,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'View' }).first()).toBeVisible();
     await expectNoPageOverflow();
+
+    await page.getByRole('button', { name: 'Enter hours', exact: true }).first().click();
+    await expect(page).toHaveURL(/\/companies\/\d+\/pay-runs\/\d+\/work\?return_to=/);
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/overview`);
     await expect(page.getByLabel('Pay run identity')).toBeVisible();

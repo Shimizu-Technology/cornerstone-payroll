@@ -52,6 +52,7 @@ function PayPeriodMobileCard({
   onRun,
   onApprove,
   onCommit,
+  onEnterHours,
 }: {
   period: PayPeriod;
   actionInFlight: string | null;
@@ -61,6 +62,7 @@ function PayPeriodMobileCard({
   onRun: () => void;
   onApprove: () => void;
   onCommit: () => void;
+  onEnterHours: () => void;
 }) {
   const statusConfig = payPeriodStatusConfig[period.status];
 
@@ -107,7 +109,7 @@ function PayPeriodMobileCard({
             <Button variant="ghost" size="sm" className="text-danger-700" onClick={onDelete} disabled={actionInFlight !== null}>Delete</Button>
           </>
         )}
-        {period.status === 'draft' && <Button size="sm" onClick={onView}>Enter hours</Button>}
+        {period.status === 'draft' && <Button size="sm" onClick={onEnterHours}>Enter hours</Button>}
         {period.status === 'calculated' && (
           <>
             <Button variant="outline" size="sm" onClick={onRun} disabled={actionInFlight !== null}>Recalculate</Button>
@@ -137,6 +139,7 @@ export function PayPeriods() {
   const statusParam = searchParams.get('status') || '';
   const statusFilter = ['draft', 'calculated', 'approved', 'committed'].includes(statusParam) ? statusParam : undefined;
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [payPeriodCompanyId, setPayPeriodCompanyId] = useState<number | null>(null);
   const searchTerm = searchParams.get('search') || '';
   const requestedSort = searchParams.get('sort');
   const sortBy = (['pay_period', 'pay_date', 'processed', 'employees', 'gross', 'net', 'status'].includes(requestedSort || '') ? requestedSort : 'pay_period') as
@@ -151,6 +154,7 @@ export function PayPeriods() {
   };
   const loadRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
+  const payPeriodCompanyIdRef = useRef<number | null>(null);
   activeCompanyIdRef.current = activeCompanyId;
   
   // Modal state
@@ -190,6 +194,13 @@ export function PayPeriods() {
     if (requestedCompanyId !== activeCompanyIdRef.current) return;
     const requestId = ++loadRequestIdRef.current;
 
+    if (payPeriodCompanyIdRef.current !== requestedCompanyId) {
+      payPeriodCompanyIdRef.current = null;
+      setPayPeriodCompanyId(null);
+      setPayPeriods([]);
+      setStatusCounts({});
+    }
+
     try {
       if (!silent) setLoading(true);
       setError(null);
@@ -197,6 +208,8 @@ export function PayPeriods() {
       if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
       setPayPeriods(response.pay_periods);
       setStatusCounts(response.meta.statuses);
+      payPeriodCompanyIdRef.current = requestedCompanyId;
+      setPayPeriodCompanyId(requestedCompanyId);
     } catch (err) {
       if (requestId !== loadRequestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
       setError(err instanceof Error ? err.message : 'Failed to load pay periods');
@@ -355,7 +368,9 @@ export function PayPeriods() {
   };
 
   const handleCommit = async (id: number) => {
-    const period = payPeriods.find((candidate) => candidate.id === id);
+    const period = payPeriodCompanyId === activeCompanyId
+      ? payPeriods.find((candidate) => candidate.id === id)
+      : undefined;
     const warningText = period?.compliance_warnings?.length
       ? `\n\nAttention:\n${period.compliance_warnings.map((warning) => `• ${warning}`).join('\n')}`
       : '';
@@ -509,10 +524,15 @@ export function PayPeriods() {
     }
   };
 
+  const companyPayPeriods = useMemo(
+    (): PayPeriod[] => payPeriodCompanyId === activeCompanyId ? payPeriods : [],
+    [activeCompanyId, payPeriodCompanyId, payPeriods],
+  );
+  const companyStatusCounts = payPeriodCompanyId === activeCompanyId ? statusCounts : {};
   const visiblePayPeriods = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     const filtered = normalizedSearch
-      ? payPeriods.filter((period) => {
+      ? companyPayPeriods.filter((period) => {
           const haystack = [
             formatDateRange(period.start_date, period.end_date),
             new Date(period.pay_date).toLocaleDateString('en-US'),
@@ -527,7 +547,7 @@ export function PayPeriods() {
 
           return haystack.includes(normalizedSearch);
         })
-      : payPeriods;
+      : companyPayPeriods;
 
     const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
     return [...filtered].sort((left, right) => {
@@ -567,7 +587,7 @@ export function PayPeriods() {
         ) || compareNumbers(left.id, right.id);
       }
     });
-  }, [payPeriods, searchTerm, sortBy, sortDirection]);
+  }, [companyPayPeriods, searchTerm, sortBy, sortDirection]);
 
   return (
     <div>
@@ -612,7 +632,7 @@ export function PayPeriods() {
             size="sm"
             onClick={() => updateViewParam('status')}
           >
-            All ({Object.values(statusCounts).reduce((a, b) => a + b, 0)})
+            All ({Object.values(companyStatusCounts).reduce((a, b) => a + b, 0)})
           </Button>
           {(['draft', 'calculated', 'approved', 'committed'] as const).map((status) => (
             <Button
@@ -621,7 +641,7 @@ export function PayPeriods() {
               size="sm"
               onClick={() => updateViewParam('status', status)}
             >
-              {payPeriodStatusConfig[status]?.label || status} ({statusCounts[status] || 0})
+              {payPeriodStatusConfig[status]?.label || status} ({companyStatusCounts[status] || 0})
             </Button>
           ))}
         </div>
@@ -682,6 +702,7 @@ export function PayPeriods() {
                     period={period}
                     actionInFlight={actionInFlight}
                     onView={() => navigate(payRunPath(companyId, period.id, 'overview', { returnTo }))}
+                    onEnterHours={() => navigate(payRunPath(companyId, period.id, 'work', { returnTo }))}
                     onEdit={() => openEditModal(period)}
                     onDelete={() => handleDelete(period.id)}
                     onRun={() => handleRunPayroll(period.id)}
