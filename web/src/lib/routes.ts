@@ -5,8 +5,7 @@ interface ReturnContext {
   returnTo?: string;
 }
 
-// Leave room for percent-encoding and the destination route under common 2 KB URL limits.
-const MAX_RETURN_PATH_LENGTH = 1024;
+const MAX_APP_URL_LENGTH = 2048;
 
 function normalizeQuery(query: string): string {
   if (!query || query === '?') return '';
@@ -14,10 +13,11 @@ function normalizeQuery(query: string): string {
 }
 
 function withReturnContext(path: string, context: ReturnContext = {}): string {
-  if (!context.returnTo || context.returnTo.length > MAX_RETURN_PATH_LENGTH) return path;
+  if (!context.returnTo) return path;
 
   const params = new URLSearchParams({ return_to: context.returnTo });
-  return `${path}?${params.toString()}`;
+  const contextualPath = `${path}?${params.toString()}`;
+  return contextualPath.length <= MAX_APP_URL_LENGTH ? contextualPath : path;
 }
 
 export function companyPath(companyId: number): string {
@@ -73,7 +73,7 @@ export function payrollItemPath(
 export function safeInternalReturnPath(value: string | null, fallback: string): string {
   if (
     !value
-    || value.length > MAX_RETURN_PATH_LENGTH
+    || value.length > MAX_APP_URL_LENGTH
     || !value.startsWith('/')
     || value.startsWith('//')
     || value.includes('\\')
