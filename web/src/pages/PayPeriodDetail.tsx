@@ -1234,7 +1234,7 @@ export function PayPeriodDetail() {
               </p>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Link
-                  to="/pay-schedule-settings"
+                  to="/client-settings/payroll"
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex min-h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-950 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
@@ -2851,7 +2851,7 @@ export function PayPeriodDetail() {
             <div className="p-4 border-b flex items-center justify-between gap-3">
               <h3 className="font-semibold text-gray-900">Checks</h3>
               <div className="flex items-center gap-3">
-                <Link to="/check-settings" className="text-xs text-blue-600 hover:underline">Check Settings ›</Link>
+                <Link to="/client-settings/checks" className="text-xs text-blue-600 hover:underline">Check Settings ›</Link>
                 <Button size="sm" onClick={() => setCheckPrintOpen(true)}>Print checks</Button>
               </div>
             </div>

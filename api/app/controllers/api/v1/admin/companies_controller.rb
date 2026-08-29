@@ -7,12 +7,14 @@ module Api
         STAFF_EDITABLE_COMPANY_FIELDS = %i[
           address_line1 address_line2 city state zip phone email
         ].freeze
+        MANAGER_EDITABLE_COMPANY_FIELDS = (
+          STAFF_EDITABLE_COMPANY_FIELDS + %i[simple_payroll_register_enabled]
+        ).freeze
         ADMIN_EDITABLE_COMPANY_FIELDS = (
           %i[
-            name ein pay_frequency active address_line1 address_line2 city state zip
-            phone email bank_name bank_address check_stock_type check_offset_x check_offset_y
-            next_check_number simple_payroll_register_enabled
-          ] + [ "check_layout_config" ]
+            name ein active address_line1 address_line2 city state zip phone email
+            simple_payroll_register_enabled
+          ]
         ).freeze
 
         skip_before_action :enforce_company_access!, only: [ :index ]
@@ -59,7 +61,7 @@ module Api
             return render json: { error: "Only admins can create companies" }, status: :forbidden
           end
 
-          company = Company.new(company_params)
+          company = Company.new(company_create_params)
           company.organization = current_user.organization unless current_user.super_admin? && company.organization.present?
 
           company.check_stock_type ||= "top_check"
@@ -91,14 +93,18 @@ module Api
             return render json: { error: "Not authorized" }, status: :forbidden
           end
 
-          update_params = current_user&.organization_admin? ? company_params : staff_company_params
+          update_params = if current_user&.organization_admin?
+            company_update_params
+          elsif current_user&.manager?
+            manager_company_params
+          else
+            staff_company_params
+          end
           if update_params.blank?
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
-          normalize_company_check_layout_config!(update_params, company)
           company.assign_attributes(update_params)
-          clear_active_printer_profile_if_calibration_changed(company)
 
           if company.save
             render json: { company: company_payload(company, detailed: true) }
@@ -111,7 +117,7 @@ module Api
 
         private
 
-        def company_params
+        def company_create_params
           params.require(:company).permit(
             :name, :ein, :pay_frequency, :active,
             :address_line1, :address_line2, :city, :state, :zip,
@@ -123,31 +129,16 @@ module Api
           )
         end
 
+        def company_update_params
+          params.require(:company).permit(*ADMIN_EDITABLE_COMPANY_FIELDS)
+        end
+
         def staff_company_params
           params.require(:company).permit(*STAFF_EDITABLE_COMPANY_FIELDS)
         end
 
-        def normalize_company_check_layout_config!(update_params, company)
-          target_stock_type = update_params[:check_stock_type].presence || company.check_stock_type
-          stock_type_changed = update_params.key?(:check_stock_type) && target_stock_type.to_s != company.check_stock_type.to_s
-
-          if update_params.key?(:check_layout_config)
-            update_params[:check_layout_config] = CheckLayoutConfigSanitizer.call(
-              stock_type: target_stock_type,
-              config: update_params[:check_layout_config]
-            )
-          elsif stock_type_changed
-            update_params[:check_layout_config] = {}
-          end
-        end
-
-        def clear_active_printer_profile_if_calibration_changed(company)
-          return unless company.will_save_change_to_check_stock_type? ||
-            company.will_save_change_to_check_offset_x? ||
-            company.will_save_change_to_check_offset_y? ||
-            company.will_save_change_to_check_layout_config?
-
-          company.active_printer_profile = nil
+        def manager_company_params
+          params.require(:company).permit(*MANAGER_EDITABLE_COMPANY_FIELDS)
         end
 
         def company_payload(company, detailed: false, total_employee_counts: nil, active_employee_counts: nil)
@@ -183,7 +174,13 @@ module Api
 
           payload[:organization_id] = company.organization_id
           payload[:can_update] = current_user&.organization_admin? || staff_can_update_company?(company)
-          payload[:editable_fields] = current_user&.organization_admin? ? ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s) : STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          payload[:editable_fields] = if current_user&.organization_admin?
+            ADMIN_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          elsif current_user&.manager?
+            MANAGER_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          else
+            STAFF_EDITABLE_COMPANY_FIELDS.map(&:to_s)
+          end
 
           payload
         end

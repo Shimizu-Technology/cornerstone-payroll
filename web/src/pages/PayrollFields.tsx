@@ -53,7 +53,7 @@ const defaultField: Partial<PayrollFieldDefinition> = {
   sort_order: 0,
 };
 
-export function PayrollFields() {
+export function PayrollFields({ embedded = false }: { embedded?: boolean }) {
   const [fields, setFields] = useState<PayrollFieldDefinition[]>([]);
   const [draft, setDraft] = useState<Partial<PayrollFieldDefinition>>(defaultField);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -140,12 +140,12 @@ export function PayrollFields() {
 
   return (
     <div>
-      <Header
+      {!embedded && <Header
         title="Payroll Fields"
         description="Create reusable client-wide additions, deductions, and employer contributions."
-      />
+      />}
 
-      <div className="p-4 space-y-6 sm:p-6 lg:p-8">
+      <div className={embedded ? 'space-y-6' : 'p-4 space-y-6 sm:p-6 lg:p-8'}>
         {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
 
         <Card>

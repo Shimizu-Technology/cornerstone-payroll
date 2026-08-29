@@ -1325,7 +1325,7 @@ export function EmployeeForm() {
                     Field definitions are managed once for the whole client, then assigned to employees here.
                   </CardDescription>
                 </div>
-                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
+                <Button type="button" variant="outline" size="sm" onClick={() => navigate('/client-settings/pay-items')}>
                   Manage client-wide fields
                 </Button>
               </div>
@@ -1339,7 +1339,7 @@ export function EmployeeForm() {
               {payrollFields.length === 0 ? (
                 <div className="flex flex-col gap-3 rounded-lg border border-blue-100 bg-white px-4 py-3 text-sm text-blue-800 sm:flex-row sm:items-center sm:justify-between">
                   <span>No client-wide payroll fields exist yet. Create reusable fields first, then assign them here.</span>
-                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/payroll-fields')}>
+                  <Button type="button" variant="outline" size="sm" onClick={() => navigate('/client-settings/pay-items')}>
                     Create payroll fields
                   </Button>
                 </div>

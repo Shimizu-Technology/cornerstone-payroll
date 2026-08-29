@@ -54,7 +54,14 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "id" => user.id,
         "role" => "admin",
         "home_company_id" => company.id,
-        "assigned_company_ids" => [ company.id ]
+        "assigned_company_ids" => [ company.id ],
+        "capabilities" => include(
+          "staff_workspace" => true,
+          "payroll_operations" => true,
+          "manage_client_configuration" => true,
+          "manage_organization" => true,
+          "manage_platform" => false
+        )
       )
       expect(response.parsed_body.fetch("user")).not_to have_key("super_admin")
     end

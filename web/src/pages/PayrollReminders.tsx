@@ -18,7 +18,7 @@ import {
 import { payrollReminderApi } from '@/services/api';
 import type { PayrollReminderConfig, PayrollReminderLog } from '@/services/api';
 
-export default function PayrollReminders() {
+export default function PayrollReminders({ embedded = false }: { embedded?: boolean }) {
   const [config, setConfig] = useState<PayrollReminderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -143,7 +143,7 @@ export default function PayrollReminders() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className={embedded ? 'flex min-h-72 items-center justify-center' : 'flex min-h-screen items-center justify-center'}>
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
       </div>
     );
@@ -158,13 +158,13 @@ export default function PayrollReminders() {
     );
 
   return (
-    <div className="min-h-screen bg-neutral-50/60">
-      <Header
+    <div className={embedded ? '' : 'min-h-screen bg-neutral-50/60'}>
+      {!embedded && <Header
         title="Payroll Reminders"
         description="Configure automatic email reminders for upcoming and overdue payroll processing."
-      />
+      />}
 
-      <div className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+      <div className={embedded ? 'space-y-6' : 'mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6 lg:px-8'}>
         {/* Status messages */}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">

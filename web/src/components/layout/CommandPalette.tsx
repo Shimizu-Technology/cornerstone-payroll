@@ -2,7 +2,6 @@ import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
-  Bell,
   Building2,
   Calculator,
   CalendarDays,
@@ -14,13 +13,10 @@ import {
   FolderOpen,
   HandCoins,
   LayoutDashboard,
-  Link2,
-  Printer,
   ReceiptText,
   ScanLine,
   Search,
   SlidersHorizontal,
-  UserCog,
   Users,
   WalletCards,
   X,
@@ -78,7 +74,7 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isManager, isClient } = useAuth();
+  const { isClient, can } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -191,7 +187,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         href: '/tools/transmittals',
       });
 
-      if (isAdmin) {
+      if (can('manage_organization')) {
         add({
           id: 'invoice-center',
           label: 'Invoice Center',
@@ -204,64 +200,16 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         });
       }
 
-      if (isManager) {
-        add({
-          id: 'pay-schedule-settings',
-          label: 'Pay Schedule',
-          description: 'Confirm payroll cadence and the legal overtime workweek.',
-          group: 'Settings',
-          keywords: ['pay schedule', 'workweek', 'frequency', 'pay date'],
-          icon: <CalendarDays className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/pay-schedule-settings',
-        });
-
-        add({
-          id: 'check-settings',
-          label: 'Check Settings',
-          description: 'Adjust check stock, printer profiles, and check layout.',
-          group: 'Settings',
-          keywords: ['printer', 'checks', 'layout'],
-          icon: <Printer className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/check-settings',
-        });
-
-        add({
-          id: 'payroll-reminders',
-          label: 'Payroll Reminders',
-          description: 'Configure payroll reminder recipients and timing.',
-          group: 'Settings',
-          keywords: ['reminders', 'notifications', 'email'],
-          icon: <Bell className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/payroll-reminders',
-        });
-
-        add({
-          id: 'payroll-fields',
-          label: 'Payroll Fields',
-          description: 'Manage reusable client-wide additions, deductions, and employer contributions.',
-          group: 'Settings',
-          keywords: ['payroll fields', 'deductions', 'additions', 'employer contributions', '401k', 'rent', 'benefits'],
-          icon: <SlidersHorizontal className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/payroll-fields',
-        });
-      }
-
-      if (isAdmin) {
-        add({
-          id: 'time-tracking-sources',
-          label: 'Time Tracking Sources',
-          description: 'Configure external time tracking import sources.',
-          group: 'Settings',
-          keywords: ['time tracking', 'integrations'],
-          icon: <Link2 className="h-4 w-4" />,
-          kind: 'navigation',
-          href: '/time-tracking-sources',
-        });
-      }
+      add({
+        id: 'client-settings',
+        label: 'Client Settings',
+        description: 'Review and configure the active client from one place.',
+        group: 'Settings',
+        keywords: ['company', 'pay schedule', 'workweek', 'checks', 'printer', 'payroll fields', 'deductions', 'reports', 'reminders', 'time tracking', 'integrations'],
+        icon: <SlidersHorizontal className="h-4 w-4" />,
+        kind: 'navigation',
+        href: '/client-settings/overview',
+      });
 
       add({
         id: 'client-documents-admin',
@@ -286,20 +234,20 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       });
     }
 
-    if (isSuperAdmin) {
+    if (can('manage_platform')) {
       add({
-        id: 'organizations',
-        label: 'Organizations',
-        description: 'Manage organization-level settings and accounts.',
+        id: 'platform-administration',
+        label: 'Platform Administration',
+        description: 'Manage organizations and system-wide tax rules.',
         group: 'Administration',
-        keywords: ['orgs', 'platform'],
+        keywords: ['organizations', 'orgs', 'platform', 'tax rules', 'tax configuration'],
         icon: <Building2 className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/settings/organizations',
+        href: '/platform/organizations',
       });
     }
 
-    if (isAdmin) {
+    if (!isClient) {
       add({
         id: 'clients',
         label: 'Client Management',
@@ -311,26 +259,18 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         href: '/settings/clients',
       });
 
+    }
+
+    if (can('manage_organization')) {
       add({
-        id: 'tax-config',
-        label: 'Tax Configuration',
-        description: 'Review tax tables and payroll tax configuration.',
+        id: 'firm-settings',
+        label: 'Firm Settings',
+        description: 'Manage team access and shared printer profiles.',
         group: 'Administration',
-        keywords: ['tax config', 'rates'],
+        keywords: ['users', 'team', 'permissions', 'invites', 'printer profiles'],
         icon: <SlidersHorizontal className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/settings/tax-config',
-      });
-
-      add({
-        id: 'users',
-        label: 'User Management',
-        description: 'Invite and manage staff and client users.',
-        group: 'Administration',
-        keywords: ['users', 'permissions', 'invites'],
-        icon: <UserCog className="h-4 w-4" />,
-        kind: 'navigation',
-        href: '/settings/users',
+        href: '/firm-settings/team',
       });
 
       add({
@@ -407,7 +347,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany?.id, can, canSwitchCompany, companies, isClient]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

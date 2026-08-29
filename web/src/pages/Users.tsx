@@ -31,7 +31,7 @@ const allRoleOptions: { value: UserRole; label: string; description: string }[] 
 
 const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant' || role === 'client';
 
-export function Users() {
+export function Users({ embedded = false }: { embedded?: boolean }) {
   const { user: currentUser } = useAuth();
   const roleOptions = currentUser?.role === 'super_admin'
     ? allRoleOptions
@@ -359,7 +359,12 @@ export function Users() {
 
   return (
     <div>
-      <Header
+      {embedded ? (
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div><h2 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">Team & access</h2><p className="mt-1 text-sm text-neutral-500">Manage staff accounts, roles, and payroll client access.</p></div>
+          {!isAddingNew && <Button onClick={handleStartAddNew}><Plus className="w-4 h-4 mr-2" />Invite User</Button>}
+        </div>
+      ) : <Header
         title="User Management"
         description="Manage staff accounts, roles, and payroll client access"
         actions={
@@ -370,9 +375,9 @@ export function Users() {
             </Button>
           )
         }
-      />
+      />}
 
-      <div className="p-4 sm:p-6 lg:p-8">
+      <div className={embedded ? '' : 'p-4 sm:p-6 lg:p-8'}>
         {/* Role Descriptions */}
         <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <h4 className="text-sm font-semibold text-blue-900 mb-2">Role Permissions</h4>

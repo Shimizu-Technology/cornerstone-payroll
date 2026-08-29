@@ -54,7 +54,7 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
   };
 }
 
-export function PayScheduleSettings() {
+export function PayScheduleSettings({ embedded = false }: { embedded?: boolean }) {
   const [response, setResponse] = useState<PayScheduleSettingsResponse | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -149,8 +149,8 @@ export function PayScheduleSettings() {
 
   return (
     <div>
-      <Header title="Pay Schedule & Workweek" description="Define payroll cadence separately from the employer’s legal overtime workweek" />
-      <div className="space-y-6 p-4 pb-28 sm:p-6 sm:pb-32 lg:p-8">
+      {!embedded && <Header title="Pay Schedule & Workweek" description="Define payroll cadence separately from the employer’s legal overtime workweek" />}
+      <div className={embedded ? 'space-y-6 pb-28 sm:pb-32' : 'space-y-6 p-4 pb-28 sm:p-6 sm:pb-32 lg:p-8'}>
         {error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800">{error}</div>}
         {success && <div role="status" className="rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-800">{success}</div>}
 

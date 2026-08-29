@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { AuthProvider, useAuth, type StaffCapability } from '@/contexts/AuthContext';
 import { CompanyProvider } from '@/contexts/CompanyContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
 import { Layout } from '@/components/layout/Layout';
@@ -38,6 +38,13 @@ const InvoiceCenter = lazy(() => import('@/pages/InvoiceCenter').then((module) =
 const PayrollReminders = lazy(() => import('@/pages/PayrollReminders'));
 const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').then((module) => ({ default: module.TimeTrackingSources })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
+const ClientSettingsLayout = lazy(() => import('@/components/settings/ClientSettingsLayout').then((module) => ({ default: module.ClientSettingsLayout })));
+const FirmSettingsLayout = lazy(() => import('@/components/settings/FirmSettingsLayout').then((module) => ({ default: module.FirmSettingsLayout })));
+const PlatformAdminLayout = lazy(() => import('@/components/settings/PlatformAdminLayout').then((module) => ({ default: module.PlatformAdminLayout })));
+const ClientSettingsOverview = lazy(() => import('@/pages/settings/ClientSettingsOverview').then((module) => ({ default: module.ClientSettingsOverview })));
+const ClientCompanyProfile = lazy(() => import('@/pages/settings/ClientCompanyProfile').then((module) => ({ default: module.ClientCompanyProfile })));
+const ClientReportSettings = lazy(() => import('@/pages/settings/ClientReportSettings').then((module) => ({ default: module.ClientReportSettings })));
+const FirmPrinterProfiles = lazy(() => import('@/pages/settings/FirmPrinterProfiles').then((module) => ({ default: module.FirmPrinterProfiles })));
 const Login = lazy(() => import('@/pages/Login').then((module) => ({ default: module.Login })));
 const Invite = lazy(() => import('@/pages/Invite').then((module) => ({ default: module.Invite })));
 const PublicHome = lazy(() => import('@/pages/PublicHome').then((module) => ({ default: module.PublicHome })));
@@ -113,27 +120,10 @@ function ManagerOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function SuperAdminOnlyRoute({ children }: { children: React.ReactNode }) {
-  const { isSuperAdmin, isLoading } = useAuth();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <svg className="animate-spin h-8 w-8 text-primary-600 mx-auto" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          <p className="mt-4 text-gray-500">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isSuperAdmin) {
-    return <Navigate to="/app" replace />;
-  }
-
+function CapabilityRoute({ capability, children }: { capability: StaffCapability; children: React.ReactNode }) {
+  const { can, isLoading } = useAuth();
+  if (isLoading) return <PageLoader />;
+  if (!can(capability)) return <Navigate to="/app" replace />;
   return <>{children}</>;
 }
 
@@ -289,22 +279,46 @@ function AppRoutes() {
         <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
         <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
         <Route path="employee-loans" element={<StaffOnlyRoute><EmployeeLoans /></StaffOnlyRoute>} />
-        <Route path="payroll-fields" element={<ManagerOnlyRoute><PayrollFields /></ManagerOnlyRoute>} />
+        <Route path="payroll-fields" element={<Navigate to="/client-settings/pay-items" replace />} />
         <Route path="tools/timecard-ocr" element={<StaffOnlyRoute><TimecardOcrTool /></StaffOnlyRoute>} />
         <Route path="tools/transmittals" element={<StaffOnlyRoute><GeneralTransmittals /></StaffOnlyRoute>} />
         <Route path="tools/invoices" element={<AdminOnlyRoute><InvoiceCenter /></AdminOnlyRoute>} />
         <Route path="tools/invoices/assistant" element={<AdminOnlyRoute><InvoiceMaker /></AdminOnlyRoute>} />
-        <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
-        <Route path="settings/organizations" element={<SuperAdminOnlyRoute><Organizations /></SuperAdminOnlyRoute>} />
-        <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
+        <Route path="settings/users" element={<Navigate to="/firm-settings/team" replace />} />
+        <Route path="settings/organizations" element={<Navigate to="/platform/organizations" replace />} />
+        <Route path="settings/tax-config" element={<Navigate to="/platform/tax-rules" replace />} />
         <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<ManagerOnlyRoute><AdminEmployeeChangeRequestsPage /></ManagerOnlyRoute>} />
-        <Route path="check-settings" element={<ManagerOnlyRoute><CheckSettingsPage /></ManagerOnlyRoute>} />
-        <Route path="payroll-reminders" element={<ManagerOnlyRoute><PayrollReminders /></ManagerOnlyRoute>} />
-        <Route path="time-tracking-sources" element={<AdminOnlyRoute><TimeTrackingSources /></AdminOnlyRoute>} />
-        <Route path="pay-schedule-settings" element={<ManagerOnlyRoute><PayScheduleSettings /></ManagerOnlyRoute>} />
+        <Route path="check-settings" element={<Navigate to="/client-settings/checks" replace />} />
+        <Route path="payroll-reminders" element={<Navigate to="/client-settings/notifications" replace />} />
+        <Route path="time-tracking-sources" element={<Navigate to="/client-settings/integrations" replace />} />
+        <Route path="pay-schedule-settings" element={<Navigate to="/client-settings/payroll" replace />} />
         <Route path="settings/clients" element={<StaffOnlyRoute><Clients /></StaffOnlyRoute>} />
+
+        <Route path="client-settings" element={<StaffOnlyRoute><ClientSettingsLayout /></StaffOnlyRoute>}>
+          <Route index element={<Navigate to="overview" replace />} />
+          <Route path="overview" element={<ClientSettingsOverview />} />
+          <Route path="company" element={<ClientCompanyProfile />} />
+          <Route path="payroll" element={<CapabilityRoute capability="manage_client_configuration"><PayScheduleSettings embedded /></CapabilityRoute>} />
+          <Route path="pay-items" element={<CapabilityRoute capability="manage_client_configuration"><PayrollFields embedded /></CapabilityRoute>} />
+          <Route path="checks" element={<CapabilityRoute capability="manage_client_configuration"><CheckSettingsPage embedded /></CapabilityRoute>} />
+          <Route path="reports" element={<CapabilityRoute capability="manage_client_configuration"><ClientReportSettings /></CapabilityRoute>} />
+          <Route path="notifications" element={<CapabilityRoute capability="manage_client_configuration"><PayrollReminders embedded /></CapabilityRoute>} />
+          <Route path="integrations" element={<CapabilityRoute capability="manage_organization"><TimeTrackingSources embedded /></CapabilityRoute>} />
+        </Route>
+
+        <Route path="firm-settings" element={<CapabilityRoute capability="manage_organization"><FirmSettingsLayout /></CapabilityRoute>}>
+          <Route index element={<Navigate to="team" replace />} />
+          <Route path="team" element={<Users embedded />} />
+          <Route path="printers" element={<FirmPrinterProfiles />} />
+        </Route>
+
+        <Route path="platform" element={<CapabilityRoute capability="manage_platform"><PlatformAdminLayout /></CapabilityRoute>}>
+          <Route index element={<Navigate to="organizations" replace />} />
+          <Route path="organizations" element={<Organizations embedded />} />
+          <Route path="tax-rules" element={<TaxConfigs embedded />} />
+        </Route>
       </Route>
 
       {/* Catch-all redirect */}

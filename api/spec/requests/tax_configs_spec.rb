@@ -4,11 +4,22 @@ require "rails_helper"
 
 RSpec.describe "Tax Configs Admin API", type: :request do
   let!(:company) { create(:company, name: "Tax Config Staff HQ") }
-  let!(:admin_user) do
+  let!(:platform_admin) do
     User.create!(
       company: company,
-      email: "tax-admin@example.com",
-      name: "Tax Admin",
+      organization: company.organization,
+      email: "tax-platform-admin@example.com",
+      name: "Tax Platform Admin",
+      role: "super_admin",
+      active: true
+    )
+  end
+  let!(:organization_admin) do
+    User.create!(
+      company: company,
+      organization: company.organization,
+      email: "tax-organization-admin@example.com",
+      name: "Tax Organization Admin",
       role: "admin",
       active: true
     )
@@ -24,8 +35,8 @@ RSpec.describe "Tax Configs Admin API", type: :request do
   end
 
   before do
-    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(admin_user)
-    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(admin_user.id)
+    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(platform_admin)
+    allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user_id).and_return(platform_admin.id)
   end
 
   describe "GET /api/v1/admin/tax_configs" do
@@ -52,6 +63,15 @@ RSpec.describe "Tax Configs Admin API", type: :request do
       # Check that these specific years are in descending order within the results
       test_years = years.select { |y| y >= 2600 }
       expect(test_years).to eq([ 2602, 2601, 2600 ])
+    end
+
+    it "forbids organization admins because the rules affect every organization" do
+      allow_any_instance_of(Api::V1::Admin::TaxConfigsController).to receive(:current_user).and_return(organization_admin)
+
+      get "/api/v1/admin/tax_configs"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Super admin access required")
     end
   end
 
@@ -129,7 +149,7 @@ RSpec.describe "Tax Configs Admin API", type: :request do
            }
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["error"]).to eq("Admin access required")
+      expect(response.parsed_body["error"]).to eq("Super admin access required")
     end
   end
 
