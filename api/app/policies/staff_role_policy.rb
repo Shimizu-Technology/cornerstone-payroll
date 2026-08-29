@@ -42,6 +42,7 @@ class StaffRolePolicy
     "api/v1/admin/pay_component_tax_rules#create" => :manage_organization,
     "api/v1/admin/pay_component_tax_rules#update" => :manage_organization,
     "api/v1/admin/pay_schedule_settings#update" => :manage_client_configuration,
+    "api/v1/admin/pay_periods#adopt_confirmed_workweek" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#create" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#update" => :manage_client_configuration,
     "api/v1/admin/payroll_fields#destroy" => :manage_client_configuration,

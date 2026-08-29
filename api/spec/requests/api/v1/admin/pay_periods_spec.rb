@@ -154,6 +154,91 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
     end
   end
 
+  describe "POST /api/v1/admin/pay_periods/:id/adopt_confirmed_workweek" do
+    let!(:legacy_workweek) do
+      company.company_workweeks.create!(
+        starts_on_weekday: 0,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        source: "legacy_system_default",
+        confirmation_status: "needs_confirmation",
+        effective_on: Date.new(2026, 1, 1),
+        ends_on: Date.new(2026, 8, 28)
+      )
+    end
+    let!(:confirmed_workweek) do
+      company.company_workweeks.create!(
+        starts_on_weekday: 0,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: admin_user,
+        confirmed_at: Time.current,
+        notes: "Confirmed with the employer",
+        effective_on: Date.new(2026, 8, 29)
+      )
+    end
+
+    before do
+      pay_period.update_columns(
+        start_date: Date.new(2026, 8, 1),
+        end_date: Date.new(2026, 8, 15),
+        pay_date: Date.new(2026, 8, 31),
+        company_workweek_id: legacy_workweek.id
+      )
+    end
+
+    it "adopts an exact matching confirmed workweek for an empty draft" do
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("pay_period", "confirmed_workweek_adoption", "available")).to be(true)
+
+      expect {
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
+      }.to change {
+        AuditLog.where(action: "pay_periods#adopt_confirmed_workweek", record_id: pay_period.id).count
+      }.by(1)
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload.company_workweek).to eq(confirmed_workweek)
+      expect(response.parsed_body.dig("pay_period", "compliance_warnings")).to be_empty
+      expect(response.parsed_body.dig("pay_period", "confirmed_workweek_adoption", "available")).to be(false)
+    end
+
+    it "refuses to move a draft that already contains payroll evidence" do
+      create(:payroll_item, pay_period: pay_period, employee: employee, company: company)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("already contains payroll or import evidence")
+      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+    end
+
+    it "refuses a confirmed workweek whose legal boundary does not match" do
+      confirmed_workweek.update!(starts_on_weekday: 1)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("same weekday, start time, and timezone")
+      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+    end
+
+    it "requires manager or admin access" do
+      accountant = create(:user, company: company, organization: organization, role: "accountant")
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(accountant)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/adopt_confirmed_workweek"
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+    end
+  end
+
   describe "POST /api/v1/admin/pay_periods/:id/generate_fit_check" do
     before do
       pay_period.update!(status: "committed", committed_at: Time.current)
