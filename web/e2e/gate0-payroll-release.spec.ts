@@ -156,7 +156,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expectRoute(fixture.admin_email, '/settings/tax-config', /\/app$/);
   });
 
-  test('does not apply a delayed company-profile save after switching clients', async ({ browser }) => {
+  test('does not apply a delayed company-profile save after switching clients', async ({ browser }): Promise<void> => {
     const [firstCompanyResponse, secondCompanyResponse] = await Promise.all([
       adminApi.get(`admin/companies/${fixture.company_id}`),
       adminApi.get(`admin/companies/${fixture.other_company_id}`),
