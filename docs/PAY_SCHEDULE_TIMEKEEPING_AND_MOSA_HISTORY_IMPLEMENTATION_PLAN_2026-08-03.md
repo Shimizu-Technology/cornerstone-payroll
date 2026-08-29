@@ -104,6 +104,7 @@ The canonical scenario uses synthetic identities, fixed dates, fixed tax configu
 - Salary calculation enforces zero base salary for an off-cycle tips run even if a stale salary override exists.
 - New and edited payroll runs display purpose, salary treatment, schedule-derived date guidance, and an employer-confirmation warning before commit.
 - The Pay Schedule & Workweek settings page exposes inferred/legacy provenance, records a required confirmation note, and creates new effective-dated records instead of rewriting history.
+- An empty draft created immediately before confirmation can explicitly adopt the newly confirmed workweek when weekday, start time, and timezone match exactly. The repair is manager/admin-only, audited, and refuses any run that already contains payroll or import evidence; completed runs remain untouched.
 - If a legacy biweekly configuration has no trustworthy anchor, new payroll dates stay blank and manual until an operator confirms one; the UI never silently substitutes a weekly cycle.
 - Production backfill is idempotent, links existing pay periods to the seeded schedule/workweek, labels correction flows without changing their money, and relabels Spike pay period `#43` as tips-only without recalculation.
 - `golden_payroll_regression_spec.rb` drives the real calculate, approve, and commit endpoints and reconciles fixed expected paychecks, YTD totals, liability postings, payroll register, SWICA/941 quarterly packet, W-2GU, and 1099-NEC outputs from one synthetic biweekly scenario.

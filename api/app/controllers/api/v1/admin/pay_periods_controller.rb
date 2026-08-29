@@ -13,9 +13,9 @@ module Api
         # `:supplemental_pay_periods`) are deliberately omitted.
         audit_actions :approve, :unapprove, :commit, :run_payroll, :void,
                       :create_correction_run, :generate_fit_check,
-                      :corrective_paychecks
+                      :corrective_paychecks, :adopt_confirmed_workweek
         before_action :set_pay_period, only: [
-          :show, :update, :destroy, :run_payroll, :approve, :unapprove, :commit, :retry_tax_sync,
+          :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit, :retry_tax_sync,
           :correct_pay_date, :void, :create_correction_run, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs
@@ -53,6 +53,19 @@ module Api
           render json: {
             pay_period: pay_period_json(@pay_period, include_items: true)
           }
+        end
+
+        # POST /api/v1/admin/pay_periods/:id/adopt_confirmed_workweek
+        #
+        # Repairs the narrow ordering case where an empty draft was created
+        # immediately before the employer confirmed the same legal workweek.
+        # The service refuses populated or non-draft runs and only accepts an
+        # exact weekday/time/timezone match, so no payroll inputs or math move.
+        def adopt_confirmed_workweek
+          PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: @pay_period, actor: current_user)
+          render json: { pay_period: pay_period_json(@pay_period.reload, include_items: true) }
+        rescue PayPeriodConfirmedWorkweekAdoptionService::AdoptionError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/pay_periods/:id/payroll_field_inputs
@@ -1009,6 +1022,21 @@ module Api
             created_at: pay_period.created_at,
             updated_at: pay_period.updated_at
           }
+
+          if include_items
+            confirmed_workweek = PayPeriodConfirmedWorkweekAdoptionService.candidate_for(pay_period)
+            json[:confirmed_workweek_adoption] = {
+              available: confirmed_workweek.present?,
+              workweek: confirmed_workweek && {
+                id: confirmed_workweek.id,
+                starts_on_weekday: confirmed_workweek.starts_on_weekday,
+                starts_at_minutes: confirmed_workweek.starts_at_minutes,
+                timezone: confirmed_workweek.timezone,
+                effective_on: confirmed_workweek.effective_on,
+                confirmed_at: confirmed_workweek.confirmed_at
+              }
+            }
+          end
 
           if include_items
             json[:payroll_items] = pay_period.payroll_items.includes(:payroll_item_field_entries, employee: :department).map do |item|
