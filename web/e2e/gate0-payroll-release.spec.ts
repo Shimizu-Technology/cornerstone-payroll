@@ -156,6 +156,62 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expectRoute(fixture.admin_email, '/settings/tax-config', /\/app$/);
   });
 
+  test('does not apply a delayed company-profile save after switching clients', async ({ browser }) => {
+    const [firstCompanyResponse, secondCompanyResponse] = await Promise.all([
+      adminApi.get(`admin/companies/${fixture.company_id}`),
+      adminApi.get(`admin/companies/${fixture.other_company_id}`),
+    ]);
+    expect(firstCompanyResponse.ok()).toBeTruthy();
+    expect(secondCompanyResponse.ok()).toBeTruthy();
+    const firstCompany = (await responseJson(firstCompanyResponse)).company as Record<string, unknown>;
+    const secondCompany = (await responseJson(secondCompanyResponse)).company as Record<string, unknown>;
+
+    const context = await browser.newContext({
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    let releaseSaveResponse: () => void = () => {};
+    let markSavePending: () => void = () => {};
+    const saveResponseGate = new Promise<void>((resolve) => { releaseSaveResponse = resolve; });
+    const savePending = new Promise<void>((resolve) => { markSavePending = resolve; });
+
+    await page.route(`**/api/v1/admin/companies/${fixture.company_id}`, async (route) => {
+      if (route.request().method() !== 'PUT') {
+        await route.continue();
+        return;
+      }
+
+      markSavePending();
+      await saveResponseGate;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ company: { ...firstCompany, phone: '671-555-0199' } }),
+      });
+    });
+
+    await page.goto('/client-settings/company');
+    const legalName = page.getByLabel('Legal client name');
+    const payrollPhone = page.getByLabel('Payroll contact phone');
+    await expect(legalName).toHaveValue(String(firstCompany.name));
+    await payrollPhone.fill('671-555-0199');
+    await page.getByRole('button', { name: 'Save profile' }).click();
+    await savePending;
+
+    const sidebar = page.locator('aside');
+    await sidebar.getByRole('button').filter({ hasText: String(firstCompany.name) }).click();
+    await sidebar.getByRole('button').filter({ hasText: String(secondCompany.name) }).click();
+    await expect(legalName).toHaveValue(String(secondCompany.name));
+
+    releaseSaveResponse();
+    await expect(legalName).toHaveValue(String(secondCompany.name));
+    await expect(page.getByText('Company profile saved for this client.')).toHaveCount(0);
+    await context.close();
+  });
+
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {
     const me = await adminApi.get('auth/me');
     expect(me.ok()).toBeTruthy();
