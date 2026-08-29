@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { Building2, Save, ShieldCheck } from 'lucide-react';
+import { Building2, LoaderCircle, Save, ShieldCheck } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -41,7 +41,7 @@ export function ClientCompanyProfile(): ReactElement {
   const activeCompanyIdRef = useRef(activeCompanyId);
   activeCompanyIdRef.current = activeCompanyId;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<void> => {
     const requestId = ++requestIdRef.current;
     const requestedCompanyId = activeCompanyId;
     if (!activeCompanyId) {
@@ -119,7 +119,7 @@ export function ClientCompanyProfile(): ReactElement {
   };
 
   if (loading || (activeCompanyId != null && loadedCompanyId !== activeCompanyId)) {
-    return <div className="rounded-[1.35rem] border border-neutral-200 bg-white p-10 text-center text-sm text-neutral-500">Loading company profile…</div>;
+    return <div className="flex items-center justify-center gap-2 rounded-[1.35rem] border border-neutral-200 bg-white p-8 text-sm text-neutral-500"><LoaderCircle className="h-4 w-4 animate-spin" />Loading company profile…</div>;
   }
 
   if (!form || !company) {
