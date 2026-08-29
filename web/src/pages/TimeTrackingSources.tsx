@@ -220,7 +220,7 @@ export function TimeTrackingSources({ embedded = false }: TimeTrackingSourcesPro
   };
 
   if (!activeCompanyId) {
-    return <div className="rounded-[1.35rem] border border-warning-200 bg-warning-50 p-10 text-center text-sm text-warning-900">Select a client to configure its time-tracking source.</div>;
+    return <div className="rounded-[1.35rem] border border-warning-200 bg-warning-50 p-8 text-center text-sm text-warning-900">Select a client to configure its time-tracking source.</div>;
   }
 
   return (
