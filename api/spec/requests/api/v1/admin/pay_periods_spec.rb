@@ -205,6 +205,18 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.company_workweek).to eq(confirmed_workweek)
       expect(response.parsed_body.dig("pay_period", "compliance_warnings")).to be_empty
       expect(response.parsed_body.dig("pay_period", "confirmed_workweek_adoption", "available")).to be(false)
+      expect(AuditLog.last).to have_attributes(
+        user: admin_user,
+        company: company,
+        record_type: "PayPeriod"
+      )
+      expect(AuditLog.last.metadata).to include(
+        "previous_company_workweek_id" => legacy_workweek.id,
+        "confirmed_company_workweek_id" => confirmed_workweek.id,
+        "starts_on_weekday" => 0,
+        "starts_at_minutes" => 0,
+        "timezone" => "Pacific/Guam"
+      )
     end
 
     it "refuses to move a draft that already contains payroll evidence" do
@@ -224,6 +236,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to include("same weekday, start time, and timezone")
+      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
+    end
+
+    it "rolls back the adoption if its audit event cannot be recorded" do
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+
+      expect {
+        PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: pay_period, actor: admin_user)
+      }.to raise_error(ActiveRecord::RecordInvalid)
+
       expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
     end
 
