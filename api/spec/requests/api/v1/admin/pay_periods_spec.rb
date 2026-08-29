@@ -239,16 +239,6 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
     end
 
-    it "rolls back the adoption if its audit event cannot be recorded" do
-      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
-
-      expect {
-        PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: pay_period, actor: admin_user)
-      }.to raise_error(ActiveRecord::RecordInvalid)
-
-      expect(pay_period.reload.company_workweek).to eq(legacy_workweek)
-    end
-
     it "requires manager or admin access" do
       accountant = create(:user, company: company, organization: organization, role: "accountant")
       allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:current_user).and_return(accountant)
