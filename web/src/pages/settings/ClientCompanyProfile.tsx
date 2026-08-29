@@ -38,12 +38,16 @@ export function ClientCompanyProfile(): ReactElement {
   const [success, setSuccess] = useState<string | null>(null);
   const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
   const requestIdRef = useRef(0);
+  const saveRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
   activeCompanyIdRef.current = activeCompanyId;
 
   const load = useCallback(async (): Promise<void> => {
+    saveRequestIdRef.current += 1;
     const requestId = ++requestIdRef.current;
     const requestedCompanyId = activeCompanyId;
+    setSaving(false);
+    setSuccess(null);
     if (!activeCompanyId) {
       setCompany(null);
       setForm(null);
@@ -102,19 +106,28 @@ export function ClientCompanyProfile(): ReactElement {
     const payload = Object.fromEntries(
       Object.entries(form).filter(([field]) => editableFields.has(field)),
     ) as Partial<ProfileForm>;
+    const saveRequestId = ++saveRequestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
+    const isCurrentSave = (): boolean => (
+      saveRequestId === saveRequestIdRef.current
+      && requestedCompanyId === activeCompanyIdRef.current
+    );
     setSaving(true);
     setError(null);
     setSuccess(null);
     try {
-      const response = await companiesApi.update(activeCompanyId, payload);
+      const response = await companiesApi.update(requestedCompanyId, payload);
+      if (!isCurrentSave()) return;
       setCompany(response.company);
       setForm(buildForm(response.company));
       await refreshCompanies();
+      if (!isCurrentSave()) return;
       setSuccess('Company profile saved for this client.');
     } catch (err) {
+      if (!isCurrentSave()) return;
       setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Failed to save company profile');
     } finally {
-      setSaving(false);
+      if (saveRequestId === saveRequestIdRef.current) setSaving(false);
     }
   };
 
