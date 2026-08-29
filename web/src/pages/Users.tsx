@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,11 @@ const allRoleOptions: { value: UserRole; label: string; description: string }[] 
 
 const needsClientAssignment = (role: UserRole) => role === 'manager' || role === 'accountant' || role === 'client';
 
-export function Users({ embedded = false }: { embedded?: boolean }) {
+interface UsersProps {
+  embedded?: boolean;
+}
+
+export function Users({ embedded = false }: UsersProps): ReactElement {
   const { user: currentUser } = useAuth();
   const roleOptions = currentUser?.role === 'super_admin'
     ? allRoleOptions

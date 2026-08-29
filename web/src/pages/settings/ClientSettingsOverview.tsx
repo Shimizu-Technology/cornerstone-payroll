@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { AlertTriangle, Bell, Building2, CalendarClock, CheckCircle2, Clock3, FileSpreadsheet, Link2, ListPlus, Printer } from 'lucide-react';
 import { Link } from 'react-router';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -27,13 +27,18 @@ interface ReadinessItem {
 
 const iconClass = 'h-5 w-5';
 
-export function ClientSettingsOverview() {
+export function ClientSettingsOverview(): ReactElement {
   const { can } = useAuth();
   const { activeCompany, activeCompanyId } = useCompany();
   const [items, setItems] = useState<ReadinessItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const requestIdRef = useRef(0);
+  const activeCompanyIdRef = useRef(activeCompanyId);
+  activeCompanyIdRef.current = activeCompanyId;
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
     if (!activeCompanyId) {
       setItems([]);
       setLoading(false);
@@ -49,6 +54,7 @@ export function ClientSettingsOverview() {
       payrollReminderApi.getConfig(),
       timeTrackingSourcesApi.list(),
     ]);
+    if (requestId !== requestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
 
     const company = companyResult.status === 'fulfilled' ? companyResult.value.company : null;
     const schedule = scheduleResult.status === 'fulfilled' ? scheduleResult.value.pay_schedule_settings : null;
@@ -151,7 +157,7 @@ export function ClientSettingsOverview() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-3 xl:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         {items.map((item) => {
           const toneClasses = {
             ready: 'border-success-200 bg-success-50/20 text-success-700',
@@ -162,7 +168,7 @@ export function ClientSettingsOverview() {
           const statusLabel = { ready: 'Ready', attention: 'Needs attention', optional: 'Optional', unknown: 'Unavailable' }[item.tone];
 
           return (
-            <Link key={item.href} to={item.href} className="group rounded-[1.2rem] border border-neutral-200 bg-white p-5 shadow-[0_16px_36px_-32px_rgba(15,23,42,0.55)] transition duration-150 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-[0_18px_42px_-28px_rgba(30,64,175,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
+            <Link key={item.href} to={item.href} className="group rounded-[1.2rem] border border-neutral-200 bg-white p-4 shadow-[0_16px_36px_-32px_rgba(15,23,42,0.55)] transition duration-150 hover:-translate-y-0.5 hover:border-primary-200 hover:shadow-[0_18px_42px_-28px_rgba(30,64,175,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300">
               <div className="flex items-start gap-4">
                 <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${toneClasses}`}>{item.icon}</div>
                 <div className="min-w-0 flex-1">

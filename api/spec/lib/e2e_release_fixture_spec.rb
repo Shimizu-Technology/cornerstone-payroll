@@ -43,6 +43,7 @@ RSpec.describe E2eReleaseFixture do
     expect(manifest).not_to have_key("time_tracking_source_secret")
     expect(Organization.find(fixture.fetch(:organization_id)).slug).to eq("gate-0-synthetic-firm")
     expect(Employee.find(fixture.fetch(:employee_id)).full_name).to eq("Avery Example")
+    expect(User.find_by!(email: fixture.fetch(:platform_admin_email))).to be_super_admin
     expect(User.find_by!(email: fixture.fetch(:manager_email))).to be_manager
     expect(User.find_by!(email: fixture.fetch(:accountant_email))).to be_accountant
     expect(User.find_by!(email: fixture.fetch(:inactive_user_email))).not_to be_active

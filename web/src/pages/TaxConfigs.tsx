@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactElement } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,11 @@ interface EditableConfig {
   additional_medicare_threshold: number;
 }
 
-export default function TaxConfigs({ embedded = false }: { embedded?: boolean }) {
+interface TaxConfigsProps {
+  embedded?: boolean;
+}
+
+export default function TaxConfigs({ embedded = false }: TaxConfigsProps): ReactElement {
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
   const [auditLogs, setAuditLogs] = useState<TaxConfigAuditLog[]>([]);

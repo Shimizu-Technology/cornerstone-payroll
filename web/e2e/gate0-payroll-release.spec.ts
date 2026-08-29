@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse } from '@playwright/test';
+import { expect, request as playwrightRequest, test, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -7,6 +7,7 @@ interface Gate0Fixture {
   company_id: number;
   other_company_id: number;
   admin_email: string;
+  platform_admin_email: string;
   manager_email: string;
   accountant_email: string;
   client_email: string;
@@ -108,6 +109,51 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantPage.goto('/pay-schedule-settings');
     await expect(accountantPage).toHaveURL(/\/app$/);
     await accountantContext.close();
+  });
+
+  test('enforces capability guards across consolidated and legacy settings routes', async ({ browser }) => {
+    const newRoleContext = async (email: string): Promise<BrowserContext> => (
+      await browser.newContext({
+        extraHTTPHeaders: {
+          'X-E2E-User-Email': email,
+          'X-Company-Id': String(fixture.company_id),
+        },
+      })
+    );
+    const expectRoute = async (email: string, source: string, destination: RegExp): Promise<void> => {
+      const context = await newRoleContext(email);
+      const page = await context.newPage();
+      await page.goto(source);
+      await expect(page).toHaveURL(destination);
+      await context.close();
+    };
+
+    await expectRoute(fixture.manager_email, '/client-settings/payroll', /\/client-settings\/payroll$/);
+    await expectRoute(fixture.accountant_email, '/client-settings/payroll', /\/app$/);
+    await expectRoute(fixture.admin_email, '/firm-settings/team', /\/firm-settings\/team$/);
+    await expectRoute(fixture.manager_email, '/firm-settings/team', /\/app$/);
+    await expectRoute(fixture.platform_admin_email, '/platform/organizations', /\/platform\/organizations$/);
+    await expectRoute(fixture.admin_email, '/platform/organizations', /\/app$/);
+
+    const clientLegacyRoutes: Array<[string, RegExp]> = [
+      ['/payroll-fields', /\/client-settings\/pay-items$/],
+      ['/check-settings', /\/client-settings\/checks$/],
+      ['/payroll-reminders', /\/client-settings\/notifications$/],
+      ['/time-tracking-sources', /\/client-settings\/integrations$/],
+      ['/pay-schedule-settings', /\/client-settings\/payroll$/],
+    ];
+    for (const [source, destination] of clientLegacyRoutes) {
+      await expectRoute(fixture.admin_email, source, destination);
+    }
+
+    await expectRoute(fixture.accountant_email, '/payroll-fields', /\/app$/);
+    await expectRoute(fixture.manager_email, '/time-tracking-sources', /\/app$/);
+    await expectRoute(fixture.admin_email, '/settings/users', /\/firm-settings\/team$/);
+    await expectRoute(fixture.manager_email, '/settings/users', /\/app$/);
+    await expectRoute(fixture.platform_admin_email, '/settings/organizations', /\/platform\/organizations$/);
+    await expectRoute(fixture.admin_email, '/settings/organizations', /\/app$/);
+    await expectRoute(fixture.platform_admin_email, '/settings/tax-config', /\/platform\/tax-rules$/);
+    await expectRoute(fixture.admin_email, '/settings/tax-config', /\/app$/);
   });
 
   test('binds the fixture identity, rejects inactive access, and enforces role and company boundaries', async () => {

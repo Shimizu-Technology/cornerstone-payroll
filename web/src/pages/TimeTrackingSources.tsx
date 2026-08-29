@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { Link2, RefreshCw, Save, ShieldCheck, Trash2, X, Zap } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -58,7 +58,11 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}`;
 }
 
-export function TimeTrackingSources({ embedded = false }: { embedded?: boolean }) {
+interface TimeTrackingSourcesProps {
+  embedded?: boolean;
+}
+
+export function TimeTrackingSources({ embedded = false }: TimeTrackingSourcesProps): ReactElement {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [form, setForm] = useState<FormState>(() => normalizeForm());
@@ -70,7 +74,11 @@ export function TimeTrackingSources({ embedded = false }: { embedded?: boolean }
   const successTimerRef = useRef<number | null>(null);
 
   const loadSources = useCallback(async () => {
-    if (!activeCompanyId) return;
+    if (!activeCompanyId) {
+      setSources([]);
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -210,6 +218,10 @@ export function TimeTrackingSources({ embedded = false }: { embedded?: boolean }
       setTestingId(null);
     }
   };
+
+  if (!activeCompanyId) {
+    return <div className="rounded-[1.35rem] border border-warning-200 bg-warning-50 p-10 text-center text-sm text-warning-900">Select a client to configure its time-tracking source.</div>;
+  }
 
   return (
     <div>

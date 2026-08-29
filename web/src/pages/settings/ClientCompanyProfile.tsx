@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Building2, Save, ShieldCheck } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -23,12 +23,12 @@ function buildForm(company: CompanyDetail): ProfileForm {
   };
 }
 
-function formatEin(value: string) {
+function formatEin(value: string): string {
   const digits = value.replace(/\D/g, '').slice(0, 9);
   return digits.length <= 2 ? digits : `${digits.slice(0, 2)}-${digits.slice(2)}`;
 }
 
-export function ClientCompanyProfile() {
+export function ClientCompanyProfile(): ReactElement {
   const { activeCompanyId, refreshCompanies } = useCompany();
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [form, setForm] = useState<ProfileForm | null>(null);
@@ -163,14 +163,16 @@ export function ClientCompanyProfile() {
   );
 }
 
-function Field({ label, value, onChange, disabled, placeholder, type = 'text' }: {
+interface FieldProps {
   label: string;
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
   placeholder?: string;
   type?: string;
-}) {
+}
+
+function Field({ label, value, onChange, disabled, placeholder, type = 'text' }: FieldProps): ReactElement {
   return (
     <label className="block text-sm font-semibold text-neutral-700">
       {label}

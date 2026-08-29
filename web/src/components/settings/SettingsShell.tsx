@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { ChevronRight } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -13,7 +14,7 @@ interface SettingsShellProps {
   items: SettingsNavigationItem[];
 }
 
-export function SettingsShell({ title, description, contextLabel, contextValue, items }: SettingsShellProps) {
+export function SettingsShell({ title, description, contextLabel, contextValue, items }: SettingsShellProps): ReactElement {
   const location = useLocation();
   const navigate = useNavigate();
   const selected = items.find((item) => location.pathname === item.href) ?? items[0];

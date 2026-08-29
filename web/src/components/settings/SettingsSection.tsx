@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 
 interface SettingsSectionProps {
   eyebrow?: string;
@@ -8,7 +8,7 @@ interface SettingsSectionProps {
   children: ReactNode;
 }
 
-export function SettingsSection({ eyebrow = 'Client configuration', title, description, actions, children }: SettingsSectionProps) {
+export function SettingsSection({ eyebrow = 'Client configuration', title, description, actions, children }: SettingsSectionProps): ReactElement {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 border-b border-neutral-200 pb-5 sm:flex-row sm:items-start sm:justify-between">

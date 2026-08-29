@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,11 @@ import {
 import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationSummary } from '@/services/api';
 import type { PaginationMeta } from '@/types';
 
-export function Organizations({ embedded = false }: { embedded?: boolean }) {
+interface OrganizationsProps {
+  embedded?: boolean;
+}
+
+export function Organizations({ embedded = false }: OrganizationsProps): ReactElement {
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
