@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Building2, LoaderCircle, Save, ShieldCheck } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -40,7 +40,10 @@ export function ClientCompanyProfile(): ReactElement {
   const requestIdRef = useRef(0);
   const saveRequestIdRef = useRef(0);
   const activeCompanyIdRef = useRef(activeCompanyId);
-  activeCompanyIdRef.current = activeCompanyId;
+
+  useLayoutEffect(() => {
+    activeCompanyIdRef.current = activeCompanyId;
+  }, [activeCompanyId]);
 
   const load = useCallback(async (): Promise<void> => {
     saveRequestIdRef.current += 1;
@@ -96,7 +99,7 @@ export function ClientCompanyProfile(): ReactElement {
     setSuccess(null);
   };
 
-  const save = async () => {
+  const save = async (): Promise<void> => {
     if (!activeCompanyId || loadedCompanyId !== activeCompanyId || !form) return;
     if (canEdit('name') && !form.name.trim()) {
       setError('Client name is required.');
