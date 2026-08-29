@@ -47,7 +47,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("active_printer_profile_id")).to be_nil
       profiles = response.parsed_body.fetch("printer_profiles")
-      expect(profiles.map { |profile| profile.fetch("id") }).to eq([shared_profile.id])
+      expect(profiles.map { |profile| profile.fetch("id") }).to eq([ shared_profile.id ])
       expect(profiles.first.fetch("organization_id")).to eq(organization.id)
     end
   end
@@ -155,7 +155,7 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       expect(foreign_company.reload.check_stock_type).to eq("top_check")
     end
 
-    it "requires manager or admin access" do
+    it "requires firm admin access" do
       accountant = User.create!(
         company: company,
         organization: organization,
@@ -177,8 +177,61 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
       post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies"
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+      expect(response.parsed_body.fetch("error")).to eq("Admin access required")
       expect(company.reload.check_stock_type).to eq("top_check")
+      expect(other_company.reload.active_printer_profile_id).to be_nil
+    end
+  end
+
+
+  describe "manager mutation boundaries" do
+    let!(:manager) do
+      User.create!(
+        company: company,
+        organization: organization,
+        email: "printer-manager@example.com",
+        name: "Printer Manager",
+        role: "manager",
+        active: true
+      )
+    end
+    let!(:profile) do
+      PrinterProfile.create!(
+        organization: organization,
+        name: "Firm Printer",
+        check_stock_type: "bottom_check",
+        check_offset_x: 0.125,
+        check_offset_y: -0.025
+      )
+    end
+
+    before do
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user).and_return(manager)
+      allow_any_instance_of(Api::V1::Admin::PrinterProfilesController).to receive(:current_user_id).and_return(manager.id)
+    end
+
+    it "can apply a shared profile to the active client" do
+      post "/api/v1/admin/printer_profiles/#{profile.id}/apply"
+
+      expect(response).to have_http_status(:ok)
+      expect(company.reload.active_printer_profile_id).to eq(profile.id)
+    end
+
+    it "cannot create, edit, delete, or apply shared profiles firmwide" do
+      requests = [
+        -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
+        -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
+        -> { delete "/api/v1/admin/printer_profiles/#{profile.id}" },
+        -> { post "/api/v1/admin/printer_profiles/#{profile.id}/apply_to_all_companies" }
+      ]
+
+      requests.each do |request|
+        request.call
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.fetch("error")).to eq("Admin access required")
+      end
+
+      expect(profile.reload.name).to eq("Firm Printer")
       expect(other_company.reload.active_printer_profile_id).to be_nil
     end
   end
@@ -279,11 +332,12 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
         -> { post "/api/v1/admin/printer_profiles/clear_active" }
       ]
 
-      requests.each do |request|
+      requests.each_with_index do |request, index|
         request.call
 
         expect(response).to have_http_status(:forbidden)
-        expect(response.parsed_body.fetch("error")).to eq("Manager or admin access required")
+        expected_error = index.in?([ 0, 1, 2, 4 ]) ? "Admin access required" : "Manager or admin access required"
+        expect(response.parsed_body.fetch("error")).to eq(expected_error)
       end
 
       expect(organization.printer_profiles.count).to eq(1)

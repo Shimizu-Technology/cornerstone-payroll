@@ -2488,6 +2488,7 @@ interface AuthApiUser {
   company_name: string;
   home_company_id: number;
   assigned_company_ids: number[];
+  capabilities?: Record<'staff_workspace' | 'payroll_operations' | 'manage_client_configuration' | 'manage_organization' | 'manage_platform', boolean>;
 }
 
 export const companiesApi = {

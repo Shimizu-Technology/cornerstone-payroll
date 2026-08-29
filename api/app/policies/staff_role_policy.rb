@@ -23,7 +23,7 @@ class StaffRolePolicy
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,
     "api/v1/admin/audit_logs" => :manage_organization,
-    "api/v1/admin/tax_configs" => :manage_organization,
+    "api/v1/admin/tax_configs" => :manage_platform,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
     "api/v1/admin/invoice_chat_sessions" => :manage_organization,
@@ -50,11 +50,11 @@ class StaffRolePolicy
     "api/v1/admin/payroll_reminder_configs#test" => :manage_client_configuration,
     "api/v1/admin/checks#update_check_settings" => :manage_client_configuration,
     "api/v1/admin/checks#update_next_check_number" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#create" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#update" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#destroy" => :manage_client_configuration,
+    "api/v1/admin/printer_profiles#create" => :manage_organization,
+    "api/v1/admin/printer_profiles#update" => :manage_organization,
+    "api/v1/admin/printer_profiles#destroy" => :manage_organization,
     "api/v1/admin/printer_profiles#apply" => :manage_client_configuration,
-    "api/v1/admin/printer_profiles#apply_to_all_companies" => :manage_client_configuration,
+    "api/v1/admin/printer_profiles#apply_to_all_companies" => :manage_organization,
     "api/v1/admin/printer_profiles#clear_active" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#index" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
@@ -78,5 +78,11 @@ class StaffRolePolicy
 
   def self.error_message(capability)
     CAPABILITY_ERRORS.fetch(capability)
+  end
+
+  def self.capabilities_for(user)
+    CAPABILITY_ROLES.each_key.each_with_object({}) do |capability, result|
+      result[capability] = allowed?(user, capability)
+    end
   end
 end

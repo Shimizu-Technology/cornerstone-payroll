@@ -2,7 +2,6 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 import {
-  UserCog,
   ClipboardList,
   Shield,
   Building2,
@@ -15,11 +14,6 @@ import {
   WalletCards,
   FolderOpen,
   HandCoins,
-  ListPlus,
-  SlidersHorizontal,
-  Printer,
-  Bell,
-  Link2,
   Search,
   Settings,
   Wrench,
@@ -79,23 +73,17 @@ const toolsNavigation: NavItem[] = [
 ];
 
 const clientSettingsNavigation: NavItem[] = [
-  { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Check Settings', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Time Tracking Sources', href: '/time-tracking-sources', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Client Settings', href: '/client-settings/overview', icon: <Settings className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const adminNavigation: NavItem[] = [
   { name: 'Client Management', href: '/settings/clients', icon: <Building2 className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Tax Configuration', href: '/settings/tax-config', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'User Management', href: '/settings/users', icon: <UserCog className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Audit Logs', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Firm Settings', href: '/firm-settings/team', icon: <Settings className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Audit History', href: '/settings/audit-logs', icon: <ClipboardList className="h-[18px] w-[18px] shrink-0" /> },
 ];
 const platformNavigation: NavItem[] = [
-  { name: 'Organizations', href: '/settings/organizations', icon: <Building2 className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Platform Administration', href: '/platform/organizations', icon: <Shield className="h-[18px] w-[18px] shrink-0" /> },
 ];
-const CLIENT_MANAGEMENT_PATH = '/settings/clients';
 
 const portalAdminNavigation: NavItem[] = [
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
@@ -218,12 +206,12 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 }
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, can } = useAuth();
   const { canViewClientManagement } = useCompany();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
-  const canManageClientConfiguration = isAdmin || user?.role === 'manager';
-  const isSuperAdmin = user?.role === 'super_admin';
+  const canManageClientConfiguration = can('manage_client_configuration');
+  const canManageOrganization = can('manage_organization');
+  const canManagePlatform = can('manage_platform');
   const isClient = user?.role === 'client';
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const commandButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -295,7 +283,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             <SectionDivider icon={<Wrench className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Tools" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={isAdmin ? toolsNavigation : toolsNavigation.filter((item) => item.href !== '/tools/invoices')}
+                items={canManageOrganization ? toolsNavigation : toolsNavigation.filter((item) => item.href !== '/tools/invoices')}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />
@@ -303,12 +291,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </>
         )}
 
-        {canManageClientConfiguration && (
+        {!isClient && (
           <>
             <SectionDivider icon={<Settings className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Settings" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={isAdmin ? clientSettingsNavigation : clientSettingsNavigation.filter((item) => item.href !== '/time-tracking-sources')}
+                items={clientSettingsNavigation}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />
@@ -331,15 +319,17 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
           </>
         )}
 
-        {canViewClientManagement && (
+        {(canViewClientManagement || canManageOrganization || canManagePlatform) && (
           <>
             <SectionDivider icon={<Shield className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Administration" collapsed={collapsed} />
             <div className="space-y-1.5">
-              {isSuperAdmin && (
+              {canManagePlatform && (
                 <NavSection items={platformNavigation} collapsed={collapsed} onNavigate={onNavigate} />
               )}
               <NavSection
-                items={isAdmin ? adminNavigation : adminNavigation.filter((item) => item.href === CLIENT_MANAGEMENT_PATH)}
+                items={adminNavigation.filter((item) => (
+                  item.href === '/settings/clients' ? canViewClientManagement : canManageOrganization
+                ))}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />

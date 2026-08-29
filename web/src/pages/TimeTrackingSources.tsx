@@ -58,7 +58,7 @@ function summarizeTestResult(result: TimeTrackingSourceTestResponse) {
   return `${result.message || 'Connection succeeded.'} Found ${count} employee${count === 1 ? '' : 's'} for today.${source}`;
 }
 
-export function TimeTrackingSources() {
+export function TimeTrackingSources({ embedded = false }: { embedded?: boolean }) {
   const { activeCompany, activeCompanyId } = useCompany();
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [form, setForm] = useState<FormState>(() => normalizeForm());
@@ -213,12 +213,12 @@ export function TimeTrackingSources() {
 
   return (
     <div>
-      <Header
+      {!embedded && <Header
         title="Time Tracking Source"
         description="Configure the time tracking system for the active client."
-      />
+      />}
 
-      <div className="p-4 space-y-6 sm:p-6 lg:p-8">
+      <div className={embedded ? 'space-y-6' : 'p-4 space-y-6 sm:p-6 lg:p-8'}>
         {error && <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
         {success && <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-700">{success}</div>}
 

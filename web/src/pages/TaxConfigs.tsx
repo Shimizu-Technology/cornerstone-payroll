@@ -20,7 +20,7 @@ interface EditableConfig {
   additional_medicare_threshold: number;
 }
 
-export default function TaxConfigs() {
+export default function TaxConfigs({ embedded = false }: { embedded?: boolean }) {
   const [configs, setConfigs] = useState<TaxConfig[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<TaxConfig | null>(null);
   const [auditLogs, setAuditLogs] = useState<TaxConfigAuditLog[]>([]);
@@ -250,7 +250,12 @@ export default function TaxConfigs() {
 
   return (
     <div>
-      <Header
+      {embedded ? (
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div><h2 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">System tax rules</h2><p className="mt-1 text-sm text-neutral-500">Manage annual tax rates, brackets, and deductions across the platform.</p></div>
+          <Button onClick={() => setShowCreateModal(true)}><Plus className="h-4 w-4 mr-2" />Create New Year</Button>
+        </div>
+      ) : <Header
         title="Tax Configuration"
         description="Manage annual tax rates, brackets, and deductions"
         actions={
@@ -259,9 +264,9 @@ export default function TaxConfigs() {
             Create New Year
           </Button>
         }
-      />
+      />}
 
-      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className={embedded ? 'space-y-6' : 'space-y-6 p-4 sm:p-6 lg:p-8'}>
 
       {/* Tax Years List */}
       <div className="space-y-3 sm:hidden">
