@@ -156,6 +156,7 @@ Rails.application.routes.draw do
           resources :payroll_liabilities, only: [ :index ]
           member do
             post :run_payroll
+            post :adopt_confirmed_workweek
             get :payroll_field_inputs
             get :comparison
             post :approve

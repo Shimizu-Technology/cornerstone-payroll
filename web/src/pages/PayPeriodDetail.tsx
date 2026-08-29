@@ -272,6 +272,7 @@ export function PayPeriodDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
   const [retryingSyncTax, setRetryingSyncTax] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
@@ -715,6 +716,21 @@ export function PayPeriodDetail() {
       setError(err instanceof Error ? err.message : 'Failed to run payroll');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleAdoptConfirmedWorkweek = async () => {
+    if (!payPeriod) return;
+
+    try {
+      setAdoptingConfirmedWorkweek(true);
+      setError(null);
+      const response = await payPeriodsApi.adoptConfirmedWorkweek(payPeriod.id);
+      setPayPeriod(response.pay_period);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to use the confirmed workweek');
+    } finally {
+      setAdoptingConfirmedWorkweek(false);
     }
   };
 
@@ -1210,8 +1226,37 @@ export function PayPeriodDetail() {
         )}
 
         {payPeriod.compliance_warnings?.map((warning) => (
-          <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <span className="font-semibold">Workweek confirmation needed:</span> {warning}
+          <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <p className="max-w-4xl leading-6">
+                <span className="font-semibold">Workweek confirmation needed:</span> {warning}
+              </p>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Link
+                  to="/pay-schedule-settings"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-amber-950 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
+                >
+                  Review settings
+                </Link>
+                {payPeriod.confirmed_workweek_adoption?.available && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleAdoptConfirmedWorkweek()}
+                    disabled={adoptingConfirmedWorkweek}
+                  >
+                    {adoptingConfirmedWorkweek ? 'Applying…' : 'Use confirmed workweek'}
+                  </Button>
+                )}
+              </div>
+            </div>
+            {payPeriod.confirmed_workweek_adoption?.available && (
+              <p className="mt-2 max-w-4xl text-xs leading-5 text-amber-800">
+                A matching employer-confirmed workweek is now available. Applying it changes only this empty draft; it does not recalculate payroll or alter completed runs.
+              </p>
+            )}
           </div>
         ))}
 

@@ -467,6 +467,17 @@ export interface PayPeriod {
   company_pay_schedule_id?: number | null;
   company_workweek_id?: number | null;
   compliance_warnings?: string[];
+  confirmed_workweek_adoption?: {
+    available: boolean;
+    workweek?: {
+      id: number;
+      starts_on_weekday: number;
+      starts_at_minutes: number;
+      timezone: string;
+      effective_on: string;
+      confirmed_at?: string | null;
+    } | null;
+  };
   excluded_employee_ids?: number[];
   notes?: string;
   period_description?: string;
