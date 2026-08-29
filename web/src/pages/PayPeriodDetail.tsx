@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams, useNavigate } from 'react-router';
+import { Loader2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +28,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime, payPeriodStatusConfig } from '@/lib/utils';
-import { payPeriodsApi, employeesApi } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi } from '@/services/api';
 import { ImportModal } from '@/components/import/ImportModal';
 import { PayrollIntakeImportModal } from '@/components/import/PayrollIntakeImportModal';
 import { ChecksPanel } from '@/components/payroll/ChecksPanel';
@@ -719,7 +720,7 @@ export function PayPeriodDetail() {
     }
   };
 
-  const handleAdoptConfirmedWorkweek = async () => {
+  const handleAdoptConfirmedWorkweek = async (): Promise<void> => {
     if (!payPeriod) return;
 
     try {
@@ -728,7 +729,7 @@ export function PayPeriodDetail() {
       const response = await payPeriodsApi.adoptConfirmedWorkweek(payPeriod.id);
       setPayPeriod(response.pay_period);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to use the confirmed workweek');
+      setError(err instanceof ApiError ? err.message : 'Failed to use the confirmed workweek');
     } finally {
       setAdoptingConfirmedWorkweek(false);
     }
@@ -1226,8 +1227,8 @@ export function PayPeriodDetail() {
         )}
 
         {payPeriod.compliance_warnings?.map((warning) => (
-          <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div key={warning} role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">
                 <span className="font-semibold">Workweek confirmation needed:</span> {warning}
               </p>
@@ -1236,7 +1237,7 @@ export function PayPeriodDetail() {
                   to="/pay-schedule-settings"
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-3.5 py-1.5 text-xs font-semibold text-amber-950 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
+                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-950 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
                 >
                   Review settings
                 </Link>
@@ -1247,7 +1248,9 @@ export function PayPeriodDetail() {
                     onClick={() => void handleAdoptConfirmedWorkweek()}
                     disabled={adoptingConfirmedWorkweek}
                   >
-                    {adoptingConfirmedWorkweek ? 'Applying…' : 'Use confirmed workweek'}
+                    {adoptingConfirmedWorkweek ? (
+                      <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Applying…</>
+                    ) : 'Use confirmed workweek'}
                   </Button>
                 )}
               </div>
