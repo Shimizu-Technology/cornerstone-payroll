@@ -62,7 +62,7 @@ module Api
         # The service refuses populated or non-draft runs and only accepts an
         # exact weekday/time/timezone match, so no payroll inputs or math move.
         def adopt_confirmed_workweek
-          PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: @pay_period)
+          PayPeriodConfirmedWorkweekAdoptionService.call!(pay_period: @pay_period, actor: current_user)
           render json: { pay_period: pay_period_json(@pay_period.reload, include_items: true) }
         rescue PayPeriodConfirmedWorkweekAdoptionService::AdoptionError => e
           render json: { error: e.message }, status: :unprocessable_entity
