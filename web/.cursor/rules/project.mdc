@@ -13,7 +13,7 @@ React 19 + TypeScript + Vite frontend for Cornerstone Payroll.
 - TypeScript strict mode
 - Vite 7 for bundling
 - Tailwind CSS v4 (with @theme variables)
-- React Router v7
+- React Router v8
 - Lucide React for icons
 
 ## Guiding Principles

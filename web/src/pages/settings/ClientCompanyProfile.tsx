@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Building2, Save, ShieldCheck } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -36,11 +36,18 @@ export function ClientCompanyProfile(): ReactElement {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [loadedCompanyId, setLoadedCompanyId] = useState<number | null>(null);
+  const requestIdRef = useRef(0);
+  const activeCompanyIdRef = useRef(activeCompanyId);
+  activeCompanyIdRef.current = activeCompanyId;
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const requestedCompanyId = activeCompanyId;
     if (!activeCompanyId) {
       setCompany(null);
       setForm(null);
+      setLoadedCompanyId(null);
       setError('Select a client to review its company profile.');
       setLoading(false);
       return;
@@ -49,19 +56,25 @@ export function ClientCompanyProfile(): ReactElement {
     setError(null);
     try {
       const response = await companiesApi.get(activeCompanyId);
+      if (requestId !== requestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
       setCompany(response.company);
       setForm(buildForm(response.company));
+      setLoadedCompanyId(requestedCompanyId);
     } catch (err) {
+      if (requestId !== requestIdRef.current || requestedCompanyId !== activeCompanyIdRef.current) return;
+      setCompany(null);
+      setForm(null);
+      setLoadedCompanyId(requestedCompanyId);
       setError(err instanceof Error ? err.message : 'Failed to load company profile');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current && requestedCompanyId === activeCompanyIdRef.current) setLoading(false);
     }
   }, [activeCompanyId]);
 
   useEffect(() => { void load(); }, [load]);
 
   const editableFields = useMemo(() => new Set(company?.editable_fields || []), [company?.editable_fields]);
-  const hasChanges = company != null && form != null && JSON.stringify(form) !== JSON.stringify(buildForm(company));
+  const hasChanges = company != null && form != null && loadedCompanyId === activeCompanyId && JSON.stringify(form) !== JSON.stringify(buildForm(company));
   const canEdit = (field: keyof ProfileForm) => editableFields.has(field);
 
   useEffect(() => {
@@ -80,7 +93,7 @@ export function ClientCompanyProfile(): ReactElement {
   };
 
   const save = async () => {
-    if (!activeCompanyId || !form) return;
+    if (!activeCompanyId || loadedCompanyId !== activeCompanyId || !form) return;
     if (canEdit('name') && !form.name.trim()) {
       setError('Client name is required.');
       return;
@@ -105,7 +118,7 @@ export function ClientCompanyProfile(): ReactElement {
     }
   };
 
-  if (loading) {
+  if (loading || (activeCompanyId != null && loadedCompanyId !== activeCompanyId)) {
     return <div className="rounded-[1.35rem] border border-neutral-200 bg-white p-10 text-center text-sm text-neutral-500">Loading company profile…</div>;
   }
 

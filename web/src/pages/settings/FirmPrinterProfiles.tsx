@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { AlertTriangle, Pencil, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -72,6 +72,7 @@ export function FirmPrinterProfiles(): ReactElement {
   const [applyingId, setApplyingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const applyInFlightRef = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -138,10 +139,12 @@ export function FirmPrinterProfiles(): ReactElement {
   };
 
   const applyToAll = async (profile: PrinterProfile) => {
+    if (applyInFlightRef.current) return;
     const confirmation = window.prompt(
       `This will replace the active check stock and calibration for every client in the firm with "${profile.name}". Type APPLY TO ALL CLIENTS to continue.`,
     );
     if (confirmation !== 'APPLY TO ALL CLIENTS') return;
+    applyInFlightRef.current = true;
     setApplyingId(profile.id);
     setError(null);
     setSuccess(null);
@@ -151,6 +154,7 @@ export function FirmPrinterProfiles(): ReactElement {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to apply printer profile');
     } finally {
+      applyInFlightRef.current = false;
       setApplyingId(null);
     }
   };
@@ -191,7 +195,7 @@ export function FirmPrinterProfiles(): ReactElement {
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   <Button variant="outline" size="sm" onClick={() => beginEdit(profile)}><Pencil className="mr-1.5 h-4 w-4" />Edit</Button>
-                  <Button variant="outline" size="sm" onClick={() => void applyToAll(profile)} disabled={applyingId === profile.id}>{applyingId === profile.id ? 'Applying…' : 'Apply to all clients'}</Button>
+                  <Button variant="outline" size="sm" onClick={() => void applyToAll(profile)} disabled={applyingId !== null}>{applyingId === profile.id ? 'Applying…' : 'Apply to all clients'}</Button>
                   <Button variant="ghost" size="sm" className="text-danger-700 hover:text-danger-800" onClick={() => void remove(profile)}><Trash2 className="mr-1.5 h-4 w-4" />Delete</Button>
                 </div>
               </CardContent>
