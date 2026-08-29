@@ -2,7 +2,7 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Download } from 'lucide-react';
 import { Link } from 'react-router';
@@ -103,7 +103,11 @@ function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentP
   return nextConfig;
 }
 
-export function CheckSettingsPage({ embedded = false }: { embedded?: boolean }) {
+interface CheckSettingsPageProps {
+  embedded?: boolean;
+}
+
+export function CheckSettingsPage({ embedded = false }: CheckSettingsPageProps): ReactElement {
   const { can } = useAuth();
   const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
@@ -631,7 +635,7 @@ export function CheckSettingsPage({ embedded = false }: { embedded?: boolean }) 
               {can('manage_organization') && (
                 <Link
                   to="/firm-settings/printers"
-                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-3.5 py-1.5 text-xs font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800"
+                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800"
                 >
                   Manage Firm Profiles
                 </Link>

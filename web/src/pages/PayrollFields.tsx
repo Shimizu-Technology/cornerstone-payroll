@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -53,7 +53,11 @@ const defaultField: Partial<PayrollFieldDefinition> = {
   sort_order: 0,
 };
 
-export function PayrollFields({ embedded = false }: { embedded?: boolean }) {
+interface PayrollFieldsProps {
+  embedded?: boolean;
+}
+
+export function PayrollFields({ embedded = false }: PayrollFieldsProps): ReactElement {
   const [fields, setFields] = useState<PayrollFieldDefinition[]>([]);
   const [draft, setDraft] = useState<Partial<PayrollFieldDefinition>>(defaultField);
   const [editingId, setEditingId] = useState<number | null>(null);

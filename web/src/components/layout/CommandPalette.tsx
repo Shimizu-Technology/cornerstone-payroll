@@ -75,7 +75,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
   const navigate = useNavigate();
   const location = useLocation();
   const { isClient, can } = useAuth();
-  const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
+  const { companies, activeCompany, canSwitchCompany, canViewClientManagement, switchCompany } = useCompany();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -247,7 +247,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
       });
     }
 
-    if (!isClient) {
+    if (!isClient && canViewClientManagement) {
       add({
         id: 'clients',
         label: 'Client Management',
@@ -347,7 +347,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany?.id, can, canSwitchCompany, companies, isClient]);
+  }, [activeCompany?.id, can, canSwitchCompany, canViewClientManagement, companies, isClient]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AlertTriangle, Pencil, Plus, Printer, Save, Trash2 } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -45,7 +45,7 @@ function draftFromProfile(profile: PrinterProfile): ProfileDraft {
   };
 }
 
-function profilePayload(draft: ProfileDraft) {
+function profilePayload(draft: ProfileDraft): Partial<PrinterProfile> {
   if (!draft.name.trim()) throw new Error('Profile name is required.');
   const parsed = JSON.parse(draft.check_layout_json || '{}');
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -63,7 +63,7 @@ function profilePayload(draft: ProfileDraft) {
   };
 }
 
-export function FirmPrinterProfiles() {
+export function FirmPrinterProfiles(): ReactElement {
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
   const [editingId, setEditingId] = useState<number | 'new' | null>(null);
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft);
@@ -208,14 +208,16 @@ export function FirmPrinterProfiles() {
   );
 }
 
-function ProfileEditor({ draft, onChange, onSave, onCancel, saving, title }: {
+interface ProfileEditorProps {
   draft: ProfileDraft;
   onChange: (draft: ProfileDraft) => void;
   onSave: () => void;
   onCancel: () => void;
   saving: boolean;
   title: string;
-}) {
+}
+
+function ProfileEditor({ draft, onChange, onSave, onCancel, saving, title }: ProfileEditorProps): ReactElement {
   const update = <K extends keyof ProfileDraft>(field: K, value: ProfileDraft[K]) => onChange({ ...draft, [field]: value });
   return (
     <Card className="border-primary-200">
@@ -237,6 +239,12 @@ function ProfileEditor({ draft, onChange, onSave, onCancel, saving, title }: {
   );
 }
 
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+interface FieldProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function Field({ label, value, onChange }: FieldProps): ReactElement {
   return <label className="block text-sm font-semibold text-neutral-700">{label}<Input className="mt-1.5" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }

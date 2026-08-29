@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { FileSpreadsheet, Save } from 'lucide-react';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useCompany } from '@/contexts/CompanyContext';
 import { companiesApi, type CompanyDetail } from '@/services/api';
 
-export function ClientReportSettings() {
+export function ClientReportSettings(): ReactElement {
   const { activeCompanyId } = useCompany();
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [enabled, setEnabled] = useState(false);

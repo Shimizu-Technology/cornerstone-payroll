@@ -74,7 +74,7 @@ function isAdminRole(role?: string) {
   return role === 'admin' || role === 'org_admin' || role === 'super_admin';
 }
 
-function canUser(user: User | null, capability: StaffCapability) {
+function canUser(user: User | null, capability: StaffCapability): boolean {
   return user?.capabilities[capability] === true;
 }
 

@@ -85,6 +85,14 @@ class E2eReleaseFixture
         role: "org_admin",
         active: true
       )
+      platform_admin = User.create!(
+        organization: organization,
+        company: company,
+        email: "gate0-platform-admin@example.test",
+        name: "Gate 0 Platform Admin",
+        role: "super_admin",
+        active: true
+      )
       client = User.create!(
         organization: organization,
         company: company,
@@ -241,6 +249,7 @@ class E2eReleaseFixture
         company_id: company.id,
         other_company_id: other_company.id,
         admin_email: admin.email,
+        platform_admin_email: platform_admin.email,
         manager_email: manager.email,
         accountant_email: accountant.email,
         client_email: client.email,

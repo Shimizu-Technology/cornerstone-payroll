@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, History, Scale } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
@@ -54,7 +54,11 @@ function buildForm(data: PayScheduleSettingsResponse): FormState {
   };
 }
 
-export function PayScheduleSettings({ embedded = false }: { embedded?: boolean }) {
+interface PayScheduleSettingsProps {
+  embedded?: boolean;
+}
+
+export function PayScheduleSettings({ embedded = false }: PayScheduleSettingsProps): ReactElement {
   const [response, setResponse] = useState<PayScheduleSettingsResponse | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);

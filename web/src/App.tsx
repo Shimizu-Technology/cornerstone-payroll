@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth, type StaffCapability } from '@/contexts/AuthContext';
@@ -120,7 +120,12 @@ function ManagerOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function CapabilityRoute({ capability, children }: { capability: StaffCapability; children: React.ReactNode }) {
+interface CapabilityRouteProps {
+  capability: StaffCapability;
+  children: ReactNode;
+}
+
+function CapabilityRoute({ capability, children }: CapabilityRouteProps): ReactElement {
   const { can, isLoading } = useAuth();
   if (isLoading) return <PageLoader />;
   if (!can(capability)) return <Navigate to="/app" replace />;

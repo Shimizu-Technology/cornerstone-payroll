@@ -218,6 +218,10 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
     end
 
     it "cannot create, edit, delete, or apply shared profiles firmwide" do
+      setting_fields = %w[active_printer_profile_id check_stock_type check_offset_x check_offset_y check_layout_config]
+      profile_count = organization.printer_profiles.count
+      company_settings = company.attributes.slice(*setting_fields)
+      other_company_settings = other_company.attributes.slice(*setting_fields)
       requests = [
         -> { post "/api/v1/admin/printer_profiles", params: { printer_profile: { name: "Unauthorized", check_stock_type: "top_check" } } },
         -> { patch "/api/v1/admin/printer_profiles/#{profile.id}", params: { printer_profile: { name: "Unauthorized" } } },
@@ -231,8 +235,10 @@ RSpec.describe "Api::V1::Admin::PrinterProfiles", type: :request do
         expect(response.parsed_body.fetch("error")).to eq("Admin access required")
       end
 
+      expect(organization.printer_profiles.count).to eq(profile_count)
       expect(profile.reload.name).to eq("Firm Printer")
-      expect(other_company.reload.active_printer_profile_id).to be_nil
+      expect(company.reload.attributes.slice(*setting_fields)).to eq(company_settings)
+      expect(other_company.reload.attributes.slice(*setting_fields)).to eq(other_company_settings)
     end
   end
 

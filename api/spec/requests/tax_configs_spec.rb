@@ -15,7 +15,8 @@ RSpec.describe "Tax Configs Admin API", type: :request do
     )
   end
   let!(:organization_admin) do
-    User.create!(
+    create(
+      :user,
       company: company,
       organization: company.organization,
       email: "tax-organization-admin@example.com",

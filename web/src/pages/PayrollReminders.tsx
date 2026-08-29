@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactElement } from 'react';
 import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -18,7 +18,11 @@ import {
 import { payrollReminderApi } from '@/services/api';
 import type { PayrollReminderConfig, PayrollReminderLog } from '@/services/api';
 
-export default function PayrollReminders({ embedded = false }: { embedded?: boolean }) {
+interface PayrollRemindersProps {
+  embedded?: boolean;
+}
+
+export default function PayrollReminders({ embedded = false }: PayrollRemindersProps): ReactElement {
   const [config, setConfig] = useState<PayrollReminderConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

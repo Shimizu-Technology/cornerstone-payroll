@@ -1,8 +1,9 @@
+import type { ReactElement } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { SettingsShell } from './SettingsShell';
 import { firmSettingsNavigation } from './settings-navigation';
 
-export function FirmSettingsLayout() {
+export function FirmSettingsLayout(): ReactElement {
   const { user, can } = useAuth();
   const visibleItems = firmSettingsNavigation.filter((item) => !item.capability || can(item.capability));
 
