@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require "bigdecimal"
 
 module TimeTracking
   module CanonicalPayload
@@ -18,6 +19,8 @@ module TimeTracking
         end.sort.to_h
       when Array
         value.map { |child| canonicalize(child) }
+      when BigDecimal
+        value.to_f
       else
         value
       end

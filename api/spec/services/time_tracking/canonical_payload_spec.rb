@@ -13,4 +13,13 @@ RSpec.describe TimeTracking::CanonicalPayload do
   it "preserves array order" do
     expect(described_class.checksum(rows: [ 1, 2 ])).not_to eq(described_class.checksum(rows: [ 2, 1 ]))
   end
+
+  it "normalizes source decimals to AIRE's JSON float representation" do
+    decimal_payload = { total_hours: BigDecimal("8.00") }
+    float_payload = { total_hours: 8.0 }
+    decoded_payload = JSON.parse(JSON.generate(float_payload))
+
+    expect(described_class.checksum(decimal_payload)).to eq(described_class.checksum(float_payload))
+    expect(described_class.checksum(decoded_payload)).to eq(described_class.checksum(float_payload))
+  end
 end
