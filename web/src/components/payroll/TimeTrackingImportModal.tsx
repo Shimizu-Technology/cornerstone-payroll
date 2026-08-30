@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, History, ShieldCheck, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
+import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
 import type { TimeTrackingImportData, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
@@ -47,6 +48,7 @@ function exclusionLabel(reason: string): string {
 }
 
 export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
+  const navigate = useNavigate();
   const [step, setStep] = useState<Step>('select');
   const [sources, setSources] = useState<TimeTrackingSource[]>([]);
   const [sourceId, setSourceId] = useState<number | ''>('');
@@ -345,10 +347,28 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           {step === 'select' && (
             <div className="space-y-6">
               {sourcesLoading ? (
-                <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">Loading this client’s time tracking source…</div>
+                <div className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+                  <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Loading this client’s time tracking source…
+                </div>
               ) : sources.length === 0 ? (
                 <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-900">
-                  No active time tracking source is configured for this client. Add one in Time Tracking Source settings, then return to this pay period.
+                  <div className="flex items-start gap-2">
+                    <Link2 className="mt-2 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <p>No active time tracking source is configured for this client. Add one in Time Tracking Source settings, then return to this pay period.</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => {
+                      onClose();
+                      navigate('/time-tracking-sources');
+                    }}
+                  >
+                    Configure time tracking
+                  </Button>
                 </div>
               ) : (
                 <>

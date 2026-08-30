@@ -6,7 +6,8 @@ RSpec.describe TimeTrackingImport do
   it "keeps finalized payroll batch provenance and payload immutable after preview creation" do
     company = create(:company)
     pay_period = create(:pay_period, company: company)
-    source = TimeTrackingSource.create!(
+    source = create(
+      :time_tracking_source,
       company: company,
       name: "AIRE",
       source_type: "aire_services",
@@ -33,6 +34,19 @@ RSpec.describe TimeTrackingImport do
     expect(import.update(external_batch_id: "AIRE-PAY-REPLACED-001")).to eq(false)
     expect(import.errors[:base]).to include("Finalized payroll batch provenance and payload cannot be changed after preview creation")
     expect(import.reload.external_batch_id).to eq("AIRE-PAY-IMMUTABLE-001")
+
+    expect(
+      import.update(
+        external_batch_id: nil,
+        external_batch_checksum: nil,
+        contract_version: nil,
+        source_cutoff_at: nil,
+        raw_payload: { "batch_id" => "AIRE-PAY-REPLACED-001" }
+      )
+    ).to eq(false)
+    expect(import.errors[:base]).to include("Finalized payroll batch provenance and payload cannot be changed after preview creation")
+    expect(import.reload.external_batch_id).to eq("AIRE-PAY-IMMUTABLE-001")
+    expect(import.raw_payload).to eq("batch_id" => "AIRE-PAY-IMMUTABLE-001")
 
     expect(import.update(status: "applied", applied_at: Time.current)).to eq(true)
   end
