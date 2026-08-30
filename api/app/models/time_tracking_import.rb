@@ -25,11 +25,17 @@ class TimeTrackingImport < ApplicationRecord
   private
 
   def finalized_batch_snapshot_is_immutable
-    return unless finalized_batch?
+    return unless finalized_batch_persisted?
 
     changed_fields = FINALIZED_IMMUTABLE_ATTRIBUTES.select { |attribute| will_save_change_to_attribute?(attribute) }
     return if changed_fields.empty?
 
     errors.add(:base, "Finalized payroll batch provenance and payload cannot be changed after preview creation")
+  end
+
+  def finalized_batch_persisted?
+    %w[external_batch_id external_batch_checksum contract_version source_cutoff_at].any? do |attribute|
+      attribute_in_database(attribute).present?
+    end
   end
 end
