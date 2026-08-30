@@ -130,6 +130,65 @@ RSpec.describe HourlyPayrollCalculator do
     end
   end
 
+  describe "with a finalized-source rate correction" do
+    let(:employee) do
+      create(
+        :employee,
+        company: company,
+        department: department,
+        employment_type: "hourly",
+        pay_rate: 25.00,
+        filing_status: "single"
+      )
+    end
+
+    it "keeps the old-rate reversal in gross pay and the earnings audit trail" do
+      rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+      payroll_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 25,
+        hours_worked: 8,
+        overtime_hours: 0
+      )
+      payroll_item.wage_rate_hours = [
+        {
+          employee_wage_rate_id: rate.id,
+          label: "Flight Hours · AIRE $20.00/hr",
+          rate: 20,
+          regular_hours: -2,
+          overtime_hours: 0,
+          holiday_hours: 0,
+          pto_hours: 0,
+          is_primary: true,
+          active: true
+        },
+        {
+          employee_wage_rate_id: rate.id,
+          label: "Flight Hours · AIRE $25.00/hr",
+          rate: 25,
+          regular_hours: 10,
+          overtime_hours: 0,
+          holiday_hours: 0,
+          pto_hours: 0,
+          is_primary: false,
+          active: true
+        }
+      ]
+
+      payroll_item.calculate!
+
+      expect(payroll_item.reload.gross_pay).to eq(210.00)
+      expect(payroll_item.payroll_item_earnings.sum(:amount)).to eq(210.00)
+      expect(payroll_item.payroll_item_earnings).to include(
+        have_attributes(category: "other", amount: -40.00, hours: nil, label: /correction reversal/),
+        have_attributes(category: "regular", amount: 250.00, hours: 10.0)
+      )
+    end
+  end
+
   describe "with tips and bonus" do
     let(:employee) do
       create(:employee,

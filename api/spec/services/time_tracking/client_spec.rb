@@ -329,4 +329,65 @@ RSpec.describe TimeTracking::Client do
       expect(policy).not_to have_received(:resolve_public_addresses!)
     end
   end
+
+  describe "finalized payroll batches" do
+    let(:source) do
+      TimeTrackingSource.create!(
+        company: create(:company),
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://time.example.com/client-a",
+        shared_secret: "secret"
+      )
+    end
+
+    it "discovers exact-date batches with both supported shared-secret headers" do
+      stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/batches")
+        .with(
+          query: { start_date: "2026-08-16", end_date: "2026-08-31" },
+          headers: { "X-Shared-Secret" => "secret", "X-Payroll-Shared-Secret" => "secret" }
+        )
+        .to_return(status: 200, body: { payroll_batches: [] }.to_json, headers: { "Content-Type" => "application/json" })
+
+      result = client_for(source).payroll_batches(start_date: "2026-08-16", end_date: "2026-08-31")
+
+      expect(result).to eq("payroll_batches" => [])
+      expect(stub).to have_been_requested.once
+    end
+
+    it "retrieves a stable batch ID and verifies source identity" do
+      stub = stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/batches/AIRE-PAY-001")
+        .to_return(
+          status: 200,
+          body: { source: "aire_services", batch_id: "AIRE-PAY-001" }.to_json,
+          headers: { "Content-Type" => "application/json" }
+        )
+
+      result = client_for(source).payroll_batch(batch_id: "AIRE-PAY-001")
+
+      expect(result["batch_id"]).to eq("AIRE-PAY-001")
+      expect(stub).to have_been_requested.once
+    end
+
+    it "rejects unsafe batch identifiers before making a request" do
+      request = stub_request(:get, %r{time\.example\.com})
+
+      [ "../admin", ".", "..." ].each do |batch_id|
+        expect do
+          client_for(source).payroll_batch(batch_id: batch_id)
+        end.to raise_error(TimeTracking::Client::Error, /Invalid payroll batch ID/)
+      end
+      expect(request).not_to have_been_requested
+    end
+
+    it "rejects a malformed batch list" do
+      stub_request(:get, "https://time.example.com/client-a/api/v1/payroll/batches")
+        .with(query: { start_date: "2026-08-16", end_date: "2026-08-31" })
+        .to_return(status: 200, body: { payroll_batches: {} }.to_json, headers: { "Content-Type" => "application/json" })
+
+      expect do
+        client_for(source).payroll_batches(start_date: "2026-08-16", end_date: "2026-08-31")
+      end.to raise_error(TimeTracking::Client::Error, /invalid payroll batch list/)
+    end
+  end
 end

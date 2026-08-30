@@ -56,10 +56,10 @@ class HourlyPayrollCalculator < PayrollCalculator
         rate = entry[:rate].to_f
         label = entry[:label]
 
-        build_earning("regular", label, entry[:regular_hours], rate, entry[:regular_pay]) if entry[:regular_pay] > 0
-        build_earning("overtime", "#{label} OT", entry[:overtime_hours], rate * 1.5, entry[:overtime_pay]) if entry[:overtime_pay] > 0
-        build_earning("holiday", "#{label} Holiday", entry[:holiday_hours], rate, entry[:holiday_pay]) if entry[:holiday_pay] > 0
-        build_earning("pto", "#{label} PTO", entry[:pto_hours], rate, entry[:pto_pay]) if entry[:pto_pay] > 0
+        build_multi_rate_earning("regular", label, entry[:regular_hours], rate, entry[:regular_pay])
+        build_multi_rate_earning("overtime", "#{label} OT", entry[:overtime_hours], rate * 1.5, entry[:overtime_pay])
+        build_multi_rate_earning("holiday", "#{label} Holiday", entry[:holiday_hours], rate, entry[:holiday_pay])
+        build_multi_rate_earning("pto", "#{label} PTO", entry[:pto_hours], rate, entry[:pto_pay])
       end
     else
       rate = payroll_item.pay_rate.to_f
@@ -157,5 +157,15 @@ class HourlyPayrollCalculator < PayrollCalculator
       rate: rate,
       amount: amount.to_f.round(2)
     )
+  end
+
+  def build_multi_rate_earning(category, label, hours, rate, amount)
+    return if amount.zero?
+
+    if amount.positive?
+      build_earning(category, label, hours, rate, amount)
+    else
+      build_earning("other", "#{label} correction reversal", nil, nil, amount)
+    end
   end
 end

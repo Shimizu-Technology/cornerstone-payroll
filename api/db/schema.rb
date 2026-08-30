@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_23_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_31_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1876,13 +1876,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_23_190000) do
   create_table "time_tracking_imports", force: :cascade do |t|
     t.datetime "applied_at"
     t.bigint "applied_by_id"
+    t.string "contract_version"
     t.datetime "created_at", null: false
     t.date "end_date", null: false
+    t.string "external_batch_checksum"
+    t.string "external_batch_id"
     t.date "fetch_end_date", null: false
     t.date "fetch_start_date", null: false
+    t.text "negative_adjustment_acknowledgement"
     t.bigint "pay_period_id", null: false
     t.jsonb "processed_payload", default: {}, null: false
     t.jsonb "raw_payload", default: {}, null: false
+    t.datetime "source_cutoff_at"
     t.string "source_payload_hash", null: false
     t.date "start_date", null: false
     t.string "status", default: "previewed", null: false
@@ -1892,7 +1897,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_23_190000) do
     t.index ["applied_by_id"], name: "index_time_tracking_imports_on_applied_by_id"
     t.index ["pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash"], name: "idx_time_tracking_imports_idempotency", unique: true
     t.index ["pay_period_id"], name: "index_time_tracking_imports_on_pay_period_id"
+    t.index ["time_tracking_source_id", "external_batch_id"], name: "idx_time_tracking_imports_unique_external_batch", unique: true, where: "(external_batch_id IS NOT NULL)"
     t.index ["time_tracking_source_id"], name: "index_time_tracking_imports_on_time_tracking_source_id"
+    t.check_constraint "external_batch_id IS NULL AND external_batch_checksum IS NULL AND contract_version IS NULL AND source_cutoff_at IS NULL OR external_batch_id IS NOT NULL AND external_batch_checksum IS NOT NULL AND contract_version IS NOT NULL AND source_cutoff_at IS NOT NULL", name: "time_tracking_imports_batch_provenance_complete"
   end
 
   create_table "time_tracking_sources", force: :cascade do |t|
