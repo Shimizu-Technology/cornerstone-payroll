@@ -230,6 +230,9 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "records an empty finalized batch as applied without creating payroll items" do
     company, pay_period, source = setup_records
     payload = payload_for(pay_period: pay_period, employee: nil, adjustments: [], batch_id: "AIRE-PAY-EMPTY-001")
+    payload["cutoff_at"] = "2026-08-31T11:00:00+10:00"
+    payload["export"]["cutoff_at"] = payload["cutoff_at"]
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
     import = preview_import(pay_period: pay_period, source: source, payload: payload)
 
     results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call

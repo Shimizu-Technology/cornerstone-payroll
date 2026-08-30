@@ -166,13 +166,13 @@ module TimeTracking
     def category_buckets(adjustments)
       buckets = {}
       Array(adjustments).each do |adjustment|
-        category = adjustment.fetch("category")
+        category = adjustment["category"] || {}
         key = category_bucket_key(adjustment)
         bucket = buckets[key] ||= {
           source_category_id: adjustment["source_category_id"].to_s.presence,
           key: category["key"].to_s.presence,
           name: category["name"].presence || "Uncategorized",
-          effective_rate_cents: adjustment.fetch("effective_rate_cents"),
+          effective_rate_cents: adjustment["effective_rate_cents"],
           total_hours: 0.to_d,
           regular_hours: 0.to_d,
           overtime_hours: 0.to_d,
@@ -201,7 +201,7 @@ module TimeTracking
     end
 
     def category_bucket_key(adjustment)
-      category = adjustment.fetch("category")
+      category = adjustment["category"] || {}
       [
         adjustment["source_category_id"],
         category["key"],
@@ -303,9 +303,12 @@ module TimeTracking
         existing = TimeTrackingImport.lock.find_by(time_tracking_source: source, external_batch_id: batch_id)
         return validate_existing_import!(existing, checksum) if existing
 
-        TimeTrackingImport.create!(attrs)
-      rescue ActiveRecord::RecordNotUnique
-        validate_existing_import!(TimeTrackingImport.lock.find_by!(time_tracking_source: source, external_batch_id: batch_id), checksum)
+        begin
+          TimeTrackingImport.transaction(requires_new: true) { TimeTrackingImport.create!(attrs) }
+        rescue ActiveRecord::RecordNotUnique
+          existing = TimeTrackingImport.lock.find_by!(time_tracking_source: source, external_batch_id: batch_id)
+          validate_existing_import!(existing, checksum)
+        end
       end
     end
 
@@ -330,7 +333,7 @@ module TimeTracking
 
     def source_gross_delta_cents(adjustments)
       Array(adjustments).sum do |adjustment|
-        rate_cents = decimal(adjustment.fetch("effective_rate_cents"))
+        rate_cents = decimal(adjustment["effective_rate_cents"] || 0)
         regular = decimal(adjustment.fetch("regular_hours"))
         overtime = decimal(adjustment.fetch("overtime_hours"))
         (regular * rate_cents) + (overtime * rate_cents * BigDecimal("1.5"))

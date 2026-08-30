@@ -28,6 +28,29 @@ RSpec.describe TimeTracking::ImportPreviewService do
   end
 
   describe "#call" do
+    it "delegates AIRE sources to the finalized batch preview service" do
+      company = create(:company)
+      pay_period = create(:pay_period, company: company)
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      batch_service = instance_double(TimeTracking::BatchImportPreviewService)
+
+      expect(TimeTracking::BatchImportPreviewService).to receive(:new).with(
+        pay_period: pay_period,
+        source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date
+      ).and_return(batch_service)
+      expect(batch_service).to receive(:call).and_return(:finalized_preview)
+
+      expect(described_class.new(pay_period: pay_period, source: source).call).to eq(:finalized_preview)
+    end
+
     it "surfaces category buckets and warns when a multi-rate employee needs earning-type mapping" do
       company = create(:company)
       confirm_workweek!(company)
