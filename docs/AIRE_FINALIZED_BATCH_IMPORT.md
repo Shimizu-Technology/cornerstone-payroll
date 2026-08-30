@@ -62,4 +62,3 @@ An empty finalized batch is valid and may be applied so Cornerstone retains evid
 The branch includes automated coverage for canonical checksums, payload reconciliation, list/detail retrieval, employee and rate mapping, apply-time revalidation, idempotency, empty batches, exclusions, negative corrections, and request serialization.
 
 Local full-stack verification used isolated AIRE and Cornerstone databases and servers. A finalized AIRE batch containing a four-hour carryover at $32 per hour and one open-clock exclusion was retrieved, integrity-verified, applied once, and rejected as a duplicate on the second retrieval. The resulting Cornerstone payroll row retained the source batch ID, checksum, contract `2.0`, cutoff, earning label, rate, and hours.
-
