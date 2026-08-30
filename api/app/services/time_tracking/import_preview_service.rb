@@ -12,6 +12,13 @@ module TimeTracking
     end
 
     def call
+      return BatchImportPreviewService.new(
+        pay_period: pay_period,
+        source: source,
+        start_date: start_date,
+        end_date: end_date
+      ).call if source.source_type == "aire_services"
+
       raise ArgumentError, "Time tracking source is inactive" unless source.active?
       raise ArgumentError, "Source does not belong to this company" unless source.company_id == pay_period.company_id
       raise ArgumentError, "end_date must be on or after start_date" if end_date < start_date

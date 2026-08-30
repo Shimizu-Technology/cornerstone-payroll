@@ -39,7 +39,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -88,7 +88,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -135,7 +135,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -182,7 +182,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -225,7 +225,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -264,7 +264,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -284,7 +284,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -309,7 +309,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
@@ -341,7 +341,7 @@ RSpec.describe TimeTracking::ImportPreviewService do
       source = TimeTrackingSource.create!(
         company: company,
         name: "AIRE",
-        source_type: "aire_services",
+        source_type: "custom",
         base_url: "https://aire.example.com",
         shared_secret: "secret"
       )
