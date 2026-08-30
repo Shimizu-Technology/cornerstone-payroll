@@ -824,6 +824,7 @@ export interface TimeTrackingWarning {
   source_category_id?: string | null;
   source_category_key?: string | null;
   source_category_name?: string | null;
+  source_effective_rate_cents?: number | null;
 }
 
 export interface TimeTrackingPreviewCategory {
@@ -838,6 +839,8 @@ export interface TimeTrackingPreviewCategory {
   employee_wage_rate_id?: number | null;
   wage_rate_label?: string | null;
   wage_rate_match_method?: string | null;
+  source_kinds?: Array<'current' | 'carryover' | 'correction'>;
+  source_time_entry_ids?: string[];
 }
 
 export interface TimeTrackingPreviewRow {
@@ -851,7 +854,9 @@ export interface TimeTrackingPreviewRow {
   regular_hours: number;
   overtime_hours: number;
   total_hours: number;
+  estimated_gross_delta?: number;
   categories?: TimeTrackingPreviewCategory[];
+  source_kind_counts?: Partial<Record<'current' | 'carryover' | 'correction', number>>;
   issues: Record<string, unknown>;
   warnings: TimeTrackingWarning[];
   ready: boolean;
@@ -870,7 +875,33 @@ export interface TimeTrackingImportData {
   processed_payload: {
     ready: boolean;
     rows: TimeTrackingPreviewRow[];
+    validation_version?: 'time_summary_v1' | 'payroll_batch_v2';
+    schema_version?: string;
+    batch_id?: string;
+    batch_checksum?: string;
+    cutoff_at?: string;
+    finalized_at?: string;
+    negative_adjustment_count?: number;
+    summary?: Record<string, number>;
+    issues?: Record<string, number>;
+    exclusions?: Array<{
+      source_time_entry_id: string;
+      source_user_id: string;
+      display_name?: string | null;
+      email?: string | null;
+      reason: string;
+      original_work_date: string;
+      held_total_hours: number;
+      held_regular_hours: number;
+      held_overtime_hours: number;
+      category?: { id?: string | number | null; key?: string | null; name?: string | null } | null;
+      first_excluded_batch_id?: string | null;
+    }>;
   };
+  external_batch_id: string | null;
+  external_batch_checksum: string | null;
+  contract_version: string | null;
+  source_cutoff_at: string | null;
   applied_at: string | null;
 }
 
@@ -1044,7 +1075,7 @@ export const payPeriodsApi = {
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
   previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
-  applyTimeTrackingImport: (id: number, data: { import_id: number; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; employee_wage_rate_id: number | null }> }> }) =>
+  applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_effective_rate_cents?: number | null; employee_wage_rate_id: number | null }> }> }) =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
 };
 
