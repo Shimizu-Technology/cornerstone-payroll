@@ -196,7 +196,7 @@ module TimeTracking
              checksum == @import.external_batch_checksum &&
              @import.source_payload_hash == checksum &&
              @import.contract_version == raw["schema_version"] &&
-             @import.source_cutoff_at&.iso8601 == Time.iso8601(raw.fetch("cutoff_at")).iso8601
+             @import.source_cutoff_at == Time.iso8601(raw.fetch("cutoff_at"))
         raise ArgumentError, "AIRE payroll batch provenance changed; refresh and investigate before applying"
       end
     rescue PayrollBatchPayloadValidator::Error

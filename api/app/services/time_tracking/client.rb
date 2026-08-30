@@ -85,7 +85,7 @@ module TimeTracking
 
     def payroll_batch_uri(batch_id)
       normalized_id = batch_id.to_s
-      unless normalized_id.match?(/\A[A-Za-z0-9._-]+\z/)
+      unless normalized_id.match?(/\A[A-Za-z0-9._-]+\z/) && normalized_id.match?(/[A-Za-z0-9_-]/)
         raise Error, "Invalid payroll batch ID"
       end
 

@@ -152,6 +152,57 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     expect(import.processed_payload.fetch("exclusions")).to contain_exactly(include("reason" => "pending_approval"))
   end
 
+  it "accepts a zero-hour adjustment without category or rate dimensions" do
+    company, _workweek, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    zero_adjustment = {
+      "source_time_entry_id" => "zero-101",
+      "line_key" => "zero-net",
+      "source_kind" => "correction",
+      "original_work_date" => pay_period.start_date.iso8601,
+      "original_week_start" => pay_period.start_date.beginning_of_week(:sunday).iso8601,
+      "total_hours" => 0.0,
+      "regular_hours" => 0.0,
+      "overtime_hours" => 0.0
+    }
+    payload = finalized_payload(
+      start_date: pay_period.start_date,
+      end_date: pay_period.end_date,
+      employees: [
+        {
+          "source_user_id" => "aire-user-zero",
+          "email" => employee.email,
+          "display_name" => employee.full_name,
+          "adjustments" => [ zero_adjustment ],
+          "total_hours" => 0.0,
+          "regular_hours" => 0.0,
+          "overtime_hours" => 0.0
+        }
+      ]
+    )
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_batches).and_return(
+      "payroll_batches" => [
+        {
+          "id" => payload["batch_id"],
+          "start_date" => payload["start_date"],
+          "end_date" => payload["end_date"],
+          "cutoff_at" => payload["cutoff_at"],
+          "checksum" => payload.dig("export", "checksum")
+        }
+      ]
+    )
+    allow(client).to receive(:payroll_batch).and_return(payload)
+
+    row = described_class.new(pay_period: pay_period, source: source).call.processed_payload.fetch("rows").first
+
+    expect(row.fetch("estimated_gross_delta")).to eq(0.0)
+    expect(row.fetch("categories")).to contain_exactly(
+      include("name" => "Uncategorized", "effective_rate_cents" => nil, "total_hours" => 0.0)
+    )
+  end
+
   it "returns the existing import for the same batch ID and checksum" do
     _company, _workweek, pay_period, source = setup_records
     payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date, employees: [])

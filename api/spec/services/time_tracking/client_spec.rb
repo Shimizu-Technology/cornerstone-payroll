@@ -372,9 +372,11 @@ RSpec.describe TimeTracking::Client do
     it "rejects unsafe batch identifiers before making a request" do
       request = stub_request(:get, %r{time\.example\.com})
 
-      expect do
-        client_for(source).payroll_batch(batch_id: "../admin")
-      end.to raise_error(TimeTracking::Client::Error, /Invalid payroll batch ID/)
+      [ "../admin", ".", "..." ].each do |batch_id|
+        expect do
+          client_for(source).payroll_batch(batch_id: batch_id)
+        end.to raise_error(TimeTracking::Client::Error, /Invalid payroll batch ID/)
+      end
       expect(request).not_to have_been_requested
     end
 
