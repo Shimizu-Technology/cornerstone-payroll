@@ -35,6 +35,10 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
         fetch_end_date: pay_period.end_date,
         warnings: [],
         processed_payload: { "rows" => [] },
+        external_batch_id: nil,
+        external_batch_checksum: nil,
+        contract_version: nil,
+        source_cutoff_at: nil,
         applied_at: nil
       )
 
@@ -76,7 +80,9 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
       expect(TimeTracking::ApplyImportService).to receive(:new).with(
         import: import,
         mappings: [],
-        applied_by: admin_user
+        applied_by: admin_user,
+        acknowledge_negative_adjustments: nil,
+        negative_adjustment_note: nil
       ).and_return(
         instance_double(TimeTracking::ApplyImportService, call: { applied: [], skipped: [], errors: [] })
       )

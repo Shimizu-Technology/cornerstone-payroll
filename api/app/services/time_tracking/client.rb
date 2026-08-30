@@ -22,8 +22,25 @@ module TimeTracking
     end
 
     def time_summary(start_date:, end_date:)
-      uri = time_summary_uri(start_date: start_date, end_date: end_date)
+      request_json(time_summary_uri(start_date: start_date, end_date: end_date), validate_source: true)
+    end
 
+    def payroll_batches(start_date:, end_date:)
+      payload = request_json(payroll_batches_uri(start_date: start_date, end_date: end_date), validate_source: false)
+      raise Error, "#{@source.name} returned an invalid payroll batch list" unless payload["payroll_batches"].is_a?(Array)
+
+      payload
+    end
+
+    def payroll_batch(batch_id:)
+      request_json(payroll_batch_uri(batch_id), validate_source: true)
+    end
+
+    class Error < StandardError; end
+
+    private
+
+    def request_json(uri, validate_source:)
       request = Net::HTTP::Get.new(uri)
       request["Accept"] = "application/json"
       request["Accept-Encoding"] = "identity"
@@ -43,7 +60,7 @@ module TimeTracking
       payload = JSON.parse(body)
       raise Error, "#{@source.name} returned an invalid payload" unless payload.is_a?(Hash)
 
-      validate_source_identity!(payload)
+      validate_source_identity!(payload) if validate_source
       payload
     rescue JSON::ParserError
       raise Error, "#{@source.name} returned invalid JSON"
@@ -54,15 +71,32 @@ module TimeTracking
       raise Error, "Could not securely reach #{@source.name}"
     end
 
-    class Error < StandardError; end
-
-    private
-
     def time_summary_uri(start_date:, end_date:)
+      uri = source_uri("/api/v1/payroll/time_summary")
+      uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
+      uri
+    end
+
+    def payroll_batches_uri(start_date:, end_date:)
+      uri = source_uri("/api/v1/payroll/batches")
+      uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
+      uri
+    end
+
+    def payroll_batch_uri(batch_id)
+      normalized_id = batch_id.to_s
+      unless normalized_id.match?(/\A[A-Za-z0-9._-]+\z/)
+        raise Error, "Invalid payroll batch ID"
+      end
+
+      source_uri("/api/v1/payroll/batches/#{normalized_id}")
+    end
+
+    def source_uri(suffix)
       uri = URI.parse(@source.base_url.to_s.strip)
       base_path = uri.path.to_s.chomp("/")
-      uri.path = "#{base_path}/api/v1/payroll/time_summary"
-      uri.query = URI.encode_www_form(start_date: start_date, end_date: end_date)
+      uri.path = "#{base_path}#{suffix}"
+      uri.query = nil
       uri.fragment = nil
       uri
     end

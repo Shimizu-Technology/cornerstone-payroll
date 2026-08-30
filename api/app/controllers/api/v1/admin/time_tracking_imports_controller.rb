@@ -26,7 +26,9 @@ module Api
           results = TimeTracking::ApplyImportService.new(
             import: import,
             mappings: permitted[:mappings] || [],
-            applied_by: current_user
+            applied_by: current_user,
+            acknowledge_negative_adjustments: permitted[:acknowledge_negative_adjustments],
+            negative_adjustment_note: permitted[:negative_adjustment_note]
           ).call
 
           status = results[:errors].any? ? :unprocessable_entity : :ok
@@ -49,11 +51,13 @@ module Api
         def apply_params
           params.permit(
             :import_id,
+            :acknowledge_negative_adjustments,
+            :negative_adjustment_note,
             mappings: [
               :source_user_id,
               :employee_id,
               :include,
-              { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :employee_wage_rate_id ] }
+              { wage_rate_mappings: [ :source_category_id, :source_category_key, :source_category_name, :source_effective_rate_cents, :employee_wage_rate_id ] }
             ]
           )
         end
@@ -70,6 +74,10 @@ module Api
             fetch_end_date: import.fetch_end_date,
             warnings: import.warnings,
             processed_payload: import.processed_payload,
+            external_batch_id: import.external_batch_id,
+            external_batch_checksum: import.external_batch_checksum,
+            contract_version: import.contract_version,
+            source_cutoff_at: import.source_cutoff_at,
             applied_at: import.applied_at
           }
         end
