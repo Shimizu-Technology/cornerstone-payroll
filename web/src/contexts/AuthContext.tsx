@@ -3,6 +3,15 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { useAuth as useClerkAuth } from '@clerk/clerk-react';
 import { ApiError, authApi, setAuthToken, setAuthTokenProvider } from '@/services/api';
 
+export type StaffCapability =
+  | 'staff_workspace'
+  | 'payroll_operations'
+  | 'manage_client_configuration'
+  | 'manage_organization'
+  | 'manage_platform';
+
+type CapabilityMap = Record<StaffCapability, boolean>;
+
 interface User {
   id: number;
   email: string;
@@ -13,6 +22,7 @@ interface User {
   company_id: number;
   company_name: string;
   assigned_company_ids: number[];
+  capabilities: CapabilityMap;
 }
 
 interface AuthContextType {
@@ -24,6 +34,7 @@ interface AuthContextType {
   isManager: boolean;
   isAccountant: boolean;
   isClient: boolean;
+  can: (capability: StaffCapability) => boolean;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -32,6 +43,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 type AuthResponseUser = Awaited<ReturnType<typeof authApi.me>>['user'];
 
 function mapAuthUser(user: AuthResponseUser): User {
+  const isAdmin = isAdminRole(user.role);
+  const fallbackCapabilities: CapabilityMap = {
+    staff_workspace: !['client'].includes(user.role),
+    payroll_operations: !['client'].includes(user.role),
+    manage_client_configuration: user.role === 'manager' || isAdmin,
+    manage_organization: isAdmin,
+    manage_platform: user.role === 'super_admin',
+  };
+
   return {
     id: user.id,
     email: user.email,
@@ -42,6 +62,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     company_id: user.company_id,
     company_name: user.company_name,
     assigned_company_ids: user.assigned_company_ids || [],
+    capabilities: { ...fallbackCapabilities, ...user.capabilities },
   };
 }
 
@@ -51,6 +72,10 @@ const authEnabled = import.meta.env.VITE_AUTH_ENABLED === 'true';
 
 function isAdminRole(role?: string) {
   return role === 'admin' || role === 'org_admin' || role === 'super_admin';
+}
+
+function canUser(user: User | null, capability: StaffCapability): boolean {
+  return user?.capabilities[capability] === true;
 }
 
 function DevAuthProvider({ children }: { children: React.ReactNode }) {
@@ -83,11 +108,12 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading,
         isAuthenticated: !!user,
-        isAdmin: isAdminRole(user?.role),
-        isSuperAdmin: user?.role === 'super_admin',
-        isManager: user?.role === 'manager' || isAdminRole(user?.role),
+        isAdmin: canUser(user, 'manage_organization'),
+        isSuperAdmin: canUser(user, 'manage_platform'),
+        isManager: canUser(user, 'manage_client_configuration'),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
+        can: (capability) => canUser(user, capability),
         signOut: async () => setUser(null),
         refreshUser: async () => {
           const res = await authApi.me();
@@ -182,11 +208,12 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoading: !isLoaded || isLoading,
         isAuthenticated: !!user && isSignedIn === true,
-        isAdmin: isAdminRole(user?.role),
-        isSuperAdmin: user?.role === 'super_admin',
-        isManager: user?.role === 'manager' || isAdminRole(user?.role),
+        isAdmin: canUser(user, 'manage_organization'),
+        isSuperAdmin: canUser(user, 'manage_platform'),
+        isManager: canUser(user, 'manage_client_configuration'),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
+        can: (capability) => canUser(user, capability),
         signOut: async () => {
           setUser(null);
           await clerkSignOut();

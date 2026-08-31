@@ -591,7 +591,7 @@ export function ChecksPayments() {
             <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
               Checks & Payments uses the same stock type and X/Y alignment as payroll checks.
               Before printing on live check stock, test on plain paper or a photocopy of the real check first.
-              <Link to="/check-settings" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
+              <Link to="/client-settings/checks" className="ml-1 font-medium text-blue-700 underline underline-offset-2">
                 Open Check Settings
               </Link>
             </div>
@@ -628,7 +628,7 @@ export function ChecksPayments() {
                 </select>
               )}
               <Link
-                to="/check-settings"
+                to="/client-settings/checks"
                 className="inline-flex items-center rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm font-medium text-neutral-700 shadow-sm hover:bg-neutral-50"
               >
                 <Settings className="mr-1.5 h-4 w-4" /> Check Settings

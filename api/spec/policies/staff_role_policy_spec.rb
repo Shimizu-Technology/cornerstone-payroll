@@ -66,7 +66,13 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/pay_component_tax_rules",
         action_name: "create"
       )).to eq(:manage_organization)
-      %w[create update destroy apply apply_to_all_companies clear_active].each do |action_name|
+      %w[create update destroy apply_to_all_companies].each do |action_name|
+        expect(described_class.capability_for(
+          controller_path: "api/v1/admin/printer_profiles",
+          action_name: action_name
+        )).to eq(:manage_organization)
+      end
+      %w[apply clear_active].each do |action_name|
         expect(described_class.capability_for(
           controller_path: "api/v1/admin/printer_profiles",
           action_name: action_name
@@ -76,6 +82,27 @@ RSpec.describe StaffRolePolicy do
         controller_path: "api/v1/admin/organizations",
         action_name: "index"
       )).to eq(:manage_platform)
+      expect(described_class.capability_for(
+        controller_path: "api/v1/admin/tax_configs",
+        action_name: "index"
+      )).to eq(:manage_platform)
+    end
+  end
+
+
+  describe ".capabilities_for" do
+    it "returns the complete capability map for the user" do
+      organization = create(:organization)
+      company = create(:company, organization: organization)
+      manager = build(:user, organization: organization, company: company, role: "manager")
+
+      expect(described_class.capabilities_for(manager)).to eq(
+        staff_workspace: true,
+        payroll_operations: true,
+        manage_client_configuration: true,
+        manage_organization: false,
+        manage_platform: false
+      )
     end
   end
 end

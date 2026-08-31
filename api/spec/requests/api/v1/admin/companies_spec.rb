@@ -78,8 +78,22 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       expect(response.parsed_body.dig("company", "editable_fields")).to include("simple_payroll_register_enabled")
     end
 
-    it "resets field-level check layout overrides when stock type changes from client management" do
+    it "does not let the generic client endpoint bypass payroll and check-setting workflows" do
+      schedule = client_company.company_pay_schedules.create!(
+        frequency: "biweekly",
+        period_rule: "manual",
+        pay_date_rule: "manual",
+        timezone: "Pacific/Guam",
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: admin_user,
+        confirmed_at: Time.zone.local(2026, 1, 1, 9),
+        notes: "Confirmed with employer",
+        effective_on: Date.new(2026, 1, 1)
+      )
       client_company.update!(
+        pay_frequency: "biweekly",
+        next_check_number: 4200,
         check_stock_type: "top_check",
         check_layout_config: {
           "check_face" => {
@@ -90,6 +104,9 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
 
       patch "/api/v1/admin/companies/#{client_company.id}", params: {
         company: {
+          name: "Renamed Client",
+          pay_frequency: "semimonthly",
+          next_check_number: 10,
           check_stock_type: "first_hawaiian_4up",
           check_layout_config: {
             check_face: {
@@ -100,49 +117,23 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       }
 
       expect(response).to have_http_status(:ok)
-      expect(client_company.reload.check_stock_type).to eq("first_hawaiian_4up")
-      expect(client_company.check_layout_config).to eq({})
-    end
-
-    it "preserves valid First Hawaiian drift calibration from client management" do
-      client_company.update!(check_stock_type: "first_hawaiian_4up")
-
-      patch "/api/v1/admin/companies/#{client_company.id}", params: {
-        company: {
-          check_layout_config: {
-            calibration: { slot_pitch_adjustment: 7.2 },
-            check_face: {
-              memo: { x: 285.6, y: 58 }
-            }
-          }
-        }
-      }
-
-      expect(response).to have_http_status(:ok)
       client_company.reload
-      expect(client_company.check_layout_config.dig("calibration", "slot_pitch_adjustment")).to eq(7.2)
-      expect(client_company.check_layout_config.dig("check_face", "memo", "x")).to eq(285.6)
+      expect(client_company.name).to eq("Renamed Client")
+      expect(client_company.pay_frequency).to eq("biweekly")
+      expect(client_company.next_check_number).to eq(4200)
+      expect(client_company.check_stock_type).to eq("top_check")
+      expect(client_company.check_layout_config.dig("check_face", "payee", "x")).to eq(72.0)
+      expect(schedule.reload.frequency).to eq("biweekly")
     end
 
-    it "clears the active printer profile when calibration settings change" do
-      profile = PrinterProfile.create!(
-        organization: organization,
-        name: "Office Printer",
-        check_stock_type: client_company.check_stock_type,
-        check_offset_x: client_company.check_offset_x,
-        check_offset_y: client_company.check_offset_y,
-        check_layout_config: client_company.check_layout_config
-      )
-      client_company.update!(active_printer_profile: profile)
-
-      patch "/api/v1/admin/companies/#{client_company.id}", params: {
-        company: {
-          check_offset_x: 0.125
-        }
-      }
+    it "advertises only the fields the general client editor can change" do
+      get "/api/v1/admin/companies/#{client_company.id}"
 
       expect(response).to have_http_status(:ok)
-      expect(client_company.reload.active_printer_profile_id).to be_nil
+      expect(response.parsed_body.dig("company", "editable_fields")).to contain_exactly(
+        "name", "ein", "active", "address_line1", "address_line2", "city", "state", "zip",
+        "phone", "email", "simple_payroll_register_enabled"
+      )
     end
   end
 
@@ -258,6 +249,34 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
       }
 
       expect(response).to have_http_status(:forbidden)
+    end
+
+    it "lets assigned managers change report presentation without changing payroll controls" do
+      manager = User.create!(
+        company: staff_company,
+        organization: organization,
+        email: "assigned-manager@example.com",
+        name: "Assigned Manager",
+        role: "manager",
+        active: true
+      )
+      CompanyAssignment.create!(user: manager, company: client_company)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user).and_return(manager)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:current_user_id).and_return(manager.id)
+
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: {
+          simple_payroll_register_enabled: true,
+          pay_frequency: "monthly",
+          next_check_number: 2
+        }
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload.simple_payroll_register_enabled).to be(true)
+      expect(client_company.pay_frequency).not_to eq("monthly")
+      expect(client_company.next_check_number).not_to eq(2)
+      expect(response.parsed_body.dig("company", "editable_fields")).to include("simple_payroll_register_enabled")
     end
 
     it "prevents non-staff users from updating company details even when they can access the company" do

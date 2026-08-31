@@ -2,9 +2,10 @@
  * CPR-66: Check Settings Page
  * Operator-level configuration for check printing: offsets, stock type, next check number.
  */
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Download } from 'lucide-react';
+import { Link } from 'react-router';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { CheckLayoutEditor } from '@/components/checks/CheckLayoutEditor';
+import { useAuth } from '@/contexts/AuthContext';
 import { checksApi, printerProfilesApi } from '@/services/api';
 import type { PrinterProfile } from '@/services/api';
 import type { CheckLayoutResponse, CheckSettings as CheckSettingsType, CheckStockType } from '@/types';
@@ -101,7 +103,12 @@ function withFhbSlotPitchAdjustment(config: Record<string, unknown>, adjustmentP
   return nextConfig;
 }
 
-export function CheckSettingsPage() {
+interface CheckSettingsPageProps {
+  embedded?: boolean;
+}
+
+export function CheckSettingsPage({ embedded = false }: CheckSettingsPageProps): ReactElement {
+  const { can } = useAuth();
   const skipNextLayoutEffectRef = useRef(false);
   const [settings, setSettings] = useState<CheckSettingsType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -132,16 +139,6 @@ export function CheckSettingsPage() {
 
   // Printer profiles
   const [profiles, setProfiles] = useState<PrinterProfile[]>([]);
-  const [showAddProfile, setShowAddProfile] = useState(false);
-  const [newProfileName, setNewProfileName] = useState('');
-  const [newProfileDescription, setNewProfileDescription] = useState('');
-  const [newProfileNotes, setNewProfileNotes] = useState('');
-  const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
-  const [editProfileName, setEditProfileName] = useState('');
-  const [editProfileDescription, setEditProfileDescription] = useState('');
-  const [editProfileNotes, setEditProfileNotes] = useState('');
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileApplyingAllId, setProfileApplyingAllId] = useState<number | null>(null);
 
   const currentSettingsSnapshot = useMemo(() => checkSettingsSnapshot({
     stockType,
@@ -483,41 +480,6 @@ export function CheckSettingsPage() {
     }
   };
 
-  const handleSaveCurrentAsProfile = async () => {
-    if (!newProfileName.trim()) { setError('Profile name is required.'); return; }
-    setProfileSaving(true);
-    setError(null);
-    let layoutConfig: Record<string, unknown>;
-    try {
-      layoutConfig = JSON.parse(layoutOverridesJson || '{}');
-    } catch {
-      setError('Invalid JSON in advanced layout overrides. Please fix it before saving.');
-      setProfileSaving(false);
-      return;
-    }
-    try {
-      await printerProfilesApi.create({
-        name: newProfileName.trim(),
-        description: newProfileDescription.trim() || null,
-        notes: newProfileNotes.trim() || null,
-        check_stock_type: stockType,
-        check_offset_x: parseOffsetInput(offsetX),
-        check_offset_y: parseOffsetInput(offsetY),
-        check_layout_config: layoutConfig,
-      });
-      setNewProfileName('');
-      setNewProfileDescription('');
-      setNewProfileNotes('');
-      setShowAddProfile(false);
-      setSuccess('Printer profile saved.');
-      loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save profile');
-    } finally {
-      setProfileSaving(false);
-    }
-  };
-
   const handleApplyProfile = async (profile: PrinterProfile) => {
     if (!confirmDiscardUnsavedChanges(`You have unsaved check setting changes. Applying "${profile.name}" will replace them with that printer profile. Continue?`)) return;
 
@@ -537,30 +499,6 @@ export function CheckSettingsPage() {
     }
   };
 
-  const handleApplyProfileToAllCompanies = async (profile: PrinterProfile) => {
-    const message = `Use "${profile.name}" for every client in this organization? This updates each client's check stock, alignment, and active printer profile.`;
-    if (!window.confirm(message)) return;
-
-    setError(null);
-    setSuccess(null);
-    setProfileApplyingAllId(profile.id);
-    try {
-      const result = await printerProfilesApi.applyToAllCompanies(profile.id);
-      const data = await checksApi.getSettings();
-      if (data.check_settings.check_stock_type !== stockType) {
-        skipNextLayoutEffectRef.current = true;
-      }
-      applySettingsToForm(data.check_settings);
-      await loadCheckLayout(data.check_settings.check_stock_type);
-      setSuccess(`Applied "${profile.name}" to ${result.applied_count} client${result.applied_count === 1 ? '' : 's'}.`);
-      await loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply printer profile to all clients');
-    } finally {
-      setProfileApplyingAllId(null);
-    }
-  };
-
   const handleClearActiveProfile = async () => {
     if (!window.confirm('Stop using a saved printer profile for this client? Current check settings will stay as-is.')) return;
     setError(null);
@@ -574,61 +512,6 @@ export function CheckSettingsPage() {
       await loadProfiles();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear active printer profile');
-    }
-  };
-
-  const handleUpdateProfile = async (id: number) => {
-    if (!editProfileName.trim()) { setError('Profile name is required.'); return; }
-    setProfileSaving(true);
-    setError(null);
-    try {
-      await printerProfilesApi.update(id, {
-        name: editProfileName.trim(),
-        description: editProfileDescription.trim() || null,
-        notes: editProfileNotes.trim() || null,
-      });
-      setEditingProfileId(null);
-      setSuccess('Profile updated.');
-      loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setProfileSaving(false);
-    }
-  };
-
-  const handleDeleteProfile = async (id: number, name: string) => {
-    if (!window.confirm(`Delete printer profile "${name}"?`)) return;
-    try {
-      await printerProfilesApi.delete(id);
-      setSuccess('Profile deleted.');
-      loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete profile');
-    }
-  };
-
-  const handleOverwriteProfile = async (profile: PrinterProfile) => {
-    if (!window.confirm(`Overwrite "${profile.name}" with current settings?`)) return;
-    setError(null);
-    let layoutConfig: Record<string, unknown>;
-    try {
-      layoutConfig = JSON.parse(layoutOverridesJson || '{}');
-    } catch {
-      setError('Invalid JSON in advanced layout overrides. Please fix it before overwriting.');
-      return;
-    }
-    try {
-      await printerProfilesApi.update(profile.id, {
-        check_stock_type: stockType,
-        check_offset_x: parseOffsetInput(offsetX),
-        check_offset_y: parseOffsetInput(offsetY),
-        check_layout_config: layoutConfig,
-      });
-      setSuccess(`Profile "${profile.name}" updated with current settings.`);
-      loadProfiles();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update profile');
     }
   };
 
@@ -665,18 +548,18 @@ export function CheckSettingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Header title="Check Settings" />
+      <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+        {!embedded && <Header title="Check Settings" />}
         <div className="p-8 text-center text-gray-500">Loading…</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header title="Check Printing Settings" />
+    <div className={embedded ? '' : 'min-h-screen bg-gray-50'}>
+      {!embedded && <Header title="Check Printing Settings" />}
 
-      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className={embedded ? 'space-y-6' : 'mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8'}>
 
         {/* Feedback */}
         {error && (
@@ -699,8 +582,8 @@ export function CheckSettingsPage() {
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-slate-200">
               {activeProfile
-                ? 'This client is using a shared organization printer profile. Use “Use for all clients” if this same office printer should follow you across every client.'
-                : 'No shared printer profile is selected. Save works as a client-specific custom override until you choose or create a printer profile.'}
+                ? 'This client is using a shared firm printer profile. Changes below are saved only for the active client.'
+                : 'No shared printer profile is selected. Save works as a client-specific custom override until you choose a firm profile.'}
             </p>
           </div>
           <CardContent className="grid gap-3 p-4 text-sm md:grid-cols-3">
@@ -725,12 +608,10 @@ export function CheckSettingsPage() {
             <div>
               <h2 className="font-semibold text-gray-900">Printer Profiles</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                Save and switch between alignment settings for different printers.
+                Choose a firm-managed printer calibration for this client.
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                These profiles are shared with everyone in your organization &mdash; calibrate
-                an office printer once and reuse it across clients. <span className="font-medium">Use for this client</span>
-                {' '}updates only the active client; <span className="font-medium">Use for all clients</span> applies the same printer everywhere.
+                Applying a profile changes only the active client. Profile ownership and firm-wide actions live in Firm Settings.
               </p>
               <p className="mt-2 text-sm">
                 {activePrinterProfileId ? (
@@ -751,52 +632,19 @@ export function CheckSettingsPage() {
               <Button variant="outline" size="sm" onClick={handleClearProfileCalibration}>
                 Reset Calibration Draft
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowAddProfile(!showAddProfile)}>
-                {showAddProfile ? 'Cancel' : '+ Save Current as Profile'}
-              </Button>
+              {can('manage_organization') && (
+                <Link
+                  to="/firm-settings/printers"
+                  className="inline-flex min-h-9 items-center justify-center rounded-full border border-neutral-300 bg-white/80 px-4 py-2 text-xs font-semibold text-neutral-700 transition hover:border-primary-300 hover:bg-primary-50/60 hover:text-primary-800"
+                >
+                  Manage Firm Profiles
+                </Link>
+              )}
             </div>
           </div>
           <CardContent className="p-4 space-y-3">
-            {showAddProfile && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-2">
-                <p className="text-sm font-medium text-blue-900">Save current settings as a new printer profile</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <Label className="text-xs">Profile Name *</Label>
-                    <Input
-                      value={newProfileName}
-                      onChange={(e) => setNewProfileName(e.target.value)}
-                      placeholder="e.g., Office HP LaserJet"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Description</Label>
-                    <Input
-                      value={newProfileDescription}
-                      onChange={(e) => setNewProfileDescription(e.target.value)}
-                      placeholder="e.g., Main office printer"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs">Notes / Print Instructions</Label>
-                  <Textarea
-                    value={newProfileNotes}
-                    onChange={(e) => setNewProfileNotes(e.target.value)}
-                    placeholder="e.g., Set browser print to 'Fit to page', use tray 2 for check stock"
-                    className="min-h-[60px] text-sm"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSaveCurrentAsProfile} disabled={profileSaving}>
-                    {profileSaving ? 'Saving...' : 'Save Profile'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {profiles.length === 0 && !showAddProfile && (
-              <p className="text-sm text-gray-400 italic">No printer profiles saved yet. Save your current settings as a profile to get started.</p>
+            {profiles.length === 0 && (
+              <p className="text-sm text-gray-400 italic">No firm printer profiles are available. A firm administrator can create one.</p>
             )}
 
             {profiles.map((profile) => {
@@ -813,29 +661,7 @@ export function CheckSettingsPage() {
               const hasCustomLayout = stableLayoutJson(profile.check_layout_config || {}) !== '{}';
               return (
               <div key={profile.id} className={`rounded-lg border p-3 transition-colors ${profileMatchesCurrent ? 'border-blue-300 bg-blue-50/50' : 'hover:bg-gray-50'}`}>
-                {editingProfileId === profile.id ? (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-xs">Name</Label>
-                        <Input value={editProfileName} onChange={(e) => setEditProfileName(e.target.value)} />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Description</Label>
-                        <Input value={editProfileDescription} onChange={(e) => setEditProfileDescription(e.target.value)} />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Notes</Label>
-                      <Textarea value={editProfileNotes} onChange={(e) => setEditProfileNotes(e.target.value)} className="min-h-[60px] text-sm" />
-                    </div>
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" size="sm" onClick={() => setEditingProfileId(null)}>Cancel</Button>
-                      <Button size="sm" onClick={() => handleUpdateProfile(profile.id)} disabled={profileSaving}>Save</Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-900">{profile.name}</span>
@@ -869,38 +695,8 @@ export function CheckSettingsPage() {
                       <Button size="sm" onClick={() => handleApplyProfile(profile)}>
                         {profileMatchesCurrent ? 'Using for This Client' : 'Use for This Client'}
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleApplyProfileToAllCompanies(profile)} disabled={profileApplyingAllId === profile.id}>
-                        {profileApplyingAllId === profile.id ? 'Applying...' : 'Use for All Clients'}
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleOverwriteProfile(profile)}>
-                        Save Draft to Profile
-                      </Button>
-                      <div className="grid grid-cols-2 gap-1 sm:flex">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() => {
-                            setEditingProfileId(profile.id);
-                            setEditProfileName(profile.name);
-                            setEditProfileDescription(profile.description || '');
-                            setEditProfileNotes(profile.notes || '');
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs text-red-600 hover:text-red-700"
-                          onClick={() => handleDeleteProfile(profile.id, profile.name)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
                     </div>
                   </div>
-                )}
               </div>
               );
             })}

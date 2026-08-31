@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,11 @@ import {
 import { ApiError, organizationsApi, usersApi, type OrganizationAdminSummary, type OrganizationSummary } from '@/services/api';
 import type { PaginationMeta } from '@/types';
 
-export function Organizations() {
+interface OrganizationsProps {
+  embedded?: boolean;
+}
+
+export function Organizations({ embedded = false }: OrganizationsProps): ReactElement {
   const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -281,7 +285,12 @@ export function Organizations() {
 
   return (
     <div>
-      <Header
+      {embedded ? (
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div><h2 className="font-display text-2xl font-extrabold tracking-tight text-neutral-950">Organizations</h2><p className="mt-1 text-sm text-neutral-500">Manage accounting firm workspaces and their administrators.</p></div>
+          <Button onClick={() => setIsAdding(true)} disabled={isAdding}><Plus className="mr-2 h-4 w-4" />New Organization</Button>
+        </div>
+      ) : <Header
         title="Organizations"
         description="Manage accounting firm workspaces and their administrators"
         actions={
@@ -290,9 +299,9 @@ export function Organizations() {
             New Organization
           </Button>
         }
-      />
+      />}
 
-      <div className="p-4 sm:p-6 lg:p-8">
+      <div className={embedded ? '' : 'p-4 sm:p-6 lg:p-8'}>
         <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card className="p-4">
             <div className="flex items-center gap-3">

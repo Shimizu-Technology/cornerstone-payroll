@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Input } from '@/components/ui/input';
-import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -21,12 +20,6 @@ const payFrequencyOptions = [
   { value: 'weekly', label: 'Weekly' },
   { value: 'semimonthly', label: 'Semi-monthly' },
   { value: 'monthly', label: 'Monthly' },
-];
-
-const checkStockOptions = [
-  { value: 'top_check', label: 'Top Check' },
-  { value: 'bottom_check', label: 'Bottom Check' },
-  { value: 'first_hawaiian_4up', label: 'First Hawaiian 4-Up' },
 ];
 
 const emptyForm: CompanyFormData = {
@@ -141,7 +134,18 @@ export function Clients() {
 
     try {
       if (editingId) {
-        await companiesApi.update(editingId, form);
+        await companiesApi.update(editingId, {
+          name: form.name,
+          ein: form.ein,
+          active: form.active,
+          address_line1: form.address_line1,
+          address_line2: form.address_line2,
+          city: form.city,
+          state: form.state,
+          zip: form.zip,
+          phone: form.phone,
+          email: form.email,
+        });
       } else {
         await companiesApi.create(form);
       }
@@ -227,7 +231,7 @@ export function Clients() {
                     disabled={!canManageClients}
                   />
                 </div>
-                <div>
+                {!editingId && <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Pay Frequency</label>
                   <Select
                     value={form.pay_frequency}
@@ -238,7 +242,8 @@ export function Clients() {
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </Select>
-                </div>
+                  <p className="mt-1 text-xs text-gray-500">Initial onboarding value. Confirm the payroll cadence and legal workweek in Client Settings after creation.</p>
+                </div>}
               </div>
 
               {/* Contact */}
@@ -310,82 +315,10 @@ export function Clients() {
                 </div>
               </div>
 
-              {canManageClients && (
-                <>
-                  {/* Bank Info */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Bank Information</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Name</label>
-                      <Input
-                        value={form.bank_name || ''}
-                        onChange={(e) => updateField('bank_name', e.target.value)}
-                        placeholder="Bank of Guam"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bank Address</label>
-                      <Input
-                        value={form.bank_address || ''}
-                        onChange={(e) => updateField('bank_address', e.target.value)}
-                        placeholder="111 Chalan Santo Papa"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Payroll Reporting */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Payroll Reporting</h4>
-                  <div className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={form.simple_payroll_register_enabled === true}
-                      aria-label="Use simple payroll register Excel format"
-                      onClick={() => updateField('simple_payroll_register_enabled', form.simple_payroll_register_enabled !== true)}
-                      className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                        form.simple_payroll_register_enabled === true ? 'bg-blue-600' : 'bg-gray-300'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          form.simple_payroll_register_enabled === true ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">Simple payroll register Excel format</p>
-                      <p className="mt-1 text-xs text-gray-600">
-                        Adds the SCR/AIRE register as the first worksheet while preserving the detailed payroll sheets.
-                        Leave this off for clients that require a different register format.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Check Settings */}
-                  <h4 className="text-sm font-medium text-gray-700 border-b pb-1 pt-2">Check Settings</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Check Stock Type</label>
-                      <Select
-                        value={form.check_stock_type || 'bottom_check'}
-                        onChange={(e) => updateField('check_stock_type', e.target.value)}
-                      >
-                        {checkStockOptions.map(opt => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Next Check Number</label>
-                      <NumericInput
-                        value={form.next_check_number ?? 1001}
-                        onValueChange={(value) => updateField('next_check_number', Math.max(1, Math.round(value ?? 1001)))}
-                        min={1}
-                        fixedDecimalsOnBlur={0}
-                      />
-                    </div>
-                  </div>
-                </>
+              {editingId && (
+                <div className="rounded-xl border border-primary-100 bg-primary-50/50 px-4 py-3 text-sm text-primary-950">
+                  Payroll cadence, reporting, checks, and integrations are managed from the active client’s dedicated Client Settings workspace.
+                </div>
               )}
 
               {/* Active toggle (edit only) */}
