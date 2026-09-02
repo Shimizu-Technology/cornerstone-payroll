@@ -1,39 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-MIGRATION_KEYS = %w[
-  MIGRATION_DATABASE_URL
-  MIGRATION_CACHE_DATABASE_URL
-  MIGRATION_QUEUE_DATABASE_URL
-  MIGRATION_CABLE_DATABASE_URL
-].freeze
-
 # Database migrations are forward-only during a normal rollback.
 exit 0 if ENV["KAMAL_COMMAND"] == "rollback"
 
-version = ENV.fetch("KAMAL_VERSION")
-migration_environment = MIGRATION_KEYS.filter_map do |key|
-  value = ENV.fetch(key, "").strip
-  "#{key}:#{value}" unless value.empty?
-end
-
-unless migration_environment.any? { |entry| entry.start_with?("MIGRATION_DATABASE_URL:") }
-  warn "MIGRATION_DATABASE_URL must be set to a direct, non-pooler connection before deploying."
-  exit 1
-end
-
-command = [
-  File.expand_path("../../bin/kamal", __dir__),
-  "app",
-  "exec",
-  "--quiet",
-  "--primary",
-  "--version",
-  version
-]
-
-destination = ENV.fetch("KAMAL_DESTINATION", "").strip
-command.concat([ "--destination", destination ]) unless destination.empty?
-command.concat([ "--env", *migration_environment, "--", "bin/rails db:safe_prepare" ])
-
-exec(*command)
+exec File.expand_path("../../bin/kamal-safe-prepare", __dir__)

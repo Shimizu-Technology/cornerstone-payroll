@@ -227,7 +227,7 @@ For the existing data model, the safe release rule is:
 return if payroll_adjustments_overridden?
 return unless open_period?
 
-if known_default_snapshot? || empty? || legacy_snapshot_is_subset_of_current_defaults?
+if new_record? || known_default_snapshot? || empty? || legacy_snapshot_is_subset_of_current_defaults?
   self.payroll_adjustments = normalize(employee.default_payroll_adjustments)
   mark_as_default_snapshot
 end
@@ -341,7 +341,7 @@ The deployment repair should:
 
 The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts.
 
-The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Render receives the direct migration URL as a service secret because that platform runs the configured pre-deploy command for the service. Kamal keeps every `MIGRATION_*_DATABASE_URL` out of `config/deploy.yml`'s runtime secret list and uses the active `.kamal/hooks/pre-deploy` hook to pass them only to the version-pinned, primary-host one-off migration container. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, the Kamal runtime configuration excludes direct migration URLs, the hook invokes the safe task exactly once, and runtime startup cannot invoke a schema task.
+The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Render receives the direct migration URL as a service secret because that platform runs the configured pre-deploy command for the service. Kamal keeps every `MIGRATION_*_DATABASE_URL` out of `config/deploy.yml`'s runtime secret list. Its destination-safe `.kamal/secrets-common` mappings expose only local environment references, never credentials. The active `.kamal/hooks/pre-deploy` hook calls a dedicated wrapper that injects those values inside the Kamal process, marks the generated Docker environment arguments sensitive so command logs redact them, and runs `db:safe_prepare` only in the version-pinned, primary-host one-off migration container. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, the Kamal runtime configuration excludes direct migration URLs, destination runs receive the migration environment without rendering its value, the hook invokes the safe task exactly once, and runtime startup cannot invoke a schema task.
 
 ### Render configuration required after merge
 
@@ -364,17 +364,19 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 
 ## Branch verification evidence
 
-Local evidence was current as of `2026-09-02T15:23:21Z`. Earlier GitHub Actions runs [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) and [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) independently passed the backend, frontend, and browser gates on prior reviewed heads. The current implementation must receive the same independent current-head result after it is pushed.
+Local evidence was current as of `2026-09-02T15:49:21Z`. Earlier GitHub Actions runs [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) and [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) independently passed the backend, frontend, and browser gates on prior reviewed heads. The current implementation must receive the same independent current-head result after it is pushed.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
-- full Rails suite after review fixes: `1,885 examples, 0 failures`;
+- full Rails suite after review fixes: `1,886 examples, 0 failures`;
 - Brakeman: `0 security warnings`;
 - Bundler Audit: `No vulnerabilities found`;
 - npm audit: `0 vulnerabilities` after advancing the affected transitive development dependency to its patched release;
 - frontend typecheck, ESLint, and production build;
 - focused model/request/pre-deploy coverage for open-period synchronization, provenance, legacy manual preservation, immutable states, timecard OCR, database-session safety, and one-off Kamal migration scope; and
 - the complete seven-test Gate 0 browser release lane, including the accountant-role Bonus Alpha/Bonus Beta scenario and request assertions that unrelated or reverted payroll-item edits do not transmit or freeze the adjustment snapshot.
+
+CodeRabbit's final local review of the staged secret-delivery remediation inspected all seven changed files and returned zero findings.
 
 A separate manual Chrome walkthrough against a disposable local database confirmed the recurring-versus-one-time guidance, six adjustment rows on the existing-adjustments fixture, both fictional bonuses, the expected synthetic gross, and exactly one bonus after recalculation. Changing only overtime preserved the bonus and left the manual-adjustment override unset.
 
