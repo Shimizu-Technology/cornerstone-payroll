@@ -50,4 +50,41 @@ RSpec.describe TimeTrackingImport do
 
     expect(import.update(status: "applied", applied_at: Time.current)).to eq(true)
   end
+
+  it "keeps the newest failed acknowledgement visible when failures arrive out of order" do
+    company = create(:company)
+    pay_period = create(:pay_period, company: company)
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    previous_event_time = Time.iso8601("2026-09-02T08:00:00Z")
+    newer_failure_time = Time.iso8601("2026-09-02T10:00:00Z")
+    delayed_failure_time = Time.iso8601("2026-09-02T09:00:00Z")
+    import = create(
+      :time_tracking_import,
+      :finalized_aire_batch,
+      pay_period: pay_period,
+      time_tracking_source: source,
+      source_processing_status: "committed",
+      source_processing_event_occurred_at: previous_event_time
+    )
+
+    expect(
+      import.record_source_processing_failure!(
+        status: "payment_failed",
+        occurred_at: newer_failure_time,
+        message: "newer delivery failure"
+      )
+    ).to eq(true)
+    expect(
+      import.record_source_processing_failure!(
+        status: "payment_issued",
+        occurred_at: delayed_failure_time,
+        message: "older delayed failure"
+      )
+    ).to eq(false)
+
+    expect(import.reload).to have_attributes(
+      source_processing_event_occurred_at: newer_failure_time,
+      source_processing_sync_error: "newer delivery failure"
+    )
+  end
 end

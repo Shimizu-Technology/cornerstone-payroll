@@ -1453,6 +1453,58 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
     end
 
+    it "queues a committed acknowledgement for each applied finalized AIRE batch" do
+      source = create(
+        :time_tracking_source,
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = create(
+        :time_tracking_import,
+        :finalized_aire_batch,
+        pay_period: pay_period,
+        time_tracking_source: source,
+        status: "applied",
+        external_batch_id: "AIRE-PAY-COMMIT-1",
+        applied_at: Time.current
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      acknowledgement = import.aire_payroll_acknowledgements.find_by!(status: "committed")
+      expect(AirePayrollStatusSyncJob).to have_been_enqueued.with(acknowledgement.id)
+    end
+
+    it "commits payroll and preserves a recoverable acknowledgement when enqueueing fails" do
+      source = create(:time_tracking_source, company: company, source_type: "aire_services")
+      import = create(
+        :time_tracking_import,
+        :finalized_aire_batch,
+        pay_period: pay_period,
+        time_tracking_source: source,
+        status: "applied",
+        applied_at: Time.current
+      )
+      allow(AirePayrollStatusSyncJob).to receive(:perform_later).and_raise(StandardError, "queue unavailable")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+
+      expect(response).to have_http_status(:ok)
+      expect(pay_period.reload).to be_committed
+      acknowledgement = import.aire_payroll_acknowledgements.find_by!(status: "committed")
+      expect(acknowledgement).to have_attributes(enqueued_at: nil, delivered_at: nil, last_error: "queue unavailable")
+      expect(import.reload.source_processing_sync_error).to eq("queue unavailable")
+
+      allow(AirePayrollStatusSyncJob).to receive(:perform_later).and_return(true)
+      AirePayrollAcknowledgement.dispatch_pending!(ids: [ acknowledgement.id ])
+      expect(acknowledgement.reload).to have_attributes(last_error: nil)
+      expect(acknowledgement.enqueued_at).to be_present
+    end
+
     it "atomically records immutable payroll liabilities from stored item values" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 

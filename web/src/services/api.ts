@@ -836,11 +836,13 @@ export interface TimeTrackingPreviewCategory {
   regular_hours: number;
   overtime_hours: number;
   effective_rate_cents?: number | null;
+  payroll_rate_cents?: number | null;
   employee_wage_rate_id?: number | null;
   wage_rate_label?: string | null;
   wage_rate_match_method?: string | null;
   source_kinds?: Array<'current' | 'carryover' | 'correction'>;
   source_time_entry_ids?: string[];
+  original_work_dates?: string[];
 }
 
 export interface TimeTrackingPreviewRow {
@@ -903,6 +905,9 @@ export interface TimeTrackingImportData {
   contract_version: string | null;
   source_cutoff_at: string | null;
   applied_at: string | null;
+  source_processing_status: 'imported' | 'committed' | 'payment_issued' | 'payment_failed' | null;
+  source_processing_synced_at: string | null;
+  source_processing_sync_error: string | null;
 }
 
 export const timeTrackingSourcesApi = {
@@ -1075,7 +1080,7 @@ export const payPeriodsApi = {
     api.post<TimecardImportApplyResponse>(`/admin/pay_periods/${id}/apply_timecard_import`, { mappings }),
   previewTimeTrackingImport: (id: number, data: { source_id: number; start_date?: string; end_date?: string }) =>
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
-  applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_effective_rate_cents?: number | null; employee_wage_rate_id: number | null }> }> }) =>
+  applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
 };
 

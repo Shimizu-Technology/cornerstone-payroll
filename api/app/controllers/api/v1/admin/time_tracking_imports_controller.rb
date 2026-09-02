@@ -78,7 +78,10 @@ module Api
             external_batch_checksum: import.external_batch_checksum,
             contract_version: import.contract_version,
             source_cutoff_at: import.source_cutoff_at,
-            applied_at: import.applied_at
+            applied_at: import.applied_at,
+            source_processing_status: import.source_processing_status,
+            source_processing_synced_at: import.source_processing_synced_at,
+            source_processing_sync_error: import.source_processing_sync_error
           }
         end
       end
