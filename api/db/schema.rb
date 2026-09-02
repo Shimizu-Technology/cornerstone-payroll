@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1905,6 +1905,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_020000) do
     t.jsonb "raw_payload", default: {}, null: false
     t.datetime "source_cutoff_at"
     t.string "source_payload_hash", null: false
+    t.datetime "source_processing_event_occurred_at"
     t.string "source_processing_status"
     t.text "source_processing_sync_error"
     t.datetime "source_processing_synced_at"

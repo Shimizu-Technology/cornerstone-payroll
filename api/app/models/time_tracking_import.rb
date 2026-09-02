@@ -32,23 +32,26 @@ class TimeTrackingImport < ApplicationRecord
     external_batch_id.present? || external_batch_checksum.present? || contract_version.present? || source_cutoff_at.present?
   end
 
-  def record_source_processing_sync!(status:, synced_at:)
+  def record_source_processing_sync!(status:, synced_at:, occurred_at:)
     with_lock do
-      next_status = next_source_processing_status(status)
+      next_status = next_source_processing_status(status, occurred_at)
       return false if source_processing_status.present? && next_status == source_processing_status && status != source_processing_status
+      return false if stale_source_processing_event?(status, occurred_at)
 
       update!(
         source_processing_status: next_status,
         source_processing_synced_at: synced_at,
+        source_processing_event_occurred_at: occurred_at,
         source_processing_sync_error: nil
       )
     end
     true
   end
 
-  def record_source_processing_failure!(status:, message:)
+  def record_source_processing_failure!(status:, occurred_at:, message:)
     with_lock do
       return false if source_processing_status_supersedes?(status)
+      return false if stale_source_processing_event?(status, occurred_at)
 
       update!(source_processing_sync_error: message)
     end
@@ -57,8 +60,12 @@ class TimeTrackingImport < ApplicationRecord
 
   private
 
-  def next_source_processing_status(status)
-    return status if status.in?(SOURCE_PAYMENT_STATUSES)
+  def next_source_processing_status(status, occurred_at)
+    if status.in?(SOURCE_PAYMENT_STATUSES)
+      return source_processing_status if stale_source_processing_event?(status, occurred_at)
+
+      return status
+    end
     return source_processing_status if source_processing_status.in?(SOURCE_PAYMENT_STATUSES)
 
     current_rank = SOURCE_PROCESSING_STATUS_RANK.fetch(source_processing_status, -1)
@@ -70,6 +77,17 @@ class TimeTrackingImport < ApplicationRecord
     return true if source_processing_status == status && source_processing_synced_at.present?
     return true if source_processing_status.in?(SOURCE_PAYMENT_STATUSES) && !status.in?(SOURCE_PAYMENT_STATUSES)
     return false if status.in?(SOURCE_PAYMENT_STATUSES)
+
+    SOURCE_PROCESSING_STATUS_RANK.fetch(source_processing_status, -1) > SOURCE_PROCESSING_STATUS_RANK.fetch(status)
+  end
+
+  def stale_source_processing_event?(status, occurred_at)
+    return false if source_processing_event_occurred_at.blank?
+
+    incoming_time = occurred_at.to_time
+    current_time = source_processing_event_occurred_at.to_time
+    return true if current_time > incoming_time
+    return false if current_time < incoming_time
 
     SOURCE_PROCESSING_STATUS_RANK.fetch(source_processing_status, -1) > SOURCE_PROCESSING_STATUS_RANK.fetch(status)
   end

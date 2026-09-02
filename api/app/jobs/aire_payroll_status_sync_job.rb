@@ -30,11 +30,19 @@ class AirePayrollStatusSyncJob < ApplicationJob
       }
     )
     delivered_at = Time.current
-    import.record_source_processing_sync!(status: status, synced_at: delivered_at)
+    import.record_source_processing_sync!(
+      status: status,
+      synced_at: delivered_at,
+      occurred_at: acknowledgement.occurred_at
+    )
     acknowledgement.mark_delivered!(at: delivered_at)
   rescue TimeTracking::Client::Error => e
     acknowledgement&.record_delivery_failure!(e.message)
-    import&.record_source_processing_failure!(status: status, message: e.message)
+    import&.record_source_processing_failure!(
+      status: status,
+      occurred_at: acknowledgement.occurred_at,
+      message: e.message
+    )
     raise
   end
 end

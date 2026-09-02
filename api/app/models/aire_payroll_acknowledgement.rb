@@ -42,7 +42,13 @@ class AirePayrollAcknowledgement < ApplicationRecord
   rescue StandardError => e
     update_columns(last_error: e.message, updated_at: Time.current) if persisted?
     begin
-      time_tracking_import.record_source_processing_failure!(status: status, message: e.message) if persisted?
+      if persisted?
+        time_tracking_import.record_source_processing_failure!(
+          status: status,
+          occurred_at: occurred_at,
+          message: e.message
+        )
+      end
     rescue StandardError => state_error
       Rails.logger.error("AIRE payroll acknowledgement #{id || event_id} could not record its enqueue failure: #{state_error.message}")
     end

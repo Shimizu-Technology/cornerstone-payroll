@@ -115,7 +115,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "requires a written acknowledgement and calculates a correction with Cornerstone's wage rate" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
-    new_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    new_rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
     adjustments = [
       {
         "source_time_entry_id" => "101",
@@ -188,7 +188,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "keeps current and carried-forward hours separate on earning lines" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
-    rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
     adjustments = [
       {
         "source_time_entry_id" => "101",
@@ -229,8 +229,8 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "preserves distinct wage mappings for the same category by source kind" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "split-rate@example.com")
-    current_rate = employee.employee_wage_rates.create!(label: "Current Flight", rate: 30, is_primary: true, active: true)
-    carryover_rate = employee.employee_wage_rates.create!(label: "Prior Flight", rate: 25, is_primary: false, active: true)
+    current_rate = create(:employee_wage_rate, employee: employee, label: "Current Flight", rate: 30, is_primary: true, active: true)
+    carryover_rate = create(:employee_wage_rate, employee: employee, label: "Prior Flight", rate: 25, is_primary: false, active: true)
     adjustments = [
       {
         "source_time_entry_id" => "101",
@@ -294,7 +294,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "applies hours and preserves a recoverable acknowledgement when enqueueing fails" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "retry@example.com")
-    employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
     adjustments = [
       {
         "source_time_entry_id" => "101",
@@ -329,7 +329,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "does not allow an included finalized employee row to be skipped" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
-    employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
     adjustment = {
       "source_time_entry_id" => "101",
       "line_key" => "flight:2500",
@@ -373,7 +373,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "blocks a correction whose resulting regular or overtime bucket is negative" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
-    employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
     adjustment = {
       "source_time_entry_id" => "101",
       "line_key" => "flight:2500",
@@ -403,8 +403,8 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
   it "blocks a correction whose hours net to zero but whose Cornerstone gross adjustment is negative" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
-    flight_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
-    admin_rate = employee.employee_wage_rates.create!(label: "Admin Duties", rate: 20, is_primary: false, active: true)
+    flight_rate = create(:employee_wage_rate, employee: employee, label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    admin_rate = create(:employee_wage_rate, employee: employee, label: "Admin Duties", rate: 20, is_primary: false, active: true)
     base = {
       "source_time_entry_id" => "101",
       "source_kind" => "correction",
