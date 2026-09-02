@@ -353,7 +353,7 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 
 ## Branch verification evidence
 
-The application and test code in commit `3af2366` passed the checks below on September 3, 2026 (Guam time). GitHub Actions run [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) independently ran the backend, frontend, and browser gates against that exact commit. A later documentation-only commit may become the PR head without changing the tested application or test code.
+Evidence was current as of `2026-09-03T00:40:55+10:00`. The application and test code in commit `3af2366` passed the checks below. GitHub Actions run [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) independently ran the backend, frontend, and browser gates against that exact code commit; run [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) repeated all three gates successfully on documentation-only head `5871d73` and supplied the timestamp above.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
