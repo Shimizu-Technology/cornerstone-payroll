@@ -330,7 +330,7 @@ The deployment repair should:
 - re-establish the connection before retrying after any provider-side disconnect; and
 - test that the cleanup task can never terminate its own current backend or ordinary live web/worker sessions.
 
-The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL, accepts separate direct migration URLs for split databases, and always applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts. The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, and runtime startup cannot invoke a schema task.
+The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts. The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, and runtime startup cannot invoke a schema task.
 
 ### Render configuration required after merge
 
@@ -353,7 +353,7 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 
 ## Branch verification evidence
 
-The following checks passed on September 2, 2026 before the PR was opened:
+The application and test code in commit `3af2366` passed the checks below on September 3, 2026 (Guam time). GitHub Actions run [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) independently ran the backend, frontend, and browser gates against that exact commit. A later documentation-only commit may become the PR head without changing the tested application or test code.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
