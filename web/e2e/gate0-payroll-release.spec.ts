@@ -19,6 +19,8 @@ interface Gate0Fixture {
   bonus_alpha_payroll_item_id: number;
   bonus_beta_employee_id: number;
   bonus_beta_payroll_item_id: number;
+  register_reconciliation_field_name: string;
+  register_reconciliation_field_total: number;
   workflow_pay_period_id: number;
   workflow_payroll_item_id: number;
   time_import_pay_period_id: number;
@@ -129,8 +131,17 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('button', { name: 'Calculate Payroll' }).click();
     await expect(page.getByRole('button', { name: 'Approve' })).toBeVisible();
 
-    const bonusAlphaRow = page.getByRole('row').filter({ hasText: 'Bonus Alpha' });
-    const bonusBetaRow = page.getByRole('row').filter({ hasText: 'Bonus Beta' });
+    const payrollTable = page.getByRole('table').filter({
+      has: page.getByRole('columnheader', { name: 'Last Name' }),
+    });
+    await expect(payrollTable.getByRole('columnheader', { name: 'First Name' })).toBeVisible();
+    await expect(payrollTable.getByRole('columnheader', { name: /^Employee Medicare/ })).toBeVisible();
+    await expect(payrollTable.getByRole('columnheader', { name: /^Employer Medicare/ })).toBeVisible();
+
+    const bonusAlphaRow = payrollTable.getByRole('row').filter({ hasText: 'Alpha' });
+    const bonusBetaRow = payrollTable.getByRole('row').filter({ hasText: 'Beta' });
+    await expect(bonusAlphaRow.getByRole('cell').nth(0)).toContainText('Alpha');
+    await expect(bonusAlphaRow.getByRole('cell').nth(1)).toContainText('Bonus');
     await expect(bonusAlphaRow).toContainText('Bonus');
     await expect(bonusAlphaRow).toContainText('$1,234.56');
     await expect(bonusBetaRow).toContainText('Bonus');
@@ -142,6 +153,26 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const firstItems = firstPeriod.payroll_items as Array<Record<string, unknown>>;
     const firstBonusAlpha = firstItems.find((item) => item.id === fixture.bonus_alpha_payroll_item_id);
     expect(Number(firstBonusAlpha?.gross_pay)).toBe(2034.56);
+
+    await expect(payrollTable.getByRole('columnheader', { name: new RegExp(fixture.register_reconciliation_field_name) })).toBeVisible();
+    const headerLabels = (await payrollTable.getByRole('columnheader').allTextContents())
+      .map((label) => label.replace(/\s+/g, ' ').trim());
+    const totalsRow = payrollTable.getByRole('row').filter({ hasText: /Totals \(\d+ employees\)/ });
+    const totalCells = totalsRow.getByRole('cell');
+    expect(await totalCells.count()).toBe(headerLabels.length);
+    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('160');
+    const reconciliationFieldIndex = headerLabels.findIndex((label) => label.includes(fixture.register_reconciliation_field_name));
+    expect(reconciliationFieldIndex).toBeGreaterThanOrEqual(0);
+    expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim())
+      .toBe(`+$${fixture.register_reconciliation_field_total.toFixed(2)}`);
+
+    const employeeMedicareIndex = headerLabels.findIndex((label) => label.startsWith('Employee Medicare'));
+    const employerMedicareIndex = headerLabels.findIndex((label) => label.startsWith('Employer Medicare'));
+    const expectedEmployeeMedicare = firstItems.reduce((sum, item) => sum + Number(item.medicare_tax || 0), 0);
+    const expectedEmployerMedicare = firstItems.reduce((sum, item) => sum + Number(item.employer_medicare_tax || 0), 0);
+    expect((await totalCells.nth(employeeMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployeeMedicare.toFixed(2)}`);
+    expect((await totalCells.nth(employerMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployerMedicare.toFixed(2)}`);
+    expect(await totalsRow.evaluate((row) => window.getComputedStyle(row.parentElement as HTMLElement).position)).toBe('sticky');
 
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
