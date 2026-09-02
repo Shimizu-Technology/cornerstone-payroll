@@ -165,6 +165,25 @@ RSpec.describe DatabasePredeploy do
     expect(predeploy.migration_environment).not_to have_key("CACHE_DATABASE_URL")
   end
 
+  it "uses a direct migration override for a distinct pooled service database" do
+    pooled_cache_url = "postgresql://payroll:secret@cache-pooler.example.com/cache"
+    direct_cache_url = "postgresql://payroll:secret@cache.example.com/cache"
+    predeploy = described_class.new(
+      env: {
+        "RAILS_ENV" => "production",
+        "DATABASE_URL" => pooled_url,
+        "MIGRATION_DATABASE_URL" => direct_url,
+        "CACHE_DATABASE_URL" => pooled_cache_url,
+        "MIGRATION_CACHE_DATABASE_URL" => direct_cache_url
+      }
+    )
+
+    expect(predeploy.migration_environment).to include(
+      "DATABASE_URL" => direct_url,
+      "CACHE_DATABASE_URL" => direct_cache_url
+    )
+  end
+
   it "uses the normal Rails database configuration outside production when no URL override is needed" do
     calls = []
     predeploy = described_class.new(

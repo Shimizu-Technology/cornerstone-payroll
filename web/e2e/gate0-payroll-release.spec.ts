@@ -146,12 +146,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
     await expect(page.getByText('One-Time Bonus')).toBeVisible();
-    const updateRequestPromise = page.waitForRequest((request) =>
-      request.method() === 'PATCH' && request.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
+    const updateResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === 'PATCH' &&
+      response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
     );
     await page.getByRole('button', { name: 'Save & Recalculate' }).click();
-    const updateRequest = await updateRequestPromise;
-    const updatePayload = updateRequest.postDataJSON() as { payroll_item: Record<string, unknown> };
+    const updateResponse = await updateResponsePromise;
+    expect(updateResponse.ok()).toBeTruthy();
+    const updatePayload = updateResponse.request().postDataJSON() as { payroll_item: Record<string, unknown> };
     expect(updatePayload.payroll_item).not.toHaveProperty('payroll_adjustments');
 
     const secondRun = await accountantApi.post(`admin/pay_periods/${fixture.bonus_sync_pay_period_id}/run_payroll`);
