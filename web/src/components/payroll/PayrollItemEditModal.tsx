@@ -23,6 +23,26 @@ interface PayrollAdjustmentField {
   active: boolean;
 }
 
+interface NormalizedPayrollAdjustment {
+  label: string;
+  amount: number;
+  treatment: PayrollAdjustmentTreatment;
+  notes: string;
+  active: boolean;
+}
+
+function normalizePayrollAdjustments(adjustments: PayrollAdjustmentField[]): NormalizedPayrollAdjustment[] {
+  return adjustments
+    .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
+    .map(adjustment => ({
+      label: adjustment.label.trim(),
+      amount: parseFloat(adjustment.amount) || 0,
+      treatment: adjustment.treatment,
+      notes: adjustment.notes.trim(),
+      active: adjustment.active !== false,
+    }));
+}
+
 const adjustmentTreatmentOptions: Array<{ value: PayrollAdjustmentTreatment; label: string; helper: string }> = [
   { value: 'taxable_addition', label: 'Adds taxable pay', helper: 'Increases gross wages and payroll taxes.' },
   { value: 'non_taxable_addition', label: 'Adds non-taxable reimbursement', helper: 'Increases net pay only.' },
@@ -97,7 +117,7 @@ export function PayrollItemEditModal({
     payroll_field_entries: [],
   });
   const [saving, setSaving] = useState(false);
-  const [payrollAdjustmentsDirty, setPayrollAdjustmentsDirty] = useState(false);
+  const [initialPayrollAdjustments, setInitialPayrollAdjustments] = useState<NormalizedPayrollAdjustment[]>([]);
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -119,6 +139,16 @@ export function PayrollItemEditModal({
             active: rate.active,
           }));
 
+      const itemPayrollAdjustments: PayrollAdjustmentField[] = (item.payroll_adjustments && item.payroll_adjustments.length > 0)
+        ? item.payroll_adjustments.map(adjustment => ({
+            label: adjustment.label,
+            amount: String(adjustment.amount),
+            treatment: adjustment.treatment,
+            notes: adjustment.notes || '',
+            active: adjustment.active !== false,
+          }))
+        : [];
+
       setFields({
         hours_worked: item.hours_worked || 0,
         overtime_hours: item.overtime_hours || 0,
@@ -137,15 +167,7 @@ export function PayrollItemEditModal({
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
         check_memo: item.check_memo || '',
-        payroll_adjustments: (item.payroll_adjustments && item.payroll_adjustments.length > 0)
-          ? item.payroll_adjustments.map(adjustment => ({
-              label: adjustment.label,
-              amount: String(adjustment.amount),
-              treatment: adjustment.treatment,
-              notes: adjustment.notes || '',
-              active: adjustment.active !== false,
-            }))
-          : [],
+        payroll_adjustments: itemPayrollAdjustments,
         payroll_field_entries: (item.payroll_field_entries || [])
           .filter(entry => entry.active === true)
           .map(entry => ({
@@ -154,8 +176,8 @@ export function PayrollItemEditModal({
             active: true,
           })),
       });
+      setInitialPayrollAdjustments(normalizePayrollAdjustments(itemPayrollAdjustments));
       setError(null);
-      setPayrollAdjustmentsDirty(false);
       setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
     }
@@ -175,6 +197,8 @@ export function PayrollItemEditModal({
   const tipsPaidOutInput = Number(fields.tips_paid_out || 0);
   const effectiveReportedTips = Math.max(reportedTipsInput, tipsPaidOutInput);
   const tipsPaidOutExceedsReportedTips = tipsPaidOutInput > reportedTipsInput;
+  const normalizedPayrollAdjustments = normalizePayrollAdjustments(fields.payroll_adjustments);
+  const payrollAdjustmentsDirty = JSON.stringify(normalizedPayrollAdjustments) !== JSON.stringify(initialPayrollAdjustments);
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -218,7 +242,6 @@ export function PayrollItemEditModal({
   };
 
   const handlePayrollAdjustmentChange = (index: number, patch: Partial<PayrollAdjustmentField>) => {
-    setPayrollAdjustmentsDirty(true);
     setFields((prev) => {
       const updated = [...prev.payroll_adjustments];
       updated[index] = { ...updated[index], ...patch };
@@ -227,7 +250,6 @@ export function PayrollItemEditModal({
   };
 
   const addPayrollAdjustment = () => {
-    setPayrollAdjustmentsDirty(true);
     setFields((prev) => ({
       ...prev,
       payroll_adjustments: [...prev.payroll_adjustments, { label: '', amount: '0', treatment: 'post_tax_deduction', notes: '', active: true }],
@@ -235,7 +257,6 @@ export function PayrollItemEditModal({
   };
 
   const removePayrollAdjustment = (index: number) => {
-    setPayrollAdjustmentsDirty(true);
     setFields((prev) => ({
       ...prev,
       payroll_adjustments: prev.payroll_adjustments.filter((_, i) => i !== index),
@@ -280,15 +301,7 @@ export function PayrollItemEditModal({
       };
 
       if (payrollAdjustmentsDirty) {
-        payload.payroll_adjustments = fields.payroll_adjustments
-          .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
-          .map(adjustment => ({
-            label: adjustment.label.trim(),
-            amount: parseFloat(adjustment.amount) || 0,
-            treatment: adjustment.treatment,
-            notes: adjustment.notes.trim(),
-            active: adjustment.active !== false,
-          }));
+        payload.payroll_adjustments = normalizedPayrollAdjustments;
       }
 
       if (payrollFieldEntriesDirty) {

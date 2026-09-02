@@ -221,16 +221,23 @@ Before correcting the June 4 payroll, Cornerstone must confirm:
 
 ### 1. Repair default synchronization
 
-For the existing data model, the safe minimal rule is:
+For the existing data model, the safe release rule is:
 
 ```ruby
 return if payroll_adjustments_overridden?
-self.payroll_adjustments = normalize(employee.default_payroll_adjustments)
+return unless open_period?
+
+if known_default_snapshot? || empty? || legacy_snapshot_is_subset_of_current_defaults?
+  self.payroll_adjustments = normalize(employee.default_payroll_adjustments)
+  mark_as_default_snapshot
+end
 ```
 
-In other words, a draft/calculated item that has **not** been manually overridden should refresh to the employee's current defaults, even if its existing snapshot is nonempty. Assigning an empty normalized array is also necessary so removing all employee defaults can clear a stale, non-overridden snapshot.
+In other words, a draft/calculated item refreshes when it is a known employee-default snapshot, is empty, or is a legacy snapshot whose complete adjustment multiset still appears in the employee's current defaults. The last condition matches the production incident: the period item contained the five existing defaults and the employee profile contained those same five plus the newly added bonus. Multiplicity is preserved when comparing entries, so duplicate-looking adjustments are not collapsed.
 
-This is safer than merging by label in the current JSON array because labels are editable and not stable identifiers. The existing manual-edit paths already set `payroll_adjustments_overridden`, which protects deliberate period-specific changes.
+Every newly copied default snapshot now records `payroll_adjustments_source: employee_default` in `custom_columns_data`; an explicit period edit records `payroll_adjustments_source: manual` together with `payroll_adjustments_overridden`. This provenance lets later default changes and removals refresh safely. An older unmarked, nonempty array that cannot be proven to be defaults is preserved rather than overwritten. That conservative legacy rule means an old default that was replaced wholesale cannot be identified automatically; it requires explicit review because the pre-fix data has no trustworthy source marker.
+
+This is safer than merging by label in the current JSON array because labels are editable and not stable identifiers. Assigning an empty normalized array remains necessary for known default snapshots so removing all employee defaults clears a stale open-period snapshot.
 
 The method should be renamed to reflect synchronization rather than “apply if unset.” Every caller must be reviewed, including normal payroll runs, item recalculation, MoSa import, time-tracking import, payroll intake, and timecard OCR.
 
@@ -275,14 +282,16 @@ The P0 release must cover all of these cases. Items marked automated are enforce
 2. **Automated:** changing a default refreshes a non-overridden item.
 3. **Automated:** removing all defaults clears a non-overridden draft/calculated item.
 4. **Automated:** a manually overridden item keeps its period-specific adjustments.
-5. **Automated:** an approved or committed period does not change through ordinary default synchronization.
-6. **Covered by existing calculator/import suites:** salary and import-owned inputs remain intact while adjustments synchronize.
-7. **Automated:** timecard OCR updates an existing item through the shared synchronization path.
-8. **Automated in the release lane and existing payroll suites:** the register/calculator uses the synchronized taxable bonus, and the broader export/report suites guard downstream outputs.
-9. **Automated:** gross and taxes are recalculated from updated period data, rather than changing display data only.
-10. **Automated:** the production-shaped Bonus Alpha/Bonus Beta fixture reproduces the old failure and passes with the fix.
-11. **Existing control:** recalculation remains recorded through the run-payroll audit event; per-adjustment provenance is a separate long-term improvement.
-12. **Automated:** repeating recalculation leaves one bonus entry and does not duplicate it.
+5. **Automated:** an unmarked legacy period adjustment that cannot be proven to be an employee default is preserved.
+6. **Automated:** an approved or committed period does not change through ordinary default synchronization.
+7. **Covered by existing calculator/import suites:** salary and import-owned inputs remain intact while adjustments synchronize.
+8. **Automated:** timecard OCR updates an existing item through the shared synchronization path.
+9. **Automated in the release lane and existing payroll suites:** the register/calculator uses the synchronized taxable bonus, and the broader export/report suites guard downstream outputs.
+10. **Automated:** gross and taxes are recalculated from updated period data, rather than changing display data only.
+11. **Automated:** the production-shaped Bonus Alpha/Bonus Beta fixture reproduces the old failure and passes with the fix.
+12. **Existing control:** recalculation remains recorded through the run-payroll audit event; per-adjustment provenance is a separate long-term improvement.
+13. **Automated:** repeating recalculation leaves one bonus entry and does not duplicate it.
+14. **Automated browser request assertions:** editing then reverting an adjustment, or adding then removing a blank row, does not transmit an unchanged adjustment array or mark the item manual.
 
 ## Operational correction plan for June 4
 
@@ -330,7 +339,9 @@ The deployment repair should:
 - re-establish the connection before retrying after any provider-side disconnect; and
 - test that the cleanup task can never terminate its own current backend or ordinary live web/worker sessions.
 
-The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts. The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, and runtime startup cannot invoke a schema task.
+The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts.
+
+The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Render receives the direct migration URL as a service secret because that platform runs the configured pre-deploy command for the service. Kamal keeps every `MIGRATION_*_DATABASE_URL` out of `config/deploy.yml`'s runtime secret list and uses the active `.kamal/hooks/pre-deploy` hook to pass them only to the version-pinned, primary-host one-off migration container. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, the Kamal runtime configuration excludes direct migration URLs, the hook invokes the safe task exactly once, and runtime startup cannot invoke a schema task.
 
 ### Render configuration required after merge
 
@@ -353,16 +364,17 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 
 ## Branch verification evidence
 
-Evidence was current as of `2026-09-03T00:40:55+10:00`. The application and test code in commit `3af2366` passed the checks below. GitHub Actions run [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) independently ran the backend, frontend, and browser gates against that exact code commit; run [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) repeated all three gates successfully on documentation-only head `5871d73` and supplied the timestamp above.
+Local evidence was current as of `2026-09-02T15:23:21Z`. Earlier GitHub Actions runs [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) and [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) independently passed the backend, frontend, and browser gates on prior reviewed heads. The current implementation must receive the same independent current-head result after it is pushed.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
-- full Rails suite after review fixes: `1,882 examples, 0 failures`;
+- full Rails suite after review fixes: `1,885 examples, 0 failures`;
 - Brakeman: `0 security warnings`;
 - Bundler Audit: `No vulnerabilities found`;
+- npm audit: `0 vulnerabilities` after advancing the affected transitive development dependency to its patched release;
 - frontend typecheck, ESLint, and production build;
-- focused model/request/pre-deploy coverage for open-period synchronization, manual overrides, immutable states, timecard OCR, and database-session safety; and
-- the complete seven-test Gate 0 browser release lane, including the accountant-role Bonus Alpha/Bonus Beta scenario and a request assertion that an unrelated payroll-item save does not transmit or freeze the adjustment snapshot.
+- focused model/request/pre-deploy coverage for open-period synchronization, provenance, legacy manual preservation, immutable states, timecard OCR, database-session safety, and one-off Kamal migration scope; and
+- the complete seven-test Gate 0 browser release lane, including the accountant-role Bonus Alpha/Bonus Beta scenario and request assertions that unrelated or reverted payroll-item edits do not transmit or freeze the adjustment snapshot.
 
 A separate manual Chrome walkthrough against a disposable local database confirmed the recurring-versus-one-time guidance, six adjustment rows on the existing-adjustments fixture, both fictional bonuses, the expected synthetic gross, and exactly one bonus after recalculation. Changing only overtime preserved the bonus and left the manual-adjustment override unset.
 

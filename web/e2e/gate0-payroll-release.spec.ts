@@ -146,15 +146,34 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
     await expect(page.getByText('One-Time Bonus')).toBeVisible();
-    const updateResponsePromise = page.waitForResponse((response) =>
-      response.request().method() === 'PATCH' &&
-      response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
-    );
-    await page.getByRole('button', { name: 'Save & Recalculate' }).click();
-    const updateResponse = await updateResponsePromise;
-    expect(updateResponse.ok()).toBeTruthy();
-    const updatePayload = updateResponse.request().postDataJSON() as { payroll_item: Record<string, unknown> };
-    expect(updatePayload.payroll_item).not.toHaveProperty('payroll_adjustments');
+
+    const saveAndCaptureUpdatePayload = async (): Promise<{ payroll_item: Record<string, unknown> }> => {
+      const updateResponsePromise = page.waitForResponse((response) =>
+        response.request().method() === 'PATCH' &&
+        response.url().includes(`/payroll_items/${fixture.bonus_alpha_payroll_item_id}`)
+      );
+      await page.getByRole('button', { name: 'Save & Recalculate' }).click();
+      const updateResponse = await updateResponsePromise;
+      expect(updateResponse.ok()).toBeTruthy();
+      return updateResponse.request().postDataJSON() as { payroll_item: Record<string, unknown> };
+    };
+
+    const firstAdjustmentLabel = page.getByPlaceholder('Label (e.g. Uniform repayment)').first();
+    const originalLabel = await firstAdjustmentLabel.inputValue();
+    await firstAdjustmentLabel.fill(`${originalLabel} edited`);
+    await firstAdjustmentLabel.fill(originalLabel);
+    const revertedEditPayload = await saveAndCaptureUpdatePayload();
+    expect(revertedEditPayload.payroll_item).not.toHaveProperty('payroll_adjustments');
+
+    await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
+    const adjustmentLabels = page.getByPlaceholder('Label (e.g. Uniform repayment)');
+    const initialAdjustmentCount = await adjustmentLabels.count();
+    await page.getByRole('button', { name: '+ Add Adjustment' }).click();
+    await expect(adjustmentLabels).toHaveCount(initialAdjustmentCount + 1);
+    await page.getByTitle('Remove').last().click();
+    await expect(adjustmentLabels).toHaveCount(initialAdjustmentCount);
+    const addRemovePayload = await saveAndCaptureUpdatePayload();
+    expect(addRemovePayload.payroll_item).not.toHaveProperty('payroll_adjustments');
 
     const secondRun = await accountantApi.post(`admin/pay_periods/${fixture.bonus_sync_pay_period_id}/run_payroll`);
     expect(secondRun.ok()).toBeTruthy();
