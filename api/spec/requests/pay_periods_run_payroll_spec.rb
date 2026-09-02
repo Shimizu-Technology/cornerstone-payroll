@@ -128,6 +128,64 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
       expect(refreshed_item&.wage_rate_hours&.first&.dig("rate")).to eq(10.0)
     end
 
+    it "reproduces and repairs the production-shaped recurring bonus mismatch" do
+      existing_adjustments_employee = employee
+      existing_defaults = [
+        { "label" => "Fixture reimbursement A", "amount" => 111.11, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement B", "amount" => 222.22, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement C", "amount" => 33.33, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement D", "amount" => 44.44, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement E", "amount" => 55.55, "treatment" => "non_taxable_addition", "active" => true }
+      ]
+      existing_adjustments_employee.update!(
+        first_name: "Bonus",
+        last_name: "Alpha",
+        default_payroll_adjustments: existing_defaults
+      )
+      existing_adjustments_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: existing_adjustments_employee,
+        company: company,
+        payroll_adjustments: existing_adjustments_employee.default_payroll_adjustments
+      )
+
+      empty_adjustments_employee = create(
+        :employee,
+        company: company,
+        first_name: "Bonus",
+        last_name: "Beta",
+        default_payroll_adjustments: []
+      )
+      empty_adjustments_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: empty_adjustments_employee,
+        company: company,
+        payroll_adjustments: []
+      )
+
+      existing_bonus = { "label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition", "active" => true }
+      comparison_bonus = { "label" => "Bonus", "amount" => 876.54, "treatment" => "taxable_addition", "active" => true }
+      existing_adjustments_employee.update!(default_payroll_adjustments: existing_defaults + [ existing_bonus ])
+      empty_adjustments_employee.update!(
+        default_payroll_adjustments: [ comparison_bonus ]
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/run_payroll",
+           params: { employee_ids: [ existing_adjustments_employee.id, empty_adjustments_employee.id ] },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      response_items = response.parsed_body.dig("pay_period", "payroll_items")
+      response_existing_item = response_items.find { |item| item.fetch("employee_id") == existing_adjustments_employee.id }
+      response_comparison_item = response_items.find { |item| item.fetch("employee_id") == empty_adjustments_employee.id }
+      expect(response_existing_item.fetch("payroll_adjustments")).to eq(existing_defaults + [ existing_bonus ])
+      expect(response_comparison_item.fetch("payroll_adjustments")).to eq([ comparison_bonus ])
+      expect(existing_adjustments_item.reload.payroll_adjustments).to eq(existing_defaults + [ existing_bonus ])
+      expect(empty_adjustments_item.reload.payroll_adjustments).to eq([ comparison_bonus ])
+    end
+
     it "includes submitted hourly employees when imported payroll items already exist" do
       allow_any_instance_of(PayrollItem).to receive(:calculate!) do |item|
         custom_total = Array(item.custom_earnings).sum { |earning| earning["amount"].to_f }

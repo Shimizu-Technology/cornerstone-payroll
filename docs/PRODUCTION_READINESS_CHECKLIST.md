@@ -1,8 +1,10 @@
 # Production Readiness Checklist
 
-Last reviewed: August 24, 2026
+Last reviewed: `2026-09-02T15:49:21Z`
 
 Current evidence: [August 24, 2026 production rerun](PRODUCTION_READINESS_EVIDENCE_2026-08-24.md). The deployed command passes 24 of 26 controls. Clerk production keys and MFA remain failed, and the manual controls below remain no-go until their evidence is attached.
+
+Release gate as of `2026-09-02T15:49:21Z`: PR [#142](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/142) is the code-complete, not-yet-merged correction for the recurring-adjustment synchronization incident and unsafe pooled pre-deploy process. Before its first production deployment, Render must receive a direct, non-pooler `MIGRATION_DATABASE_URL`, plus a matching direct `MIGRATION_CACHE_DATABASE_URL`, `MIGRATION_QUEUE_DATABASE_URL`, or `MIGRATION_CABLE_DATABASE_URL` for any service that uses a distinct pooled database. The Render pre-deploy command must be exactly `bundle exec rails db:safe_prepare`. Kamal deployments must use the tracked pre-deploy hook, which supplies those direct URLs only to the version-pinned one-off migration container through redacted sensitive arguments; the URLs must remain absent from long-lived container configuration and command output. Existing pooled URLs remain appropriate for normal web/worker traffic, and runtime entrypoints must not prepare schemas. The release is a no-go until current-head review and CI pass, the direct connections are configured, pre-deploy succeeds, the expected commit is live on web and worker, and the deidentified smoke test passes. Correcting the affected June 4 payroll is a separate controlled operation requiring Cornerstone's bonus/retirement confirmation, before-and-after reconciliation, and second-review signoff. See the [redacted incident and implementation record](MARK_ACCOUNTANT_FEEDBACK_AND_RECURRING_BONUS_INVESTIGATION_2026-09-02.md).
 
 This is the release gate for payroll and compliance workloads. Passing automated tests is necessary but does not authorize production use by itself. The release owner must attach evidence for every applicable control below.
 
@@ -45,6 +47,7 @@ The R2 and cache probes create random, non-customer test values and remove their
 - [ ] Active Record encryption uses one authoritative, recoverable key set. If both Rails credentials and deployment environment keys exist, they match exactly.
 - [ ] R2 is private, lifecycle/versioning policy is documented, and a generated payroll document remains available after an application redeploy.
 - [ ] Solid Queue, Cache, and Cable schemas are installed; a queued job survives a web-process restart.
+- [ ] Production schema preparation runs only in the serialized pre-deploy phase, uses `db:safe_prepare` with every required direct `MIGRATION_*_DATABASE_URL`, and cannot run from a web/worker entrypoint or continue through a pooled migration. Kamal direct migration URLs are scoped to its one-off pre-deploy container and are absent from long-lived runtime configuration.
 - [ ] Email delivery, bounce/error reporting, and sender-domain authentication are verified.
 - [ ] Database backups are encrypted; restore to an isolated environment has been timed and verified.
 - [ ] Object-storage backup/recovery has been exercised.

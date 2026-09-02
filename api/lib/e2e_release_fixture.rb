@@ -183,6 +183,71 @@ class E2eReleaseFixture
         hire_date: Date.new(2026, 1, 1)
       )
 
+      bonus_alpha = create_employee!(
+        company: company,
+        department: department,
+        first_name: "Bonus",
+        last_name: "Alpha",
+        email: "bonus-alpha@example.test",
+        ssn: "900-00-0004",
+        pay_rate: 10.00,
+        hire_date: Date.new(2026, 1, 1),
+        default_payroll_adjustments: existing_adjustments
+      )
+      bonus_beta = create_employee!(
+        company: company,
+        department: department,
+        first_name: "Bonus",
+        last_name: "Beta",
+        email: "bonus-beta@example.test",
+        ssn: "900-00-0005",
+        pay_rate: 10.00,
+        hire_date: Date.new(2026, 1, 1)
+      )
+      [ bonus_alpha, bonus_beta ].each do |fixture_employee|
+        fixture_employee.update!(status: "terminated", termination_date: Date.new(2026, 6, 5))
+      end
+
+      bonus_sync_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 5, 18),
+        end_date: Date.new(2026, 5, 31),
+        pay_date: Date.new(2026, 6, 4),
+        notes: "Production-shaped recurring bonus synchronization scenario"
+      )
+      bonus_alpha_item = PayrollItem.create!(
+        company: company,
+        pay_period: bonus_sync_period,
+        employee: bonus_alpha,
+        employment_type: bonus_alpha.employment_type,
+        pay_rate: bonus_alpha.pay_rate,
+        hours_worked: 80,
+        payroll_adjustments: bonus_alpha.default_payroll_adjustments,
+        timekeeping_source: "manual"
+      )
+      bonus_beta_item = PayrollItem.create!(
+        company: company,
+        pay_period: bonus_sync_period,
+        employee: bonus_beta,
+        employment_type: bonus_beta.employment_type,
+        pay_rate: bonus_beta.pay_rate,
+        hours_worked: 80,
+        payroll_adjustments: [],
+        timekeeping_source: "manual"
+      )
+      bonus_alpha.update!(
+        default_payroll_adjustments: bonus_alpha.default_payroll_adjustments + [
+          { "label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition", "active" => true }
+        ]
+      )
+      bonus_beta.update!(
+        default_payroll_adjustments: [
+          { "label" => "Bonus", "amount" => 876.54, "treatment" => "taxable_addition", "active" => true }
+        ]
+      )
+
       workflow_period = create_pay_period!(
         company: company,
         pay_schedule: pay_schedule,
@@ -248,6 +313,11 @@ class E2eReleaseFixture
         employee_id: employee.id,
         client_employee_id: client_employee.id,
         other_employee_id: other_employee.id,
+        bonus_sync_pay_period_id: bonus_sync_period.id,
+        bonus_alpha_employee_id: bonus_alpha.id,
+        bonus_alpha_payroll_item_id: bonus_alpha_item.id,
+        bonus_beta_employee_id: bonus_beta.id,
+        bonus_beta_payroll_item_id: bonus_beta_item.id,
         workflow_pay_period_id: workflow_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
         time_import_pay_period_id: time_import_period.id,
@@ -259,7 +329,7 @@ class E2eReleaseFixture
       }
     end
 
-    def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:)
+    def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:, default_payroll_adjustments: [])
       Employee.create!(
         company: company,
         department: department,
@@ -277,8 +347,19 @@ class E2eReleaseFixture
         address_line1: "100 Test Avenue",
         city: "Hagåtña",
         state: "GU",
-        zip: "96910"
+        zip: "96910",
+        default_payroll_adjustments: default_payroll_adjustments
       )
+    end
+
+    def existing_adjustments
+      [
+        { "label" => "Fixture reimbursement A", "amount" => 111.11, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement B", "amount" => 222.22, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement C", "amount" => 33.33, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement D", "amount" => 44.44, "treatment" => "non_taxable_addition", "active" => true },
+        { "label" => "Fixture reimbursement E", "amount" => 55.55, "treatment" => "non_taxable_addition", "active" => true }
+      ]
     end
 
     def create_pay_period!(company:, pay_schedule:, workweek:, start_date:, end_date:, pay_date:, notes:)

@@ -324,7 +324,7 @@ module Api
               end
 
               sync_pay_rate_from_employee(payroll_item, employee)
-              payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
+              payroll_item.sync_default_payroll_adjustments!(employee)
 
               # Use hours from params if provided
               if params[:hours] && params[:hours][employee_id.to_s]
