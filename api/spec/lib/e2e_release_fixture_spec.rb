@@ -50,6 +50,8 @@ RSpec.describe E2eReleaseFixture do
     expect(PayPeriod.find(fixture.fetch(:bonus_sync_pay_period_id)).pay_date).to eq(Date.new(2026, 6, 4))
     expect(PayrollItem.find(fixture.fetch(:bonus_alpha_payroll_item_id)).payroll_adjustments.size).to eq(5)
     expect(Employee.find(fixture.fetch(:bonus_alpha_employee_id)).default_payroll_adjustments.size).to eq(6)
+    expect(fixture.fetch(:register_reconciliation_field_name)).to eq("Fixture Employer Benefit")
+    expect(EmployeePayrollField.where(payroll_field_definition: PayrollFieldDefinition.find_by!(name: "Fixture Employer Benefit")).sum(:amount)).to eq(35.79)
   ensure
     FileUtils.rm_f(output) if output
   end

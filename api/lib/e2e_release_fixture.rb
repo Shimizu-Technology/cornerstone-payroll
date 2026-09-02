@@ -204,6 +204,26 @@ class E2eReleaseFixture
         pay_rate: 10.00,
         hire_date: Date.new(2026, 1, 1)
       )
+      register_reconciliation_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Fixture Employer Benefit",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "benefit",
+        amount_type: "fixed",
+        show_in_payroll_grid: true,
+        sort_order: 1
+      )
+      EmployeePayrollField.create!(
+        employee: bonus_alpha,
+        payroll_field_definition: register_reconciliation_field,
+        amount: 12.34
+      )
+      EmployeePayrollField.create!(
+        employee: bonus_beta,
+        payroll_field_definition: register_reconciliation_field,
+        amount: 23.45
+      )
       [ bonus_alpha, bonus_beta ].each do |fixture_employee|
         fixture_employee.update!(status: "terminated", termination_date: Date.new(2026, 6, 5))
       end
@@ -318,6 +338,8 @@ class E2eReleaseFixture
         bonus_alpha_payroll_item_id: bonus_alpha_item.id,
         bonus_beta_employee_id: bonus_beta.id,
         bonus_beta_payroll_item_id: bonus_beta_item.id,
+        register_reconciliation_field_name: register_reconciliation_field.name,
+        register_reconciliation_field_total: 35.79,
         workflow_pay_period_id: workflow_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
         time_import_pay_period_id: time_import_period.id,
