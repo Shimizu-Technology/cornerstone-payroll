@@ -1,5 +1,5 @@
 # Cornerstone Payroll
-# https://payroll.cornerstonetaxservices.com
+# https://payroll.shimizu-technology.com
 
 User-agent: *
 Allow: /
