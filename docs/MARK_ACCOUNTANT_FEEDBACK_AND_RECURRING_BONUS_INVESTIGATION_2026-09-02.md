@@ -367,7 +367,7 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 
 ## Release verification evidence
 
-Local evidence was current as of `2026-09-02T15:49:21Z`. GitHub Actions run [33651132579](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33651132579) passed the backend, frontend, and browser gates on PR #142's final reviewed head `48ab974cd0d825c442608bc7da0cb0782b225f99`. PR #143 then resolved a dependency advisory exposed on the merged-main run; its checks and the follow-up main run [33687384704](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33687384704) passed.
+Local evidence was current as of `2026-09-02T15:49:21Z`. GitHub Actions run [33651132579](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33651132579) passed the backend, frontend, and browser gates on PR #142's final reviewed head `48ab974cd0d825c442608bc7da0cb0782b225f99`. PR #143 then resolved a frontend-only dependency advisory in `web/package-lock.json`; its checks and the follow-up main run [33687384704](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33687384704) passed. Netlify published the resulting main revision `673c0c7a84066aca017cb3b1bee49218526369d4` at `2026-09-03T07:51:00+10:00`. Render's path filters correctly left the API web service and background worker on PR #142's backend revision `e69114531fb610bc6c4a4b9036337419428b5b74`; the web service became live at `2026-09-03T07:42:36+10:00`, and the worker became live at `2026-09-03T07:41:33+10:00`.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
