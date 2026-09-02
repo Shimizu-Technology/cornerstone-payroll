@@ -62,6 +62,12 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("import", "id")).to eq(123)
+      expect(response.parsed_body.fetch("import")).to include(
+        "applied_at" => nil,
+        "source_processing_status" => nil,
+        "source_processing_synced_at" => nil,
+        "source_processing_sync_error" => nil
+      )
     end
   end
 

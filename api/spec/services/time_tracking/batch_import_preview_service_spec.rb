@@ -198,9 +198,11 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     row = described_class.new(pay_period: pay_period, source: source).call.processed_payload.fetch("rows").first
 
     expect(row.fetch("estimated_gross_delta")).to eq(0.0)
-    expect(row.fetch("categories")).to contain_exactly(
+    categories = row.fetch("categories")
+    expect(categories).to contain_exactly(
       include("name" => "Uncategorized", "total_hours" => 0.0)
     )
+    expect(categories.first).not_to have_key("effective_rate_cents")
   end
 
   it "returns the existing import for the same batch ID and checksum" do

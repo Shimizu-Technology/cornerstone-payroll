@@ -27,7 +27,7 @@ For AIRE, Cornerstone:
 7. shows current, carryover, correction, and unpaid exclusion evidence before apply; and
 8. records the external batch ID, checksum, contract version, cutoff, raw payload, processed payload, and applying operator.
 
-After apply, Cornerstone asynchronously posts an idempotent `imported` acknowledgement back to AIRE. After the containing pay period is committed, it posts a separate `committed` acknowledgement. Delivery retries automatically, and the import records the last acknowledged source status plus any current retry error. Applying a batch is never represented as payment issued.
+After apply, Cornerstone records a durable, idempotent `imported` acknowledgement in the same database transaction, then delivers it to AIRE asynchronously. Committing the containing pay period transaction records a separate `committed` acknowledgement. A recurring dispatcher recovers acknowledgements that could not be queued or delivered, and stale failures cannot overwrite a newer successful source status. The import records the last acknowledged source status plus any current applicable retry error. Applying a batch is never represented as payment issued.
 
 The external batch ID is unique per time-tracking source. Repeating the same ID and checksum is a no-op. Reusing an ID with different contents, or presenting the same ID for another pay period, is rejected.
 
@@ -60,6 +60,7 @@ An empty finalized batch is valid and may be applied so Cornerstone retains evid
 - **Unmapped employee or earning:** update the mapping in the preview; do not discard a finalized row.
 - **Negative net correction:** use Cornerstone's correction workflow.
 - **Already applied:** do not create a second import. The existing import provenance is the authoritative record.
+- **AIRE acknowledgement retrying:** payroll work remains safely applied or committed. The durable acknowledgement outbox retries without requiring the operator to repeat the payroll action.
 
 ## Release evidence
 

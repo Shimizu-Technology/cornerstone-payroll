@@ -14,14 +14,15 @@ module TimeTracking
     end
 
     def call
-      results = @pay_period.with_lock { apply_locked! }
-      enqueue_source_processing_sync("imported", @import.applied_at) if finalized_batch? && @import.status == "applied"
+      acknowledgement_ids = []
+      results = @pay_period.with_lock { apply_locked!(acknowledgement_ids) }
+      AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids)
       results
     end
 
     private
 
-    def apply_locked!
+    def apply_locked!(acknowledgement_ids)
       raise ArgumentError, "Cannot apply to a non-editable pay period" unless @pay_period.can_edit?
       results = nil
 
@@ -152,6 +153,14 @@ module TimeTracking
           applied_by: @applied_by,
           negative_adjustment_acknowledgement: finalized_batch? && negative_adjustment_count.positive? ? @negative_adjustment_note : nil
         )
+        if finalized_batch?
+          acknowledgement = AirePayrollAcknowledgement.record!(
+            time_tracking_import: @import,
+            status: "imported",
+            occurred_at: @import.applied_at
+          )
+          acknowledgement_ids << acknowledgement.id
+        end
       end
 
       results
@@ -399,10 +408,6 @@ module TimeTracking
       first_date.to_s
     end
 
-    def enqueue_source_processing_sync(status, occurred_at)
-      AirePayrollStatusSyncJob.perform_later(@import.id, status, occurred_at.iso8601)
-    end
-
     def build_wage_rate_entries(item, categories, active_rates, override, preserved_holiday_hours:, preserved_pto_hours:)
       override_by_category_key = wage_rate_overrides_by_category_key(override)
       existing_by_rate_id = item.wage_rate_hours.index_by { |entry| entry["employee_wage_rate_id"].presence&.to_i }
@@ -472,7 +477,8 @@ module TimeTracking
           mapping["source_category_id"] || mapping[:source_category_id],
           mapping["source_category_key"] || mapping[:source_category_key],
           mapping["source_category_name"] || mapping[:source_category_name],
-          effective_rate_cents
+          effective_rate_cents,
+          mapping["source_kind"] || mapping[:source_kind]
         )
         acc[identity] = rate_id.to_i if identity.present?
 
@@ -519,7 +525,8 @@ module TimeTracking
         category["source_category_id"] || category[:source_category_id],
         category["key"] || category[:key],
         category["name"] || category[:name],
-        category["effective_rate_cents"] || category[:effective_rate_cents]
+        category["effective_rate_cents"] || category[:effective_rate_cents],
+        Array(category["source_kinds"] || category[:source_kinds]).join(",")
       )
       [ identity ] + [
         category["source_category_id"] || category[:source_category_id],
@@ -587,11 +594,11 @@ module TimeTracking
       value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
     end
 
-    def mapping_identity(source_category_id, source_category_key, source_category_name, effective_rate_cents)
+    def mapping_identity(source_category_id, source_category_key, source_category_name, effective_rate_cents, source_kind = nil)
       values = [ source_category_id, source_category_key, source_category_name ].map { |value| normalize_match_key(value) }
       return if values.all?(&:blank?)
 
-      [ values.join("|"), (effective_rate_cents unless finalized_batch?) ].compact.join("|")
+      [ values.join("|"), (effective_rate_cents unless finalized_batch?), normalize_match_key(source_kind) ].compact_blank.join("|")
     end
 
     def round_hours(value)

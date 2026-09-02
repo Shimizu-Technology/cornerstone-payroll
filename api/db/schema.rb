@@ -10,9 +10,25 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_02_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "aire_payroll_acknowledgements", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "delivered_at"
+    t.datetime "enqueued_at"
+    t.string "event_id", null: false
+    t.text "last_error"
+    t.datetime "occurred_at", null: false
+    t.string "status", null: false
+    t.bigint "time_tracking_import_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["delivered_at", "enqueued_at"], name: "idx_aire_payroll_acknowledgements_dispatch"
+    t.index ["event_id"], name: "index_aire_payroll_acknowledgements_on_event_id", unique: true
+    t.index ["time_tracking_import_id"], name: "index_aire_payroll_acknowledgements_on_time_tracking_import_id"
+    t.check_constraint "status::text = ANY (ARRAY['imported'::character varying, 'committed'::character varying, 'payment_issued'::character varying, 'payment_failed'::character varying]::text[])", name: "aire_payroll_acknowledgements_status_check"
+  end
 
   create_table "annual_tax_configs", force: :cascade do |t|
     t.decimal "additional_medicare_rate", precision: 6, scale: 5, default: "0.009", null: false
@@ -2050,6 +2066,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_02_010000) do
     t.index ["marked_ready_by_id"], name: "index_w2_filing_readinesses_on_marked_ready_by_id"
   end
 
+  add_foreign_key "aire_payroll_acknowledgements", "time_tracking_imports"
   add_foreign_key "audit_logs", "companies"
   add_foreign_key "audit_logs", "organizations"
   add_foreign_key "audit_logs", "users"

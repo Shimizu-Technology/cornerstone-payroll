@@ -19,6 +19,7 @@ class TimeTrackingImport < ApplicationRecord
   belongs_to :pay_period
   belongs_to :time_tracking_source
   belongs_to :applied_by, class_name: "User", optional: true
+  has_many :aire_payroll_acknowledgements, dependent: :restrict_with_error
 
   validates :status, inclusion: { in: STATUSES }
   validates :start_date, :end_date, :fetch_start_date, :fetch_end_date, :source_payload_hash, presence: true
@@ -33,12 +34,25 @@ class TimeTrackingImport < ApplicationRecord
 
   def record_source_processing_sync!(status:, synced_at:)
     with_lock do
+      next_status = next_source_processing_status(status)
+      return false if source_processing_status.present? && next_status == source_processing_status && status != source_processing_status
+
       update!(
-        source_processing_status: next_source_processing_status(status),
+        source_processing_status: next_status,
         source_processing_synced_at: synced_at,
         source_processing_sync_error: nil
       )
     end
+    true
+  end
+
+  def record_source_processing_failure!(status:, message:)
+    with_lock do
+      return false if source_processing_status_supersedes?(status)
+
+      update!(source_processing_sync_error: message)
+    end
+    true
   end
 
   private
@@ -49,6 +63,15 @@ class TimeTrackingImport < ApplicationRecord
 
     current_rank = SOURCE_PROCESSING_STATUS_RANK.fetch(source_processing_status, -1)
     SOURCE_PROCESSING_STATUS_RANK.fetch(status) >= current_rank ? status : source_processing_status
+  end
+
+  def source_processing_status_supersedes?(status)
+    return false if source_processing_status.blank?
+    return true if source_processing_status == status && source_processing_synced_at.present?
+    return true if source_processing_status.in?(SOURCE_PAYMENT_STATUSES) && !status.in?(SOURCE_PAYMENT_STATUSES)
+    return false if status.in?(SOURCE_PAYMENT_STATUSES)
+
+    SOURCE_PROCESSING_STATUS_RANK.fetch(source_processing_status, -1) > SOURCE_PROCESSING_STATUS_RANK.fetch(status)
   end
 
   def finalized_batch_snapshot_is_immutable

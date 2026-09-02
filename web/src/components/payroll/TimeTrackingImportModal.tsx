@@ -284,6 +284,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             source_category_id: category.source_category_id,
             source_category_key: category.key,
             source_category_name: category.name,
+            source_kind: (category.source_kinds || []).join(',') || null,
             employee_wage_rate_id: rowRateMappings[categoryMappingKey(category)] || null,
           })),
         };
@@ -718,7 +719,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
               {isFinalizedBatch && (
                 <div className="mx-auto mt-5 max-w-xl rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-left text-sm leading-6 text-primary-900">
                   <div className="font-semibold">What happens next</div>
-                  <p className="mt-1">Cornerstone records the import in AIRE now. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.</p>
+                  <p className="mt-1">Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.</p>
                   {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">AIRE status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
                 </div>
               )}

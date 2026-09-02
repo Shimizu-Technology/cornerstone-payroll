@@ -40,13 +40,20 @@ RSpec.describe AirePayrollStatusSyncJob, type: :job do
       )
     )
 
-    described_class.perform_now(import.id, "imported", Time.current.iso8601)
+    acknowledgement = AirePayrollAcknowledgement.record!(
+      time_tracking_import: import,
+      status: "imported",
+      occurred_at: Time.current
+    )
+
+    described_class.perform_now(acknowledgement.id)
 
     expect(import.reload).to have_attributes(
       source_processing_status: "imported",
       source_processing_sync_error: nil
     )
     expect(import.source_processing_synced_at).to be_present
+    expect(acknowledgement.reload.delivered_at).to be_present
 
     import.record_source_processing_sync!(status: "committed", synced_at: 1.minute.from_now)
     import.record_source_processing_sync!(status: "imported", synced_at: 2.minutes.from_now)
@@ -56,5 +63,39 @@ RSpec.describe AirePayrollStatusSyncJob, type: :job do
     import.record_source_processing_sync!(status: "payment_issued", synced_at: 4.minutes.from_now)
     import.record_source_processing_sync!(status: "committed", synced_at: 5.minutes.from_now)
     expect(import.reload.source_processing_status).to eq("payment_issued")
+  end
+
+  it "does not let a stale failed delivery overwrite a newer successful status" do
+    company = create(:company)
+    pay_period = create(:pay_period, company: company)
+    source = create(:time_tracking_source, company: company, source_type: "aire_services")
+    import = create(
+      :time_tracking_import,
+      :finalized_aire_batch,
+      pay_period: pay_period,
+      time_tracking_source: source,
+      status: "applied",
+      source_processing_status: "committed",
+      source_processing_synced_at: Time.current,
+      source_processing_sync_error: nil
+    )
+    acknowledgement = AirePayrollAcknowledgement.record!(
+      time_tracking_import: import,
+      status: "imported",
+      occurred_at: 1.minute.ago
+    )
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:record_payroll_batch_processing_event).and_raise(TimeTracking::Client::Error, "AIRE unavailable")
+
+    expect do
+      described_class.new.perform(acknowledgement.id)
+    end.to raise_error(TimeTracking::Client::Error, "AIRE unavailable")
+
+    expect(import.reload).to have_attributes(
+      source_processing_status: "committed",
+      source_processing_sync_error: nil
+    )
+    expect(acknowledgement.reload.last_error).to eq("AIRE unavailable")
   end
 end

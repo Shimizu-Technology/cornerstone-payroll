@@ -50,6 +50,7 @@ class PayPeriodLifecycleService
   end
 
   def commit!
+    acknowledgement_ids = []
     pay_period.with_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only commit an approved pay period"
@@ -77,9 +78,10 @@ class PayPeriodLifecycleService
       tax_sync_enabled = pay_period.prepare_tax_sync_if_configured!
       record_correction_commit! if pay_period.correction_run?
       enqueue_tax_sync_after_commit if tax_sync_enabled
+      acknowledgement_ids.concat(record_aire_processing_acknowledgements)
     end
 
-    enqueue_aire_processing_sync
+    AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids)
 
     pay_period
   end
@@ -88,11 +90,15 @@ class PayPeriodLifecycleService
 
   attr_reader :pay_period, :actor, :ip_address
 
-  def enqueue_aire_processing_sync
-    pay_period.time_tracking_imports.where(status: "applied").find_each do |import|
+  def record_aire_processing_acknowledgements
+    pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").filter_map do |import|
       next unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
 
-      AirePayrollStatusSyncJob.perform_later(import.id, "committed", pay_period.committed_at.iso8601)
+      AirePayrollAcknowledgement.record!(
+        time_tracking_import: import,
+        status: "committed",
+        occurred_at: pay_period.committed_at
+      ).id
     end
   end
 
