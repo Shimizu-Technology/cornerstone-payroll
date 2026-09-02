@@ -1,9 +1,6 @@
 #!/bin/bash -e
 
-# Prepare all databases on web server boot
-if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
-  ./bin/rails db:prepare
-  ./bin/rails solid_queue:setup
-fi
+# Schema preparation belongs to the serialized pre-deploy phase. Running it
+# here would let every web process mutate schemas through the pooled runtime URL.
 
 exec "${@}"
