@@ -221,11 +221,11 @@ class PayrollItem < ApplicationRecord
     self.custom_columns_data = data
   end
 
-  def apply_default_payroll_adjustments_if_unset!(source_employee = employee)
-    return if payroll_adjustments.present? || payroll_adjustments_overridden?
+  def sync_default_payroll_adjustments!(source_employee = employee)
+    return if payroll_adjustments_overridden?
+    return if pay_period && !pay_period.draft? && !pay_period.calculated?
 
-    defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
-    self.payroll_adjustments = defaults if defaults.present?
+    self.payroll_adjustments = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
   end
 
   def apply_default_payroll_field_entries_if_unset!(source_employee = employee, assignments: nil)

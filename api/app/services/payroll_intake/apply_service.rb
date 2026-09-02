@@ -284,7 +284,7 @@ module PayrollIntake
       persist_tip_components!(payroll_item, values)
       payroll_item.loan_deduction = values[:loan_deduction]
       payroll_item.import_source = session.source_type
-      payroll_item.apply_default_payroll_adjustments_if_unset!(employee)
+      payroll_item.sync_default_payroll_adjustments!(employee)
       payroll_item.calculate!
     end
 
@@ -333,7 +333,7 @@ module PayrollIntake
       payroll_item.insurance_payment = 0
       payroll_item.custom_earnings = []
       payroll_item.custom_deductions = []
-      payroll_item.payroll_adjustments = []
+      payroll_item.payroll_adjustments = [] unless payroll_item.payroll_adjustments_overridden?
       payroll_item.payroll_item_field_entries.destroy_all
       payroll_item.custom_columns_data = reset_intake_custom_columns(payroll_item.custom_columns_data)
     end
@@ -348,9 +348,7 @@ module PayrollIntake
       data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
       data.except(
         "wage_rate_hours",
-        :wage_rate_hours,
-        "payroll_adjustments_overridden",
-        :payroll_adjustments_overridden
+        :wage_rate_hours
       )
     end
   end
