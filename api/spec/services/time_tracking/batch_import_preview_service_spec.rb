@@ -20,8 +20,7 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
             "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
             "total_hours" => 8.0,
             "regular_hours" => 8.0,
-            "overtime_hours" => 0.0,
-            "effective_rate_cents" => 2500
+            "overtime_hours" => 0.0
           }
         ],
         "total_hours" => 8.0,
@@ -42,7 +41,6 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
       "exclusions" => exclusions,
       "issues" => {
         "missing_category_count" => 0,
-        "missing_rate_count" => 0,
         "negative_adjustment_count" => adjustments.count { |adjustment| adjustment.values_at("regular_hours", "overtime_hours").any?(&:negative?) },
         "pending_approval_count" => exclusions.count { |row| row["reason"].in?(%w[pending_approval approved_after_cutoff created_after_cutoff]) },
         "denied_approval_count" => exclusions.count { |row| row["reason"] == "denied_approval" },
@@ -146,8 +144,10 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
       "ready" => true
     )
     expect(row.dig("categories", 0)).to include(
-      "effective_rate_cents" => 2500,
-      "employee_wage_rate_id" => rate.id
+      "payroll_rate_cents" => 2500,
+      "employee_wage_rate_id" => rate.id,
+      "source_kinds" => [ "current" ],
+      "original_work_dates" => [ pay_period.start_date.iso8601 ]
     )
     expect(import.processed_payload.fetch("exclusions")).to contain_exactly(include("reason" => "pending_approval"))
   end
@@ -198,9 +198,11 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     row = described_class.new(pay_period: pay_period, source: source).call.processed_payload.fetch("rows").first
 
     expect(row.fetch("estimated_gross_delta")).to eq(0.0)
-    expect(row.fetch("categories")).to contain_exactly(
-      include("name" => "Uncategorized", "effective_rate_cents" => nil, "total_hours" => 0.0)
+    categories = row.fetch("categories")
+    expect(categories).to contain_exactly(
+      include("name" => "Uncategorized", "total_hours" => 0.0)
     )
+    expect(categories.first).not_to have_key("effective_rate_cents")
   end
 
   it "returns the existing import for the same batch ID and checksum" do

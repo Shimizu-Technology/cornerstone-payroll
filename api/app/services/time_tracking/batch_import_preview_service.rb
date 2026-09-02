@@ -129,7 +129,7 @@ module TimeTracking
       regular_hours = decimal(source_employee.fetch("regular_hours"))
       overtime_hours = decimal(source_employee.fetch("overtime_hours"))
       total_hours = decimal(source_employee.fetch("total_hours"))
-      estimated_gross_delta_cents = source_gross_delta_cents(source_employee.fetch("adjustments"))
+      estimated_gross_delta_cents = payroll_gross_delta_cents(categories)
       warnings = warnings_for(
         source_employee,
         match,
@@ -172,18 +172,19 @@ module TimeTracking
           source_category_id: adjustment["source_category_id"].to_s.presence,
           key: category["key"].to_s.presence,
           name: category["name"].presence || "Uncategorized",
-          effective_rate_cents: adjustment["effective_rate_cents"],
           total_hours: 0.to_d,
           regular_hours: 0.to_d,
           overtime_hours: 0.to_d,
           source_kinds: Set.new,
-          source_time_entry_ids: Set.new
+          source_time_entry_ids: Set.new,
+          original_work_dates: Set.new
         }
         bucket[:total_hours] += decimal(adjustment.fetch("total_hours"))
         bucket[:regular_hours] += decimal(adjustment.fetch("regular_hours"))
         bucket[:overtime_hours] += decimal(adjustment.fetch("overtime_hours"))
         bucket[:source_kinds] << adjustment.fetch("source_kind")
         bucket[:source_time_entry_ids] << adjustment.fetch("source_time_entry_id")
+        bucket[:original_work_dates] << adjustment.fetch("original_work_date")
       end
 
       buckets.values.map do |bucket|
@@ -193,10 +194,11 @@ module TimeTracking
           regular_hours: number(bucket[:regular_hours]),
           overtime_hours: number(bucket[:overtime_hours]),
           source_kinds: bucket[:source_kinds].to_a.sort,
-          source_time_entry_ids: bucket[:source_time_entry_ids].to_a.sort
+          source_time_entry_ids: bucket[:source_time_entry_ids].to_a.sort,
+          original_work_dates: bucket[:original_work_dates].to_a.sort
         )
       end.sort_by do |bucket|
-        [ bucket[:name].to_s, bucket[:key].to_s, bucket[:source_category_id].to_s, bucket[:effective_rate_cents].to_i ]
+        [ bucket[:name].to_s, bucket[:key].to_s, bucket[:source_category_id].to_s, bucket[:source_kinds].join(",") ]
       end
     end
 
@@ -206,7 +208,7 @@ module TimeTracking
         adjustment["source_category_id"],
         category["key"],
         category["name"],
-        adjustment["effective_rate_cents"]
+        adjustment["source_kind"]
       ].map(&:to_s).map(&:strip).join("|")
     end
 
@@ -224,16 +226,14 @@ module TimeTracking
         category.merge(
           employee_wage_rate_id: rate&.id,
           wage_rate_label: rate&.label,
-          wage_rate_match_method: method
+          wage_rate_match_method: method,
+          payroll_rate_cents: wage_rate_cents(rate)
         )
       end
       result
     end
 
     def find_wage_rate(category, rates)
-      rate_matches = rates.select { |rate| wage_rate_cents(rate) == category[:effective_rate_cents].to_i }
-      return [ rate_matches.first, "effective_rate" ] if rate_matches.one?
-
       label_matches = rates.select do |rate|
         candidates = [ category[:key], category[:name] ].compact_blank.map { |value| normalize_match_key(value) }
         candidates.include?(normalize_match_key(rate.label))
@@ -257,7 +257,7 @@ module TimeTracking
       if estimated_gross_delta_cents.negative?
         warnings << warning(
           "negative_net_pay_delta",
-          "This batch produces a negative source-pay delta for the employee. Use the payroll correction workflow instead of an ordinary pay-period import."
+          "This batch produces a negative Cornerstone payroll gross adjustment for the employee. Use the payroll correction workflow instead of an ordinary pay-period import."
         )
       end
       if requires_category_mapping
@@ -267,11 +267,10 @@ module TimeTracking
 
           warnings << warning(
             "unmapped_wage_rate",
-            "Map #{category[:name]} at #{format_rate(category[:effective_rate_cents])} to a payroll earning type before importing",
+            "Map #{category[:name]} to one of this employee's Cornerstone earning types before importing",
             source_category_id: category[:source_category_id],
             source_category_key: category[:key],
-            source_category_name: category[:name],
-            source_effective_rate_cents: category[:effective_rate_cents]
+            source_category_name: category[:name]
           )
         end
       end
@@ -331,11 +330,11 @@ module TimeTracking
       end
     end
 
-    def source_gross_delta_cents(adjustments)
-      Array(adjustments).sum do |adjustment|
-        rate_cents = decimal(adjustment["effective_rate_cents"] || 0)
-        regular = decimal(adjustment.fetch("regular_hours"))
-        overtime = decimal(adjustment.fetch("overtime_hours"))
+    def payroll_gross_delta_cents(categories)
+      Array(categories).sum do |category|
+        rate_cents = decimal(category[:payroll_rate_cents] || 0)
+        regular = decimal(category[:regular_hours] || 0)
+        overtime = decimal(category[:overtime_hours] || 0)
         (regular * rate_cents) + (overtime * rate_cents * BigDecimal("1.5"))
       end
     end
@@ -357,17 +356,13 @@ module TimeTracking
     end
 
     def wage_rate_cents(rate)
-      (BigDecimal(rate.rate.to_s) * 100).round.to_i if rate.rate.present?
+      (BigDecimal(rate.rate.to_s) * 100).round.to_i if rate&.rate.present?
     rescue ArgumentError
       nil
     end
 
     def normalize_match_key(value)
       value.to_s.downcase.gsub(/[^a-z0-9]+/, " ").squish
-    end
-
-    def format_rate(cents)
-      "$#{format('%.2f', cents.to_i / 100.0)}/hr"
     end
 
     def warning(code, message, extra = {})

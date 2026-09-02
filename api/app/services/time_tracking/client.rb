@@ -36,16 +36,36 @@ module TimeTracking
       request_json(payroll_batch_uri(batch_id), validate_source: true)
     end
 
+    def record_payroll_batch_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, metadata: {})
+      request_json(
+        payroll_batch_processing_events_uri(batch_id),
+        validate_source: false,
+        method: :post,
+        body: {
+          event_id: event_id,
+          status: status,
+          occurred_at: occurred_at,
+          external_system: "cornerstone_payroll",
+          external_pay_period_id: external_pay_period_id,
+          metadata: metadata
+        }
+      )
+    end
+
     class Error < StandardError; end
 
     private
 
-    def request_json(uri, validate_source:)
-      request = Net::HTTP::Get.new(uri)
+    def request_json(uri, validate_source:, method: :get, body: nil)
+      request = method == :post ? Net::HTTP::Post.new(uri) : Net::HTTP::Get.new(uri)
       request["Accept"] = "application/json"
       request["Accept-Encoding"] = "identity"
       request["X-Shared-Secret"] = @source.shared_secret.to_s
       request["X-Payroll-Shared-Secret"] = @source.shared_secret.to_s
+      if body
+        request["Content-Type"] = "application/json"
+        request.body = JSON.generate(body)
+      end
 
       connection_deadline = @monotonic_clock.call + OPEN_TIMEOUT_SECONDS
       pinned_ips = resolve_public_addresses(uri, connection_deadline)
@@ -90,6 +110,12 @@ module TimeTracking
       end
 
       source_uri("/api/v1/payroll/batches/#{normalized_id}")
+    end
+
+    def payroll_batch_processing_events_uri(batch_id)
+      uri = payroll_batch_uri(batch_id)
+      uri.path = "#{uri.path}/processing_events"
+      uri
     end
 
     def source_uri(suffix)

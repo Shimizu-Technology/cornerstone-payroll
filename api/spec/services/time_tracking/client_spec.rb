@@ -330,6 +330,34 @@ RSpec.describe TimeTracking::Client do
     end
   end
 
+  describe "#record_payroll_batch_processing_event" do
+    it "posts an authenticated idempotent processing acknowledgement" do
+      source = TimeTrackingSource.create!(
+        company: create(:company),
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://time.example.com",
+        shared_secret: "secret"
+      )
+      stub = stub_request(:post, "https://time.example.com/api/v1/payroll/batches/AIRE-PAY-123/processing_events")
+        .with(
+          headers: { "X-Payroll-Shared-Secret" => "secret", "Content-Type" => "application/json" },
+          body: hash_including("event_id" => "event-1", "status" => "imported", "external_system" => "cornerstone_payroll")
+        )
+        .to_return(status: 201, body: { processing: { status: "imported" } }.to_json, headers: { "Content-Type" => "application/json" })
+
+      client_for(source).record_payroll_batch_processing_event(
+        batch_id: "AIRE-PAY-123",
+        event_id: "event-1",
+        status: "imported",
+        occurred_at: "2026-09-02T01:00:00Z",
+        external_pay_period_id: "42"
+      )
+
+      expect(stub).to have_been_requested.once
+    end
+  end
+
   describe "finalized payroll batches" do
     let(:source) do
       TimeTrackingSource.create!(

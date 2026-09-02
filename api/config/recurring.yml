@@ -18,3 +18,8 @@ production:
     class: SendPayrollRemindersJob
     queue: default
     schedule: every day at 7am
+
+  dispatch_aire_payroll_acknowledgements:
+    class: AirePayrollAcknowledgementDispatchJob
+    queue: default
+    schedule: every 5 minutes

@@ -28,8 +28,7 @@ RSpec.describe TimeTracking::PayrollBatchPayloadValidator do
               "category" => { "id" => 7, "key" => "flight_hours", "name" => "Flight Hours" },
               "total_hours" => 8.0,
               "regular_hours" => 8.0,
-              "overtime_hours" => 0.0,
-              "effective_rate_cents" => 2500
+              "overtime_hours" => 0.0
             }
           ],
           "total_hours" => 8.0,
@@ -50,7 +49,6 @@ RSpec.describe TimeTracking::PayrollBatchPayloadValidator do
       ],
       "issues" => {
         "missing_category_count" => 0,
-        "missing_rate_count" => 0,
         "negative_adjustment_count" => 0,
         "pending_approval_count" => 1,
         "denied_approval_count" => 0,

@@ -18,7 +18,7 @@ type Step = 'select' | 'review' | 'done';
 type WageRateMappingState = Map<string, Record<string, number | null>>;
 
 function categoryMappingKey(category: TimeTrackingPreviewCategory): string {
-  return [category.source_category_id || '', category.key || '', category.name || '', category.effective_rate_cents ?? ''].join('|');
+  return [category.source_category_id || '', category.key || '', category.name || '', (category.source_kinds || []).join(',')].join('|');
 }
 
 function categoryHours(category: TimeTrackingPreviewCategory): number {
@@ -34,7 +34,7 @@ function formatHours(value: number | null | undefined): string {
 }
 
 function formatRate(cents: number | null | undefined): string {
-  return cents == null ? 'Rate unavailable' : `$${(cents / 100).toFixed(2)}/hr`;
+  return cents == null ? 'Cornerstone rate not mapped' : `$${(cents / 100).toFixed(2)}/hr in Cornerstone`;
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -64,6 +64,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
+  const [appliedThisSession, setAppliedThisSession] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -132,6 +133,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setStartDate(payPeriod.start_date);
     setEndDate(payPeriod.end_date);
     setAppliedCount(0);
+    setAppliedThisSession(false);
     setSources([]);
     setSourceId('');
     setSourcesLoading(true);
@@ -177,12 +179,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     return (row.categories || []).reduce<Record<string, number | null>>((acc, category) => {
       const backendMatch = activeRates.some((rate) => rate.id === category.employee_wage_rate_id) ? category.employee_wage_rate_id ?? null : null;
       const labelMatch = ratesByLabel.get(normalizeMatchKey(category.name)) ?? ratesByLabel.get(normalizeMatchKey(category.key || '')) ?? null;
-      const rateMatches = category.effective_rate_cents == null ? [] : activeRates.filter((rate) => {
-        const numericRate = Number(rate.rate);
-        return Number.isFinite(numericRate) && Math.round(numericRate * 100) === category.effective_rate_cents;
-      });
-      const uniqueRateMatch = rateMatches.length === 1 ? rateMatches[0]?.id ?? null : null;
-      acc[categoryMappingKey(category)] = backendMatch ?? labelMatch ?? uniqueRateMatch ?? onlyRateId;
+      acc[categoryMappingKey(category)] = backendMatch ?? labelMatch ?? onlyRateId;
       return acc;
     }, {});
   };
@@ -287,7 +284,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             source_category_id: category.source_category_id,
             source_category_key: category.key,
             source_category_name: category.name,
-            source_effective_rate_cents: category.effective_rate_cents,
+            source_kind: (category.source_kinds || []).join(',') || null,
             employee_wage_rate_id: rowRateMappings[categoryMappingKey(category)] || null,
           })),
         };
@@ -305,6 +302,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       }
 
       setAppliedCount(res.results.applied.length);
+      setAppliedThisSession(true);
+      setPreview(res.import);
       setStep('done');
       onImportComplete();
     } catch (err) {
@@ -538,7 +537,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                           </div>
                           {isFinalizedBatch && row.estimated_gross_delta != null && (
                             <div className="mt-2 text-xs font-medium text-neutral-600">
-                              Source-rate gross delta: <span className="font-mono text-neutral-900">${Number(row.estimated_gross_delta).toFixed(2)}</span>
+                              Estimated Cornerstone gross adjustment: <span className="font-mono text-neutral-900">${Number(row.estimated_gross_delta).toFixed(2)}</span>
                             </div>
                           )}
                         </div>
@@ -572,12 +571,19 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                         <div className="mt-4 border-t border-neutral-200 pt-4">
                           <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Payable earning dimensions</div>
                           <div className="mt-2 grid gap-2 lg:grid-cols-2">
-                            {categories.map((category) => (
+                            {categories.map((category) => {
+                              const selectedRateId = rowRateMappings[categoryMappingKey(category)] ?? category.employee_wage_rate_id;
+                              const selectedRate = activeWageRates.find((rate) => rate.id === selectedRateId);
+                              const selectedRateCents = selectedRate
+                                ? Math.round(Number(selectedRate.rate || 0) * 100)
+                                : category.payroll_rate_cents;
+
+                              return (
                               <div key={categoryMappingKey(category)} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                   <div>
                                     <div className="text-sm font-semibold text-neutral-900">{category.name}</div>
-                                    <div className="mt-2 text-xs text-neutral-500">{formatRate(category.effective_rate_cents)} · {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT</div>
+                                    <div className="mt-2 text-xs text-neutral-500">{formatRate(selectedRateCents)} · {formatHours(category.regular_hours)} reg / {formatHours(category.overtime_hours)} OT</div>
                                   </div>
                                   {(category.source_kinds || []).map((kind) => (
                                     <span key={kind} className="rounded-full bg-white px-2 text-[10px] font-semibold capitalize text-neutral-600">{kind}</span>
@@ -611,7 +617,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                                   </label>
                                 )}
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -698,10 +705,10 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
             <div className="py-10 text-center">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success-600" aria-hidden="true" />
               <h3 className="mt-4 text-lg font-semibold text-neutral-950">
-                {alreadyApplied ? 'This finalized batch was already applied' : isFinalizedBatch ? 'Finalized batch applied' : 'Time tracking imported'}
+                {!appliedThisSession && alreadyApplied ? 'This finalized batch was already applied' : isFinalizedBatch ? 'Finalized batch applied' : 'Time tracking imported'}
               </h3>
               <p className="mt-2 text-sm text-neutral-600">
-                {alreadyApplied
+                {!appliedThisSession && alreadyApplied
                   ? `Cornerstone recorded this batch on ${formatTimestamp(preview?.applied_at)}. Its hours were not imported again.`
                   : appliedCount === 0
                   ? isFinalizedBatch
@@ -709,6 +716,13 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                     : 'No employee rows were applied. This can be valid when every ordinary import row was skipped.'
                   : `${appliedCount} employee row${appliedCount === 1 ? '' : 's'} applied. Run payroll to calculate taxes and deductions.`}
               </p>
+              {isFinalizedBatch && (
+                <div className="mx-auto mt-5 max-w-xl rounded-xl border border-primary-200 bg-primary-50/60 p-4 text-left text-sm leading-6 text-primary-900">
+                  <div className="font-semibold">What happens next</div>
+                  <p className="mt-1">Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.</p>
+                  {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">AIRE status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
+                </div>
+              )}
             </div>
           )}
         </div>
