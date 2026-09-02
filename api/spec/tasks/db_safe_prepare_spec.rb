@@ -2,6 +2,7 @@
 
 require "rails_helper"
 require "rake"
+require "yaml"
 require Rails.root.join("lib/database_predeploy")
 
 RSpec.describe "database pre-deploy safety" do
@@ -23,6 +24,25 @@ RSpec.describe "database pre-deploy safety" do
 
     expect(entrypoint).to include('exec "${@}"')
     expect(entrypoint).not_to match(/db:(?:prepare|safe_prepare)|solid_queue:setup/)
+  end
+
+  it "runs Kamal schema preparation once without exposing direct URLs to runtime containers" do
+    deploy_config = YAML.safe_load(Rails.root.join("config/deploy.yml").read, aliases: true)
+    runtime_secrets = deploy_config.dig("env", "secret")
+    migration_keys = %w[
+      MIGRATION_DATABASE_URL
+      MIGRATION_CACHE_DATABASE_URL
+      MIGRATION_QUEUE_DATABASE_URL
+      MIGRATION_CABLE_DATABASE_URL
+    ]
+    hook_path = Rails.root.join(".kamal/hooks/pre-deploy")
+    hook = hook_path.read
+
+    expect(runtime_secrets).not_to include(*migration_keys)
+    expect(hook_path).to be_executable
+    expect(hook).to include("bin/rails db:safe_prepare", "--quiet", "--primary", "--version")
+    expect(hook.scan("bin/rails db:safe_prepare").length).to eq(1)
+    expect(hook).to include(*migration_keys)
   end
 end
 

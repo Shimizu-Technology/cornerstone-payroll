@@ -2,6 +2,10 @@
 
 class PayrollItem < ApplicationRecord
   include PayrollAdjustable
+  PAYROLL_ADJUSTMENTS_SOURCE_KEY = "payroll_adjustments_source"
+  EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE = "employee_default"
+  MANUAL_ADJUSTMENTS_SOURCE = "manual"
+
   belongs_to :pay_period
   belongs_to :employee
   belongs_to :company
@@ -218,6 +222,22 @@ class PayrollItem < ApplicationRecord
   def mark_payroll_adjustments_overridden!
     data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
     data["payroll_adjustments_overridden"] = true
+    data[PAYROLL_ADJUSTMENTS_SOURCE_KEY] = MANUAL_ADJUSTMENTS_SOURCE
+    self.custom_columns_data = data
+  end
+
+  def payroll_adjustments_default_snapshot?
+    return false unless custom_columns_data.is_a?(Hash)
+
+    source = custom_columns_data[PAYROLL_ADJUSTMENTS_SOURCE_KEY] || custom_columns_data[PAYROLL_ADJUSTMENTS_SOURCE_KEY.to_sym]
+    source == EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE
+  end
+
+  def mark_payroll_adjustments_default_snapshot!
+    data = custom_columns_data.is_a?(Hash) ? custom_columns_data.deep_dup : {}
+    data.delete("payroll_adjustments_overridden")
+    data.delete(:payroll_adjustments_overridden)
+    data[PAYROLL_ADJUSTMENTS_SOURCE_KEY] = EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE
     self.custom_columns_data = data
   end
 
@@ -225,7 +245,12 @@ class PayrollItem < ApplicationRecord
     return if payroll_adjustments_overridden?
     return if pay_period && !pay_period.draft? && !pay_period.calculated?
 
-    self.payroll_adjustments = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    defaults = self.class.normalize_payroll_adjustments(source_employee&.default_payroll_adjustments)
+    current = self.class.normalize_payroll_adjustments(payroll_adjustments)
+    return unless new_record? || current.empty? || payroll_adjustments_default_snapshot? || legacy_adjustments_subset_of_defaults?(current, defaults)
+
+    self.payroll_adjustments = defaults
+    mark_payroll_adjustments_default_snapshot!
   end
 
   def apply_default_payroll_field_entries_if_unset!(source_employee = employee, assignments: nil)
@@ -462,6 +487,15 @@ class PayrollItem < ApplicationRecord
   end
 
   private
+
+  def legacy_adjustments_subset_of_defaults?(current, defaults)
+    remaining_defaults = defaults.dup
+
+    current.all? do |adjustment|
+      index = remaining_defaults.index(adjustment)
+      index && remaining_defaults.delete_at(index)
+    end
+  end
 
   def normalize_pay_precision
     self.pay_rate = round_currency_value(pay_rate)

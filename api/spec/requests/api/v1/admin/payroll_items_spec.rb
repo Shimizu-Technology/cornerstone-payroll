@@ -554,11 +554,16 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
 
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
     it "refreshes changed employee defaults on a calculated non-overridden item" do
-      payroll_item.update!(
-        payroll_adjustments: [
+      employee.update!(
+        default_payroll_adjustments: [
           { "label" => "Old default", "amount" => 10, "treatment" => "post_tax_deduction", "active" => true }
         ]
       )
+      payroll_item.update!(
+        payroll_adjustments: []
+      )
+      payroll_item.sync_default_payroll_adjustments!(employee)
+      payroll_item.save!
       employee.update!(
         default_payroll_adjustments: [
           { "label" => "Current default", "amount" => 25, "treatment" => "taxable_addition", "active" => true }
