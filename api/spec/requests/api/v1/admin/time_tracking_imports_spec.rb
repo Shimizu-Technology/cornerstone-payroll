@@ -39,7 +39,10 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
         external_batch_checksum: nil,
         contract_version: nil,
         source_cutoff_at: nil,
-        applied_at: nil
+        applied_at: nil,
+        source_processing_status: nil,
+        source_processing_synced_at: nil,
+        source_processing_sync_error: nil
       )
 
       expect(TimeTracking::ImportPreviewService).to receive(:new).with(

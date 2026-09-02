@@ -62,7 +62,6 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "exclusions" => [],
       "issues" => {
         "missing_category_count" => 0,
-        "missing_rate_count" => 0,
         "negative_adjustment_count" => adjustments.count { |row| row.values_at("regular_hours", "overtime_hours").any?(&:negative?) },
         "pending_approval_count" => 0,
         "denied_approval_count" => 0,
@@ -113,7 +112,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     TimeTracking::BatchImportPreviewService.new(pay_period: pay_period, source: source).call
   end
 
-  it "requires a written acknowledgement and preserves rate-specific reversal lines" do
+  it "requires a written acknowledgement and calculates a correction with Cornerstone's wage rate" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
     new_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
@@ -128,8 +127,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
         "total_hours" => -2.0,
         "regular_hours" => -2.0,
-        "overtime_hours" => 0.0,
-        "effective_rate_cents" => 2000
+        "overtime_hours" => 0.0
       },
       {
         "source_time_entry_id" => "101",
@@ -141,8 +139,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
         "total_hours" => 10.0,
         "regular_hours" => 10.0,
-        "overtime_hours" => 0.0,
-        "effective_rate_cents" => 2500
+        "overtime_hours" => 0.0
       }
     ]
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
@@ -164,14 +161,6 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
               source_category_id: "flight",
               source_category_key: "flight_hours",
               source_category_name: "Flight Hours",
-              source_effective_rate_cents: 2000,
-              employee_wage_rate_id: new_rate.id
-            },
-            {
-              source_category_id: "flight",
-              source_category_key: "flight_hours",
-              source_category_name: "Flight Hours",
-              source_effective_rate_cents: 2500,
               employee_wage_rate_id: new_rate.id
             }
           ]
@@ -185,9 +174,8 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     expect(results[:errors]).to be_empty
     item = pay_period.payroll_items.find_by!(employee: employee)
     expect(item).to have_attributes(hours_worked: 8.0, overtime_hours: 0.0)
-    expect(item.wage_rate_hours).to include(
-      include("employee_wage_rate_id" => new_rate.id, "regular_hours" => -2.0, "rate" => 20.0, "label" => /AIRE \$20\.00/),
-      include("employee_wage_rate_id" => new_rate.id, "regular_hours" => 10.0, "rate" => 25.0)
+    expect(item.wage_rate_hours).to contain_exactly(
+      include("employee_wage_rate_id" => new_rate.id, "regular_hours" => 8.0, "rate" => 25.0, "label" => /AIRE correction for Aug 17, 2026 · \$25\.00/)
     )
     expect(import.reload).to have_attributes(
       status: "applied",
@@ -195,6 +183,47 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       negative_adjustment_acknowledgement: "Verified the old-rate reversal and replacement."
     )
     expect(item.import_source).to include(import.external_batch_id)
+  end
+
+  it "keeps current and carried-forward hours separate on earning lines" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    adjustments = [
+      {
+        "source_time_entry_id" => "101",
+        "line_key" => "flight:2500",
+        "source_kind" => "current",
+        "original_work_date" => "2026-08-20",
+        "original_week_start" => "2026-08-16",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 8.0,
+        "regular_hours" => 8.0,
+        "overtime_hours" => 0.0
+      },
+      {
+        "source_time_entry_id" => "88",
+        "line_key" => "flight:2500",
+        "source_kind" => "carryover",
+        "original_work_date" => "2026-08-14",
+        "original_week_start" => "2026-08-09",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => 3.5,
+        "regular_hours" => 3.5,
+        "overtime_hours" => 0.0
+      }
+    ]
+    import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
+
+    results = described_class.new(import: import, mappings: [], applied_by: create(:user, company: company)).call
+
+    expect(results[:errors]).to be_empty
+    expect(pay_period.payroll_items.find_by!(employee: employee).wage_rate_hours).to contain_exactly(
+      include("employee_wage_rate_id" => rate.id, "regular_hours" => 8.0, "label" => /AIRE current period/),
+      include("employee_wage_rate_id" => rate.id, "regular_hours" => 3.5, "label" => /AIRE carryover from Aug 14, 2026/)
+    )
   end
 
   it "does not allow an included finalized employee row to be skipped" do
@@ -211,8 +240,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
       "total_hours" => 8.0,
       "regular_hours" => 8.0,
-      "overtime_hours" => 0.0,
-      "effective_rate_cents" => 2500
+      "overtime_hours" => 0.0
     }
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ]))
 
@@ -256,8 +284,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
       "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
       "total_hours" => -2.0,
       "regular_hours" => -2.0,
-      "overtime_hours" => 0.0,
-      "effective_rate_cents" => 2500
+      "overtime_hours" => 0.0
     }
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ]))
 
@@ -273,22 +300,33 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     expect(import.reload.status).to eq("previewed")
   end
 
-  it "blocks a rate correction whose hours net to zero but whose source-pay delta is negative" do
+  it "blocks a correction whose hours net to zero but whose Cornerstone gross adjustment is negative" do
     company, pay_period, source = setup_records
-    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 20)
-    rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 20, is_primary: true, active: true)
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com", pay_rate: 25)
+    flight_rate = employee.employee_wage_rates.create!(label: "Flight Hours", rate: 25, is_primary: true, active: true)
+    admin_rate = employee.employee_wage_rates.create!(label: "Admin Duties", rate: 20, is_primary: false, active: true)
     base = {
       "source_time_entry_id" => "101",
       "source_kind" => "correction",
       "original_work_date" => "2026-08-17",
       "original_week_start" => "2026-08-16",
-      "source_category_id" => "flight",
-      "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
       "overtime_hours" => 0.0
     }
     adjustments = [
-      base.merge("line_key" => "flight:2500", "total_hours" => -10.0, "regular_hours" => -10.0, "effective_rate_cents" => 2500),
-      base.merge("line_key" => "flight:2000", "total_hours" => 10.0, "regular_hours" => 10.0, "effective_rate_cents" => 2000)
+      base.merge(
+        "line_key" => "flight",
+        "source_category_id" => "flight",
+        "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+        "total_hours" => -10.0,
+        "regular_hours" => -10.0
+      ),
+      base.merge(
+        "line_key" => "admin",
+        "source_category_id" => "admin",
+        "category" => { "id" => "admin", "key" => "admin_duties", "name" => "Admin Duties" },
+        "total_hours" => 10.0,
+        "regular_hours" => 10.0
+      )
     ]
     import = preview_import(pay_period: pay_period, source: source, payload: payload_for(pay_period: pay_period, employee: employee, adjustments: adjustments))
     row = import.processed_payload.fetch("rows").first
@@ -303,23 +341,28 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
           source_user_id: "aire-user-1",
           employee_id: employee.id,
           include: true,
-          wage_rate_mappings: adjustments.map do |adjustment|
+          wage_rate_mappings: [
             {
               source_category_id: "flight",
               source_category_key: "flight_hours",
               source_category_name: "Flight Hours",
-              source_effective_rate_cents: adjustment.fetch("effective_rate_cents"),
-              employee_wage_rate_id: rate.id
+              employee_wage_rate_id: flight_rate.id
+            },
+            {
+              source_category_id: "admin",
+              source_category_key: "admin_duties",
+              source_category_name: "Admin Duties",
+              employee_wage_rate_id: admin_rate.id
             }
-          end
+          ]
         }
       ],
       applied_by: create(:user, company: company),
       acknowledge_negative_adjustments: true,
-      negative_adjustment_note: "Reviewed the negative source-pay correction."
+      negative_adjustment_note: "Reviewed the negative Cornerstone gross correction."
     ).call
 
-    expect(results[:errors]).to contain_exactly(include(error: /negative source-pay delta/))
+    expect(results[:errors]).to contain_exactly(include(error: /negative Cornerstone payroll gross adjustment/))
     expect(pay_period.payroll_items).to be_empty
   end
 end

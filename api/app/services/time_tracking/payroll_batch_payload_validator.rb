@@ -121,10 +121,6 @@ module TimeTracking
            adjustment["source_category_id"].to_s != category["id"].to_s
           raise Error, "#{path}.category ID does not match source_category_id"
         end
-        rate = adjustment["effective_rate_cents"]
-        unless rate.is_a?(Integer) && rate >= 0
-          raise Error, "#{path}.effective_rate_cents must be a non-negative integer"
-        end
       end
 
       { total: total, regular: regular, overtime: overtime }
@@ -191,10 +187,8 @@ module TimeTracking
         actual = finite_number!(issues[field], "issues.#{field}")
         raise Error, "issues.#{field} does not reconcile" unless close?(actual, value)
       end
-      %w[missing_category_count missing_rate_count].each do |field|
-        actual = finite_number!(issues[field], "issues.#{field}")
-        raise Error, "issues.#{field} must be zero for a finalized batch" unless actual.zero?
-      end
+      missing_category_count = finite_number!(issues["missing_category_count"], "issues.missing_category_count")
+      raise Error, "issues.missing_category_count must be zero for a finalized batch" unless missing_category_count.zero?
     end
 
     def assert_hours!(employee, rows, path)

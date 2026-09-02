@@ -14,7 +14,9 @@ module TimeTracking
     end
 
     def call
-      @pay_period.with_lock { apply_locked! }
+      results = @pay_period.with_lock { apply_locked! }
+      enqueue_source_processing_sync("imported", @import.applied_at) if finalized_batch? && @import.status == "applied"
+      results
     end
 
     private
@@ -241,10 +243,10 @@ module TimeTracking
       categories = Array(row["categories"] || row[:categories]).select do |category|
         finalized_batch? ? category_total_hours(category).nonzero? : category_total_hours(category).positive?
       end
-      if finalized_batch? && finalized_source_gross_delta(categories).negative?
-        return "This AIRE correction produces a negative source-pay delta; use the payroll correction workflow instead."
-      end
       active_rates = employee.active_wage_rates.to_a
+      if finalized_batch? && finalized_payroll_gross_delta(categories, active_rates, override).negative?
+        return "This AIRE correction produces a negative Cornerstone payroll gross adjustment; use the payroll correction workflow instead."
+      end
       uses_multi_rate = (employee.hourly? || employee.contractor_hourly?) && categories.any? &&
                         (finalized_batch? || active_rates.length > 1)
 
@@ -294,10 +296,9 @@ module TimeTracking
         rate = wage_rate_for_category(category, active_rates, override_by_category_key)
         return "Map #{category_name(category)} to one of this employee's payroll earning types before importing." unless rate
 
-        effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
-        return "#{category_name(category)} is missing its finalized AIRE source rate." if effective_rate_cents.blank?
-
-        bucket = hours_by_dimension[[ rate.id, effective_rate_cents.to_i ]]
+        source_kind = Array(category["source_kinds"] || category[:source_kinds]).first || "current"
+        original_work_dates = Array(category["original_work_dates"] || category[:original_work_dates]).map(&:to_s).sort
+        bucket = hours_by_dimension[[ rate.id, source_kind, original_work_dates.first, original_work_dates.last ]]
         bucket[:regular_hours] += category_regular_hours(category)
         bucket[:overtime_hours] += category_overtime_hours(category)
       end
@@ -309,20 +310,22 @@ module TimeTracking
         preserved_pto_hours: preserved_pto_hours
       )
       rates_by_id = active_rates.index_by(&:id)
-      dimensions = hours_by_dimension.keys.sort_by { |rate_id, cents| [ rate_id, cents ] }
-      entries = dimensions.each_with_index.map do |(rate_id, cents), index|
+      dimensions = hours_by_dimension.keys.sort_by { |rate_id, source_kind, first_date, _last_date| [ rate_id, source_kind, first_date.to_s ] }
+      primary_rate_ids = Set.new
+      entries = dimensions.map do |(rate_id, source_kind, first_date, last_date)|
         rate = rates_by_id.fetch(rate_id)
         preserved = preserved_by_rate_id.delete(rate_id) || { holiday_hours: 0.0, pto_hours: 0.0 }
-        imported = hours_by_dimension.fetch([ rate_id, cents ])
+        imported = hours_by_dimension.fetch([ rate_id, source_kind, first_date, last_date ])
+        is_primary = rate.is_primary && primary_rate_ids.add?(rate.id)
         {
           employee_wage_rate_id: rate.id,
-          label: finalized_rate_label(rate, cents),
-          rate: cents / 100.0,
+          label: finalized_rate_label(rate, source_kind: source_kind, first_date: first_date, last_date: last_date),
+          rate: rate.rate.to_f,
           regular_hours: round_hours(imported[:regular_hours]),
           overtime_hours: round_hours(imported[:overtime_hours]),
           holiday_hours: round_hours(preserved[:holiday_hours]),
           pto_hours: round_hours(preserved[:pto_hours]),
-          is_primary: rate.is_primary && index == dimensions.index { |dimension| dimension.first == rate.id },
+          is_primary: is_primary,
           active: rate.active
         }
       end
@@ -372,8 +375,32 @@ module TimeTracking
       preserved
     end
 
-    def finalized_rate_label(rate, cents)
-      "#{rate.label} · AIRE $#{format('%.2f', cents / 100.0)}/hr"
+    def finalized_rate_label(rate, source_kind:, first_date:, last_date:)
+      provenance = case source_kind
+      when "carryover"
+        "carryover from #{date_range_label(first_date, last_date)}"
+      when "correction"
+        "correction for #{date_range_label(first_date, last_date)}"
+      else
+        "current period"
+      end
+      "#{rate.label} · AIRE #{provenance} · $#{format('%.2f', rate.rate.to_f)}/hr"
+    end
+
+    def date_range_label(first_date, last_date)
+      return "prior period" if first_date.blank?
+
+      first = Date.iso8601(first_date)
+      last = Date.iso8601(last_date.presence || first_date)
+      return first.strftime("%b %-d, %Y") if first == last
+
+      "#{first.strftime('%b %-d')}–#{last.strftime('%b %-d, %Y')}"
+    rescue Date::Error
+      first_date.to_s
+    end
+
+    def enqueue_source_processing_sync(status, occurred_at)
+      AirePayrollStatusSyncJob.perform_later(@import.id, status, occurred_at.iso8601)
     end
 
     def build_wage_rate_entries(item, categories, active_rates, override, preserved_holiday_hours:, preserved_pto_hours:)
@@ -473,7 +500,7 @@ module TimeTracking
       return label_match if label_match
 
       effective_rate_cents = category["effective_rate_cents"] || category[:effective_rate_cents]
-      return if effective_rate_cents.blank?
+      return if finalized_batch? || effective_rate_cents.blank?
 
       matches_by_rate = active_rates.select { |rate| wage_rate_cents(rate) == effective_rate_cents.to_i }
       matches_by_rate.one? ? matches_by_rate.first : nil
@@ -544,9 +571,13 @@ module TimeTracking
       category["name"] || category[:name] || "this source category"
     end
 
-    def finalized_source_gross_delta(categories)
+    def finalized_payroll_gross_delta(categories, active_rates, override)
+      override_by_category_key = wage_rate_overrides_by_category_key(override)
       categories.sum do |category|
-        rate = (category["effective_rate_cents"] || category[:effective_rate_cents]).to_d / 100
+        wage_rate = wage_rate_for_category(category, active_rates, override_by_category_key)
+        next 0.to_d unless wage_rate
+
+        rate = wage_rate.rate.to_d
         (category_regular_hours(category).to_d * rate) +
           (category_overtime_hours(category).to_d * rate * BigDecimal("1.5"))
       end
@@ -560,7 +591,7 @@ module TimeTracking
       values = [ source_category_id, source_category_key, source_category_name ].map { |value| normalize_match_key(value) }
       return if values.all?(&:blank?)
 
-      "#{values.join('|')}|#{effective_rate_cents.presence}"
+      [ values.join("|"), (effective_rate_cents unless finalized_batch?) ].compact.join("|")
     end
 
     def round_hours(value)

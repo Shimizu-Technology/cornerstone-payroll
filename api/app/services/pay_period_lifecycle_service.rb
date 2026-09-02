@@ -79,12 +79,22 @@ class PayPeriodLifecycleService
       enqueue_tax_sync_after_commit if tax_sync_enabled
     end
 
+    enqueue_aire_processing_sync
+
     pay_period
   end
 
   private
 
   attr_reader :pay_period, :actor, :ip_address
+
+  def enqueue_aire_processing_sync
+    pay_period.time_tracking_imports.where(status: "applied").find_each do |import|
+      next unless import.finalized_batch? && import.time_tracking_source.source_type == "aire_services"
+
+      AirePayrollStatusSyncJob.perform_later(import.id, "committed", pay_period.committed_at.iso8601)
+    end
+  end
 
   def apply_ytd_and_loan_effects!(committed_items)
     year = pay_period.pay_date.year

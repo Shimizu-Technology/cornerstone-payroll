@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_31_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_02_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1889,6 +1889,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_120000) do
     t.jsonb "raw_payload", default: {}, null: false
     t.datetime "source_cutoff_at"
     t.string "source_payload_hash", null: false
+    t.string "source_processing_status"
+    t.text "source_processing_sync_error"
+    t.datetime "source_processing_synced_at"
     t.date "start_date", null: false
     t.string "status", default: "previewed", null: false
     t.bigint "time_tracking_source_id", null: false
@@ -1897,6 +1900,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_120000) do
     t.index ["applied_by_id"], name: "index_time_tracking_imports_on_applied_by_id"
     t.index ["pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash"], name: "idx_time_tracking_imports_idempotency", unique: true
     t.index ["pay_period_id"], name: "index_time_tracking_imports_on_pay_period_id"
+    t.index ["source_processing_status"], name: "index_time_tracking_imports_on_source_processing_status"
     t.index ["time_tracking_source_id", "external_batch_id"], name: "idx_time_tracking_imports_unique_external_batch", unique: true, where: "(external_batch_id IS NOT NULL)"
     t.index ["time_tracking_source_id"], name: "index_time_tracking_imports_on_time_tracking_source_id"
     t.check_constraint "external_batch_id IS NULL AND external_batch_checksum IS NULL AND contract_version IS NULL AND source_cutoff_at IS NULL OR external_batch_id IS NOT NULL AND external_batch_checksum IS NOT NULL AND contract_version IS NOT NULL AND source_cutoff_at IS NOT NULL", name: "time_tracking_imports_batch_provenance_complete"

@@ -1453,6 +1453,38 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(assigned_event.reason).to eq("Assigned when pay period was committed")
     end
 
+    it "queues a committed acknowledgement for each applied finalized AIRE batch" do
+      source = TimeTrackingSource.create!(
+        company: company,
+        name: "AIRE",
+        source_type: "aire_services",
+        base_url: "https://aire.example.com",
+        shared_secret: "secret"
+      )
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        status: "applied",
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: "a" * 64,
+        external_batch_id: "AIRE-PAY-COMMIT-1",
+        external_batch_checksum: "a" * 64,
+        contract_version: "2.0",
+        source_cutoff_at: Time.current,
+        raw_payload: {},
+        processed_payload: {}
+      )
+
+      expect do
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
+      end.to have_enqueued_job(AirePayrollStatusSyncJob).with(import.id, "committed", kind_of(String))
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it "atomically records immutable payroll liabilities from stored item values" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 
