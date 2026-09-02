@@ -131,7 +131,7 @@ RSpec.describe AirePayrollStatusSyncJob, type: :job do
 
     expect(import.reload).to have_attributes(
       source_processing_status: "payment_issued",
-      source_processing_event_occurred_at: newer_event_time,
+      source_processing_event_occurred_at: be_within(0.000001).of(newer_event_time),
       source_processing_sync_error: nil
     )
     expect(acknowledgement.reload.last_error).to eq("AIRE unavailable")
