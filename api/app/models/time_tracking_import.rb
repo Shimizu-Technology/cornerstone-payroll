@@ -53,7 +53,10 @@ class TimeTrackingImport < ApplicationRecord
       return false if source_processing_status_supersedes?(status)
       return false if stale_source_processing_event?(status, occurred_at)
 
-      update!(source_processing_sync_error: message)
+      update!(
+        source_processing_sync_error: message,
+        source_processing_event_occurred_at: occurred_at
+      )
     end
     true
   end
