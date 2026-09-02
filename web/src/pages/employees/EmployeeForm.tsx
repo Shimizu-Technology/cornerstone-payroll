@@ -1521,10 +1521,19 @@ export function EmployeeForm() {
           <CardHeader>
             <CardTitle>Employee-Specific Recurring Adjustments</CardTitle>
             <CardDescription>
-              Use these for recurring additions, reimbursements, or deductions. Each item is copied into new payroll runs and can be reviewed before finalizing.
+              Use these for additions, reimbursements, or deductions that should recur across payrolls.
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div role="note" className="mb-4 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+              <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <div className="text-sm leading-6">
+                <p className="font-semibold">These are employee defaults, not a one-time check entry.</p>
+                <p className="text-amber-900">
+                  Saving does not recalculate payroll by itself. Rerun an open draft or calculated payroll to refresh its defaults. A manually adjusted payroll item keeps its period-specific values, and approved or committed payrolls do not change.
+                </p>
+              </div>
+            </div>
             {getFieldError('default_payroll_adjustments') && (
               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {getFieldError('default_payroll_adjustments')}

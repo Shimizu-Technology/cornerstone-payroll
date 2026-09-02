@@ -329,6 +329,44 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
       expect(item.payroll_adjustments).to eq([])
     end
 
+    it "preserves manually overridden adjustments when force overwriting intake fields" do
+      manual_adjustment = {
+        "label" => "Reviewed period adjustment",
+        "amount" => 42.0,
+        "treatment" => "post_tax_deduction",
+        "active" => true
+      }
+      item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        company: company,
+        employee: alice,
+        import_source: nil,
+        hours_worked: 1,
+        payroll_adjustments: [ manual_adjustment ]
+      )
+      item.mark_payroll_adjustments_overridden!
+      item.save!
+      post preview_path, params: { source_type: "spike_email", pasted_text: spike_text }
+      import = JSON.parse(response.body).fetch("import")
+
+      post apply_path(import.fetch("id")), params: {
+        acknowledge_warnings: true,
+        force_overwrite: true,
+        rows: import.fetch("rows").map do |intake_row|
+          {
+            id: intake_row.fetch("id"),
+            include: intake_row.fetch("source_employee_name") == "Alice Barista",
+            employee_id: intake_row.fetch("employee_id")
+          }
+        end
+      }
+
+      expect(response).to have_http_status(:ok)
+      expect(item.reload.payroll_adjustments).to contain_exactly(include(manual_adjustment))
+      expect(item).to be_payroll_adjustments_overridden
+    end
+
     it "preserves required variable salary overrides when force overwriting" do
       alice.update!(employment_type: "salary", salary_type: "variable", pay_rate: 0)
       create(

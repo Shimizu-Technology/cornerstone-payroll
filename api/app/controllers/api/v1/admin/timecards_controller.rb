@@ -189,8 +189,8 @@ module Api
               item.import_source = "timecard_ocr"
               if item.new_record?
                 item.custom_earnings = employee.default_custom_earnings if item.custom_earnings.blank?
-                item.payroll_adjustments = employee.default_payroll_adjustments if item.payroll_adjustments.blank?
               end
+              item.sync_default_payroll_adjustments!(employee)
               item.calculate!
 
               timecard.update!(

@@ -115,7 +115,7 @@ module TimeTracking
             item.employment_type = employee.employment_type
             item.pay_rate = employee.primary_wage_rate&.rate || employee.pay_rate
           end
-          item.apply_default_payroll_adjustments_if_unset!(employee)
+          item.sync_default_payroll_adjustments!(employee)
           preserved_holiday_hours = item.holiday_hours.to_f
           preserved_pto_hours = item.pto_hours.to_f
 
