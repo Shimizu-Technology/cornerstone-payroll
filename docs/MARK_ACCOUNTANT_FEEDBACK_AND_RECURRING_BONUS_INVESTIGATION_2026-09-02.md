@@ -1,8 +1,9 @@
 # Mark accountant feedback and recurring bonus investigation
 
 **Reviewed:** September 2, 2026  
+**Release update:** September 3, 2026 (Guam, UTC+10)
 **Owners:** Shimizu Technology and Cornerstone Tax Services  
-**Status:** Production incident root cause confirmed; P0 fix implemented and verified on branch; not merged or deployed; production was inspected read-only
+**Status:** P0 fix merged in PR #142, deployed, and verified against the affected June 4 payroll; remaining accountant-feedback work is tracked separately
 
 ## Purpose
 
@@ -12,13 +13,13 @@ This document combines three related reviews:
 2. Mark's accountant-role feedback, mapped to what is built and what still needs work; and
 3. the production incident in which one employee's June 4 bonus appears on the employee profile but not on the payroll register, while a comparison employee's bonus appears correctly.
 
-This is the investigation record, implementation assessment, and release plan. The P0 code and regression coverage described below exist on branch `codex/mark-feedback-sara-bonus-review`. They are not merged, deployed, or operationally verified in production.
+This is the investigation record, implementation assessment, and release plan. It preserves the evidence as it was understood during the read-only investigation. The P0 code and regression coverage described below were subsequently merged in PR #142. The reviewed release was deployed successfully, and a post-deploy operator session verified the affected June 4 payroll before and after recalculation. Independent Cornerstone accounting acceptance is not recorded in source control. Questions that must be answered before the remaining domain work begins are maintained in [Mark accountant-feedback clarification questions](MARK_ACCOUNTANT_FEEDBACK_CLARIFICATION_QUESTIONS_2026-09-03.md).
 
 ## Executive conclusion
 
 Mark's feedback is legitimate. Some requests describe features that already exist but are hard to find or use correctly. Others expose real gaps in the product's loan, retirement, garnishment, audit, and approval controls. The recurring-bonus incident is a confirmed payroll defect, not a Render configuration problem and not a failed calculation request.
 
-The immediate findings are:
+The findings at the time of the September 2 investigation were:
 
 - The reported employee's taxable bonus is saved on the employee profile.
 - The June 4, 2026 pay period is still `calculated`, not approved or committed.
@@ -26,13 +27,13 @@ The immediate findings are:
 - The comparison employee's payroll item contains the expected taxable bonus.
 - Mark saved both profiles and successfully recalculated the open June 4 period multiple times. Render logs and application audit records show successful requests; no application error explains the missing bonus.
 - The code only copies employee defaults when the payroll item's entire adjustment array is empty. One existing adjustment blocks every later employee-default change. The reported item already had five adjustments, so its new bonus was skipped. The empty comparison item qualified as unset and received its bonus.
-- The current production backend is commit `b4e9e64`. Commit `8906749` failed during its pre-deploy database task and never became live. The relevant payroll-default code is unchanged between those revisions.
+- Production was serving commit `b4e9e64` during the read-only investigation. Commit `8906749` had failed during its pre-deploy database task and never became live. The relevant payroll-default code was unchanged between those revisions.
 
-No production records, configuration, deployments, or services were changed during this review.
+No production records, configuration, deployments, or services were changed during the investigation. The later release and controlled correction are recorded below.
 
 ## P0 implementation status
 
-The branch now contains the minimum safe correction for the confirmed defect:
+PR #142 delivered the minimum safe correction for the confirmed defect:
 
 - draft and calculated payroll items refresh employee defaults whenever the item has not been manually overridden;
 - approved and committed payroll items keep their historical snapshots;
@@ -45,7 +46,7 @@ The branch now contains the minimum safe correction for the confirmed defect:
 
 The deidentified release fixture now mirrors the decisive production shape: synthetic employee Bonus Alpha starts with five fictional reimbursements on an existing June 4 item, then receives a `$1,234.56` employee default; synthetic employee Bonus Beta starts empty, then receives an `$876.54` employee default. The accountant browser test recalculates the same period, verifies both bonuses and Bonus Alpha's `$2,034.56` gross, reruns it, and verifies the bonus is not duplicated. These fixture amounts and labels are intentionally different from production.
 
-This implementation does not change the reported employee's production payroll. The separate accounting confirmations and controlled correction steps in this document remain required after review and deployment.
+The code merge alone did not alter the reported employee's payroll. In a separate post-deploy operator session, before-state evidence was captured, the open payroll was recalculated, the resulting bonus and payroll totals were verified, and after-state evidence was captured. Those production screenshots remain in the access-controlled session rather than source control. Independent Cornerstone accounting acceptance remains a business signoff outside this implementation record.
 
 ## What Cornerstone Payroll is
 
@@ -276,7 +277,7 @@ That enables a true three-way merge: update unchanged defaults, preserve manual 
 
 ## Regression and acceptance coverage
 
-The P0 release must cover all of these cases. Items marked automated are enforced on this branch; operational items remain release checks:
+The P0 release covered the following cases. Items marked automated were enforced before merge; operational items were checked during the controlled correction:
 
 1. **Automated:** an existing payroll item with old defaults receives a newly added taxable bonus on rerun.
 2. **Automated:** changing a default refreshes a non-overridden item.
@@ -293,9 +294,9 @@ The P0 release must cover all of these cases. Items marked automated are enforce
 13. **Automated:** repeating recalculation leaves one bonus entry and does not duplicate it.
 14. **Automated browser request assertions:** editing then reverting an adjustment, or adding then removing a blank row, does not transmit an unchanged adjustment array or mark the item manual.
 
-## Operational correction plan for June 4
+## June 4 operational correction procedure and observed result
 
-No correction was performed during this investigation. After the accounting confirmations above and after a code fix is reviewed, Cornerstone should:
+No correction was performed during the investigation. The post-deploy operator session followed this control sequence:
 
 1. export and retain the current June 4 register as before-change evidence;
 2. confirm that the affected period is still calculated and has not been used as a finalized external source;
@@ -308,11 +309,13 @@ No correction was performed during this investigation. After the accounting conf
 9. approve/commit only after reconciliation; and
 10. retain the incident and correction evidence in the audit trail.
 
+The operator observed the previously missing bonus in the recalculated register and retained before-and-after screenshots in the access-controlled session. The release evidence is PR [#142](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/142), final reviewed head `48ab974cd0d825c442608bc7da0cb0782b225f99`, and its successful backend, frontend, and browser checks. The release operator was Shimizu Technology. No named independent Cornerstone reviewer is recorded here, so Cornerstone's accounting acceptance remains pending even though the software correction and post-deploy smoke test succeeded.
+
 If the period becomes committed before correction, do not edit it in place. Use a supplemental/corrective payroll linked to the original item.
 
-## Separate production deployment blocker and branch fix
+## Historical production deployment blocker and resolution
 
-The most recent backend deployment, commit `8906749`, failed before startup. The build completed successfully. The pre-deploy command then ran:
+At the time of the investigation, the attempted backend deployment at commit `8906749` had failed before startup. The build completed successfully. The pre-deploy command then ran:
 
 ```text
 bundle exec rails db:safe_prepare && bundle exec rails solid_queue:setup
@@ -327,7 +330,7 @@ SSL connection has been closed unexpectedly
 
 The task is unsafe for a pooled Neon/PgBouncer connection because it enumerates backend PIDs and later terminates them across separate queries. A pooled connection can move between physical backends, and the blanket `state != 'active'` cleanup can kill legitimate web/worker sessions. In this deployment it caused the migration process to lose its database connection.
 
-This did not cause the bonus defect. It did leave production on the older revision and blocks a reliable bonus-fix release.
+This did not cause the bonus defect. It did leave production on the older revision and, at the time, blocked a reliable bonus-fix release.
 
 The deployment repair should:
 
@@ -339,13 +342,13 @@ The deployment repair should:
 - re-establish the connection before retrying after any provider-side disconnect; and
 - test that the cleanup task can never terminate its own current backend or ordinary live web/worker sessions.
 
-The branch replaces the session-termination task with an aborting compatibility guard and adds `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts.
+PR #142 replaced the session-termination task with an aborting compatibility guard and added `db:safe_prepare`, which launches `db:prepare` and `solid_queue:setup` through explicitly supplied direct migration URLs. In production it fails closed when `MIGRATION_DATABASE_URL` is absent or points at a recognized pooler. It maps shared cache, queue, and cable databases to the same direct URL and accepts separate direct migration URLs for split databases. Whenever a migration URL is configured—and therefore on every permitted production run—the runner applies fixed PostgreSQL connection, lock, statement, and idle-transaction timeouts.
 
 The Docker runtime entrypoint no longer prepares schemas during web-server startup; schema changes belong only to the serialized pre-deploy phase. Render receives the direct migration URL as a service secret because that platform runs the configured pre-deploy command for the service. Kamal keeps every `MIGRATION_*_DATABASE_URL` out of `config/deploy.yml`'s runtime secret list. Its destination-safe `.kamal/secrets-common` mappings expose only local environment references, never credentials. The active `.kamal/hooks/pre-deploy` hook calls a dedicated wrapper that injects those values inside the Kamal process, marks the generated Docker environment arguments sensitive so command logs redact them, and runs `db:safe_prepare` only in the version-pinned, primary-host one-off migration container. Tests prove the old task cannot open a database connection, recognized pooled migration URLs are rejected, every shared schema task receives only direct migration connections, the Kamal runtime configuration excludes direct migration URLs, destination runs receive the migration environment without rendering its value, the hook invokes the safe task exactly once, and runtime startup cannot invoke a schema task.
 
-### Render configuration required after merge
+### Render configuration completed for the release
 
-Do not change production configuration before the reviewed code is available. For the first deployment of this branch:
+The first deployment used this runbook after the reviewed code was available:
 
 1. In the Neon project, copy the direct connection string for the production database. It must not contain `-pooler` in the hostname.
 2. Add it to the Render backend service as the secret `MIGRATION_DATABASE_URL`. Keep the existing pooled `DATABASE_URL` for normal web and worker traffic.
@@ -362,9 +365,9 @@ Do not change production configuration before the reviewed code is available. Fo
 
 Never restore automatic `pg_terminate_backend` cleanup. If a future migration is blocked, identify the exact holder and coordinate a maintenance window rather than killing every idle application connection.
 
-## Branch verification evidence
+## Release verification evidence
 
-Local evidence was current as of `2026-09-02T15:49:21Z`. Earlier GitHub Actions runs [33642423339](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33642423339) and [33643328863](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33643328863) independently passed the backend, frontend, and browser gates on prior reviewed heads. The current implementation must receive the same independent current-head result after it is pushed.
+Local evidence was current as of `2026-09-02T15:49:21Z`. GitHub Actions run [33651132579](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33651132579) passed the backend, frontend, and browser gates on PR #142's final reviewed head `48ab974cd0d825c442608bc7da0cb0782b225f99`. PR #143 then resolved a frontend-only dependency advisory in `web/package-lock.json`; its checks and the follow-up main run [33687384704](https://github.com/Shimizu-Technology/cornerstone-payroll/actions/runs/33687384704) passed. Netlify published the resulting main revision `673c0c7a84066aca017cb3b1bee49218526369d4` at `2026-09-03T07:51:00+10:00`. Render's path filters correctly left the API web service and background worker on PR #142's backend revision `e69114531fb610bc6c4a4b9036337419428b5b74`; the web service became live at `2026-09-03T07:42:36+10:00`, and the worker became live at `2026-09-03T07:41:33+10:00`.
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
 - runtime-entrypoint regression proving web-server startup performs no schema preparation;
@@ -384,7 +387,7 @@ Local Vite emitted a Node version warning because the workstation shell was on N
 
 ## Recommended implementation order
 
-### P0 — Payroll correctness and deployability
+### P0 — Payroll correctness and deployability — completed
 
 1. Fix the unsafe pre-deploy database cleanup and prove one clean preview/production-style migration run.
 2. Add the default-adjustment synchronization regression tests.
@@ -409,9 +412,9 @@ Local Vite emitted a Node version warning because the workstation shell was on N
 4. Build 401(k) catch-up/annual-limit controls.
 5. Build the scoped child-support order and remittance workflow.
 
-## Release and acceptance gates
+## P0 release and acceptance gates
 
-The work is not complete when code is merged. Acceptance requires:
+The P0 work was not considered complete at merge. Acceptance required:
 
 - focused model/request tests and the full payroll regression suite passing;
 - a clean Render deploy with the expected commit live on both web and worker services;
