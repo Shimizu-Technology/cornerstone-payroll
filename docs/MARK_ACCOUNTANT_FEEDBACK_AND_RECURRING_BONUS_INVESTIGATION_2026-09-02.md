@@ -356,7 +356,7 @@ Never restore automatic `pg_terminate_backend` cleanup. If a future migration is
 The following checks passed on September 2, 2026 before the PR was opened:
 
 - `bundle exec rails db:safe_prepare` against a local test database, including Solid Queue setup;
-- full Rails suite after review fixes: `1,880 examples, 0 failures`;
+- full Rails suite after review fixes: `1,881 examples, 0 failures`;
 - Brakeman: `0 security warnings`;
 - Bundler Audit: `No vulnerabilities found`;
 - frontend typecheck, ESLint, and production build;

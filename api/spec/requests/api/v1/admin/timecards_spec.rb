@@ -126,8 +126,11 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
         params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
 
       expect(response).to have_http_status(:ok)
-      expect(item.reload.payroll_adjustments).to include(
-        include("label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition")
+      expect(item.reload.payroll_adjustments).to match(
+        [
+          include("label" => "Reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition"),
+          include("label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition")
+        ]
       )
     end
 
