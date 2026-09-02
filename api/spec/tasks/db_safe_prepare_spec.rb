@@ -4,6 +4,7 @@ require "rails_helper"
 require "rake"
 require "yaml"
 require Rails.root.join("lib/database_predeploy")
+require Rails.root.join("lib/kamal_migration_executor")
 
 RSpec.describe "database pre-deploy safety" do
   before do
@@ -37,12 +38,57 @@ RSpec.describe "database pre-deploy safety" do
     ]
     hook_path = Rails.root.join(".kamal/hooks/pre-deploy")
     hook = hook_path.read
+    migration_runner_path = Rails.root.join("bin/kamal-safe-prepare")
+    migration_runner = migration_runner_path.read
+    common_secrets = Rails.root.join(".kamal/secrets-common").read
+    default_secrets = Rails.root.join(".kamal/secrets").read
 
     expect(runtime_secrets).not_to include(*migration_keys)
     expect(hook_path).to be_executable
-    expect(hook).to include("bin/rails db:safe_prepare", "--quiet", "--primary", "--version")
-    expect(hook.scan("bin/rails db:safe_prepare").length).to eq(1)
-    expect(hook).to include(*migration_keys)
+    expect(migration_runner_path).to be_executable
+    expect(hook.scan("kamal-safe-prepare").length).to eq(1)
+    expect(migration_runner).to include("KamalMigrationExecutor.new.run!")
+    expect(common_secrets).to include(*migration_keys)
+    expect(default_secrets).not_to include(*migration_keys)
+  end
+
+  it "passes migration secrets to a destination run without exposing them in rendered commands" do
+    secret_url = "postgresql://migration-user:secret@example.test/payroll"
+    environment = {
+      "KAMAL_VERSION" => "release-sha",
+      "KAMAL_DESTINATION" => "production",
+      "MIGRATION_DATABASE_URL" => secret_url
+    }
+    cli = class_double(Kamal::Cli::Main)
+    executor = KamalMigrationExecutor.new(environment: environment, cli: cli)
+    expected_arguments =
+      %w[app exec --quiet --primary --version release-sha --destination production --] + [ "bin/rails db:safe_prepare" ]
+    expect(cli).to receive(:start).with(expected_arguments)
+
+    executor.run!
+    sensitive_environment = KamalMigrationExecutor.migration_environment
+    app_execution = Class.new do
+      attr_reader :options
+
+      def initialize
+        @options = {}
+      end
+
+      def exec(*)
+        options.fetch(:env)
+      end
+    end
+    app_execution.prepend(KamalMigrationExecutor::InjectEnvironment)
+    injected_environment = app_execution.new.exec("bin/rails db:safe_prepare")
+    rendered_argument = Kamal::Utils.argumentize("--env", injected_environment).last
+
+    expect(executor.command_arguments).to eq(expected_arguments)
+    expect(executor.command_arguments.join(" ")).not_to include(secret_url)
+    expect(injected_environment).to eq(sensitive_environment)
+    expect(injected_environment.fetch("MIGRATION_DATABASE_URL")).to eq(secret_url)
+    expect(rendered_argument.to_s).to include(secret_url)
+    expect(rendered_argument.inspect).to include("MIGRATION_DATABASE_URL=[REDACTED]")
+    expect(rendered_argument.inspect).not_to include(secret_url)
   end
 end
 
