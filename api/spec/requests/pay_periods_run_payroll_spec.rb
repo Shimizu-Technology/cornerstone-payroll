@@ -177,6 +177,11 @@ RSpec.describe "PayPeriods run_payroll", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:ok)
+      response_items = response.parsed_body.dig("pay_period", "payroll_items")
+      response_existing_item = response_items.find { |item| item.fetch("employee_id") == existing_adjustments_employee.id }
+      response_comparison_item = response_items.find { |item| item.fetch("employee_id") == empty_adjustments_employee.id }
+      expect(response_existing_item.fetch("payroll_adjustments")).to eq(existing_defaults + [ existing_bonus ])
+      expect(response_comparison_item.fetch("payroll_adjustments")).to eq([ comparison_bonus ])
       expect(existing_adjustments_item.reload.payroll_adjustments).to eq(existing_defaults + [ existing_bonus ])
       expect(empty_adjustments_item.reload.payroll_adjustments).to eq([ comparison_bonus ])
     end

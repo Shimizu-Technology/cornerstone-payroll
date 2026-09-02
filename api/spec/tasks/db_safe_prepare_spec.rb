@@ -17,6 +17,13 @@ RSpec.describe "database pre-deploy safety" do
     expect { Rake::Task["db:clear_advisory_locks"].invoke }
       .to raise_error(SystemExit, /terminating shared database sessions is unsafe/)
   end
+
+  it "keeps schema preparation out of the runtime entrypoint" do
+    entrypoint = Rails.root.join("bin/docker-entrypoint").read
+
+    expect(entrypoint).to include('exec "${@}"')
+    expect(entrypoint).not_to match(/db:(?:prepare|safe_prepare)|solid_queue:setup/)
+  end
 end
 
 RSpec.describe DatabasePredeploy do
