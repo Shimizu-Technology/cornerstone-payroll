@@ -1,12 +1,15 @@
 # Mark accountant-feedback clarification questions
 
-**Prepared:** September 3, 2026
+**Prepared:** September 3, 2026 (Guam, UTC+10)
 
 **Audience:** Mark and Cornerstone leadership
 
 **Purpose:** Confirm the intended accountant workflow before Shimizu Technology changes payroll behavior or introduces new compliance rules
 
 The questions below are deliberately separated from implementation. Existing behavior should remain unchanged until Cornerstone answers the applicable section.
+
+<!-- markdownlint-disable MD029 -->
+<!-- Question numbers are stable identifiers across sections and intentionally do not restart at 1. -->
 
 ## Payroll register and names
 
@@ -75,3 +78,5 @@ The questions below are deliberately separated from implementation. Existing beh
 ## Decision record
 
 For each section, record the answer, the person who approved it, and the effective date before implementation begins. Tax-limit, retirement, garnishment, or child-support rules also require confirmation against the applicable current authority; product copy must not imply that a generic deduction field is a compliance engine.
+
+<!-- markdownlint-enable MD029 -->

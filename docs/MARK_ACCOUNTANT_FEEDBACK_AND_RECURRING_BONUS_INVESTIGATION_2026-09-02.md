@@ -1,7 +1,7 @@
 # Mark accountant feedback and recurring bonus investigation
 
 **Reviewed:** September 2, 2026  
-**Release update:** September 3, 2026
+**Release update:** September 3, 2026 (Guam, UTC+10)
 **Owners:** Shimizu Technology and Cornerstone Tax Services  
 **Status:** P0 fix merged in PR #142, deployed, and verified against the affected June 4 payroll; remaining accountant-feedback work is tracked separately
 
@@ -13,7 +13,7 @@ This document combines three related reviews:
 2. Mark's accountant-role feedback, mapped to what is built and what still needs work; and
 3. the production incident in which one employee's June 4 bonus appears on the employee profile but not on the payroll register, while a comparison employee's bonus appears correctly.
 
-This is the investigation record, implementation assessment, and release plan. It preserves the evidence as it was understood during the read-only investigation. The P0 code and regression coverage described below were subsequently merged in PR #142. The reviewed release was deployed successfully, the affected June 4 payroll was recalculated under operator control, and the resulting bonus and payroll totals were verified. Questions that must be answered before the remaining domain work begins are maintained in [Mark accountant-feedback clarification questions](MARK_ACCOUNTANT_FEEDBACK_CLARIFICATION_QUESTIONS_2026-09-03.md).
+This is the investigation record, implementation assessment, and release plan. It preserves the evidence as it was understood during the read-only investigation. The P0 code and regression coverage described below were subsequently merged in PR #142. The reviewed release was deployed successfully, and a post-deploy operator session verified the affected June 4 payroll before and after recalculation. Independent Cornerstone accounting acceptance is not recorded in source control. Questions that must be answered before the remaining domain work begins are maintained in [Mark accountant-feedback clarification questions](MARK_ACCOUNTANT_FEEDBACK_CLARIFICATION_QUESTIONS_2026-09-03.md).
 
 ## Executive conclusion
 
@@ -46,7 +46,7 @@ PR #142 delivered the minimum safe correction for the confirmed defect:
 
 The deidentified release fixture now mirrors the decisive production shape: synthetic employee Bonus Alpha starts with five fictional reimbursements on an existing June 4 item, then receives a `$1,234.56` employee default; synthetic employee Bonus Beta starts empty, then receives an `$876.54` employee default. The accountant browser test recalculates the same period, verifies both bonuses and Bonus Alpha's `$2,034.56` gross, reruns it, and verifies the bonus is not duplicated. These fixture amounts and labels are intentionally different from production.
 
-The code merge alone did not alter the reported employee's payroll. After deployment, the controlled correction was completed separately: before-state evidence was retained, the open payroll was recalculated under operator control, the resulting bonus and payroll totals were verified, and after-state evidence was retained.
+The code merge alone did not alter the reported employee's payroll. In a separate post-deploy operator session, before-state evidence was captured, the open payroll was recalculated, the resulting bonus and payroll totals were verified, and after-state evidence was captured. Those production screenshots remain in the access-controlled session rather than source control. Independent Cornerstone accounting acceptance remains a business signoff outside this implementation record.
 
 ## What Cornerstone Payroll is
 
@@ -294,9 +294,9 @@ The P0 release covered the following cases. Items marked automated were enforced
 13. **Automated:** repeating recalculation leaves one bonus entry and does not duplicate it.
 14. **Automated browser request assertions:** editing then reverting an adjustment, or adding then removing a blank row, does not transmit an unchanged adjustment array or mark the item manual.
 
-## June 4 operational correction record
+## June 4 operational correction procedure and observed result
 
-No correction was performed during the investigation. After PR #142 was reviewed and deployed, the correction followed this control sequence:
+No correction was performed during the investigation. The post-deploy operator session followed this control sequence:
 
 1. export and retain the current June 4 register as before-change evidence;
 2. confirm that the affected period is still calculated and has not been used as a finalized external source;
@@ -308,6 +308,8 @@ No correction was performed during the investigation. After PR #142 was reviewed
 8. have a second authorized reviewer confirm the result;
 9. approve/commit only after reconciliation; and
 10. retain the incident and correction evidence in the audit trail.
+
+The operator observed the previously missing bonus in the recalculated register and retained before-and-after screenshots in the access-controlled session. The release evidence is PR [#142](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/142), final reviewed head `48ab974cd0d825c442608bc7da0cb0782b225f99`, and its successful backend, frontend, and browser checks. The release operator was Shimizu Technology. No named independent Cornerstone reviewer is recorded here, so Cornerstone's accounting acceptance remains pending even though the software correction and post-deploy smoke test succeeded.
 
 If the period becomes committed before correction, do not edit it in place. Use a supplemental/corrective payroll linked to the original item.
 
