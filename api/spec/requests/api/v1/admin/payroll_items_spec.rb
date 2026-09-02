@@ -144,6 +144,46 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("errors")).to include("Pre-2020 Form W-4 calculations are not supported")
     end
+
+    it "preserves submitted period adjustments as a manual override" do
+      employee.update!(
+        default_payroll_adjustments: [
+          { "label" => "Employee default", "amount" => 25, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+      manual_adjustment = {
+        label: "One-time adjustment",
+        amount: 75,
+        treatment: "taxable_addition",
+        active: true
+      }
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.deep_merge(
+        payroll_item: { payroll_adjustments: [ manual_adjustment ] }
+      )
+
+      expect(response).to have_http_status(:created)
+      created_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(created_item.payroll_adjustments).to contain_exactly(include("label" => "One-time adjustment", "amount" => 75.0))
+      expect(created_item).to be_payroll_adjustments_overridden
+    end
+
+    it "applies employee defaults when a client submits a null adjustment value" do
+      employee.update!(
+        default_payroll_adjustments: [
+          { "label" => "Employee default", "amount" => 25, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items", params: create_params.deep_merge(
+        payroll_item: { payroll_adjustments: nil }
+      )
+
+      expect(response).to have_http_status(:created)
+      created_item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(created_item.payroll_adjustments).to contain_exactly(include("label" => "Employee default", "amount" => 25.0))
+      expect(created_item).not_to be_payroll_adjustments_overridden
+    end
   end
 
   describe "PATCH /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
@@ -513,6 +553,35 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id/recalculate" do
+    it "refreshes changed employee defaults on a calculated non-overridden item" do
+      employee.update!(
+        default_payroll_adjustments: [
+          { "label" => "Old default", "amount" => 10, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+      payroll_item.update!(
+        payroll_adjustments: []
+      )
+      payroll_item.sync_default_payroll_adjustments!(employee)
+      payroll_item.save!
+      employee.update!(
+        default_payroll_adjustments: [
+          { "label" => "Current default", "amount" => 25, "treatment" => "taxable_addition", "active" => true }
+        ]
+      )
+      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}/recalculate"
+
+      expect(response).to have_http_status(:ok)
+      expect(payroll_item.reload.payroll_adjustments).to contain_exactly(
+        include("label" => "Current default", "amount" => 25.0, "treatment" => "taxable_addition")
+      )
+      expect(response.parsed_body.dig("payroll_item", "payroll_adjustments")).to contain_exactly(
+        include("label" => "Current default", "amount" => 25.0, "treatment" => "taxable_addition")
+      )
+    end
+
     it "returns a validation response when recalculation fails validation" do
       allow_any_instance_of(PayrollItem).to receive(:calculate!)
         .and_raise(ActiveRecord::RecordInvalid.new(payroll_item))

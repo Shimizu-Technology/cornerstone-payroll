@@ -189,8 +189,8 @@ module Api
               item.import_source = "timecard_ocr"
               if item.new_record?
                 item.custom_earnings = employee.default_custom_earnings if item.custom_earnings.blank?
-                item.payroll_adjustments = employee.default_payroll_adjustments if item.payroll_adjustments.blank?
               end
+              item.sync_default_payroll_adjustments!(employee)
               item.calculate!
 
               timecard.update!(
@@ -421,6 +421,7 @@ module Api
             withholding_tax_override: item.withholding_tax_override,
             custom_earnings: item.custom_earnings || [],
             custom_deductions: item.custom_deductions || [],
+            payroll_adjustments: item.payroll_adjustments || [],
             gross_pay: item.gross_pay,
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,

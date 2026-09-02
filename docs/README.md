@@ -36,6 +36,7 @@ Tests, a merged PR, a deploy preview, or a Greptile 5/5 do not establish operati
 
 Implementation plans explain why a change was designed a certain way and what a particular PR delivered. They do not replace the current authority documents above. Notable current records include:
 
+- [Mark accountant feedback and recurring bonus investigation](MARK_ACCOUNTANT_FEEDBACK_AND_RECURRING_BONUS_INVESTIGATION_2026-09-02.md) — confirmed recurring-adjustment synchronization defect, redacted production evidence, deployment blocker, and prioritized implementation plan.
 - [Pay schedules, salary timekeeping, and client cloning](PAY_SCHEDULE_SALARY_TIMEKEEPING_AND_CLIENT_CLONE_DESIGN_2026-08-03.md)
 - [Pay schedule, timekeeping, and MoSa history implementation](PAY_SCHEDULE_TIMEKEEPING_AND_MOSA_HISTORY_IMPLEMENTATION_PLAN_2026-08-03.md)
 - [Employee lifecycle and salary timekeeping](EMPLOYEE_LIFECYCLE_AND_SALARY_TIMEKEEPING_IMPLEMENTATION_2026-08-04.md)

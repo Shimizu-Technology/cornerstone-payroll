@@ -172,13 +172,113 @@ RSpec.describe Employee, type: :model do
       pay_period = create(:pay_period, company: employee.company)
       item = build(:payroll_item, employee: employee, company: employee.company, pay_period: pay_period, payroll_adjustments: [])
 
-      item.apply_default_payroll_adjustments_if_unset!(employee)
+      item.sync_default_payroll_adjustments!(employee)
       expect(item.payroll_adjustments.first["label"]).to eq("Recurring Bonus")
+      expect(item).to be_payroll_adjustments_default_snapshot
 
       item.payroll_adjustments = []
       item.mark_payroll_adjustments_overridden!
-      item.apply_default_payroll_adjustments_if_unset!(employee)
+      item.sync_default_payroll_adjustments!(employee)
       expect(item.payroll_adjustments).to eq([])
+      expect(item).not_to be_payroll_adjustments_default_snapshot
+    end
+
+    it "refreshes a non-overridden payroll item when employee defaults change" do
+      employee = create(
+        :employee,
+        default_payroll_adjustments: [
+          { "label" => "Rent reimbursement", "amount" => 150.0, "treatment" => "non_taxable_addition", "active" => true }
+        ]
+      )
+      pay_period = create(:pay_period, :calculated, company: employee.company)
+      item = create(
+        :payroll_item,
+        employee: employee,
+        company: employee.company,
+        pay_period: pay_period,
+        payroll_adjustments: employee.default_payroll_adjustments
+      )
+
+      employee.update!(
+        default_payroll_adjustments: employee.default_payroll_adjustments + [
+          { "label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition", "active" => true }
+        ]
+      )
+      item.sync_default_payroll_adjustments!(employee)
+
+      expect(item.payroll_adjustments.map { |adjustment| adjustment["label"] }).to contain_exactly(
+        "Rent reimbursement",
+        "Bonus"
+      )
+      expect(item).to be_payroll_adjustments_default_snapshot
+    end
+
+    it "clears stale defaults from a non-overridden open payroll item" do
+      removed_default = { "label" => "Removed default", "amount" => 25.0, "treatment" => "post_tax_deduction", "active" => true }
+      employee = create(:employee, default_payroll_adjustments: [ removed_default ])
+      pay_period = create(:pay_period, :calculated, company: employee.company)
+      item = build(
+        :payroll_item,
+        employee: employee,
+        company: employee.company,
+        pay_period: pay_period,
+        payroll_adjustments: []
+      )
+      item.sync_default_payroll_adjustments!(employee)
+      item.save!
+      employee.update!(default_payroll_adjustments: [])
+
+      item.sync_default_payroll_adjustments!(employee)
+
+      expect(item.payroll_adjustments).to eq([])
+    end
+
+    it "preserves an unmarked legacy adjustment that cannot be proven to be an employee default" do
+      employee = create(
+        :employee,
+        default_payroll_adjustments: [
+          { "label" => "Current default", "amount" => 75.0, "treatment" => "post_tax_deduction", "active" => true }
+        ]
+      )
+      pay_period = create(:pay_period, :calculated, company: employee.company)
+      legacy_manual = { "label" => "Legacy manual", "amount" => 50.0, "treatment" => "post_tax_deduction", "active" => true }
+      item = create(
+        :payroll_item,
+        employee: employee,
+        company: employee.company,
+        pay_period: pay_period,
+        payroll_adjustments: [ legacy_manual ]
+      )
+
+      item.sync_default_payroll_adjustments!(employee)
+
+      expect(item.payroll_adjustments).to eq([ legacy_manual ])
+      expect(item).not_to be_payroll_adjustments_default_snapshot
+    end
+
+    %i[approved committed].each do |state|
+      it "does not refresh defaults on a #{state} payroll item" do
+        employee = create(
+          :employee,
+          default_payroll_adjustments: [
+            { "label" => "Current default", "amount" => 75.0, "treatment" => "post_tax_deduction", "active" => true }
+          ]
+        )
+        pay_period = create(:pay_period, state, company: employee.company)
+        item = build(
+          :payroll_item,
+          employee: employee,
+          company: employee.company,
+          pay_period: pay_period,
+          payroll_adjustments: [
+            { "label" => "Historical snapshot", "amount" => 50.0, "treatment" => "post_tax_deduction", "active" => true }
+          ]
+        )
+
+        item.sync_default_payroll_adjustments!(employee)
+
+        expect(item.payroll_adjustments).to contain_exactly(include("label" => "Historical snapshot", "amount" => 50.0))
+      end
     end
   end
 

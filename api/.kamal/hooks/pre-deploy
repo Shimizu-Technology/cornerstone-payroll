@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Database migrations are forward-only during a normal rollback.
+exit 0 if ENV["KAMAL_COMMAND"] == "rollback"
+
+exec File.expand_path("../../bin/kamal-safe-prepare", __dir__)

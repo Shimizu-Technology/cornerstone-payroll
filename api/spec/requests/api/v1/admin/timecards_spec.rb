@@ -104,6 +104,29 @@ RSpec.describe "Api::V1::Admin::Timecards", type: :request do
       expect(response.parsed_body.dig("payroll_item", "state_withheld")).to be_nil
     end
 
+    it "refreshes employee defaults on an existing non-overridden payroll item" do
+      old_default = { "label" => "Reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true }
+      bonus_default = { "label" => "Bonus", "amount" => 1_234.56, "treatment" => "taxable_addition", "active" => true }
+      expected_adjustments = [ old_default, bonus_default ]
+      employee.update!(default_payroll_adjustments: [ old_default ])
+      item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        company: company,
+        employment_type: "hourly",
+        payroll_adjustments: [ old_default ]
+      )
+      employee.update!(default_payroll_adjustments: expected_adjustments)
+
+      post "/api/v1/admin/timecards/#{timecard.id}/apply_to_payroll",
+        params: { pay_period_id: pay_period.id, employee_id: employee.id, wage_rate_id: flight_rate.id }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("payroll_item", "payroll_adjustments")).to eq(expected_adjustments)
+      expect(item.reload.payroll_adjustments).to eq(expected_adjustments)
+    end
+
     it "applies recalculated punch-pair hours instead of stale stored hours" do
       timecard.punch_entries.destroy_all
       stale_entry = PunchEntry.create!(

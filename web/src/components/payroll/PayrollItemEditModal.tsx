@@ -23,6 +23,26 @@ interface PayrollAdjustmentField {
   active: boolean;
 }
 
+interface NormalizedPayrollAdjustment {
+  label: string;
+  amount: number;
+  treatment: PayrollAdjustmentTreatment;
+  notes: string;
+  active: boolean;
+}
+
+function normalizePayrollAdjustments(adjustments: PayrollAdjustmentField[]): NormalizedPayrollAdjustment[] {
+  return adjustments
+    .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
+    .map(adjustment => ({
+      label: adjustment.label.trim(),
+      amount: parseFloat(adjustment.amount) || 0,
+      treatment: adjustment.treatment,
+      notes: adjustment.notes.trim(),
+      active: adjustment.active !== false,
+    }));
+}
+
 const adjustmentTreatmentOptions: Array<{ value: PayrollAdjustmentTreatment; label: string; helper: string }> = [
   { value: 'taxable_addition', label: 'Adds taxable pay', helper: 'Increases gross wages and payroll taxes.' },
   { value: 'non_taxable_addition', label: 'Adds non-taxable reimbursement', helper: 'Increases net pay only.' },
@@ -97,6 +117,7 @@ export function PayrollItemEditModal({
     payroll_field_entries: [],
   });
   const [saving, setSaving] = useState(false);
+  const [initialPayrollAdjustments, setInitialPayrollAdjustments] = useState<NormalizedPayrollAdjustment[]>([]);
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -118,6 +139,16 @@ export function PayrollItemEditModal({
             active: rate.active,
           }));
 
+      const itemPayrollAdjustments: PayrollAdjustmentField[] = (item.payroll_adjustments && item.payroll_adjustments.length > 0)
+        ? item.payroll_adjustments.map(adjustment => ({
+            label: adjustment.label,
+            amount: String(adjustment.amount),
+            treatment: adjustment.treatment,
+            notes: adjustment.notes || '',
+            active: adjustment.active !== false,
+          }))
+        : [];
+
       setFields({
         hours_worked: item.hours_worked || 0,
         overtime_hours: item.overtime_hours || 0,
@@ -136,15 +167,7 @@ export function PayrollItemEditModal({
         wage_rate_hours: initialWageRateHours,
         check_date: item.check_date || '',
         check_memo: item.check_memo || '',
-        payroll_adjustments: (item.payroll_adjustments && item.payroll_adjustments.length > 0)
-          ? item.payroll_adjustments.map(adjustment => ({
-              label: adjustment.label,
-              amount: String(adjustment.amount),
-              treatment: adjustment.treatment,
-              notes: adjustment.notes || '',
-              active: adjustment.active !== false,
-            }))
-          : [],
+        payroll_adjustments: itemPayrollAdjustments,
         payroll_field_entries: (item.payroll_field_entries || [])
           .filter(entry => entry.active === true)
           .map(entry => ({
@@ -153,6 +176,7 @@ export function PayrollItemEditModal({
             active: true,
           })),
       });
+      setInitialPayrollAdjustments(normalizePayrollAdjustments(itemPayrollAdjustments));
       setError(null);
       setPayrollFieldEntriesDirty(false);
       setConfirmRemove(false);
@@ -173,6 +197,8 @@ export function PayrollItemEditModal({
   const tipsPaidOutInput = Number(fields.tips_paid_out || 0);
   const effectiveReportedTips = Math.max(reportedTipsInput, tipsPaidOutInput);
   const tipsPaidOutExceedsReportedTips = tipsPaidOutInput > reportedTipsInput;
+  const normalizedPayrollAdjustments = normalizePayrollAdjustments(fields.payroll_adjustments);
+  const payrollAdjustmentsDirty = JSON.stringify(normalizedPayrollAdjustments) !== JSON.stringify(initialPayrollAdjustments);
 
   const handleChange = (field: keyof EditableFields, value: string) => {
     setFields((prev) => ({
@@ -272,16 +298,11 @@ export function PayrollItemEditModal({
         withholding_tax_override: fields.withholding_tax_override.trim() === '' ? null : (Number.isFinite(parseFloat(fields.withholding_tax_override)) ? parseFloat(fields.withholding_tax_override) : null),
         check_date: fields.check_date || null,
         check_memo: fields.check_memo || null,
-        payroll_adjustments: fields.payroll_adjustments
-          .filter(adjustment => adjustment.label.trim() && parseFloat(adjustment.amount) > 0)
-          .map(adjustment => ({
-            label: adjustment.label.trim(),
-            amount: parseFloat(adjustment.amount) || 0,
-            treatment: adjustment.treatment,
-            notes: adjustment.notes.trim(),
-            active: adjustment.active !== false,
-          })),
       };
+
+      if (payrollAdjustmentsDirty) {
+        payload.payroll_adjustments = normalizedPayrollAdjustments;
+      }
 
       if (payrollFieldEntriesDirty) {
         payload.payroll_field_entries = fields.payroll_field_entries
@@ -520,13 +541,16 @@ export function PayrollItemEditModal({
             <h4 className="text-sm font-medium text-gray-700 mb-2">Additional Earnings</h4>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Bonus</label>
+                <label className="block text-xs text-gray-500 mb-1">One-Time Bonus</label>
                 <NumericInput
                   value={fields.bonus}
                   onValueChange={(value) => handleNumberFieldChange('bonus', value)}
                   min={0}
                   fixedDecimalsOnBlur={2}
                 />
+                <p className="mt-0.5 text-xs text-gray-400">
+                  Applies only to this payroll. Use the employee profile for a recurring bonus.
+                </p>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Reported Tips</label>
@@ -657,9 +681,9 @@ export function PayrollItemEditModal({
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="mb-2 flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-medium text-gray-700">Payroll Adjustments</h4>
+                <h4 className="text-sm font-medium text-gray-700">This Payroll's Adjustments</h4>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Use these when the adjustment needs a specific tax treatment. These are copied from employee defaults but can be changed for this check.
+                  Employee defaults refresh here when payroll is rerun. Changing this list creates a manual override for this check.
                 </p>
               </div>
               <button
