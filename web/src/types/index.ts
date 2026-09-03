@@ -671,6 +671,7 @@ export interface PayrollItem {
   employee_last_name?: string | null;
   employee_name?: string;
   employment_type: EmploymentType;
+  contractor_pay_type?: ContractorPayType | null;
   pay_rate: number;
   // Hours (for hourly employees)
   hours_worked?: number;

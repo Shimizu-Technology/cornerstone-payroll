@@ -1006,13 +1006,14 @@ export function PayPeriodDetail() {
   };
   const payrollItemDisplayedHours = (item: PayrollItem): number => {
     const employee = employeeLookup.get(item.employee_id);
+    const contractorPayType = item.contractor_pay_type || employee?.contractor_pay_type;
     const regularHours = toNumber(item.hours_worked);
     const overtimeHours = toNumber(item.overtime_hours);
     const isSalary = item.employment_type === 'salary';
-    const isContractorFlat = item.employment_type === 'contractor' && employee?.contractor_pay_type !== 'hourly';
+    const isContractorFlat = item.employment_type === 'contractor' && contractorPayType !== 'hourly';
     const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
     const activeWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
-    const showsMultiRateHours = (item.employment_type === 'hourly' || employee?.contractor_pay_type === 'hourly')
+    const showsMultiRateHours = (item.employment_type === 'hourly' || contractorPayType === 'hourly')
       && (item.wage_rate_hours || []).length > 1;
 
     if (isContractorFlat || (isSalary && !hasSalaryTimekeeping)) return 0;
@@ -1097,8 +1098,8 @@ export function PayPeriodDetail() {
         return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection) || nameTieBreak();
       case 'hours':
         return compareDirectional(
-          toNumber(left.hours_worked) + toNumber(left.overtime_hours),
-          toNumber(right.hours_worked) + toNumber(right.overtime_hours),
+          payrollItemDisplayedHours(left),
+          payrollItemDisplayedHours(right),
           resultsSortDirection
         ) || nameTieBreak();
       case 'gross':
@@ -2351,8 +2352,9 @@ export function PayPeriodDetail() {
                     const isSalary = item.employment_type === 'salary';
                     const isContractor = item.employment_type === 'contractor';
                     const empRecord = employeeLookup.get(item.employee_id);
-                    const isContractorHourly = isContractor && empRecord?.contractor_pay_type === 'hourly';
-                    const isContractorFlat = isContractor && empRecord?.contractor_pay_type !== 'hourly';
+                    const contractorPayType = item.contractor_pay_type || empRecord?.contractor_pay_type;
+                    const isContractorHourly = isContractor && contractorPayType === 'hourly';
+                    const isContractorFlat = isContractor && contractorPayType !== 'hourly';
                     const regularHours = toNumber(item.hours_worked);
                     const overtimeHours = toNumber(item.overtime_hours);
                     const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
