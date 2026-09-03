@@ -89,7 +89,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await clientApi.dispose();
   });
 
-  test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }) => {
+  test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       extraHTTPHeaders: {

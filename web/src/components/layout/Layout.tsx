@@ -143,7 +143,7 @@ export function Layout() {
         <Sidebar
           className="hidden lg:flex"
           onToggleCollapse={toggleCollapse}
-          onOpenCommandPalette={() => openCommandPalette('all')}
+          onOpenCommandPalette={(): void => openCommandPalette('all')}
         />
       )}
 
