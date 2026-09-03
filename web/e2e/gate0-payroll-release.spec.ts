@@ -19,6 +19,8 @@ interface Gate0Fixture {
   bonus_alpha_payroll_item_id: number;
   bonus_beta_employee_id: number;
   bonus_beta_payroll_item_id: number;
+  historical_hourly_contractor_employee_id: number;
+  historical_hourly_contractor_payroll_item_id: number;
   register_reconciliation_field_name: string;
   register_reconciliation_field_total: number;
   workflow_pay_period_id: number;
@@ -160,7 +162,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const totalsRow = payrollTable.getByRole('row').filter({ hasText: /Totals \(\d+ employees?\)/ });
     const totalCells = totalsRow.getByRole('cell');
     expect(await totalCells.count()).toBe(headerLabels.length);
-    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('160');
+    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('169');
     const reconciliationFieldIndex = headerLabels.findIndex((label) => label.includes(fixture.register_reconciliation_field_name));
     expect(reconciliationFieldIndex).toBeGreaterThanOrEqual(0);
     expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim())
@@ -174,6 +176,11 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await totalCells.nth(employerMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployerMedicare.toFixed(2)}`);
     expect(await totalsRow.evaluate((row) => window.getComputedStyle(row.parentElement as HTMLElement).position)).toBe('sticky');
     const unfilteredTotalValues = (await totalCells.allTextContents()).map((value) => value.trim());
+    const historicalContractor = firstItems.find((item) => item.id === fixture.historical_hourly_contractor_payroll_item_id);
+    expect(historicalContractor?.contractor_pay_type).toBe('hourly');
+    const historicalContractorRow = payrollTable.getByRole('row').filter({ hasText: 'Historical' });
+    await expect(historicalContractorRow).toContainText('$25.00/hr');
+    await expect(historicalContractorRow.getByRole('cell').nth(2)).toHaveText('4');
 
     const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
     await registerSearch.fill('Alpha');
@@ -182,8 +189,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim()).toBe('+$12.34');
     await expect(bonusAlphaRow).not.toContainText('Inactive legacy rate');
     await registerSearch.fill('');
-    await expect(totalsRow).toContainText('Totals (3 employees)');
+    await expect(totalsRow).toContainText('Totals (5 employees)');
     expect((await totalCells.allTextContents()).map((value) => value.trim())).toEqual(unfilteredTotalValues);
+
+    await page.getByRole('combobox').filter({ has: page.getByRole('option', { name: 'Hours Low-High' }) }).last().selectOption('hours:asc');
+    const referenceContractorRow = payrollTable.getByRole('row').filter({ hasText: 'Reference' });
+    const historicalContractorBox = await historicalContractorRow.boundingBox();
+    const referenceContractorBox = await referenceContractorRow.boundingBox();
+    expect(historicalContractorBox?.y).toBeLessThan(referenceContractorBox?.y || 0);
 
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
