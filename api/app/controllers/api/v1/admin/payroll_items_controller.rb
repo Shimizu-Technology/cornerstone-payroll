@@ -280,6 +280,7 @@ module Api
             id: item.id,
             employee_id: item.employee_id,
             employee_name: item.employee_full_name,
+            contractor_pay_type: item.employee&.contractor_pay_type,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
