@@ -136,7 +136,12 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response).to have_http_status(:ok)
     fallback_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
     expect(fallback_exported_subjects).to include("Selected client employee")
-    expect(fallback_exported_subjects).not_to include("Unassigned client employee")
+    expect(fallback_exported_subjects).not_to include(
+      "Other client employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 

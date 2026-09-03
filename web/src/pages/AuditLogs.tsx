@@ -100,6 +100,7 @@ function CompanyActivityHistory(): ReactElement {
   const [total, setTotal] = useState(0);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const latestRequestId = useRef(0);
 
   const fetchLogs = useCallback(async () => {
@@ -142,7 +143,7 @@ function CompanyActivityHistory(): ReactElement {
 
   const handleExport = async () => {
     setIsExporting(true);
-    setError(null);
+    setExportError(null);
     try {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
@@ -162,7 +163,7 @@ function CompanyActivityHistory(): ReactElement {
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export audit history');
+      setExportError(err instanceof Error ? err.message : 'Failed to export audit history');
     } finally {
       setIsExporting(false);
     }
@@ -249,6 +250,11 @@ function CompanyActivityHistory(): ReactElement {
               </Button>
             </div>
           </div>
+          {exportError && (
+            <p className="mb-4 rounded-xl bg-danger-50 px-4 py-3 text-sm text-danger-700" role="alert">
+              {exportError}
+            </p>
+          )}
           <div className={`grid grid-cols-1 gap-3 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             <Input
               placeholder="Search actions"
