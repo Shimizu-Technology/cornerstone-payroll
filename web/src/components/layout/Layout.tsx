@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Outlet, useOutlet } from 'react-router';
-import { Menu, X } from 'lucide-react';
+import { Menu, PanelLeftOpen, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -135,10 +135,29 @@ export function Layout() {
 
   return (
     <div
+      data-testid="app-shell"
       className="flex h-screen bg-transparent text-neutral-950"
-      style={{ '--sidebar-width': collapsed ? '4rem' : '18rem' } as CSSProperties}
+      style={{ '--sidebar-width': collapsed ? '0rem' : '18rem' } as CSSProperties}
     >
-      <Sidebar className="hidden lg:flex" collapsed={collapsed} onToggleCollapse={toggleCollapse} onOpenCommandPalette={() => openCommandPalette('all')} />
+      {!collapsed && (
+        <Sidebar
+          className="hidden lg:flex"
+          onToggleCollapse={toggleCollapse}
+          onOpenCommandPalette={() => openCommandPalette('all')}
+        />
+      )}
+
+      {collapsed && (
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          className="fixed left-4 top-4 z-30 hidden h-10 w-10 items-center justify-center rounded-xl border border-neutral-200 bg-white/95 text-neutral-600 shadow-lg shadow-neutral-950/10 backdrop-blur transition hover:bg-neutral-50 hover:text-neutral-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2 lg:inline-flex"
+          aria-label="Show sidebar"
+          title="Show sidebar"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+        </button>
+      )}
 
       <div className="relative flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">

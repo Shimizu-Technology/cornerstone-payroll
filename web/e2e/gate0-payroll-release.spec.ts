@@ -89,6 +89,42 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await clientApi.dispose();
   });
 
+  test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }) => {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      extraHTTPHeaders: {
+        'X-E2E-User-Email': fixture.admin_email,
+        'X-Company-Id': String(fixture.company_id),
+      },
+    });
+    const page = await context.newPage();
+    await page.goto('/app');
+
+    const sidebar = page.locator('aside');
+    await expect(sidebar).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await expect(sidebar).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    expect(await page.getByTestId('app-shell').evaluate((root) => getComputedStyle(root).getPropertyValue('--sidebar-width'))).toBe('0rem');
+    expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('true');
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    await page.getByRole('button', { name: 'Show sidebar' }).click();
+    await expect(sidebar).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('false');
+
+    await page.keyboard.press('Control+b');
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await context.close();
+  });
+
   test('keeps accountant payroll operations available while denying client configuration', async ({ browser }) => {
     const payrollPeriods = await accountantApi.get('admin/pay_periods');
     expect(payrollPeriods.ok()).toBeTruthy();
