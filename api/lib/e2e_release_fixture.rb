@@ -244,6 +244,13 @@ class E2eReleaseFixture
         employment_type: bonus_alpha.employment_type,
         pay_rate: bonus_alpha.pay_rate,
         hours_worked: 80,
+        custom_columns_data: {
+          "wage_rate_hours" => [
+            { label: "Standard", rate: 10, regular_hours: 80, overtime_hours: 0, active: true },
+            { label: "Training", rate: 10, regular_hours: 0, overtime_hours: 0, active: true },
+            { label: "Inactive legacy rate", rate: 10, regular_hours: 99, overtime_hours: 0, active: false }
+          ]
+        },
         payroll_adjustments: bonus_alpha.default_payroll_adjustments,
         timekeeping_source: "manual"
       )
