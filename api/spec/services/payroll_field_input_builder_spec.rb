@@ -16,11 +16,9 @@ RSpec.describe PayrollFieldInputBuilder do
     payroll_item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period)
     field = create(
       :payroll_field_definition,
+      :employer_contribution,
       company: company,
       name: "Employer Benefit",
-      kind: "employer_contribution",
-      tax_treatment: "employer_contribution",
-      category: "benefit",
       amount_type: "fixed",
       show_in_payroll_grid: true
     )

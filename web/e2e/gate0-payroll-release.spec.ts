@@ -157,7 +157,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(payrollTable.getByRole('columnheader', { name: new RegExp(fixture.register_reconciliation_field_name) })).toBeVisible();
     const headerLabels = (await payrollTable.getByRole('columnheader').allTextContents())
       .map((label) => label.replace(/\s+/g, ' ').trim());
-    const totalsRow = payrollTable.getByRole('row').filter({ hasText: /Totals \(\d+ employees\)/ });
+    const totalsRow = payrollTable.getByRole('row').filter({ hasText: /Totals \(\d+ employees?\)/ });
     const totalCells = totalsRow.getByRole('cell');
     expect(await totalCells.count()).toBe(headerLabels.length);
     expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('160');
@@ -173,6 +173,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await totalCells.nth(employeeMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployeeMedicare.toFixed(2)}`);
     expect((await totalCells.nth(employerMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployerMedicare.toFixed(2)}`);
     expect(await totalsRow.evaluate((row) => window.getComputedStyle(row.parentElement as HTMLElement).position)).toBe('sticky');
+
+    const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
+    await registerSearch.fill('Alpha');
+    await expect(totalsRow).toContainText('Totals (1 employee)');
+    expect((await totalCells.nth(headerLabels.indexOf('Hours')).textContent())?.trim()).toBe('80');
+    expect((await totalCells.nth(reconciliationFieldIndex).textContent())?.trim()).toBe('+$12.34');
+    await expect(bonusAlphaRow).not.toContainText('Inactive legacy rate');
+    await registerSearch.fill('');
+    await expect(totalsRow).toContainText('Totals (3 employees)');
 
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();

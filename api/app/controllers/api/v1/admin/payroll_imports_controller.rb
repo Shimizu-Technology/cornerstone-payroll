@@ -124,6 +124,8 @@ module Api
             id: item.id,
             employee_id: item.employee_id,
             employee_name: item.employee_full_name,
+            employee_first_name: item.employee&.first_name,
+            employee_last_name: item.employee&.last_name,
             employment_type: item.employment_type,
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
