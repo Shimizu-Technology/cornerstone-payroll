@@ -50,7 +50,9 @@ module Api
             logs = logs.where(company_id: company_id)
           end
 
-          logs = logs.where(user_id: params[:user_id]) if params[:user_id].present?
+          if current_user.organization_admin? && params[:user_id].present?
+            logs = logs.where(user_id: params[:user_id])
+          end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?

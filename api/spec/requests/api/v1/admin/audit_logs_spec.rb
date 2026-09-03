@@ -101,31 +101,33 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   it "gives accountants history for only the selected client" do
     accountant = create(:user, organization: organization, company: company, role: :accountant)
     second_company = create(:company, organization: organization, name: "Second Audit Client")
+    second_actor = create(:user, organization: organization, company: second_company, role: :manager, name: "Second actor")
     unassigned_company = create(:company, organization: organization, name: "Unassigned Audit Client")
     create(:company_assignment, user: accountant, company: company)
     create(:company_assignment, user: accountant, company: second_company)
     selected_log = create(:audit_log, user: admin, organization: organization, company: company, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
     create(:audit_log, user: admin, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
+    create(:audit_log, user: second_actor, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Second actor employee")
     create(:audit_log, user: admin, organization: organization, company: unassigned_company, action: "employees#updated", record_type: "employees", subject_name: "Unassigned client employee")
     create(:audit_log, user: admin, organization: organization, company: nil, action: "users#updated", record_type: "users", subject_name: "Organization user")
     create(:audit_log, user: foreign_admin, organization: foreign_organization, company: foreign_company, action: "users#updated", record_type: "users", subject_name: "Foreign user")
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
-    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id, user_id: admin.id }
 
     expect(response).to have_http_status(:ok)
     json = JSON.parse(response.body)
     returned_logs = json.fetch("data")
     expect(returned_logs.pluck("id")).not_to include(selected_log.id)
     expect(returned_logs.pluck("company_id")).to all(eq(second_company.id))
-    expect(returned_logs.pluck("subject_name")).to include("Other client employee")
+    expect(returned_logs.pluck("subject_name")).to include("Other client employee", "Second actor employee")
 
-    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id }
+    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id, user_id: admin.id }
 
     expect(response).to have_http_status(:ok)
     exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
-    expect(exported_subjects).to include("Other client employee")
+    expect(exported_subjects).to include("Other client employee", "Second actor employee")
     expect(exported_subjects).not_to include("Selected client employee", "Unassigned client employee", "Organization user", "Foreign user")
 
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => second_company.id.to_s }
@@ -133,7 +135,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response).to have_http_status(:ok)
     json = JSON.parse(response.body)
     expect(json.fetch("data").pluck("company_id")).to all(eq(second_company.id))
-    expect(json.fetch("data").pluck("subject_name")).to include("Other client employee")
+    expect(json.fetch("data").pluck("subject_name")).to include("Other client employee", "Second actor employee")
     expect(json.fetch("data").pluck("subject_name")).not_to include(
       "Selected client employee",
       "Unassigned client employee",
@@ -145,7 +147,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
     expect(response).to have_http_status(:ok)
     header_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
-    expect(header_exported_subjects).to include("Other client employee")
+    expect(header_exported_subjects).to include("Other client employee", "Second actor employee")
     expect(header_exported_subjects).not_to include(
       "Selected client employee",
       "Unassigned client employee",
@@ -167,6 +169,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(fallback_exported_subjects).to include("Selected client employee")
     expect(fallback_exported_subjects).not_to include(
       "Other client employee",
+      "Second actor employee",
       "Unassigned client employee",
       "Organization user",
       "Foreign user"

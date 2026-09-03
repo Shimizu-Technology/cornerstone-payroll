@@ -11,6 +11,7 @@ class AuditLogAccessScope
   end
 
   def call
+    authorize_role!
     validate_requested_company!
 
     return AuditLog.all if user.super_admin?
@@ -22,6 +23,12 @@ class AuditLogAccessScope
   private
 
   attr_reader :user, :current_company_id, :requested_company_id, :company_header_present
+
+  def authorize_role!
+    return if StaffRolePolicy.allowed?(user, :view_audit_history)
+
+    raise NotAuthorizedError, StaffRolePolicy.error_message(:view_audit_history)
+  end
 
   def validate_requested_company!
     return if requested_company_id.blank?

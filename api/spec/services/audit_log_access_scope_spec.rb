@@ -63,4 +63,19 @@ RSpec.describe AuditLogAccessScope do
 
     expect { access_scope.call }.to raise_error(described_class::NotAuthorizedError, "Not authorized")
   end
+
+  it "rejects roles outside the audit-history policy before applying a company scope" do
+    manager = create(:user, organization: organization, company: home_company, role: :manager)
+    access_scope = described_class.new(
+      user: manager,
+      current_company_id: nil,
+      requested_company_id: nil,
+      company_header_present: false
+    )
+
+    expect { access_scope.call }.to raise_error(
+      described_class::NotAuthorizedError,
+      StaffRolePolicy.error_message(:view_audit_history)
+    )
+  end
 end
