@@ -65,18 +65,20 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
 
   it "filters listing and export by a query-only client selector" do
     second_company = create(:company, organization: organization, name: "Selected Audit Client")
-    selected_log = AuditLog.record!(
+    selected_log = create(
+      :audit_log,
       user: admin,
-      organization_id: organization.id,
-      company_id: second_company.id,
+      organization: organization,
+      company: second_company,
       action: "employees#updated",
       record_type: "employees",
       subject_name: "Selected employee"
     )
-    AuditLog.record!(
+    create(
+      :audit_log,
       user: admin,
-      organization_id: organization.id,
-      company_id: company.id,
+      organization: organization,
+      company: company,
       action: "employees#updated",
       record_type: "employees",
       subject_name: "Excluded employee"
@@ -91,16 +93,17 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id }
 
     expect(response).to have_http_status(:ok)
-    expect(response.body).to include("Selected employee")
-    expect(response.body).not_to include("Excluded employee")
+    exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(exported_subjects).to include("Selected employee")
+    expect(exported_subjects).not_to include("Excluded employee")
   end
 
   it "gives accountants history for only the selected client" do
     accountant = create(:user, organization: organization, company: company, role: :accountant)
     second_company = create(:company, organization: organization, name: "Second Audit Client")
     unassigned_company = create(:company, organization: organization, name: "Unassigned Audit Client")
-    CompanyAssignment.create!(user: accountant, company: company)
-    CompanyAssignment.create!(user: accountant, company: second_company)
+    create(:company_assignment, user: accountant, company: company)
+    create(:company_assignment, user: accountant, company: second_company)
     selected_log = create(:audit_log, user: admin, organization: organization, company: company, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
     create(:audit_log, user: admin, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
     create(:audit_log, user: admin, organization: organization, company: unassigned_company, action: "employees#updated", record_type: "employees", subject_name: "Unassigned client employee")
@@ -109,7 +112,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
-    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => company.id.to_s }
+    get "/api/v1/admin/audit_logs", params: { company_id: company.id }
 
     expect(response).to have_http_status(:ok)
     json = JSON.parse(response.body)
@@ -117,7 +120,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(returned_logs.pluck("id")).to include(selected_log.id)
     expect(returned_logs.pluck("company_id")).to all(eq(company.id))
 
-    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => company.id.to_s }
+    get "/api/v1/admin/audit_logs/export", params: { company_id: company.id }
 
     expect(response).to have_http_status(:ok)
     exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }

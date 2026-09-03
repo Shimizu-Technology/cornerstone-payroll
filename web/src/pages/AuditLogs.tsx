@@ -251,11 +251,11 @@ function CompanyActivityHistory(): ReactElement {
             </div>
           </div>
           {exportError && (
-            <p className="mb-4 rounded-xl bg-danger-50 px-4 py-3 text-sm text-danger-700" role="alert">
+            <p className="mb-4 rounded-xl bg-danger-50 px-4 py-4 text-sm text-danger-700" role="alert">
               {exportError}
             </p>
           )}
-          <div className={`grid grid-cols-1 gap-3 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+          <div className={`grid grid-cols-1 gap-4 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             <Input
               placeholder="Search actions"
               value={actionFilter}
