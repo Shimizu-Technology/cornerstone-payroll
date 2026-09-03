@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -17,7 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Download, RotateCcw } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Download, RotateCcw, TriangleAlert } from 'lucide-react';
 
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
@@ -75,7 +75,13 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function AuditLogs() {
+export function AuditLogs(): ReactElement {
+  const { activeCompanyId } = useCompany();
+
+  return <CompanyActivityHistory key={activeCompanyId ?? 'unselected'} />;
+}
+
+function CompanyActivityHistory(): ReactElement {
   const { isAdmin } = useAuth();
   const { activeCompany } = useCompany();
   const activeCompanyId = activeCompany?.id ?? null;
@@ -98,6 +104,7 @@ export function AuditLogs() {
 
   const fetchLogs = useCallback(async () => {
     const requestId = ++latestRequestId.current;
+    let keepLoadingForPageReset = false;
     setIsLoading(true);
     setError(null);
     try {
@@ -114,6 +121,12 @@ export function AuditLogs() {
       });
       if (requestId !== latestRequestId.current) return;
 
+      if (response.data.length === 0 && page > 1) {
+        keepLoadingForPageReset = true;
+        setPage(1);
+        return;
+      }
+
       setLogs(response.data);
       setTotalPages(response.meta.total_pages || 1);
       setTotal(response.meta.total_count);
@@ -123,7 +136,7 @@ export function AuditLogs() {
 
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     } finally {
-      if (requestId === latestRequestId.current) setIsLoading(false);
+      if (requestId === latestRequestId.current && !keepLoadingForPageReset) setIsLoading(false);
     }
   }, [actionFilter, activeCompanyId, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
 
@@ -168,14 +181,6 @@ export function AuditLogs() {
       setUsers([]);
     }
   }, [isAdmin]);
-
-  useEffect(() => {
-    setLogs([]);
-    setPage(1);
-    setSelectedLogId(null);
-    setTotal(0);
-    setTotalPages(1);
-  }, [activeCompanyId]);
 
   useEffect(() => {
     void fetchLogs();
@@ -297,9 +302,19 @@ export function AuditLogs() {
           </div>
         </Card>
 
-        {error && <div className="mb-4 text-sm text-danger-600">{error}</div>}
-
-        {isLoading ? (
+        {error ? (
+          <Card className="flex min-h-72 flex-col items-center justify-center border-danger-200 p-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger-50 text-danger-700">
+              <TriangleAlert className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-neutral-950">Activity history could not be loaded</h2>
+            <p className="mt-2 max-w-md text-sm text-neutral-500">{error}</p>
+            <Button className="mt-4" variant="outline" onClick={() => void fetchLogs()}>
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              Try again
+            </Button>
+          </Card>
+        ) : isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" />

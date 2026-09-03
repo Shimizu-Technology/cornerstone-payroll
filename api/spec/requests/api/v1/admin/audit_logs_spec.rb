@@ -1,4 +1,5 @@
 require "rails_helper"
+require "csv"
 
 RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   let!(:organization) { create(:organization, name: "Audit Firm") }
@@ -97,12 +98,14 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   it "gives accountants history for only the selected client" do
     accountant = create(:user, organization: organization, company: company, role: :accountant)
     second_company = create(:company, organization: organization, name: "Second Audit Client")
+    unassigned_company = create(:company, organization: organization, name: "Unassigned Audit Client")
     CompanyAssignment.create!(user: accountant, company: company)
     CompanyAssignment.create!(user: accountant, company: second_company)
-    selected_log = AuditLog.record!(user: admin, organization_id: organization.id, company_id: company.id, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
-    AuditLog.record!(user: admin, organization_id: organization.id, company_id: second_company.id, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
-    AuditLog.record!(user: admin, organization_id: organization.id, company_id: nil, action: "users#updated", record_type: "users", subject_name: "Organization user")
-    AuditLog.record!(user: foreign_admin, organization_id: foreign_organization.id, company_id: foreign_company.id, action: "users#updated", record_type: "users", subject_name: "Foreign user")
+    selected_log = create(:audit_log, user: admin, organization: organization, company: company, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
+    create(:audit_log, user: admin, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
+    create(:audit_log, user: admin, organization: organization, company: unassigned_company, action: "employees#updated", record_type: "employees", subject_name: "Unassigned client employee")
+    create(:audit_log, user: admin, organization: organization, company: nil, action: "users#updated", record_type: "users", subject_name: "Organization user")
+    create(:audit_log, user: foreign_admin, organization: foreign_organization, company: foreign_company, action: "users#updated", record_type: "users", subject_name: "Foreign user")
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
@@ -117,8 +120,23 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => company.id.to_s }
 
     expect(response).to have_http_status(:ok)
-    expect(response.body).to include("Selected client employee")
-    expect(response.body).not_to include("Other client employee", "Organization user", "Foreign user")
+    exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(exported_subjects).to include("Selected client employee")
+    expect(exported_subjects).not_to include("Other client employee", "Unassigned client employee", "Organization user", "Foreign user")
+
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("id")).to include(selected_log.id)
+    expect(json.fetch("data").pluck("company_id")).to all(eq(company.id))
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => unassigned_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    fallback_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(fallback_exported_subjects).to include("Selected client employee")
+    expect(fallback_exported_subjects).not_to include("Unassigned client employee")
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 
