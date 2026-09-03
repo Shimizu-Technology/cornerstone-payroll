@@ -48,6 +48,7 @@ RSpec.describe E2eReleaseFixture do
     expect(User.find_by!(email: fixture.fetch(:inactive_user_email))).not_to be_active
     expect(TimeTrackingImport.where(pay_period_id: fixture.fetch(:time_import_pay_period_id)).count).to eq(2)
     expect(PayPeriod.find(fixture.fetch(:bonus_sync_pay_period_id)).pay_date).to eq(Date.new(2026, 6, 4))
+    expect(AuditLog.where(company_id: fixture.fetch(:company_id), user_id: User.find_by!(email: fixture.fetch(:accountant_email))).count).to eq(1)
     expect(PayrollItem.find(fixture.fetch(:bonus_alpha_payroll_item_id)).payroll_adjustments.size).to eq(5)
     expect(Employee.find(fixture.fetch(:bonus_alpha_employee_id)).default_payroll_adjustments.size).to eq(6)
     expect(Employee.find(fixture.fetch(:historical_hourly_contractor_employee_id))).to have_attributes(

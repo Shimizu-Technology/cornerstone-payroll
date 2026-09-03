@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { ClerkProvider } from '@clerk/clerk-react';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
@@ -93,6 +93,20 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAdmin) {
+    return <Navigate to="/app" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function AuditHistoryRoute({ children }: { children: React.ReactNode }): ReactElement {
+  const { isAdmin, isAccountant, isLoading } = useAuth();
+
+  if (isLoading) {
+    return <PageLoader />;
+  }
+
+  if (!isAdmin && !isAccountant) {
     return <Navigate to="/app" replace />;
   }
 
@@ -206,11 +220,11 @@ function PostHogIdentify() {
   return null;
 }
 
-function PageLoader() {
+function PageLoader(): ReactElement {
   return (
     <div className="flex min-h-[320px] items-center justify-center px-6 py-12">
       <div className="inline-flex items-center gap-3 rounded-full border border-neutral-200 bg-white/85 px-4 py-2 text-sm font-medium text-neutral-600 shadow-sm shadow-neutral-200/70">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary-600" />
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600" aria-hidden="true" />
         Loading workspace
       </div>
     </div>
@@ -297,7 +311,7 @@ function AppRoutes() {
         <Route path="settings/users" element={<AdminOnlyRoute><Users /></AdminOnlyRoute>} />
         <Route path="settings/organizations" element={<SuperAdminOnlyRoute><Organizations /></SuperAdminOnlyRoute>} />
         <Route path="settings/tax-config" element={<AdminOnlyRoute><TaxConfigs /></AdminOnlyRoute>} />
-        <Route path="settings/audit-logs" element={<AdminOnlyRoute><AuditLogs /></AdminOnlyRoute>} />
+        <Route path="settings/audit-logs" element={<AuditHistoryRoute><AuditLogs /></AuditHistoryRoute>} />
         <Route path="settings/client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
         <Route path="settings/client-change-requests" element={<ManagerOnlyRoute><AdminEmployeeChangeRequestsPage /></ManagerOnlyRoute>} />
         <Route path="check-settings" element={<ManagerOnlyRoute><CheckSettingsPage /></ManagerOnlyRoute>} />

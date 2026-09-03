@@ -78,7 +78,7 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAdmin, isSuperAdmin, isManager, isClient } = useAuth();
+  const { isAdmin, isSuperAdmin, isManager, isAccountant, isClient } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -332,13 +332,17 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         kind: 'navigation',
         href: '/settings/users',
       });
+    }
 
+    if (isAdmin || isAccountant) {
       add({
         id: 'audit-logs',
-        label: 'Audit Logs',
-        description: 'Review administrative activity and security events.',
+        label: 'Activity History',
+        description: isAdmin
+          ? 'Review organization activity and security events.'
+          : 'Review activity for the selected client.',
         group: 'Administration',
-        keywords: ['audit', 'logs', 'history'],
+        keywords: ['audit', 'logs', 'history', 'activity'],
         icon: <ClipboardList className="h-4 w-4" />,
         kind: 'navigation',
         href: '/settings/audit-logs',
@@ -407,7 +411,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany?.id, canSwitchCompany, companies, isAdmin, isClient, isManager, isSuperAdmin]);
+  }, [activeCompany?.id, canSwitchCompany, companies, isAccountant, isAdmin, isClient, isManager, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

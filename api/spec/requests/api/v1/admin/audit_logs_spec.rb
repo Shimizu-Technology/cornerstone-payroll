@@ -1,4 +1,5 @@
 require "rails_helper"
+require "csv"
 
 RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
   let!(:organization) { create(:organization, name: "Audit Firm") }
@@ -62,17 +63,136 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
-  it "keeps the organization-wide governance history unavailable to scoped staff" do
-    %i[manager accountant].each do |role|
-      scoped_staff = create(:user, organization: organization, company: company, role: role)
-      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(scoped_staff)
-      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(scoped_staff.id)
+  it "filters listing and export by a query-only client selector" do
+    second_company = create(:company, organization: organization, name: "Selected Audit Client")
+    selected_log = create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: second_company,
+      action: "employees#updated",
+      record_type: "employees",
+      subject_name: "Selected employee"
+    )
+    create(
+      :audit_log,
+      user: admin,
+      organization: organization,
+      company: company,
+      action: "employees#updated",
+      record_type: "employees",
+      subject_name: "Excluded employee"
+    )
 
-      get "/api/v1/admin/audit_logs"
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }
 
-      expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Admin access required")
-    end
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("id")).to eq([ selected_log.id ])
+
+    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id }
+
+    expect(response).to have_http_status(:ok)
+    exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(exported_subjects).to include("Selected employee")
+    expect(exported_subjects).not_to include("Excluded employee")
+  end
+
+  it "gives accountants history for only the selected client" do
+    accountant = create(:user, organization: organization, company: company, role: :accountant)
+    second_company = create(:company, organization: organization, name: "Second Audit Client")
+    second_actor = create(:user, organization: organization, company: second_company, role: :manager, name: "Second actor")
+    unassigned_company = create(:company, organization: organization, name: "Unassigned Audit Client")
+    create(:company_assignment, user: accountant, company: company)
+    create(:company_assignment, user: accountant, company: second_company)
+    selected_log = create(:audit_log, user: admin, organization: organization, company: company, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
+    create(:audit_log, user: admin, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
+    create(:audit_log, user: second_actor, organization: organization, company: second_company, action: "employees#updated", record_type: "employees", subject_name: "Second actor employee")
+    create(:audit_log, user: admin, organization: organization, company: unassigned_company, action: "employees#updated", record_type: "employees", subject_name: "Unassigned client employee")
+    create(:audit_log, user: admin, organization: organization, company: nil, action: "users#updated", record_type: "users", subject_name: "Organization user")
+    create(:audit_log, user: foreign_admin, organization: foreign_organization, company: foreign_company, action: "users#updated", record_type: "users", subject_name: "Foreign user")
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
+
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id, user_id: admin.id }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    returned_logs = json.fetch("data")
+    expect(returned_logs.pluck("id")).not_to include(selected_log.id)
+    expect(returned_logs.pluck("company_id")).to all(eq(second_company.id))
+    expect(returned_logs.pluck("subject_name")).to include("Other client employee", "Second actor employee")
+
+    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id, user_id: admin.id }
+
+    expect(response).to have_http_status(:ok)
+    exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(exported_subjects).to include("Other client employee", "Second actor employee")
+    expect(exported_subjects).not_to include("Selected client employee", "Unassigned client employee", "Organization user", "Foreign user")
+
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => second_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("company_id")).to all(eq(second_company.id))
+    expect(json.fetch("data").pluck("subject_name")).to include("Other client employee", "Second actor employee")
+    expect(json.fetch("data").pluck("subject_name")).not_to include(
+      "Selected client employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => second_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    header_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(header_exported_subjects).to include("Other client employee", "Second actor employee")
+    expect(header_exported_subjects).not_to include(
+      "Selected client employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
+
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("id")).to include(selected_log.id)
+    expect(json.fetch("data").pluck("company_id")).to all(eq(company.id))
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => unassigned_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    fallback_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(fallback_exported_subjects).to include("Selected client employee")
+    expect(fallback_exported_subjects).not_to include(
+      "Other client employee",
+      "Second actor employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
+
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
+
+    expect(response).to have_http_status(:forbidden)
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("Not authorized")
+    expect(json.fetch("details")).to eq("authorization" => [ "Not authorized" ])
+  end
+
+  it "keeps activity history unavailable to managers" do
+    manager = create(:user, organization: organization, company: company, role: :manager)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(manager)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(manager.id)
+
+    get "/api/v1/admin/audit_logs"
+
+    expect(response).to have_http_status(:forbidden)
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("Admin or accountant access required")
   end
 
   it "exports filtered history as CSV and records the export" do

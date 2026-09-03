@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -13,9 +13,11 @@ import {
 } from '@/components/ui/table';
 import { auditLogsApi, usersApi } from '@/services/api';
 import type { AuditLogEntry } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Download, RotateCcw, TriangleAlert } from 'lucide-react';
 
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
@@ -73,7 +75,16 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-export function AuditLogs() {
+export function AuditLogs(): ReactElement {
+  const { activeCompanyId } = useCompany();
+
+  return <CompanyActivityHistory key={activeCompanyId ?? 'unselected'} />;
+}
+
+function CompanyActivityHistory(): ReactElement {
+  const { isAdmin } = useAuth();
+  const { activeCompany } = useCompany();
+  const activeCompanyId = activeCompany?.id ?? null;
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,24 +100,33 @@ export function AuditLogs() {
   const [total, setTotal] = useState(0);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const latestRequestId = useRef(0);
 
   const fetchLogs = useCallback(async () => {
     const requestId = ++latestRequestId.current;
+    let keepLoadingForPageReset = false;
     setIsLoading(true);
     setError(null);
     try {
       const response = await auditLogsApi.list({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        user_id: userFilter ? parseInt(userFilter, 10) : undefined,
+        user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
         page,
         per_page: 50,
         sort_direction: sortDirection,
+        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
       });
       if (requestId !== latestRequestId.current) return;
+
+      if (response.data.length === 0 && page > 1) {
+        keepLoadingForPageReset = true;
+        setPage(1);
+        return;
+      }
 
       setLogs(response.data);
       setTotalPages(response.meta.total_pages || 1);
@@ -117,21 +137,22 @@ export function AuditLogs() {
 
       setError(err instanceof Error ? err.message : 'Failed to load audit logs');
     } finally {
-      if (requestId === latestRequestId.current) setIsLoading(false);
+      if (requestId === latestRequestId.current && !keepLoadingForPageReset) setIsLoading(false);
     }
-  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
+  }, [actionFilter, activeCompanyId, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
 
   const handleExport = async () => {
     setIsExporting(true);
-    setError(null);
+    setExportError(null);
     try {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        user_id: userFilter ? parseInt(userFilter, 10) : undefined,
+        user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
         sort_direction: sortDirection,
+        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
       });
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
@@ -142,20 +163,25 @@ export function AuditLogs() {
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to export audit history');
+      setExportError(err instanceof Error ? err.message : 'Failed to export audit history');
     } finally {
       setIsExporting(false);
     }
   };
 
   const fetchUsers = useCallback(async () => {
+    if (!isAdmin) {
+      setUsers([]);
+      return;
+    }
+
     try {
       const response = await usersApi.list();
       setUsers(response.data);
     } catch {
       setUsers([]);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     void fetchLogs();
@@ -164,6 +190,17 @@ export function AuditLogs() {
   useEffect(() => {
     void fetchUsers();
   }, [fetchUsers]);
+
+  const hasActiveFilters = Boolean(actionFilter || recordTypeFilter || (isAdmin && userFilter) || fromFilter || toFilter);
+
+  const clearFilters = (): void => {
+    setActionFilter('');
+    setRecordTypeFilter('');
+    setUserFilter('');
+    setFromFilter('');
+    setToFilter('');
+    setPage(1);
+  };
 
   const selectedLog = useMemo(
     () => logs.find((log) => log.id === selectedLogId) || null,
@@ -185,14 +222,16 @@ export function AuditLogs() {
 
   return (
     <div>
-      <Header title="Audit Logs" description="Track who changed what, when it happened, and what changed." />
+      <Header title="Activity History" description="Track who changed what, when it happened, and what changed." />
 
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mb-4 p-4">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-semibold text-neutral-950">Complete activity history</p>
-              <p className="text-sm text-neutral-500">{total.toLocaleString()} recorded actions across the organization</p>
+              <p className="font-semibold text-neutral-950">{isAdmin ? 'Complete activity history' : 'Client activity history'}</p>
+              <p className="text-sm text-neutral-500">
+                {total.toLocaleString()} recorded actions {isAdmin ? 'across the organization' : `for ${activeCompany?.name || 'the selected client'}`}
+              </p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -211,7 +250,12 @@ export function AuditLogs() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {exportError && (
+            <p className="mb-4 rounded-xl bg-danger-50 px-4 py-4 text-sm text-danger-700" role="alert">
+              {exportError}
+            </p>
+          )}
+          <div className={`grid grid-cols-1 gap-4 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             <Input
               placeholder="Search actions"
               value={actionFilter}
@@ -228,7 +272,7 @@ export function AuditLogs() {
                 setPage(1);
               }}
             />
-            <select
+            {isAdmin && <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               value={userFilter}
               onChange={(e) => {
@@ -242,7 +286,7 @@ export function AuditLogs() {
                   {user.name} ({user.email})
                 </option>
               ))}
-            </select>
+            </select>}
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <Input
@@ -264,15 +308,43 @@ export function AuditLogs() {
           </div>
         </Card>
 
-        {error && <div className="mb-4 text-sm text-danger-600">{error}</div>}
-
-        {isLoading ? (
+        {error ? (
+          <Card className="flex min-h-72 flex-col items-center justify-center border-danger-200 p-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-danger-50 text-danger-700">
+              <TriangleAlert className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-neutral-950">Activity history could not be loaded</h2>
+            <p className="mt-2 max-w-md text-sm text-neutral-500">{error}</p>
+            <Button className="mt-4" variant="outline" onClick={() => void fetchLogs()}>
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              Try again
+            </Button>
+          </Card>
+        ) : isLoading ? (
           <div className="flex items-center justify-center py-12">
             <div className="text-center">
               <div className="mx-auto h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600" />
               <p className="mt-2 text-sm text-gray-500">Loading logs...</p>
             </div>
           </div>
+        ) : logs.length === 0 ? (
+          <Card className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+              <ClipboardList className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-neutral-950">
+              {hasActiveFilters ? 'No activity matches these filters' : 'No activity recorded yet'}
+            </h2>
+            <p className="mt-2 max-w-md text-sm text-neutral-500">
+              {hasActiveFilters
+                ? 'Clear the current filters to return to the complete activity history.'
+                : 'Recorded changes for this client will appear here as payroll work is completed.'}
+            </p>
+            <Button className="mt-4" variant="outline" onClick={hasActiveFilters ? clearFilters : () => void fetchLogs()}>
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              {hasActiveFilters ? 'Clear filters' : 'Refresh history'}
+            </Button>
+          </Card>
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Card>
