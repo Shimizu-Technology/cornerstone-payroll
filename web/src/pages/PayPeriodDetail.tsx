@@ -1013,7 +1013,7 @@ export function PayPeriodDetail() {
     const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
     const activeWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
     const showsMultiRateHours = (item.employment_type === 'hourly' || employee?.contractor_pay_type === 'hourly')
-      && activeWageRates.length > 1;
+      && (item.wage_rate_hours || []).length > 1;
 
     if (isContractorFlat || (isSalary && !hasSalaryTimekeeping)) return 0;
     if (showsMultiRateHours) {
@@ -2357,7 +2357,7 @@ export function PayPeriodDetail() {
                     const overtimeHours = toNumber(item.overtime_hours);
                     const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
                     const itemWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
-                    const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && itemWageRates.length > 1;
+                    const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && (item.wage_rate_hours || []).length > 1;
                     const prevGroup = idx > 0 ? employmentGroupKey(displayItems[idx - 1]?.employment_type || '') : null;
                     const currentGroup = employmentGroupKey(item.employment_type);
                     const showGroupDivider = currentGroup !== prevGroup;

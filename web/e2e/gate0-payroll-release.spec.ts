@@ -173,6 +173,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect((await totalCells.nth(employeeMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployeeMedicare.toFixed(2)}`);
     expect((await totalCells.nth(employerMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployerMedicare.toFixed(2)}`);
     expect(await totalsRow.evaluate((row) => window.getComputedStyle(row.parentElement as HTMLElement).position)).toBe('sticky');
+    const unfilteredTotalValues = (await totalCells.allTextContents()).map((value) => value.trim());
 
     const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
     await registerSearch.fill('Alpha');
@@ -182,6 +183,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(bonusAlphaRow).not.toContainText('Inactive legacy rate');
     await registerSearch.fill('');
     await expect(totalsRow).toContainText('Totals (3 employees)');
+    expect((await totalCells.allTextContents()).map((value) => value.trim())).toEqual(unfilteredTotalValues);
 
     await bonusAlphaRow.getByRole('button', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit Payroll Item' })).toBeVisible();
