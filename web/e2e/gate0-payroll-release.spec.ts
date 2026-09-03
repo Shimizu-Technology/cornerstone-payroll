@@ -132,6 +132,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const activityHistory = await accountantApi.get('admin/audit_logs');
     expect(activityHistory.ok()).toBeTruthy();
     const activityEntries = (await responseJson(activityHistory)).data as Array<Record<string, unknown>>;
+    expect(activityEntries.length).toBeGreaterThan(0);
     expect(activityEntries.every((entry) => Number(entry.company_id) === fixture.company_id)).toBeTruthy();
 
     const schedule = await accountantApi.get('admin/pay_schedule_settings');

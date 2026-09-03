@@ -78,6 +78,7 @@ function formatValue(value: unknown): string {
 export function AuditLogs() {
   const { isAdmin } = useAuth();
   const { activeCompany } = useCompany();
+  const activeCompanyId = activeCompany?.id ?? null;
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -109,6 +110,7 @@ export function AuditLogs() {
         page,
         per_page: 50,
         sort_direction: sortDirection,
+        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
       });
       if (requestId !== latestRequestId.current) return;
 
@@ -123,7 +125,7 @@ export function AuditLogs() {
     } finally {
       if (requestId === latestRequestId.current) setIsLoading(false);
     }
-  }, [actionFilter, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
+  }, [actionFilter, activeCompanyId, isAdmin, recordTypeFilter, userFilter, fromFilter, toFilter, page, sortDirection]);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -136,6 +138,7 @@ export function AuditLogs() {
         from: fromFilter || undefined,
         to: toFilter || undefined,
         sort_direction: sortDirection,
+        company_id: isAdmin ? undefined : activeCompanyId ?? undefined,
       });
       const url = URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
@@ -165,6 +168,12 @@ export function AuditLogs() {
       setUsers([]);
     }
   }, [isAdmin]);
+
+  useEffect(() => {
+    setLogs([]);
+    setPage(1);
+    setSelectedLogId(null);
+  }, [activeCompanyId]);
 
   useEffect(() => {
     void fetchLogs();

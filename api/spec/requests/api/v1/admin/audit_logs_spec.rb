@@ -77,14 +77,16 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => company.id.to_s }
 
     expect(response).to have_http_status(:ok)
-    returned_logs = response.parsed_body.fetch("data")
+    json = JSON.parse(response.body)
+    returned_logs = json.fetch("data")
     expect(returned_logs.pluck("id")).to include(selected_log.id)
     expect(returned_logs.pluck("company_id")).to all(eq(company.id))
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Not authorized")
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("Not authorized")
   end
 
   it "keeps activity history unavailable to managers" do
@@ -95,7 +97,8 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     get "/api/v1/admin/audit_logs"
 
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to eq("Admin or accountant access required")
+    json = JSON.parse(response.body)
+    expect(json.fetch("error")).to eq("Admin or accountant access required")
   end
 
   it "exports filtered history as CSV and records the export" do
