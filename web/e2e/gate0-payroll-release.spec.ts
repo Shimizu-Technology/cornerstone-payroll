@@ -170,7 +170,10 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     const employeeMedicareIndex = headerLabels.findIndex((label) => label.startsWith('Employee Medicare'));
     const employerMedicareIndex = headerLabels.findIndex((label) => label.startsWith('Employer Medicare'));
-    const expectedEmployeeMedicare = firstItems.reduce((sum, item) => sum + Number(item.medicare_tax || 0), 0);
+    const expectedEmployeeMedicare = firstItems.reduce(
+      (sum, item) => sum + Number(item.medicare_tax || 0) + Number(item.additional_medicare_tax || 0),
+      0,
+    );
     const expectedEmployerMedicare = firstItems.reduce((sum, item) => sum + Number(item.employer_medicare_tax || 0), 0);
     expect((await totalCells.nth(employeeMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployeeMedicare.toFixed(2)}`);
     expect((await totalCells.nth(employerMedicareIndex).textContent())?.trim()).toBe(`$${expectedEmployerMedicare.toFixed(2)}`);
@@ -180,7 +183,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(historicalContractor?.contractor_pay_type).toBe('hourly');
     const historicalContractorRow = payrollTable.getByRole('row').filter({ hasText: 'Historical' });
     await expect(historicalContractorRow).toContainText('$25.00/hr');
-    await expect(historicalContractorRow.getByRole('cell').nth(2)).toHaveText('4');
+    await expect(
+      historicalContractorRow.getByRole('cell').nth(headerLabels.indexOf('Hours')),
+    ).toHaveText('4');
 
     const registerSearch = page.getByRole('textbox', { name: 'Search employees and checks...' });
     await registerSearch.fill('Alpha');

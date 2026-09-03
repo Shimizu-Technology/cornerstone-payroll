@@ -912,7 +912,10 @@ export function PayPeriodDetail() {
   const totalWithholding = reportablePayrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
   const totalAddlWH = reportablePayrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
   const totalSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
-  const totalMedicare = reportablePayrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
+  const totalMedicare = reportablePayrollItems.reduce(
+    (s, i) => s + toNumber(i.medicare_tax) + toNumber(i.additional_medicare_tax),
+    0,
+  );
   const totalDeductions = reportablePayrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
   const totalNet = reportablePayrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
   const totalEmployerSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
@@ -1134,7 +1137,7 @@ export function PayPeriodDetail() {
     totals.withholding += toNumber(item.withholding_tax);
     totals.additionalWithholding += toNumber(item.additional_withholding);
     totals.socialSecurity += toNumber(item.social_security_tax);
-    totals.employeeMedicare += toNumber(item.medicare_tax);
+    totals.employeeMedicare += toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax);
     totals.employerMedicare += toNumber(item.employer_medicare_tax);
     totals.deductions += toNumber(item.total_deductions);
     totals.net += toNumber(item.net_pay);
@@ -2647,7 +2650,9 @@ export function PayPeriodDetail() {
                             {toNumber(item.additional_withholding) > 0 ? formatCurrency(toNumber(item.additional_withholding)) : '—'}
                           </TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
-                          <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>
+                            {formatCurrency(toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax))}
+                          </TableCell>
                           <TableCell className={`text-right text-amber-700 ${rowTone}`}>{formatCurrency(toNumber(item.employer_medicare_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>
                           <TableCell className={`text-right font-bold text-green-600 ${rowTone}`}>{formatCurrency(toNumber(item.net_pay))}</TableCell>
