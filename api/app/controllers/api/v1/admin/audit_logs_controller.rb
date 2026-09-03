@@ -63,7 +63,7 @@ module Api
           return AuditLog.all if current_user.super_admin?
 
           unless current_user.organization_admin?
-            return AuditLog.where(company_id: current_company_id)
+            return AuditLog.where(company_id: scoped_company_id)
           end
 
           # Firm administrators retain their organization-wide governance
@@ -78,9 +78,19 @@ module Api
 
           requested_company_id = params[:company_id].to_i
           return if current_user.organization_admin? && current_user.accessible_company_ids.include?(requested_company_id)
-          return if !current_user.organization_admin? && requested_company_id == current_company_id
+
+          unless current_user.organization_admin?
+            return if request.headers["X-Company-Id"].present? && requested_company_id == current_company_id
+            return if request.headers["X-Company-Id"].blank? && current_user.accessible_company_ids.include?(requested_company_id)
+          end
 
           render json: { error: "Not authorized" }, status: :forbidden
+        end
+
+        def scoped_company_id
+          return current_company_id if params[:company_id].blank? || request.headers["X-Company-Id"].present?
+
+          params[:company_id].to_i
         end
 
         def ordered(scope)

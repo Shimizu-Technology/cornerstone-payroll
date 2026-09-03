@@ -112,20 +112,21 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
-    get "/api/v1/admin/audit_logs", params: { company_id: company.id }
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }
 
     expect(response).to have_http_status(:ok)
     json = JSON.parse(response.body)
     returned_logs = json.fetch("data")
-    expect(returned_logs.pluck("id")).to include(selected_log.id)
-    expect(returned_logs.pluck("company_id")).to all(eq(company.id))
+    expect(returned_logs.pluck("id")).not_to include(selected_log.id)
+    expect(returned_logs.pluck("company_id")).to all(eq(second_company.id))
+    expect(returned_logs.pluck("subject_name")).to include("Other client employee")
 
-    get "/api/v1/admin/audit_logs/export", params: { company_id: company.id }
+    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id }
 
     expect(response).to have_http_status(:ok)
     exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
-    expect(exported_subjects).to include("Selected client employee")
-    expect(exported_subjects).not_to include("Other client employee", "Unassigned client employee", "Organization user", "Foreign user")
+    expect(exported_subjects).to include("Other client employee")
+    expect(exported_subjects).not_to include("Selected client employee", "Unassigned client employee", "Organization user", "Foreign user")
 
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
