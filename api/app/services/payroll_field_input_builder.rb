@@ -20,7 +20,17 @@ class PayrollFieldInputBuilder
       .includes(:employee, :payroll_field_definition)
       .to_a
 
-    fields = assignments.map(&:payroll_field_definition).uniq(&:id)
+    saved_field_ids = PayrollItemFieldEntry
+      .active
+      .joins(:payroll_item)
+      .where(payroll_items: { pay_period_id: pay_period.id, company_id: company_id })
+      .where.not(payroll_field_definition_id: nil)
+      .distinct
+      .pluck(:payroll_field_definition_id)
+
+    fields = PayrollFieldDefinition
+      .where(company_id: company_id, show_in_payroll_grid: true)
+      .where(id: assignments.map(&:payroll_field_definition_id) | saved_field_ids)
       .sort_by { |field| [ field.sort_order, field.name.downcase ] }
     entries = PayrollItemFieldEntry
       .joins(:payroll_item)

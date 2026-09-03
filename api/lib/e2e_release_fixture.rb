@@ -204,7 +204,53 @@ class E2eReleaseFixture
         pay_rate: 10.00,
         hire_date: Date.new(2026, 1, 1)
       )
-      [ bonus_alpha, bonus_beta ].each do |fixture_employee|
+      historical_hourly_contractor = create_employee!(
+        company: company,
+        department: department,
+        first_name: "Historical",
+        last_name: "Contractor",
+        email: "historical-contractor@example.test",
+        ssn: "900-00-0006",
+        pay_rate: 25.00,
+        hire_date: Date.new(2026, 1, 1),
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "hourly"
+      )
+      reference_hourly_contractor = create_employee!(
+        company: company,
+        department: department,
+        first_name: "Reference",
+        last_name: "Contractor",
+        email: "reference-contractor@example.test",
+        ssn: "900-00-0007",
+        pay_rate: 25.00,
+        hire_date: Date.new(2026, 1, 1),
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "hourly"
+      )
+      register_reconciliation_field = PayrollFieldDefinition.create!(
+        company: company,
+        name: "Fixture Employer Benefit",
+        kind: "employer_contribution",
+        tax_treatment: "employer_contribution",
+        category: "benefit",
+        amount_type: "fixed",
+        show_in_payroll_grid: true,
+        sort_order: 1
+      )
+      EmployeePayrollField.create!(
+        employee: bonus_alpha,
+        payroll_field_definition: register_reconciliation_field,
+        amount: 12.34
+      )
+      EmployeePayrollField.create!(
+        employee: bonus_beta,
+        payroll_field_definition: register_reconciliation_field,
+        amount: 23.45
+      )
+      [ bonus_alpha, bonus_beta, historical_hourly_contractor, reference_hourly_contractor ].each do |fixture_employee|
         fixture_employee.update!(status: "terminated", termination_date: Date.new(2026, 6, 5))
       end
 
@@ -235,6 +281,24 @@ class E2eReleaseFixture
         pay_rate: bonus_beta.pay_rate,
         hours_worked: 80,
         payroll_adjustments: [],
+        timekeeping_source: "manual"
+      )
+      historical_hourly_contractor_item = PayrollItem.create!(
+        company: company,
+        pay_period: bonus_sync_period,
+        employee: historical_hourly_contractor,
+        employment_type: historical_hourly_contractor.employment_type,
+        pay_rate: historical_hourly_contractor.pay_rate,
+        hours_worked: 4,
+        timekeeping_source: "manual"
+      )
+      PayrollItem.create!(
+        company: company,
+        pay_period: bonus_sync_period,
+        employee: reference_hourly_contractor,
+        employment_type: reference_hourly_contractor.employment_type,
+        pay_rate: reference_hourly_contractor.pay_rate,
+        hours_worked: 5,
         timekeeping_source: "manual"
       )
       bonus_alpha.update!(
@@ -318,6 +382,10 @@ class E2eReleaseFixture
         bonus_alpha_payroll_item_id: bonus_alpha_item.id,
         bonus_beta_employee_id: bonus_beta.id,
         bonus_beta_payroll_item_id: bonus_beta_item.id,
+        historical_hourly_contractor_employee_id: historical_hourly_contractor.id,
+        historical_hourly_contractor_payroll_item_id: historical_hourly_contractor_item.id,
+        register_reconciliation_field_name: register_reconciliation_field.name,
+        register_reconciliation_field_total: 35.79,
         workflow_pay_period_id: workflow_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
         time_import_pay_period_id: time_import_period.id,
@@ -329,7 +397,7 @@ class E2eReleaseFixture
       }
     end
 
-    def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:, default_payroll_adjustments: [])
+    def create_employee!(company:, department:, first_name:, last_name:, email:, ssn:, pay_rate:, hire_date:, default_payroll_adjustments: [], employment_type: "hourly", contractor_type: nil, contractor_pay_type: nil)
       Employee.create!(
         company: company,
         department: department,
@@ -337,7 +405,9 @@ class E2eReleaseFixture
         last_name: last_name,
         email: email,
         ssn_encrypted: ssn,
-        employment_type: "hourly",
+        employment_type: employment_type,
+        contractor_type: contractor_type,
+        contractor_pay_type: contractor_pay_type,
         pay_rate: pay_rate,
         pay_frequency: "biweekly",
         status: "active",

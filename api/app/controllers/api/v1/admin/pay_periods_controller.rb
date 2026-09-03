@@ -1056,6 +1056,7 @@ module Api
             employee_last_name: item.employee&.last_name,
             employee_name: item.employee_full_name,
             employment_type: item.employment_type,
+            contractor_pay_type: item.employee&.contractor_pay_type,
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
             non_taxable_pay: item.non_taxable_pay,

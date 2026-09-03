@@ -23,6 +23,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -911,7 +912,10 @@ export function PayPeriodDetail() {
   const totalWithholding = reportablePayrollItems.reduce((s, i) => s + toNumber(i.withholding_tax), 0);
   const totalAddlWH = reportablePayrollItems.reduce((s, i) => s + toNumber(i.additional_withholding), 0);
   const totalSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.social_security_tax), 0);
-  const totalMedicare = reportablePayrollItems.reduce((s, i) => s + toNumber(i.medicare_tax), 0);
+  const totalMedicare = reportablePayrollItems.reduce(
+    (s, i) => s + toNumber(i.medicare_tax) + toNumber(i.additional_medicare_tax),
+    0,
+  );
   const totalDeductions = reportablePayrollItems.reduce((s, i) => s + toNumber(i.total_deductions), 0);
   const totalNet = reportablePayrollItems.reduce((s, i) => s + toNumber(i.net_pay), 0);
   const totalEmployerSS = reportablePayrollItems.reduce((s, i) => s + toNumber(i.employer_social_security_tax), 0);
@@ -936,23 +940,6 @@ export function PayPeriodDetail() {
       ? { calculated: totalDRTDeposit, deposited: fitDepositAmount, delta: fitDepositAmount - totalDRTDeposit }
       : null;
   const totalContractorPay = contractorItems.reduce((s, i) => s + toNumber(i.gross_pay), 0);
-  const totalCustomEarnings = reportablePayrollItems.reduce(
-    (sum, item) => sum + (item.custom_earnings || []).reduce((itemSum, earning) => itemSum + toNumber(earning.amount), 0),
-    0
-  );
-  const totalCustomDeductions = reportablePayrollItems.reduce(
-    (sum, item) => sum + (item.custom_deductions || []).reduce((itemSum, deduction) => itemSum + toNumber(deduction.amount), 0),
-    0
-  );
-  const totalPayrollAdjustments = reportablePayrollItems.reduce(
-    (sum, item) => sum + (item.payroll_adjustments || [])
-      .filter((adjustment) => adjustment.active !== false)
-      .reduce((itemSum, adjustment) => {
-        const amount = toNumber(adjustment.amount);
-        return itemSum + (adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction' ? -amount : amount);
-      }, 0),
-    0
-  );
 
   const comparisonHighlights = comparison
     ? ['employee_count', 'gross_pay', 'net_pay', 'fit', 'reported_tips', 'loan_deduction']
@@ -1006,6 +993,42 @@ export function PayPeriodDetail() {
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
+  const payrollItemNameParts = (item: PayrollItem): { firstName: string; lastName: string } => {
+    const employee = employeeLookup.get(item.employee_id);
+    const firstName = item.employee_first_name || employee?.first_name || '';
+    const lastName = item.employee_last_name || employee?.last_name || '';
+
+    if (!firstName && !lastName && item.employee_name) {
+      return { firstName: '', lastName: item.employee_name };
+    }
+
+    return {
+      firstName,
+      lastName,
+    };
+  };
+  const payrollItemDisplayedHours = (item: PayrollItem): number => {
+    const employee = employeeLookup.get(item.employee_id);
+    const contractorPayType = item.contractor_pay_type || employee?.contractor_pay_type;
+    const regularHours = toNumber(item.hours_worked);
+    const overtimeHours = toNumber(item.overtime_hours);
+    const isSalary = item.employment_type === 'salary';
+    const isContractorFlat = item.employment_type === 'contractor' && contractorPayType !== 'hourly';
+    const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
+    const activeWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
+    const showsMultiRateHours = (item.employment_type === 'hourly' || contractorPayType === 'hourly')
+      && (item.wage_rate_hours || []).length > 1;
+
+    if (isContractorFlat || (isSalary && !hasSalaryTimekeeping)) return 0;
+    if (showsMultiRateHours) {
+      return activeWageRates.reduce(
+        (sum, rate) => sum + toNumber(rate.regular_hours) + toNumber(rate.overtime_hours),
+        0
+      );
+    }
+
+    return regularHours + overtimeHours;
+  };
   const departmentOptions = Array.from(
     new Map(
       [
@@ -1059,7 +1082,7 @@ export function PayPeriodDetail() {
     return `${lastName} ${firstName} ${item.employee_name || ''}`.trim();
   };
 
-  const sortPayrollItems = [...payrollItems]
+  const sortPayrollItems = [...reportablePayrollItems]
     .filter((item) => matchesEmployeeFilters(
       item.employment_type,
       [item.employee_name || '', item.check_number || '', item.department_name || employeeLookup.get(item.employee_id)?.department?.name || ''],
@@ -1078,8 +1101,8 @@ export function PayPeriodDetail() {
         return compareDirectional(toNumber(left.pay_rate), toNumber(right.pay_rate), resultsSortDirection) || nameTieBreak();
       case 'hours':
         return compareDirectional(
-          toNumber(left.hours_worked) + toNumber(left.overtime_hours),
-          toNumber(right.hours_worked) + toNumber(right.overtime_hours),
+          payrollItemDisplayedHours(left),
+          payrollItemDisplayedHours(right),
           resultsSortDirection
         ) || nameTieBreak();
       case 'gross':
@@ -1097,6 +1120,56 @@ export function PayPeriodDetail() {
         );
       }
     });
+  const registerTotals = sortPayrollItems.reduce((totals, item) => {
+    totals.hours += payrollItemDisplayedHours(item);
+    totals.gross += toNumber(item.gross_pay);
+    totals.customEarnings += (item.custom_earnings || []).reduce((sum, earning) => sum + toNumber(earning.amount), 0);
+    totals.customDeductions += (item.custom_deductions || []).reduce((sum, deduction) => sum + toNumber(deduction.amount), 0);
+    totals.payrollAdjustments += (item.payroll_adjustments || [])
+      .filter((adjustment) => adjustment.active !== false)
+      .reduce((sum, adjustment) => {
+        const amount = toNumber(adjustment.amount);
+        return sum + (adjustment.treatment === 'pre_tax_deduction' || adjustment.treatment === 'post_tax_deduction' ? -amount : amount);
+      }, 0);
+    totals.tips += toNumber(item.reported_tips);
+    totals.tipsPaidOut += toNumber(item.tips_paid_out);
+    totals.loans += effectiveLoanDeduction(item);
+    totals.withholding += toNumber(item.withholding_tax);
+    totals.additionalWithholding += toNumber(item.additional_withholding);
+    totals.socialSecurity += toNumber(item.social_security_tax);
+    totals.employeeMedicare += toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax);
+    totals.employerMedicare += toNumber(item.employer_medicare_tax);
+    totals.deductions += toNumber(item.total_deductions);
+    totals.net += toNumber(item.net_pay);
+    return totals;
+  }, {
+    hours: 0,
+    gross: 0,
+    customEarnings: 0,
+    customDeductions: 0,
+    payrollAdjustments: 0,
+    tips: 0,
+    tipsPaidOut: 0,
+    loans: 0,
+    withholding: 0,
+    additionalWithholding: 0,
+    socialSecurity: 0,
+    employeeMedicare: 0,
+    employerMedicare: 0,
+    deductions: 0,
+    net: 0,
+  });
+  const registerPayrollFieldTotals = new Map(
+    visiblePayrollFields.map((field) => [
+      field.id,
+      sortPayrollItems.reduce((sum, item) => {
+        const entry = (item.payroll_field_entries || []).find(
+          (candidate) => candidate.active !== false && candidate.payroll_field_definition_id === field.id
+        );
+        return sum + toNumber(entry?.amount);
+      }, 0),
+    ])
+  );
 
   const lifecycle = payPeriod.lifecycle || {};
   const processedAt = payPeriod.processed_at || payPeriod.committed_at || lifecycle.committed?.timestamp;
@@ -2165,7 +2238,7 @@ export function PayPeriodDetail() {
           const hasCustomDeductions = payrollItems.some(i => (i.custom_deductions || []).some((deduction) => toNumber(deduction.amount) > 0));
           const hasPayrollAdjustments = payrollItems.some(i => (i.payroll_adjustments || []).some((adjustment) => adjustment.active !== false && toNumber(adjustment.amount) > 0));
           const extraColCount = (hasCustomEarnings ? 1 : 0) + (hasCustomDeductions ? 1 : 0) + (hasPayrollAdjustments ? 1 : 0) + visiblePayrollFields.length + (hasTips ? 1 : 0) + (hasTipsPaidOut ? 1 : 0) + (hasLoans ? 1 : 0);
-          const totalCols = 10 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
+          const totalCols = 12 + extraColCount + (isCalculated || isCommitted ? 1 : 0);
           return (
           <Card className="overflow-hidden">
             <div className="border-b p-4">
@@ -2235,10 +2308,11 @@ export function PayPeriodDetail() {
               </div>
             </div>
             <div className="max-w-full overflow-x-auto overscroll-x-contain">
-              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1640px]">
+              <Table stickyHeader containerClassName="max-h-[34rem]" className="min-w-[1900px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead stickyLeft className={`w-[260px] min-w-[260px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Employee</TableHead>
+                    <TableHead stickyLeft className={`w-[170px] min-w-[170px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>Last Name</TableHead>
+                    <TableHead className={`w-[190px] min-w-[190px] bg-gray-50 ${TABLE_STICKY_TOP_CLASS}`}>First Name</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Hours</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Rate</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Gross</TableHead>
@@ -2257,7 +2331,17 @@ export function PayPeriodDetail() {
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
-                    <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Medicare</TableHead>
+                    <TableHead
+                      className={`min-w-[150px] bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}
+                      title="Employee Medicare includes Additional Medicare withholding when applicable."
+                    >
+                      <div>Employee Medicare</div>
+                      <div className="text-[10px] font-normal normal-case tracking-normal text-gray-400">incl. Add&apos;l</div>
+                    </TableHead>
+                    <TableHead className={`min-w-[150px] bg-amber-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>
+                      <div>Employer Medicare</div>
+                      <div className="text-[10px] font-normal normal-case tracking-normal text-amber-600">employer-paid</div>
+                    </TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Total Ded.</TableHead>
                     <TableHead className={`bg-gray-50 text-right ${TABLE_STICKY_TOP_CLASS}`}>Net Pay</TableHead>
                     {(isCalculated || isCommitted) && <TableHead className="text-center w-20"></TableHead>}
@@ -2271,17 +2355,19 @@ export function PayPeriodDetail() {
                     const isSalary = item.employment_type === 'salary';
                     const isContractor = item.employment_type === 'contractor';
                     const empRecord = employeeLookup.get(item.employee_id);
-                    const isContractorHourly = isContractor && empRecord?.contractor_pay_type === 'hourly';
-                    const isContractorFlat = isContractor && empRecord?.contractor_pay_type !== 'hourly';
+                    const contractorPayType = item.contractor_pay_type || empRecord?.contractor_pay_type;
+                    const isContractorHourly = isContractor && contractorPayType === 'hourly';
+                    const isContractorFlat = isContractor && contractorPayType !== 'hourly';
                     const regularHours = toNumber(item.hours_worked);
                     const overtimeHours = toNumber(item.overtime_hours);
                     const hasSalaryTimekeeping = Boolean(item.timekeeping_source) || regularHours > 0 || overtimeHours > 0;
                     const itemWageRates = (item.wage_rate_hours || []).filter((rate) => rate.active !== false);
-                    const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && itemWageRates.length > 1;
+                    const hasMultiRateResults = (item.employment_type === 'hourly' || isContractorHourly) && (item.wage_rate_hours || []).length > 1;
                     const prevGroup = idx > 0 ? employmentGroupKey(displayItems[idx - 1]?.employment_type || '') : null;
                     const currentGroup = employmentGroupKey(item.employment_type);
                     const showGroupDivider = currentGroup !== prevGroup;
                     const rowTone = idx % 2 === 0 ? 'bg-white' : 'bg-slate-100';
+                    const { firstName, lastName } = payrollItemNameParts(item);
 
                     return (
                       <Fragment key={item.id}>
@@ -2296,16 +2382,17 @@ export function PayPeriodDetail() {
                           );
                         })()}
                         <TableRow key={item.id} className={rowTone}>
-                          <TableCell stickyLeft className={`min-w-[260px] ${rowTone}`}>
-                            <div className="flex items-center gap-2">
-                              <div>
-                                <p className="font-medium text-gray-900">{item.employee_name}</p>
-                                {(item.department_name || empRecord?.department?.name) && (
-                                  <p className="mt-0.5 text-xs text-gray-500">
-                                    {item.department_name || empRecord?.department?.name}
-                                  </p>
-                                )}
-                                <div className="flex items-center gap-1.5 mt-0.5">
+                          <TableCell stickyLeft className={`min-w-[170px] ${rowTone}`}>
+                            <p className="font-medium text-gray-900">{lastName || '—'}</p>
+                            {(item.department_name || empRecord?.department?.name) && (
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                {item.department_name || empRecord?.department?.name}
+                              </p>
+                            )}
+                          </TableCell>
+                          <TableCell className={`min-w-[190px] ${rowTone}`}>
+                            <p className="font-medium text-gray-900">{firstName || '—'}</p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                   {isSalary && (
                                     <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
                                       Salary
@@ -2346,8 +2433,6 @@ export function PayPeriodDetail() {
                                       Step 2
                                     </span>
                                   )}
-                                </div>
-                              </div>
                             </div>
                           </TableCell>
                           <TableCell className={`text-right ${rowTone}`}>
@@ -2565,7 +2650,10 @@ export function PayPeriodDetail() {
                             {toNumber(item.additional_withholding) > 0 ? formatCurrency(toNumber(item.additional_withholding)) : '—'}
                           </TableCell>
                           <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.social_security_tax))}</TableCell>
-                          <TableCell className={`text-right text-red-600 ${rowTone}`}>{formatCurrency(toNumber(item.medicare_tax))}</TableCell>
+                          <TableCell className={`text-right text-red-600 ${rowTone}`}>
+                            {formatCurrency(toNumber(item.medicare_tax) + toNumber(item.additional_medicare_tax))}
+                          </TableCell>
+                          <TableCell className={`text-right text-amber-700 ${rowTone}`}>{formatCurrency(toNumber(item.employer_medicare_tax))}</TableCell>
                           <TableCell className={`text-right text-red-600 font-medium ${rowTone}`}>{formatCurrency(toNumber(item.total_deductions))}</TableCell>
                           <TableCell className={`text-right font-bold text-green-600 ${rowTone}`}>{formatCurrency(toNumber(item.net_pay))}</TableCell>
                           {isCalculated && (
@@ -2623,36 +2711,50 @@ export function PayPeriodDetail() {
                     );
                   });
                   })()}
-                  {/* Totals */}
+                </TableBody>
+                <TableFooter className="sticky bottom-0 z-30 border-t-2 border-slate-300 bg-slate-100 shadow-[0_-8px_16px_-12px_rgba(15,23,42,0.45)]">
                   {(() => {
-                    const totalTips = reportablePayrollItems.reduce((s, i) => s + toNumber(i.reported_tips), 0);
-                    const totalTipsPaidOut = reportablePayrollItems.reduce((s, i) => s + toNumber(i.tips_paid_out), 0);
-                    const totalLoans = reportablePayrollItems.reduce((s, i) => s + effectiveLoanDeduction(i), 0);
                     return (
-                      <TableRow className="bg-gray-50 font-bold border-t-2">
-                        <TableCell stickyLeft colSpan={3} className="bg-gray-50">Totals ({reportablePayrollItems.length} employees)</TableCell>
-                        <TableCell className="text-right">{formatCurrency(totalGross)}</TableCell>
-                        {hasCustomEarnings && <TableCell className="text-right">{totalCustomEarnings > 0 ? formatCurrency(totalCustomEarnings) : '—'}</TableCell>}
-                        {hasCustomDeductions && <TableCell className="text-right text-red-600">{totalCustomDeductions > 0 ? formatCurrency(totalCustomDeductions) : '—'}</TableCell>}
+                      <TableRow className="bg-slate-100 font-bold hover:bg-slate-100">
+                        <TableCell stickyLeft className="!z-40 bg-slate-100">Totals ({sortPayrollItems.length} {sortPayrollItems.length === 1 ? 'employee' : 'employees'})</TableCell>
+                        <TableCell className="bg-slate-100" aria-label="First name total not applicable">—</TableCell>
+                        <TableCell className="bg-slate-100 text-right">{registerTotals.hours}</TableCell>
+                        <TableCell className="bg-slate-100 text-right" aria-label="Pay rate total not applicable">—</TableCell>
+                        <TableCell className="bg-slate-100 text-right">{formatCurrency(registerTotals.gross)}</TableCell>
+                        {hasCustomEarnings && <TableCell className="bg-slate-100 text-right">{registerTotals.customEarnings > 0 ? formatCurrency(registerTotals.customEarnings) : '—'}</TableCell>}
+                        {hasCustomDeductions && <TableCell className="bg-slate-100 text-right text-red-600">{registerTotals.customDeductions > 0 ? formatCurrency(registerTotals.customDeductions) : '—'}</TableCell>}
                         {hasPayrollAdjustments && (
-                          <TableCell className={totalPayrollAdjustments < 0 ? 'text-right text-red-600' : 'text-right'}>
-                            {totalPayrollAdjustments !== 0 ? `${totalPayrollAdjustments < 0 ? '-' : ''}${formatCurrency(Math.abs(totalPayrollAdjustments))}` : '—'}
+                          <TableCell className={registerTotals.payrollAdjustments < 0 ? 'bg-slate-100 text-right text-red-600' : 'bg-slate-100 text-right'}>
+                            {registerTotals.payrollAdjustments !== 0 ? `${registerTotals.payrollAdjustments < 0 ? '-' : ''}${formatCurrency(Math.abs(registerTotals.payrollAdjustments))}` : '—'}
                           </TableCell>
                         )}
-                        {hasTips && <TableCell className="text-right">{totalTips > 0 ? formatCurrency(totalTips) : '—'}</TableCell>}
-                        {hasTipsPaidOut && <TableCell className="text-right">{totalTipsPaidOut > 0 ? formatCurrency(totalTipsPaidOut) : '—'}</TableCell>}
-                        {hasLoans && <TableCell className="text-right">{totalLoans > 0 ? formatCurrency(totalLoans) : '—'}</TableCell>}
-                        <TableCell className="text-right text-red-600">{formatCurrency(totalWithholding)}</TableCell>
-                        <TableCell className="text-right text-red-600">{totalAddlWH > 0 ? formatCurrency(totalAddlWH) : '—'}</TableCell>
-                        <TableCell className="text-right text-red-600">{formatCurrency(totalSS)}</TableCell>
-                        <TableCell className="text-right text-red-600">{formatCurrency(totalMedicare)}</TableCell>
-                        <TableCell className="text-right text-red-600">{formatCurrency(totalDeductions)}</TableCell>
-                        <TableCell className="text-right text-green-600">{formatCurrency(totalNet)}</TableCell>
-                        {(isCalculated || isCommitted) && <TableCell />}
+                        {visiblePayrollFields.map((field) => {
+                          const amount = registerPayrollFieldTotals.get(field.id) || 0;
+                          const isDeduction = field.kind === 'deduction';
+                          return (
+                            <TableCell
+                              key={`payroll-field-total-${field.id}`}
+                              className={`bg-slate-100 text-right ${isDeduction ? 'text-red-600' : field.kind === 'employer_contribution' ? 'text-blue-700' : 'text-emerald-700'}`}
+                            >
+                              {amount > 0 ? `${isDeduction ? '-' : '+'}${formatCurrency(amount)}` : '—'}
+                            </TableCell>
+                          );
+                        })}
+                        {hasTips && <TableCell className="bg-slate-100 text-right">{registerTotals.tips > 0 ? formatCurrency(registerTotals.tips) : '—'}</TableCell>}
+                        {hasTipsPaidOut && <TableCell className="bg-slate-100 text-right">{registerTotals.tipsPaidOut > 0 ? formatCurrency(registerTotals.tipsPaidOut) : '—'}</TableCell>}
+                        {hasLoans && <TableCell className="bg-slate-100 text-right">{registerTotals.loans > 0 ? formatCurrency(registerTotals.loans) : '—'}</TableCell>}
+                        <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.withholding)}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-red-600">{registerTotals.additionalWithholding > 0 ? formatCurrency(registerTotals.additionalWithholding) : '—'}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.socialSecurity)}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.employeeMedicare)}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-amber-700">{formatCurrency(registerTotals.employerMedicare)}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-red-600">{formatCurrency(registerTotals.deductions)}</TableCell>
+                        <TableCell className="bg-slate-100 text-right text-green-600">{formatCurrency(registerTotals.net)}</TableCell>
+                        {(isCalculated || isCommitted) && <TableCell className="bg-slate-100" />}
                       </TableRow>
                     );
                   })()}
-                </TableBody>
+                </TableFooter>
               </Table>
             </div>
           </Card>
@@ -2714,7 +2816,7 @@ export function PayPeriodDetail() {
                       <span className="font-medium">{formatCurrency(totalEmployerSS)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employee Medicare (1.45%)</span>
+                      <span className="text-gray-600">Employee Medicare (incl. Additional Medicare)</span>
                       <span className="font-medium">{formatCurrency(totalMedicare)}</span>
                     </div>
                     <div className="flex justify-between">
