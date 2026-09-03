@@ -2816,7 +2816,7 @@ export function PayPeriodDetail() {
                       <span className="font-medium">{formatCurrency(totalEmployerSS)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Employee Medicare (1.45%)</span>
+                      <span className="text-gray-600">Employee Medicare (incl. Additional Medicare)</span>
                       <span className="font-medium">{formatCurrency(totalMedicare)}</span>
                     </div>
                     <div className="flex justify-between">
