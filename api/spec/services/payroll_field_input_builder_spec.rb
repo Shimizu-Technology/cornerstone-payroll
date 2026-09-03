@@ -14,7 +14,8 @@ RSpec.describe PayrollFieldInputBuilder do
       pay_date: Date.new(2026, 6, 4)
     )
     payroll_item = create(:payroll_item, company: company, employee: employee, pay_period: pay_period)
-    field = PayrollFieldDefinition.create!(
+    field = create(
+      :payroll_field_definition,
       company: company,
       name: "Employer Benefit",
       kind: "employer_contribution",
@@ -23,7 +24,8 @@ RSpec.describe PayrollFieldInputBuilder do
       amount_type: "fixed",
       show_in_payroll_grid: true
     )
-    PayrollItemFieldEntry.create!(
+    create(
+      :payroll_item_field_entry,
       payroll_item: payroll_item,
       payroll_field_definition: field,
       label: field.name,
