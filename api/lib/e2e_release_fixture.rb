@@ -364,6 +364,16 @@ class E2eReleaseFixture
         payload_key: "retry"
       )
 
+      AuditLog.record!(
+        user: accountant,
+        organization_id: organization.id,
+        company_id: company.id,
+        action: "pay_periods#created",
+        record_type: "PayPeriod",
+        record_id: bonus_sync_period.id,
+        subject_name: "May 18 - 31, 2026"
+      )
+
       {
         schema_version: 1,
         organization_id: organization.id,

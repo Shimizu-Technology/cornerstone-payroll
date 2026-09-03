@@ -9,8 +9,7 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
 
-        before_action :require_admin!
-        before_action :validate_requested_company!
+        before_action :resolve_access_scope!
 
         def index
           scope = filtered_scope
@@ -45,13 +44,15 @@ module Api
         private
 
         def filtered_scope
-          logs = organization_scope
+          logs = @accessible_audit_logs
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)
           end
 
-          logs = logs.where(user_id: params[:user_id]) if params[:user_id].present?
+          if current_user.organization_admin? && params[:user_id].present?
+            logs = logs.where(user_id: params[:user_id])
+          end
           logs = logs.where("action ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:action_filter])}%") if params[:action_filter].present?
           logs = logs.where("record_type ILIKE ?", "%#{AuditLog.sanitize_sql_like(params[:record_type])}%") if params[:record_type].present?
           logs = logs.where(record_id: params[:record_id]) if params[:record_id].present?
@@ -60,25 +61,18 @@ module Api
           logs
         end
 
-        def organization_scope
-          return AuditLog.all if current_user.super_admin?
-
-          # This is intentionally an organization-level governance view, not
-          # a selected-client operational view. require_admin! limits it to
-          # organization administrators (legacy admin/org_admin) while
-          # managers and accountants remain company-scoped and cannot reach
-          # this controller. Firm administrators must be able to investigate
-          # an event even when a different client is active in the UI.
-          company_ids = current_user.accessible_company_ids
-          AuditLog.where(organization_id: current_user.organization_id)
-                  .or(AuditLog.where(organization_id: nil, company_id: company_ids))
-        end
-
-        def validate_requested_company!
-          return if params[:company_id].blank?
-          return if current_user.accessible_company_ids.include?(params[:company_id].to_i)
-
-          render json: { error: "Not authorized" }, status: :forbidden
+        def resolve_access_scope!
+          @accessible_audit_logs = AuditLogAccessScope.new(
+            user: current_user,
+            current_company_id: current_company_id,
+            requested_company_id: params[:company_id],
+            company_header_present: request.headers["X-Company-Id"].present?
+          ).call
+        rescue AuditLogAccessScope::NotAuthorizedError => e
+          render json: {
+            error: e.message,
+            details: { authorization: [ e.message ] }
+          }, status: :forbidden
         end
 
         def ordered(scope)

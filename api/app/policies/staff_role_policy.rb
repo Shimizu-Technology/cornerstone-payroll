@@ -4,6 +4,7 @@ class StaffRolePolicy
   CAPABILITY_ROLES = {
     staff_workspace: %w[super_admin org_admin admin manager accountant],
     payroll_operations: %w[super_admin org_admin admin manager accountant],
+    view_audit_history: %w[super_admin org_admin admin accountant],
     manage_client_configuration: %w[super_admin org_admin admin manager],
     manage_organization: %w[super_admin org_admin admin],
     manage_platform: %w[super_admin]
@@ -12,6 +13,7 @@ class StaffRolePolicy
   CAPABILITY_ERRORS = {
     staff_workspace: "Staff access required",
     payroll_operations: "Payroll operations access required",
+    view_audit_history: "Admin or accountant access required",
     manage_client_configuration: "Manager or admin access required",
     manage_organization: "Admin access required",
     manage_platform: "Super admin access required"
@@ -22,7 +24,7 @@ class StaffRolePolicy
     "api/v1/admin/users" => :manage_organization,
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,
-    "api/v1/admin/audit_logs" => :manage_organization,
+    "api/v1/admin/audit_logs" => :view_audit_history,
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
