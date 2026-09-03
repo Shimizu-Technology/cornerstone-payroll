@@ -137,6 +137,7 @@ module Api
             withholding_tax: item.withholding_tax,
             social_security_tax: item.social_security_tax,
             medicare_tax: item.medicare_tax,
+            additional_medicare_tax: item.additional_medicare_tax,
             total_deductions: item.total_deductions,
             net_pay: item.net_pay,
             employer_social_security_tax: item.employer_social_security_tax,
