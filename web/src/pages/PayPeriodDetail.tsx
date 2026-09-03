@@ -1022,11 +1022,18 @@ export function PayPeriodDetail() {
   // showTipsLoans is toggled by user or auto-set when imported data has tips/loans
 
   const employeeLookup = new Map(employees.map((emp) => [emp.id, emp]));
-  const payrollItemNameParts = (item: PayrollItem) => {
+  const payrollItemNameParts = (item: PayrollItem): { firstName: string; lastName: string } => {
     const employee = employeeLookup.get(item.employee_id);
+    const firstName = item.employee_first_name || employee?.first_name || '';
+    const lastName = item.employee_last_name || employee?.last_name || '';
+
+    if (!firstName && !lastName && item.employee_name) {
+      return { firstName: '', lastName: item.employee_name };
+    }
+
     return {
-      firstName: item.employee_first_name || employee?.first_name || '',
-      lastName: item.employee_last_name || employee?.last_name || '',
+      firstName,
+      lastName,
     };
   };
   const departmentOptions = Array.from(
@@ -2332,7 +2339,7 @@ export function PayPeriodDetail() {
                         })()}
                         <TableRow key={item.id} className={rowTone}>
                           <TableCell stickyLeft className={`min-w-[170px] ${rowTone}`}>
-                            <p className="font-medium text-gray-900">{lastName || item.employee_name}</p>
+                            <p className="font-medium text-gray-900">{lastName || '—'}</p>
                             {(item.department_name || empRecord?.department?.name) && (
                               <p className="mt-0.5 text-xs text-gray-500">
                                 {item.department_name || empRecord?.department?.name}
@@ -2340,7 +2347,7 @@ export function PayPeriodDetail() {
                             )}
                           </TableCell>
                           <TableCell className={`min-w-[190px] ${rowTone}`}>
-                            <p className="font-medium text-gray-900">{firstName || (!lastName ? item.employee_name : '—')}</p>
+                            <p className="font-medium text-gray-900">{firstName || '—'}</p>
                             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                   {isSalary && (
                                     <span className="inline-flex items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
