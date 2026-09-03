@@ -185,7 +185,7 @@ export function AuditLogs() {
     void fetchUsers();
   }, [fetchUsers]);
 
-  const hasActiveFilters = Boolean(actionFilter || recordTypeFilter || userFilter || fromFilter || toFilter);
+  const hasActiveFilters = Boolean(actionFilter || recordTypeFilter || (isAdmin && userFilter) || fromFilter || toFilter);
 
   const clearFilters = (): void => {
     setActionFilter('');
@@ -319,7 +319,7 @@ export function AuditLogs() {
                 ? 'Clear the current filters to return to the complete activity history.'
                 : 'Recorded changes for this client will appear here as payroll work is completed.'}
             </p>
-            <Button className="mt-5" variant="outline" onClick={hasActiveFilters ? clearFilters : () => void fetchLogs()}>
+            <Button className="mt-4" variant="outline" onClick={hasActiveFilters ? clearFilters : () => void fetchLogs()}>
               <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
               {hasActiveFilters ? 'Clear filters' : 'Refresh history'}
             </Button>

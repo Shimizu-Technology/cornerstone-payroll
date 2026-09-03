@@ -99,10 +99,10 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     second_company = create(:company, organization: organization, name: "Second Audit Client")
     CompanyAssignment.create!(user: accountant, company: company)
     CompanyAssignment.create!(user: accountant, company: second_company)
-    selected_log = AuditLog.record!(user: admin, organization_id: organization.id, company_id: company.id, action: "employees#updated", record_type: "employees")
-    AuditLog.record!(user: admin, organization_id: organization.id, company_id: second_company.id, action: "employees#updated", record_type: "employees")
-    AuditLog.record!(user: admin, organization_id: organization.id, company_id: nil, action: "users#updated", record_type: "users")
-    AuditLog.record!(user: foreign_admin, organization_id: foreign_organization.id, company_id: foreign_company.id, action: "users#updated", record_type: "users")
+    selected_log = AuditLog.record!(user: admin, organization_id: organization.id, company_id: company.id, action: "employees#updated", record_type: "employees", subject_name: "Selected client employee")
+    AuditLog.record!(user: admin, organization_id: organization.id, company_id: second_company.id, action: "employees#updated", record_type: "employees", subject_name: "Other client employee")
+    AuditLog.record!(user: admin, organization_id: organization.id, company_id: nil, action: "users#updated", record_type: "users", subject_name: "Organization user")
+    AuditLog.record!(user: foreign_admin, organization_id: foreign_organization.id, company_id: foreign_company.id, action: "users#updated", record_type: "users", subject_name: "Foreign user")
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
     allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
@@ -113,6 +113,12 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     returned_logs = json.fetch("data")
     expect(returned_logs.pluck("id")).to include(selected_log.id)
     expect(returned_logs.pluck("company_id")).to all(eq(company.id))
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("Selected client employee")
+    expect(response.body).not_to include("Other client employee", "Organization user", "Foreign user")
 
     get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
 
