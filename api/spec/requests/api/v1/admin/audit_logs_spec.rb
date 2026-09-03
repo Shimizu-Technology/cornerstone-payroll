@@ -62,17 +62,40 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
-  it "keeps the organization-wide governance history unavailable to scoped staff" do
-    %i[manager accountant].each do |role|
-      scoped_staff = create(:user, organization: organization, company: company, role: role)
-      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(scoped_staff)
-      allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(scoped_staff.id)
+  it "gives accountants history for only the selected client" do
+    accountant = create(:user, organization: organization, company: company, role: :accountant)
+    second_company = create(:company, organization: organization, name: "Second Audit Client")
+    CompanyAssignment.create!(user: accountant, company: company)
+    CompanyAssignment.create!(user: accountant, company: second_company)
+    selected_log = AuditLog.record!(user: admin, organization_id: organization.id, company_id: company.id, action: "employees#updated", record_type: "employees")
+    AuditLog.record!(user: admin, organization_id: organization.id, company_id: second_company.id, action: "employees#updated", record_type: "employees")
+    AuditLog.record!(user: admin, organization_id: organization.id, company_id: nil, action: "users#updated", record_type: "users")
+    AuditLog.record!(user: foreign_admin, organization_id: foreign_organization.id, company_id: foreign_company.id, action: "users#updated", record_type: "users")
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(accountant)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(accountant.id)
 
-      get "/api/v1/admin/audit_logs"
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => company.id.to_s }
 
-      expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq("Admin access required")
-    end
+    expect(response).to have_http_status(:ok)
+    returned_logs = response.parsed_body.fetch("data")
+    expect(returned_logs.pluck("id")).to include(selected_log.id)
+    expect(returned_logs.pluck("company_id")).to all(eq(company.id))
+
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }, headers: { "X-Company-Id" => company.id.to_s }
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Not authorized")
+  end
+
+  it "keeps activity history unavailable to managers" do
+    manager = create(:user, organization: organization, company: company, role: :manager)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user).and_return(manager)
+    allow_any_instance_of(Api::V1::Admin::AuditLogsController).to receive(:current_user_id).and_return(manager.id)
+
+    get "/api/v1/admin/audit_logs"
+
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("error")).to eq("Admin or accountant access required")
   end
 
   it "exports filtered history as CSV and records the export" do

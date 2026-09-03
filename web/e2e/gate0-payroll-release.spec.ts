@@ -125,9 +125,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await context.close();
   });
 
-  test('keeps accountant payroll operations available while denying client configuration', async ({ browser }) => {
+  test('keeps accountant payroll operations available while denying client configuration', async ({ browser }): Promise<void> => {
     const payrollPeriods = await accountantApi.get('admin/pay_periods');
     expect(payrollPeriods.ok()).toBeTruthy();
+
+    const activityHistory = await accountantApi.get('admin/audit_logs');
+    expect(activityHistory.ok()).toBeTruthy();
+    const activityEntries = (await responseJson(activityHistory)).data as Array<Record<string, unknown>>;
+    expect(activityEntries.every((entry) => Number(entry.company_id) === fixture.company_id)).toBeTruthy();
 
     const schedule = await accountantApi.get('admin/pay_schedule_settings');
     expect(schedule.ok()).toBeTruthy();
@@ -147,11 +152,15 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await accountantPage.goto('/app');
     await expect(accountantPage.getByText('Gate 0 Accountant')).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Timecard OCR' })).toBeVisible();
+    await expect(accountantPage.getByRole('link', { name: 'Activity History' })).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Pay Schedule' })).toHaveCount(0);
     await expect(accountantPage.getByRole('link', { name: 'Client Changes' })).toHaveCount(0);
 
     await accountantPage.goto('/pay-schedule-settings');
     await expect(accountantPage).toHaveURL(/\/app$/);
+    await accountantPage.goto('/settings/audit-logs');
+    await expect(accountantPage.getByRole('heading', { name: 'Activity History' })).toBeVisible();
+    await expect(accountantPage.getByText(`recorded actions for Synthetic Payroll Company`)).toBeVisible();
     await accountantContext.close();
   });
 

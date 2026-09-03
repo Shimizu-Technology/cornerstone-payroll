@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/table';
 import { auditLogsApi, usersApi } from '@/services/api';
 import type { AuditLogEntry } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCompany } from '@/contexts/CompanyContext';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
 import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
@@ -74,6 +76,8 @@ function formatValue(value: unknown): string {
 }
 
 export function AuditLogs() {
+  const { isAdmin } = useAuth();
+  const { activeCompany } = useCompany();
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -149,13 +153,18 @@ export function AuditLogs() {
   };
 
   const fetchUsers = useCallback(async () => {
+    if (!isAdmin) {
+      setUsers([]);
+      return;
+    }
+
     try {
       const response = await usersApi.list();
       setUsers(response.data);
     } catch {
       setUsers([]);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     void fetchLogs();
@@ -185,14 +194,16 @@ export function AuditLogs() {
 
   return (
     <div>
-      <Header title="Audit Logs" description="Track who changed what, when it happened, and what changed." />
+      <Header title="Activity History" description="Track who changed what, when it happened, and what changed." />
 
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mb-4 p-4">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="font-semibold text-neutral-950">Complete activity history</p>
-              <p className="text-sm text-neutral-500">{total.toLocaleString()} recorded actions across the organization</p>
+              <p className="font-semibold text-neutral-950">{isAdmin ? 'Complete activity history' : 'Client activity history'}</p>
+              <p className="text-sm text-neutral-500">
+                {total.toLocaleString()} recorded actions {isAdmin ? 'across the organization' : `for ${activeCompany?.name || 'the selected client'}`}
+              </p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -211,7 +222,7 @@ export function AuditLogs() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className={`grid grid-cols-1 gap-3 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             <Input
               placeholder="Search actions"
               value={actionFilter}
@@ -228,7 +239,7 @@ export function AuditLogs() {
                 setPage(1);
               }}
             />
-            <select
+            {isAdmin && <select
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               value={userFilter}
               onChange={(e) => {
@@ -242,7 +253,7 @@ export function AuditLogs() {
                   {user.name} ({user.email})
                 </option>
               ))}
-            </select>
+            </select>}
           </div>
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
             <Input

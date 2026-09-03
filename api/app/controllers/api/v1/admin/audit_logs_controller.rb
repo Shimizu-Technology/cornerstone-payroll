@@ -9,7 +9,6 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
 
-        before_action :require_admin!
         before_action :validate_requested_company!
 
         def index
@@ -45,7 +44,7 @@ module Api
         private
 
         def filtered_scope
-          logs = organization_scope
+          logs = accessible_scope
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)
@@ -60,15 +59,15 @@ module Api
           logs
         end
 
-        def organization_scope
+        def accessible_scope
           return AuditLog.all if current_user.super_admin?
 
-          # This is intentionally an organization-level governance view, not
-          # a selected-client operational view. require_admin! limits it to
-          # organization administrators (legacy admin/org_admin) while
-          # managers and accountants remain company-scoped and cannot reach
-          # this controller. Firm administrators must be able to investigate
-          # an event even when a different client is active in the UI.
+          unless current_user.organization_admin?
+            return AuditLog.where(company_id: current_company_id)
+          end
+
+          # Firm administrators retain their organization-wide governance
+          # view even when a different client is active in the UI.
           company_ids = current_user.accessible_company_ids
           AuditLog.where(organization_id: current_user.organization_id)
                   .or(AuditLog.where(organization_id: nil, company_id: company_ids))
@@ -76,7 +75,10 @@ module Api
 
         def validate_requested_company!
           return if params[:company_id].blank?
-          return if current_user.accessible_company_ids.include?(params[:company_id].to_i)
+
+          requested_company_id = params[:company_id].to_i
+          return if current_user.organization_admin? && current_user.accessible_company_ids.include?(requested_company_id)
+          return if !current_user.organization_admin? && requested_company_id == current_company_id
 
           render json: { error: "Not authorized" }, status: :forbidden
         end
