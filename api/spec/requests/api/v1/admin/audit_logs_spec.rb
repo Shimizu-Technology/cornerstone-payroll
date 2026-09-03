@@ -62,6 +62,38 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     )
   end
 
+  it "filters listing and export by a query-only client selector" do
+    second_company = create(:company, organization: organization, name: "Selected Audit Client")
+    selected_log = AuditLog.record!(
+      user: admin,
+      organization_id: organization.id,
+      company_id: second_company.id,
+      action: "employees#updated",
+      record_type: "employees",
+      subject_name: "Selected employee"
+    )
+    AuditLog.record!(
+      user: admin,
+      organization_id: organization.id,
+      company_id: company.id,
+      action: "employees#updated",
+      record_type: "employees",
+      subject_name: "Excluded employee"
+    )
+
+    get "/api/v1/admin/audit_logs", params: { company_id: second_company.id }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("id")).to eq([ selected_log.id ])
+
+    get "/api/v1/admin/audit_logs/export", params: { company_id: second_company.id }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to include("Selected employee")
+    expect(response.body).not_to include("Excluded employee")
+  end
+
   it "gives accountants history for only the selected client" do
     accountant = create(:user, organization: organization, company: company, role: :accountant)
     second_company = create(:company, organization: organization, name: "Second Audit Client")

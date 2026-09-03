@@ -17,7 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import type { User } from '@/types';
 import { Button } from '@/components/ui/button';
-import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { ArrowDownUp, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, Download, RotateCcw } from 'lucide-react';
 
 const FIELD_LABELS: Record<string, string> = {
   wage_rates: 'Wage rates',
@@ -104,7 +104,7 @@ export function AuditLogs() {
       const response = await auditLogsApi.list({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        user_id: userFilter ? parseInt(userFilter, 10) : undefined,
+        user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
         page,
@@ -134,7 +134,7 @@ export function AuditLogs() {
       const result = await auditLogsApi.exportCsv({
         action_filter: actionFilter || undefined,
         record_type: recordTypeFilter || undefined,
-        user_id: userFilter ? parseInt(userFilter, 10) : undefined,
+        user_id: isAdmin && userFilter ? parseInt(userFilter, 10) : undefined,
         from: fromFilter || undefined,
         to: toFilter || undefined,
         sort_direction: sortDirection,
@@ -173,6 +173,8 @@ export function AuditLogs() {
     setLogs([]);
     setPage(1);
     setSelectedLogId(null);
+    setTotal(0);
+    setTotalPages(1);
   }, [activeCompanyId]);
 
   useEffect(() => {
@@ -182,6 +184,17 @@ export function AuditLogs() {
   useEffect(() => {
     void fetchUsers();
   }, [fetchUsers]);
+
+  const hasActiveFilters = Boolean(actionFilter || recordTypeFilter || userFilter || fromFilter || toFilter);
+
+  const clearFilters = (): void => {
+    setActionFilter('');
+    setRecordTypeFilter('');
+    setUserFilter('');
+    setFromFilter('');
+    setToFilter('');
+    setPage(1);
+  };
 
   const selectedLog = useMemo(
     () => logs.find((log) => log.id === selectedLogId) || null,
@@ -293,6 +306,24 @@ export function AuditLogs() {
               <p className="mt-2 text-sm text-gray-500">Loading logs...</p>
             </div>
           </div>
+        ) : logs.length === 0 ? (
+          <Card className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50 text-primary-700">
+              <ClipboardList className="h-6 w-6" aria-hidden="true" />
+            </div>
+            <h2 className="mt-4 text-lg font-semibold text-neutral-950">
+              {hasActiveFilters ? 'No activity matches these filters' : 'No activity recorded yet'}
+            </h2>
+            <p className="mt-2 max-w-md text-sm text-neutral-500">
+              {hasActiveFilters
+                ? 'Clear the current filters to return to the complete activity history.'
+                : 'Recorded changes for this client will appear here as payroll work is completed.'}
+            </p>
+            <Button className="mt-5" variant="outline" onClick={hasActiveFilters ? clearFilters : () => void fetchLogs()}>
+              <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+              {hasActiveFilters ? 'Clear filters' : 'Refresh history'}
+            </Button>
+          </Card>
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Card>
