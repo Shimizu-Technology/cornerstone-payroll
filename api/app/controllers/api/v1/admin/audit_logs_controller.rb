@@ -9,7 +9,7 @@ module Api
         DEFAULT_PER_PAGE = 50
         MAX_PER_PAGE = 100
 
-        before_action :validate_requested_company!
+        before_action :resolve_access_scope!
 
         def index
           scope = filtered_scope
@@ -44,7 +44,7 @@ module Api
         private
 
         def filtered_scope
-          logs = accessible_scope
+          logs = @accessible_audit_logs
           if params[:company_id].present?
             company_id = params[:company_id].to_i
             logs = logs.where(company_id: company_id)
@@ -59,38 +59,18 @@ module Api
           logs
         end
 
-        def accessible_scope
-          return AuditLog.all if current_user.super_admin?
-
-          unless current_user.organization_admin?
-            return AuditLog.where(company_id: scoped_company_id)
-          end
-
-          # Firm administrators retain their organization-wide governance
-          # view even when a different client is active in the UI.
-          company_ids = current_user.accessible_company_ids
-          AuditLog.where(organization_id: current_user.organization_id)
-                  .or(AuditLog.where(organization_id: nil, company_id: company_ids))
-        end
-
-        def validate_requested_company!
-          return if params[:company_id].blank?
-
-          requested_company_id = params[:company_id].to_i
-          return if current_user.organization_admin? && current_user.accessible_company_ids.include?(requested_company_id)
-
-          unless current_user.organization_admin?
-            return if request.headers["X-Company-Id"].present? && requested_company_id == current_company_id
-            return if request.headers["X-Company-Id"].blank? && current_user.accessible_company_ids.include?(requested_company_id)
-          end
-
-          render json: { error: "Not authorized" }, status: :forbidden
-        end
-
-        def scoped_company_id
-          return current_company_id if params[:company_id].blank? || request.headers["X-Company-Id"].present?
-
-          params[:company_id].to_i
+        def resolve_access_scope!
+          @accessible_audit_logs = AuditLogAccessScope.new(
+            user: current_user,
+            current_company_id: current_company_id,
+            requested_company_id: params[:company_id],
+            company_header_present: request.headers["X-Company-Id"].present?
+          ).call
+        rescue AuditLogAccessScope::NotAuthorizedError => e
+          render json: {
+            error: e.message,
+            details: { authorization: [ e.message ] }
+          }, status: :forbidden
         end
 
         def ordered(scope)

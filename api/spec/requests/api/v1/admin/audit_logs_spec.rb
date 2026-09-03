@@ -128,6 +128,31 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(exported_subjects).to include("Other client employee")
     expect(exported_subjects).not_to include("Selected client employee", "Unassigned client employee", "Organization user", "Foreign user")
 
+    get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => second_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    json = JSON.parse(response.body)
+    expect(json.fetch("data").pluck("company_id")).to all(eq(second_company.id))
+    expect(json.fetch("data").pluck("subject_name")).to include("Other client employee")
+    expect(json.fetch("data").pluck("subject_name")).not_to include(
+      "Selected client employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
+
+    get "/api/v1/admin/audit_logs/export", headers: { "X-Company-Id" => second_company.id.to_s }
+
+    expect(response).to have_http_status(:ok)
+    header_exported_subjects = CSV.parse(response.body, headers: true).map { |row| row.fetch("Affected record") }
+    expect(header_exported_subjects).to include("Other client employee")
+    expect(header_exported_subjects).not_to include(
+      "Selected client employee",
+      "Unassigned client employee",
+      "Organization user",
+      "Foreign user"
+    )
+
     get "/api/v1/admin/audit_logs", headers: { "X-Company-Id" => unassigned_company.id.to_s }
 
     expect(response).to have_http_status(:ok)
@@ -152,6 +177,7 @@ RSpec.describe "Api::V1::Admin::AuditLogs", type: :request do
     expect(response).to have_http_status(:forbidden)
     json = JSON.parse(response.body)
     expect(json.fetch("error")).to eq("Not authorized")
+    expect(json.fetch("details")).to eq("authorization" => [ "Not authorized" ])
   end
 
   it "keeps activity history unavailable to managers" do
