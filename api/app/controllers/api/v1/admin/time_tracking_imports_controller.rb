@@ -50,6 +50,12 @@ module Api
           ).call
 
           render json: { data: { results: results, import: import_json(import.reload) } }
+        rescue TimeTracking::ReconcileCommittedImportService::RowMismatch => e
+          render json: {
+            error: e.message,
+            details: [],
+            data: { source_user_id: e.source_user_id, employee_id: e.employee_id }
+          }, status: :unprocessable_entity
         rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
           render json: { error: e.message, details: [] }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound

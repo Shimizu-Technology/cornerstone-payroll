@@ -206,6 +206,27 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
       expect(json.fetch("details")).to eq([])
     end
 
+    it "returns the source row identity for an hours mismatch" do
+      service = instance_double(TimeTracking::ReconcileCommittedImportService)
+      allow(TimeTracking::ReconcileCommittedImportService).to receive(:new).and_return(service)
+      allow(service).to receive(:call).and_raise(
+        TimeTracking::ReconcileCommittedImportService::RowMismatch.new(
+          "Employee does not reconcile",
+          source_user_id: "aire-7",
+          employee_id: 42
+        )
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/reconcile_time_tracking_import",
+           params: { import_id: import.id, reconciliation_note: "Compared with signed records", mappings: [] },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      json = JSON.parse(response.body)
+      expect(json).to include("error" => "Employee does not reconcile", "details" => [])
+      expect(json.fetch("data")).to eq("source_user_id" => "aire-7", "employee_id" => 42)
+    end
+
     it "returns 404 for an unknown import" do
       post "/api/v1/admin/pay_periods/#{pay_period.id}/reconcile_time_tracking_import",
            params: { import_id: import.id + 10_000, reconciliation_note: "Compared with signed records", mappings: [] },

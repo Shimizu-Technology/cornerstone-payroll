@@ -2,6 +2,16 @@
 
 module TimeTracking
   class ReconcileCommittedImportService
+    class RowMismatch < ArgumentError
+      attr_reader :source_user_id, :employee_id
+
+      def initialize(message, source_user_id:, employee_id:)
+        super(message)
+        @source_user_id = source_user_id.to_s
+        @employee_id = employee_id
+      end
+    end
+
     def initialize(import:, mappings:, reconciled_by:, reconciliation_note:)
       @import = import
       @mappings = Array(mappings)
@@ -98,9 +108,12 @@ module TimeTracking
       actual_overtime = item.overtime_hours.to_d.round(2)
       return if actual_regular == expected_regular && actual_overtime == expected_overtime
 
-      raise ArgumentError,
-            "#{employee.full_name} does not reconcile: Cornerstone has #{format('%.2f', actual_regular)} regular / #{format('%.2f', actual_overtime)} overtime hours, " \
-            "but AIRE has #{format('%.2f', expected_regular)} regular / #{format('%.2f', expected_overtime)}"
+      raise RowMismatch.new(
+        "#{employee.full_name} does not reconcile: Cornerstone has #{format('%.2f', actual_regular)} regular / #{format('%.2f', actual_overtime)} overtime hours, " \
+          "but AIRE has #{format('%.2f', expected_regular)} regular / #{format('%.2f', expected_overtime)}",
+        source_user_id: row.fetch("source_user_id"),
+        employee_id: employee.id
+      )
     end
 
     def persist_mapping!(row, employee)

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, ShieldCheck, X } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
-import { payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
+import { ApiError, payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
 import type { TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
@@ -49,9 +49,18 @@ function exclusionLabel(reason: string): string {
 
 function withReconciliationErrors(
   importData: TimeTrackingImportData,
-  errors: TimeTrackingImportResultError[]
+  errors: TimeTrackingImportResultError[],
+  mappings: Map<string, number | null>
 ): TimeTrackingImportData {
-  const errorsBySourceId = new Map(errors.filter((item) => item.source_user_id).map((item) => [item.source_user_id, item.error]));
+  const errorsBySourceId = new Map<string, string>();
+  errors.forEach((item) => {
+    const sourceUserId = item.source_user_id || (
+      item.employee_id == null
+        ? undefined
+        : Array.from(mappings.entries()).find(([, employeeId]) => employeeId === item.employee_id)?.[0]
+    );
+    if (sourceUserId) errorsBySourceId.set(sourceUserId, item.error);
+  });
   return {
     ...importData,
     processed_payload: {
@@ -268,7 +277,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   )).length;
   const negativeReviewComplete = negativeAdjustmentCount === 0 ||
     (negativeAdjustmentsReviewed && negativeAdjustmentNote.trim().length >= 10);
-  const reconciliationNoteTooShort = reconciliationNote.length > 0 && reconciliationNote.trim().length < 10;
+  const trimmedReconciliationNote = reconciliationNote.trim();
+  const reconciliationNoteTooShort = trimmedReconciliationNote.length > 0 && trimmedReconciliationNote.length < 10;
   const finalizedRowsComplete = includedPreviewRows.length === rows.length &&
     unmappedIncludedCount === 0 &&
     rowsNeedingWageRateMapping.length === 0;
@@ -352,7 +362,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
       if (res.results.errors.length > 0) {
         if (isHistoricalReconciliation) {
-          setPreview(withReconciliationErrors(res.import, res.results.errors));
+          setPreview(withReconciliationErrors(res.import, res.results.errors, mappings));
           setError(`Cornerstone could not link this AIRE record. ${res.results.errors.map((item) => item.error).join(' ')}`);
         } else {
           setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
@@ -368,11 +378,11 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to apply time tracking import';
       if (isHistoricalReconciliation && preview) {
-        const mismatchRow = preview.processed_payload.rows.find((row) => (
-          row.employee_name && message.startsWith(`${row.employee_name} does not reconcile:`)
-        ));
-        if (mismatchRow) {
-          setPreview(withReconciliationErrors(preview, [ { source_user_id: mismatchRow.source_user_id, error: message } ]));
+        const payload = err instanceof ApiError && err.data && typeof err.data === 'object'
+          ? err.data as { data?: { source_user_id?: string; employee_id?: number } }
+          : null;
+        if (payload?.data?.source_user_id || payload?.data?.employee_id != null) {
+          setPreview(withReconciliationErrors(preview, [ { ...payload.data, error: message } ], mappings));
         }
         setError(`Cornerstone could not link this AIRE record. ${message}`);
       } else {
@@ -828,7 +838,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   <div className="font-semibold">What happens next</div>
                   <p className="mt-1">
                     {isHistoricalReconciliation
-                      ? 'Cornerstone has reported the existing committed payroll link to AIRE. Payment is reported separately only when the check is prepared and then delivered.'
+                      ? 'Cornerstone recorded the existing payroll link and is delivering the acknowledgement to AIRE. If delivery is interrupted, it will retry automatically until confirmed. Payment is reported separately only when the check is prepared and then delivered.'
                       : 'Cornerstone queues an import acknowledgement for AIRE. When this payroll is committed, Cornerstone sends a separate committed status. Importing hours does not by itself mean payment was issued.'}
                   </p>
                   {preview?.source_processing_sync_error && <p className="mt-2 text-danger-700">AIRE status delivery is retrying automatically: {preview.source_processing_sync_error}</p>}
