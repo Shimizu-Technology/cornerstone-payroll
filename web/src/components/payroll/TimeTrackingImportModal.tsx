@@ -53,11 +53,11 @@ function withReconciliationErrors(
   mappings: Map<string, number | null>
 ): TimeTrackingImportData {
   const errorsBySourceId = new Map<string, string>();
-  errors.forEach((item) => {
+  errors.forEach((item): void => {
     const sourceUserId = item.source_user_id || (
       item.employee_id == null
         ? undefined
-        : Array.from(mappings.entries()).find(([, employeeId]) => employeeId === item.employee_id)?.[0]
+        : Array.from(mappings.entries()).find(([, employeeId]): boolean => employeeId === item.employee_id)?.[0]
     );
     if (sourceUserId) errorsBySourceId.set(sourceUserId, item.error);
   });
