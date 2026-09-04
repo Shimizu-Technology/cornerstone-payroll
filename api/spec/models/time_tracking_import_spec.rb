@@ -51,6 +51,24 @@ RSpec.describe TimeTrackingImport do
     expect(import.update(status: "applied", applied_at: Time.current)).to eq(true)
   end
 
+  it "keeps historical reconciliation evidence immutable after the payroll is linked" do
+    import = create(
+      :time_tracking_import,
+      reconciled_at: Time.current,
+      reconciled_by: create(:user),
+      reconciliation_note: "Owner approved the legacy reconciliation evidence.",
+      reconciliation_exceptions: [ { "employee_id" => 42, "regular_difference_hours" => "-0.03" } ]
+    )
+
+    expect(import.update(reconciliation_note: "Replace the original evidence")).to eq(false)
+    expect(import.errors[:base]).to include("Historical reconciliation evidence cannot be changed after the payroll is linked")
+    expect(import.reload.reconciliation_note).to eq("Owner approved the legacy reconciliation evidence.")
+    expect(import.reconciliation_exceptions).to contain_exactly(
+      "employee_id" => 42,
+      "regular_difference_hours" => "-0.03"
+    )
+  end
+
   it "keeps the newest failed acknowledgement visible when failures arrive out of order" do
     company = create(:company)
     pay_period = create(:pay_period, company: company)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_012000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_013000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -2048,6 +2048,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_012000) do
     t.datetime "reconciled_at"
     t.bigint "reconciled_by_id"
     t.text "reconciliation_note"
+    t.jsonb "reconciliation_exceptions", default: [], null: false
     t.datetime "source_cutoff_at"
     t.string "source_payload_hash", null: false
     t.datetime "source_processing_event_occurred_at"
