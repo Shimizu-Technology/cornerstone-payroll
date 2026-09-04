@@ -16,8 +16,8 @@ module TimeTracking
     def call
       acknowledgement_ids = { batch: [], entries: [] }
       results = @pay_period.with_lock { apply_locked!(acknowledgement_ids) }
-      AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
-      AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
+      AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
+      AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries]) if acknowledgement_ids[:entries].any?
       results
     end
 

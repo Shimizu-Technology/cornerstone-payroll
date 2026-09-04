@@ -109,5 +109,104 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
       expect(response.parsed_body.dig("import", "id")).to eq(import.id)
       expect(response.parsed_body.dig("results", "errors")).to eq([])
     end
+
+    it "returns 422 when permanent AIRE identities conflict" do
+      import = TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("identity-conflict"),
+        raw_payload: {},
+        processed_payload: { "rows" => [] },
+        warnings: []
+      )
+      service = instance_double(TimeTracking::ApplyImportService)
+      allow(TimeTracking::ApplyImportService).to receive(:new).and_return(service)
+      allow(service).to receive(:call).and_raise(
+        TimeTrackingEmployeeMapping::IdentityConflict,
+        "AIRE staff identity conflicts with two saved payroll mappings"
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_time_tracking_import",
+           params: { import_id: import.id, mappings: [] },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/identity conflicts/)
+    end
+  end
+
+  describe "POST /api/v1/admin/pay_periods/:id/reconcile_time_tracking_import" do
+    let!(:import) do
+      TimeTrackingImport.create!(
+        pay_period: pay_period,
+        time_tracking_source: source,
+        start_date: pay_period.start_date,
+        end_date: pay_period.end_date,
+        fetch_start_date: pay_period.start_date,
+        fetch_end_date: pay_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("reconciliation"),
+        raw_payload: {},
+        processed_payload: { "rows" => [] },
+        warnings: []
+      )
+    end
+
+    it "passes mappings and the audit note to historical reconciliation" do
+      service = instance_double(
+        TimeTracking::ReconcileCommittedImportService,
+        call: { reconciled: [ { employee_id: 42 } ], errors: [] }
+      )
+      expect(TimeTracking::ReconcileCommittedImportService).to receive(:new) do |**arguments|
+        expect(arguments.except(:mappings)).to eq(
+          import: import,
+          reconciled_by: admin_user,
+          reconciliation_note: "Compared with the signed payroll register"
+        )
+        expect(arguments.fetch(:mappings).map(&:to_h)).to eq(
+          [ { "source_user_id" => "aire-7", "employee_id" => "42" } ]
+        )
+        service
+      end
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/reconcile_time_tracking_import",
+           params: {
+             import_id: import.id,
+             reconciliation_note: "Compared with the signed payroll register",
+             mappings: [ { source_user_id: "aire-7", employee_id: 42 } ]
+           },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("results", "reconciled", 0, "employee_id")).to eq(42)
+    end
+
+    it "returns 422 for an identity conflict" do
+      service = instance_double(TimeTracking::ReconcileCommittedImportService)
+      allow(TimeTracking::ReconcileCommittedImportService).to receive(:new).and_return(service)
+      allow(service).to receive(:call).and_raise(
+        TimeTrackingEmployeeMapping::IdentityConflict,
+        "AIRE staff identity conflicts with two saved payroll mappings"
+      )
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/reconcile_time_tracking_import",
+           params: { import_id: import.id, reconciliation_note: "Compared with signed records", mappings: [] },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to match(/identity conflicts/)
+    end
+
+    it "returns 404 for an unknown import" do
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/reconcile_time_tracking_import",
+           params: { import_id: import.id + 10_000, reconciliation_note: "Compared with signed records", mappings: [] },
+           headers: { "X-Company-Id" => company.id.to_s }
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.parsed_body.fetch("error")).to eq("Time tracking import not found")
+    end
   end
 end

@@ -229,22 +229,24 @@ module Api
         # Printing prepares a paper check; delivery is the explicit payment event.
         def mark_delivered
           unless @payroll_item.pay_period.committed?
-            return render json: { error: "Check actions are only available for committed pay periods" }, status: :unprocessable_entity
+            message = "Check actions are only available for committed pay periods"
+            return render json: { error: message, details: { base: [ message ] } }, status: :unprocessable_entity
           end
 
           user = User.find(current_user_id)
           result = @payroll_item.mark_delivered!(user: user, ip_address: request.remote_ip)
 
           render json: {
-            payroll_item: check_item_json(@payroll_item.reload),
-            already_delivered: result[:already_delivered]
+            data: { payroll_item: check_item_json(@payroll_item.reload) },
+            meta: { already_delivered: result[:already_delivered] }
           }
         rescue ActiveRecord::RecordNotFound
-          render json: { error: "User not found" }, status: :unprocessable_entity
+          render json: { error: "User not found", details: { user: [ "not found" ] } }, status: :unprocessable_entity
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: { error: e.message, details: { base: [ e.message ] } }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
-          render json: { error: "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}" }, status: :unprocessable_entity
+          message = "Failed to record audit event: #{e.record.errors.full_messages.join(', ')}"
+          render json: { error: message, details: e.record.errors.messages }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------

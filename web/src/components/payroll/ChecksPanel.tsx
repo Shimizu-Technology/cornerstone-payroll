@@ -3,9 +3,10 @@
  * Shows all checks for a committed pay period with print/void/reissue controls.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import type { CheckItem, CheckListMeta, PayPeriod } from '@/types';
-import { checksApi, payStubsApi } from '@/services/api';
+import { ApiError, checksApi, payStubsApi } from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
@@ -22,7 +23,7 @@ interface ChecksPanelProps {
 
 type CheckAction = 'preview' | 'markPrinted' | 'markDelivered' | 'stub';
 
-function checkStatusBadge(item: CheckItem) {
+function checkStatusBadge(item: CheckItem): ReactElement {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
   if (item.check_status === 'delivered') return <Badge variant="success">Delivered / paid</Badge>;
   if (item.check_printed_at)
@@ -49,7 +50,7 @@ function formatEventTime(value?: string | null) {
   });
 }
 
-function eventLabel(eventType: string) {
+function eventLabel(eventType: string): string {
   switch (eventType) {
     case 'assigned': return 'Assigned';
     case 'printed': return 'Printed';
@@ -303,14 +304,22 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
-  const handleMarkDelivered = async (item: CheckItem) => {
+  const handleMarkDelivered = async (item: CheckItem): Promise<void> => {
     if (!window.confirm(`Confirm that check #${item.check_number} was delivered to ${item.employee_name}? This marks the linked AIRE hours as paid.`)) return;
     setActionLoading({ id: item.id, action: 'markDelivered' });
     try {
-      await checksApi.markDelivered(item.id);
+      const result = await checksApi.markDelivered(item.id);
+      setChecks((current) => current.map((check) => (check.id === item.id ? result.data.payroll_item : check)));
+      if (result.meta.already_delivered) {
+        alert('This check was already marked as delivered.');
+      }
       await load();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to mark check as delivered');
+      if (err instanceof ApiError) {
+        setError(err.message);
+      } else {
+        alert(err instanceof Error ? err.message : 'Failed to mark check as delivered');
+      }
     } finally {
       setActionLoading(null);
     }
@@ -716,7 +725,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                           size="sm"
                           onClick={() => void handleMarkDelivered(item)}
                           disabled={isActionLoading(item.id, 'markDelivered')}
-                          className="text-xs px-2 py-1"
+                          className="text-xs px-2 py-2"
                         >
                           {isActionLoading(item.id, 'markDelivered') ? '…' : 'Delivered'}
                         </Button>

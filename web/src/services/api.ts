@@ -2345,8 +2345,8 @@ export const checksApi = {
   markPrinted: (payrollItemId: number) =>
     api.post<{ payroll_item: CheckItem; already_printed: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_printed`),
 
-  markDelivered: (payrollItemId: number) =>
-    api.post<{ payroll_item: CheckItem; already_delivered: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`),
+  markDelivered: (payrollItemId: number): Promise<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }> =>
+    api.post<{ data: { payroll_item: CheckItem }; meta: { already_delivered: boolean } }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`),
 
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>

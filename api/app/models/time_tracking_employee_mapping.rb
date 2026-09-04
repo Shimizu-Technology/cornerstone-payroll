@@ -18,25 +18,41 @@ class TimeTrackingEmployeeMapping < ApplicationRecord
             },
             if: -> { source_user_uuid.present? }
   validate :employee_belongs_to_company
+  before_validation :normalize_source_user_uuid
 
   def self.resolve_source_identity!(company:, source:, source_user_id:, source_user_uuid:)
     source_id = source_user_id.to_s
-    source_uuid = source_user_uuid.to_s.presence
+    source_uuid = normalize_uuid(source_user_uuid)
     by_id = find_by(company: company, time_tracking_source: source, source_user_id: source_id)
     return by_id unless source_uuid
 
     by_uuid = find_by(company: company, time_tracking_source: source, source_user_uuid: source_uuid)
-    if by_uuid && by_id && by_uuid.id != by_id.id
-      raise IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
-    end
-    if by_id&.source_user_uuid.present? && by_id.source_user_uuid != source_uuid
-      raise IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
-    end
+    validate_source_identity!(by_id: by_id, by_uuid: by_uuid, source_user_uuid: source_uuid)
 
     by_uuid || by_id
   end
 
+  def self.validate_source_identity!(by_id:, by_uuid:, source_user_uuid:)
+    source_uuid = normalize_uuid(source_user_uuid)
+    return unless source_uuid
+
+    if by_uuid && by_id && by_uuid.id != by_id.id
+      raise IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
+    end
+    if by_id&.source_user_uuid.present? && normalize_uuid(by_id.source_user_uuid) != source_uuid
+      raise IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
+    end
+  end
+
+  def self.normalize_uuid(value)
+    value.to_s.strip.downcase.presence
+  end
+
   private
+
+  def normalize_source_user_uuid
+    self.source_user_uuid = self.class.normalize_uuid(source_user_uuid)
+  end
 
   def employee_belongs_to_company
     return if employee.nil? || employee.company_id == company_id

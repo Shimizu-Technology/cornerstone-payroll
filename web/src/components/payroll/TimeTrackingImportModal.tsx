@@ -732,7 +732,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                   <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from AIRE.</p>
                   <label className="mt-4 block text-sm font-medium text-primary-950">
                     Audit note
-                    <textarea value={reconciliationNote} onChange={(event) => setReconciliationNote(event.target.value)} rows={3} placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff" className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-3 text-sm text-neutral-900" />
+                    <textarea value={reconciliationNote} onChange={(event) => setReconciliationNote(event.target.value)} rows={3} placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff" className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-4 text-sm text-neutral-900" />
                   </label>
                 </section>
               )}

@@ -13,13 +13,12 @@ module TimeTracking
     end
 
     def call
-      raise ArgumentError, "Historical reconciliation requires a committed pay period" unless pay_period.committed?
       raise ArgumentError, "Enter a reconciliation note of at least 10 characters" if note.length < 10
 
       ids = { batch: [], entries: [] }
       results = pay_period.with_lock { reconcile_locked!(ids) }
-      AirePayrollAcknowledgement.dispatch_pending!(ids: ids[:batch])
-      AirePayrollEntryAcknowledgement.dispatch_pending!(ids: ids[:entries])
+      AirePayrollAcknowledgement.dispatch_pending!(ids: ids[:batch]) if ids[:batch].any?
+      AirePayrollEntryAcknowledgement.dispatch_pending!(ids: ids[:entries]) if ids[:entries].any?
       results
     end
 
@@ -28,6 +27,10 @@ module TimeTracking
     attr_reader :import, :mappings, :actor, :note, :pay_period, :company, :source
 
     def reconcile_locked!(ids)
+      unless pay_period.committed? && !pay_period.voided?
+        raise ArgumentError, "Historical reconciliation requires a committed, active pay period"
+      end
+
       import.with_lock(requires_new: true) do
         raise ArgumentError, "Only a previewed finalized AIRE batch can be reconciled" unless import.status == "previewed" && import.finalized_batch?
         validate_provenance!
@@ -43,8 +46,8 @@ module TimeTracking
           raise ArgumentError, "Map every AIRE employee before reconciling" unless employee_id
           raise ArgumentError, "The same payroll employee cannot be linked to two AIRE employees" unless seen_employee_ids.add?(employee_id)
 
-          employee = Employee.active.find_by(id: employee_id, company_id: company.id)
-          raise ArgumentError, "Mapped payroll employee was not found or is inactive" unless employee
+          employee = Employee.find_by(id: employee_id, company_id: company.id)
+          raise ArgumentError, "Mapped payroll employee was not found" unless employee
           item = pay_period.payroll_items.find_by(employee_id: employee.id)
           raise ArgumentError, "#{employee.full_name} does not have a payroll item in this committed period" unless item
           validate_hours!(item, row, employee)
@@ -101,43 +104,57 @@ module TimeTracking
     end
 
     def persist_mapping!(row, employee)
-      source_user_uuid = row["source_user_uuid"].presence
-      mapping = TimeTrackingEmployeeMapping.resolve_source_identity!(
-        company: company,
-        source: source,
-        source_user_id: row.fetch("source_user_id"),
-        source_user_uuid: source_user_uuid
-      )
-      mapping ||= TimeTrackingEmployeeMapping.new(company: company, time_tracking_source: source)
-      mapping.update!(
+      mapping_attributes = {
         employee: employee,
         source_user_id: row.fetch("source_user_id").to_s,
-        source_user_uuid: source_user_uuid,
+        source_user_uuid: TimeTrackingEmployeeMapping.normalize_uuid(row["source_user_uuid"]),
         source_email: row["source_email"],
         source_display_name: row["source_display_name"]
-      )
+      }
+      TimeTrackingEmployeeMapping.transaction(requires_new: true) do
+        mapping = resolve_mapping(row)
+        mapping ||= TimeTrackingEmployeeMapping.new(company: company, time_tracking_source: source)
+        mapping.update!(mapping_attributes)
+      end
+    rescue ActiveRecord::RecordNotUnique
+      mapping = resolve_mapping(row)
+      raise unless mapping
+
+      mapping.update!(mapping_attributes)
     end
 
     def record_entry_lifecycle!
+      allocations = import.time_tracking_entry_allocations.to_a
       acknowledgements = AirePayrollEntryAcknowledgement.record_for_import!(
         time_tracking_import: import,
         status: "committed",
         occurred_at: pay_period.committed_at || import.reconciled_at,
-        source_event_prefix: "reconciliation"
+        source_event_prefix: "reconciliation",
+        allocations: allocations
       )
-      payment_acknowledgements = pay_period.payroll_items.flat_map do |item|
+      allocations_by_item = allocations.group_by(&:payroll_item_id)
+      items = pay_period.payroll_items
+        .where(id: allocations_by_item.keys)
+        .includes(:check_events)
+        .to_a
+      payment_acknowledgements = items.flat_map do |item|
         status = { "printed" => "payment_prepared", "delivered" => "payment_issued", "voided" => "payment_voided" }[item.check_status]
-        next [] unless status && item.time_tracking_entry_allocations.where(time_tracking_import: import).exists?
+        item_allocations = allocations_by_item.fetch(item.id, [])
+        next [] unless status && item_allocations.any?
 
-        event = item.check_events.order(:created_at, :id).last
+        event_type = { "payment_prepared" => "printed", "payment_issued" => "delivered", "payment_voided" => "voided" }.fetch(status)
+        event = item.check_events
+          .select { |candidate| candidate.event_type == event_type && candidate.check_number == item.check_number }
+          .max_by { |candidate| [ candidate.created_at, candidate.id ] }
         AirePayrollEntryAcknowledgement.record_for_import!(
           time_tracking_import: import,
           status: status,
-          occurred_at: event&.created_at || import.reconciled_at,
+          occurred_at: event&.created_at || payment_state_timestamp(item, status),
           payment_method: "paper_check",
           payment_reference: item.check_number,
           source_event_prefix: "reconciliation_payment_#{item.id}",
-          payroll_item_id: item.id
+          payroll_item_id: item.id,
+          allocations: item_allocations
         )
       end
       acknowledgements + payment_acknowledgements
@@ -146,6 +163,22 @@ module TimeTracking
     def source_employee_for(source_user_id)
       @source_employees ||= Array(import.raw_payload.fetch("employees")).index_by { |employee| employee.fetch("source_user_id").to_s }
       @source_employees.fetch(source_user_id)
+    end
+
+    def resolve_mapping(row)
+      TimeTrackingEmployeeMapping.resolve_source_identity!(
+        company: company,
+        source: source,
+        source_user_id: row.fetch("source_user_id"),
+        source_user_uuid: row["source_user_uuid"]
+      )
+    end
+
+    def payment_state_timestamp(item, status)
+      return item.check_printed_at if status == "payment_prepared" && item.check_printed_at
+      return item.voided_at if status == "payment_voided" && item.voided_at
+
+      import.reconciled_at
     end
 
     def value(hash, key)

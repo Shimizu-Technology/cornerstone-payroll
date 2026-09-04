@@ -182,7 +182,12 @@ class PayrollItem < ApplicationRecord
   # Check status helper (used in serialisation)
   def check_status
     return "voided"   if voided?
-    return "delivered" if check_events.any? { |event| event.event_type == "delivered" && event.check_number == check_number }
+    delivered = if check_events.loaded?
+      check_events.any? { |event| event.event_type == "delivered" && event.check_number == check_number }
+    else
+      check_events.where(event_type: "delivered", check_number: check_number).exists?
+    end
+    return "delivered" if delivered
     return "printed"  if check_printed_at.present?
     return "unprinted" if check_number.present?
     nil

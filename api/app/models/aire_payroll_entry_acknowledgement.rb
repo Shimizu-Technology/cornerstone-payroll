@@ -15,14 +15,18 @@ class AirePayrollEntryAcknowledgement < ApplicationRecord
   scope :undelivered, -> { where(delivered_at: nil) }
   scope :due_for_dispatch, -> { undelivered.where("enqueued_at IS NULL OR enqueued_at < ?", REDISPATCH_AFTER.ago) }
 
-  def self.record_for_import!(time_tracking_import:, status:, occurred_at:, payment_method: nil, payment_reference: nil, source_event_prefix: "import", payroll_item_id: nil)
-    scope = time_tracking_import.time_tracking_entry_allocations.includes(:payroll_item)
-    scope = scope.where(payroll_item_id: payroll_item_id) if payroll_item_id.present?
-    allocations = scope.to_a
+  def self.record_for_import!(time_tracking_import:, status:, occurred_at:, payment_method: nil, payment_reference: nil, source_event_prefix: "import", payroll_item_id: nil, allocations: nil)
+    unless allocations
+      scope = time_tracking_import.time_tracking_entry_allocations.includes(:payroll_item)
+      scope = scope.where(payroll_item_id: payroll_item_id) if payroll_item_id.present?
+      allocations = scope.to_a
+    end
+    allocations = allocations.to_a
+    allocations = allocations.select { |allocation| allocation.payroll_item_id == payroll_item_id } if payroll_item_id.present?
     allocations.group_by { |allocation| [ allocation.payroll_item_id, allocation.source_time_entry_id ] }.map do |(payroll_item_id, source_time_entry_id), rows|
       record_from_rows!(
         rows: rows,
-        source_event_key: "#{source_event_prefix}:#{time_tracking_import.id}:#{status}:#{source_time_entry_id}",
+        source_event_key: "#{source_event_prefix}:#{time_tracking_import.id}:#{status}:#{payroll_item_id}:#{source_time_entry_id}",
         status: status,
         occurred_at: occurred_at,
         payroll_item_id: payroll_item_id,

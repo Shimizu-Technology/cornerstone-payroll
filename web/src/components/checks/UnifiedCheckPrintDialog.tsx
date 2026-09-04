@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import { Download, Maximize2, Printer, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,7 +27,7 @@ interface UnifiedCheckPrintDialogProps {
 type SourceFilter = 'all' | 'employee' | 'non_employee';
 type StatusFilter = 'all' | 'unprinted' | 'printed';
 
-function statusBadge(item: CheckPrintQueueItem) {
+function statusBadge(item: CheckPrintQueueItem): ReactElement {
   if (item.status === 'delivered') return <Badge variant="success">Delivered</Badge>;
   if (item.status === 'voided') return <Badge variant="danger">Voided</Badge>;
   if (item.status === 'printed') return <Badge variant="success">Printed ×{item.print_count}</Badge>;

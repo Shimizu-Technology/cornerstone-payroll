@@ -65,25 +65,34 @@ RSpec.describe TimeTracking::EmployeeMatcher do
       expect(match).to include(employee_id: employee.id, match_method: "saved_mapping", match_score: 1.0)
     end
 
-    it "blocks a reused numeric source ID when its permanent UUID disagrees" do
+    it "blocks a numeric source ID and permanent UUID that resolve to different mappings" do
       company = create(:company)
       source = create(:time_tracking_source, company: company, source_type: "aire_services")
-      employee = create(:employee, company: company)
+      employee_by_id = create(:employee, company: company)
+      employee_by_uuid = create(:employee, company: company)
+      permanent_uuid = SecureRandom.uuid
       TimeTrackingEmployeeMapping.create!(
         company: company,
         time_tracking_source: source,
-        employee: employee,
+        employee: employee_by_id,
         source_user_id: "reused-id",
         source_user_uuid: SecureRandom.uuid
+      )
+      TimeTrackingEmployeeMapping.create!(
+        company: company,
+        time_tracking_source: source,
+        employee: employee_by_uuid,
+        source_user_id: "different-id",
+        source_user_uuid: permanent_uuid
       )
 
       expect do
         described_class.new(company: company, source: source).match(
           "source_user_id" => "reused-id",
-          "source_user_uuid" => SecureRandom.uuid,
-          "email" => employee.email
+          "source_user_uuid" => permanent_uuid.upcase,
+          "email" => employee_by_id.email
         )
-      end.to raise_error(TimeTrackingEmployeeMapping::IdentityConflict, /different permanent identity/)
+      end.to raise_error(TimeTrackingEmployeeMapping::IdentityConflict, /two saved payroll mappings/)
     end
   end
 end

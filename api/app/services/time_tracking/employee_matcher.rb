@@ -11,21 +11,22 @@ module TimeTracking
       @employee_scope = Employee.active.where(company_id: company.id)
       mapping_scope = TimeTrackingEmployeeMapping.includes(:employee).where(company: company, time_tracking_source: source)
       @mappings_by_source_id = mapping_scope.index_by(&:source_user_id)
-      @mappings_by_source_uuid = mapping_scope.where.not(source_user_uuid: nil).index_by(&:source_user_uuid)
+      @mappings_by_source_uuid = mapping_scope.where.not(source_user_uuid: nil).index_by do |mapping|
+        TimeTrackingEmployeeMapping.normalize_uuid(mapping.source_user_uuid)
+      end
     end
 
     def match(source_employee)
       source_user_id = source_employee["source_user_id"].to_s
-      source_user_uuid = source_employee["source_user_uuid"].to_s.presence
+      source_user_uuid = TimeTrackingEmployeeMapping.normalize_uuid(source_employee["source_user_uuid"])
       existing = if source_user_uuid
         by_uuid = @mappings_by_source_uuid[source_user_uuid]
         by_id = @mappings_by_source_id[source_user_id]
-        if by_uuid && by_id && by_uuid.id != by_id.id
-          raise TimeTrackingEmployeeMapping::IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
-        end
-        if by_id&.source_user_uuid.present? && by_id.source_user_uuid != source_user_uuid
-          raise TimeTrackingEmployeeMapping::IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
-        end
+        TimeTrackingEmployeeMapping.validate_source_identity!(
+          by_id: by_id,
+          by_uuid: by_uuid,
+          source_user_uuid: source_user_uuid
+        )
         by_uuid || by_id
       else
         @mappings_by_source_id[source_user_id]

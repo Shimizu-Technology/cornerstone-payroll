@@ -29,11 +29,7 @@ class CheckEvent < ApplicationRecord
   private
 
   def record_aire_entry_lifecycle
-    status = {
-      "printed" => "payment_prepared",
-      "delivered" => "payment_issued",
-      "voided" => "payment_voided"
-    }[event_type]
+    status = aire_entry_lifecycle_status
     return unless status
 
     @aire_entry_acknowledgement_ids = AirePayrollEntryAcknowledgement
@@ -45,5 +41,13 @@ class CheckEvent < ApplicationRecord
     return if @aire_entry_acknowledgement_ids.blank?
 
     AirePayrollEntryAcknowledgement.dispatch_pending!(ids: @aire_entry_acknowledgement_ids)
+  end
+
+  def aire_entry_lifecycle_status
+    return "payment_prepared" if event_type == "printed"
+    return "payment_issued" if event_type == "delivered"
+    return "payment_voided" if event_type == "voided" && payroll_item.voided?
+    return "payment_issued" if event_type == "voided" && payroll_item.check_status == "delivered"
+    "payment_prepared" if event_type == "voided" && payroll_item.check_status == "printed"
   end
 end
