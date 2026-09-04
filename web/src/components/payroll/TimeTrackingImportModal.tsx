@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Clock3, History, Link2, LoaderCircle, Shie
 import { useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { payPeriodsApi, timeTrackingSourcesApi } from '@/services/api';
-import type { TimeTrackingImportData, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
+import type { TimeTrackingImportData, TimeTrackingImportResultError, TimeTrackingPreviewCategory, TimeTrackingPreviewRow, TimeTrackingSource } from '@/services/api';
 import type { Employee, PayPeriod } from '@/types';
 
 interface Props {
@@ -45,6 +45,31 @@ function formatTimestamp(value: string | null | undefined): string {
 
 function exclusionLabel(reason: string): string {
   return reason.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function withReconciliationErrors(
+  importData: TimeTrackingImportData,
+  errors: TimeTrackingImportResultError[]
+): TimeTrackingImportData {
+  const errorsBySourceId = new Map(errors.filter((item) => item.source_user_id).map((item) => [item.source_user_id, item.error]));
+  return {
+    ...importData,
+    processed_payload: {
+      ...importData.processed_payload,
+      rows: importData.processed_payload.rows.map((row) => {
+        const message = errorsBySourceId.get(row.source_user_id);
+        if (!message) return row;
+
+        return {
+          ...row,
+          warnings: [
+            ...(row.warnings || []).filter((warning) => warning.code !== 'reconciliation_mismatch'),
+            { code: 'reconciliation_mismatch', message },
+          ],
+        };
+      }),
+    },
+  };
 }
 
 export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, onImportComplete }: Props) {
@@ -243,6 +268,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   )).length;
   const negativeReviewComplete = negativeAdjustmentCount === 0 ||
     (negativeAdjustmentsReviewed && negativeAdjustmentNote.trim().length >= 10);
+  const reconciliationNoteTooShort = reconciliationNote.length > 0 && reconciliationNote.trim().length < 10;
   const finalizedRowsComplete = includedPreviewRows.length === rows.length &&
     unmappedIncludedCount === 0 &&
     rowsNeedingWageRateMapping.length === 0;
@@ -325,7 +351,12 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       const res = 'data' in response ? response.data : response;
 
       if (res.results.errors.length > 0) {
-        setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
+        if (isHistoricalReconciliation) {
+          setPreview(withReconciliationErrors(res.import, res.results.errors));
+          setError(`Cornerstone could not link this AIRE record. ${res.results.errors.map((item) => item.error).join(' ')}`);
+        } else {
+          setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
+        }
         return;
       }
 
@@ -335,7 +366,18 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       setStep('done');
       onImportComplete();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to apply time tracking import');
+      const message = err instanceof Error ? err.message : 'Failed to apply time tracking import';
+      if (isHistoricalReconciliation && preview) {
+        const mismatchRow = preview.processed_payload.rows.find((row) => (
+          row.employee_name && message.startsWith(`${row.employee_name} does not reconcile:`)
+        ));
+        if (mismatchRow) {
+          setPreview(withReconciliationErrors(preview, [ { source_user_id: mismatchRow.source_user_id, error: message } ]));
+        }
+        setError(`Cornerstone could not link this AIRE record. ${message}`);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -710,7 +752,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 </section>
               )}
 
-              {isFinalizedBatch && negativeAdjustmentCount > 0 && (
+              {isFinalizedBatch && !isHistoricalReconciliation && negativeAdjustmentCount > 0 && (
                 <section className="rounded-2xl border border-warning-300 bg-warning-50 p-4 sm:p-6">
                   <div className="flex items-center gap-2 font-semibold text-warning-950">
                     <History className="h-4 w-4" aria-hidden="true" />
@@ -742,10 +784,23 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                     <History className="h-4 w-4" aria-hidden="true" /> Historical reconciliation note
                   </div>
                   <p className="mt-2 text-sm leading-6 text-primary-800">Explain what was compared. Cornerstone will refuse the link if any mapped employee’s regular or overtime hours differ from AIRE.</p>
-                  <label className="mt-4 block text-sm font-medium text-primary-950">
+                  <label htmlFor="reconciliation-note" className="mt-4 block text-sm font-medium text-primary-950">
                     Audit note
-                    <textarea value={reconciliationNote} onChange={(event) => setReconciliationNote(event.target.value)} rows={3} placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff" className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-4 text-sm text-neutral-900" />
                   </label>
+                  <textarea
+                    id="reconciliation-note"
+                    value={reconciliationNote}
+                    onChange={(event) => setReconciliationNote(event.target.value)}
+                    rows={3}
+                    minLength={10}
+                    aria-describedby="reconciliation-note-help"
+                    aria-invalid={reconciliationNoteTooShort}
+                    placeholder="Example: Compared committed Aug 1–15 payroll to finalized AIRE cutoff"
+                    className="mt-2 w-full rounded-xl border border-primary-300 bg-white px-4 py-4 text-sm text-neutral-900"
+                  />
+                  <p id="reconciliation-note-help" className={`mt-2 text-xs ${reconciliationNoteTooShort ? 'text-danger-700' : 'text-primary-700'}`}>
+                    {reconciliationNoteTooShort ? 'Enter at least 10 characters before linking the records.' : 'Required: briefly explain what records you compared (minimum 10 characters).'}
+                  </p>
                 </section>
               )}
             </div>
