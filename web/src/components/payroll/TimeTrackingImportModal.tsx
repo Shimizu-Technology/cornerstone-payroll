@@ -122,6 +122,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
 
     setStep('select');
     setPreview(null);
@@ -142,6 +143,8 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
 
     timeTrackingSourcesApi.list()
       .then((res) => {
+        if (cancelled) return;
+
         const active = res.time_tracking_sources.filter((source) => source.active);
         const eligible = payPeriod.status === 'committed'
           ? active.filter((source) => source.source_type === 'aire_services')
@@ -149,8 +152,16 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
         setSources(eligible);
         setSourceId(eligible[0]?.id || '');
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load time tracking sources'))
-      .finally(() => setSourcesLoading(false));
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load time tracking sources');
+      })
+      .finally(() => {
+        if (!cancelled) setSourcesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, payPeriod.start_date, payPeriod.end_date, payPeriod.status]);
 
   const selectedSource = useMemo(
