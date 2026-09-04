@@ -52,20 +52,34 @@ RSpec.describe TimeTrackingImport do
   end
 
   it "keeps historical reconciliation evidence immutable after the payroll is linked" do
+    original_reconciled_at = Time.current
+    original_reconciled_by = create(:user)
+    original_exceptions = [ { "employee_id" => 42, "regular_difference_hours" => "-0.03" } ]
     import = create(
       :time_tracking_import,
-      reconciled_at: Time.current,
-      reconciled_by: create(:user),
+      reconciled_at: original_reconciled_at,
+      reconciled_by: original_reconciled_by,
       reconciliation_note: "Owner approved the legacy reconciliation evidence.",
-      reconciliation_exceptions: [ { "employee_id" => 42, "regular_difference_hours" => "-0.03" } ]
+      reconciliation_exceptions: original_exceptions
     )
 
     expect(import.update(reconciliation_note: "Replace the original evidence")).to eq(false)
     expect(import.errors[:base]).to include("Historical reconciliation evidence cannot be changed after the payroll is linked")
-    expect(import.reload.reconciliation_note).to eq("Owner approved the legacy reconciliation evidence.")
-    expect(import.reconciliation_exceptions).to contain_exactly(
-      "employee_id" => 42,
-      "regular_difference_hours" => "-0.03"
+
+    expect(import.update(reconciliation_exceptions: [])).to eq(false)
+    expect(import.errors[:base]).to include("Historical reconciliation evidence cannot be changed after the payroll is linked")
+
+    expect(import.update(reconciled_at: original_reconciled_at + 1.hour)).to eq(false)
+    expect(import.errors[:base]).to include("Historical reconciliation evidence cannot be changed after the payroll is linked")
+
+    expect(import.update(reconciled_by: create(:user))).to eq(false)
+    expect(import.errors[:base]).to include("Historical reconciliation evidence cannot be changed after the payroll is linked")
+
+    expect(import.reload).to have_attributes(
+      reconciliation_note: "Owner approved the legacy reconciliation evidence.",
+      reconciliation_exceptions: original_exceptions,
+      reconciled_at: original_reconciled_at,
+      reconciled_by: original_reconciled_by
     )
   end
 

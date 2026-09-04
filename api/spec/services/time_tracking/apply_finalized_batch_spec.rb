@@ -342,6 +342,60 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     expect(item.reload).to have_attributes(hours_worked: 7.97, overtime_hours: 0.03, gross_pay: 200.0, net_pay: 180.0)
   end
 
+  it "accepts a legacy rounding exception exactly at the 0.05-hour boundary" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "boundary@example.com")
+    adjustment = {
+      "source_time_entry_id" => "historic-rounding-boundary",
+      "line_key" => "flight-current",
+      "source_kind" => "current",
+      "original_work_date" => "2026-08-20",
+      "original_week_start" => "2026-08-16",
+      "source_category_id" => "flight",
+      "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+      "total_hours" => 8.0,
+      "regular_hours" => 8.0,
+      "overtime_hours" => 0.0
+    }
+    import = preview_import(
+      pay_period: pay_period,
+      source: source,
+      payload: payload_for(
+        pay_period: pay_period,
+        employee: employee,
+        adjustments: [ adjustment ],
+        batch_id: "AIRE-PAY-HISTORICAL-ROUNDING-BOUNDARY"
+      )
+    )
+    item = create(
+      :payroll_item,
+      pay_period: pay_period,
+      employee: employee,
+      hours_worked: 7.95,
+      overtime_hours: 0.05,
+      gross_pay: 200.0,
+      net_pay: 180.0
+    )
+    pay_period.update!(status: "committed", committed_at: Time.current)
+
+    result = TimeTracking::ReconcileCommittedImportService.new(
+      import: import,
+      mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+      reconciled_by: create(:user, company: company),
+      reconciliation_note: "Owner accepted the documented boundary rounding difference."
+    ).call
+
+    expect(result.fetch(:errors)).to be_empty
+    expect(result.fetch(:rounding_exceptions)).to contain_exactly(
+      include(
+        "regular_difference_hours" => "-0.05",
+        "overtime_difference_hours" => "+0.05",
+        "total_difference_hours" => "+0.00"
+      )
+    )
+    expect(item.reload).to have_attributes(hours_worked: 7.95, overtime_hours: 0.05, gross_pay: 200.0, net_pay: 180.0)
+  end
+
   {
     "printed" => [ "payment_prepared", "printed" ],
     "delivered" => [ "payment_issued", "delivered" ],
