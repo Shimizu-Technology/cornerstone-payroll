@@ -908,9 +908,23 @@ export interface TimeTrackingImportData {
   applied_at: string | null;
   reconciled_at?: string | null;
   reconciliation_note?: string | null;
+  reconciliation_exceptions?: TimeTrackingHistoricalRoundingException[];
   source_processing_status: 'imported' | 'committed' | 'payment_issued' | 'payment_failed' | null;
   source_processing_synced_at: string | null;
   source_processing_sync_error: string | null;
+}
+
+export interface TimeTrackingHistoricalRoundingException {
+  source_user_id: string;
+  employee_id: number;
+  employee_name: string;
+  aire_regular_hours: string;
+  cornerstone_regular_hours: string;
+  regular_difference_hours: string;
+  aire_overtime_hours: string;
+  cornerstone_overtime_hours: string;
+  overtime_difference_hours: string;
+  total_difference_hours: string;
 }
 
 export interface TimeTrackingImportResultError {
@@ -1091,8 +1105,8 @@ export const payPeriodsApi = {
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
-  reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ data: { results: { reconciled: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData } }> =>
-    api.post<{ data: { results: { reconciled: unknown[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData } }>(`/admin/pay_periods/${id}/reconcile_time_tracking_import`, data),
+  reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ data: { results: { reconciled: unknown[]; rounding_exceptions: TimeTrackingHistoricalRoundingException[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData } }> =>
+    api.post<{ data: { results: { reconciled: unknown[]; rounding_exceptions: TimeTrackingHistoricalRoundingException[]; errors: TimeTrackingImportResultError[] }; import: TimeTrackingImportData } }>(`/admin/pay_periods/${id}/reconcile_time_tracking_import`, data),
 };
 
 export const clientPayPeriodsApi = {

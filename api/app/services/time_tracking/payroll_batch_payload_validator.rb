@@ -12,12 +12,13 @@ module TimeTracking
 
     class Error < StandardError; end
 
-    attr_reader :payload, :start_date, :end_date
+    attr_reader :payload, :start_date, :end_date, :allow_legacy_uncategorized
 
-    def initialize(payload:, start_date:, end_date:)
+    def initialize(payload:, start_date:, end_date:, allow_legacy_uncategorized: false)
       @payload = payload
       @start_date = parse_expected_date(start_date, "start_date")
       @end_date = parse_expected_date(end_date, "end_date")
+      @allow_legacy_uncategorized = allow_legacy_uncategorized
     end
 
     def validate!
@@ -131,12 +132,14 @@ module TimeTracking
 
       if [ total, regular, overtime ].any?(&:nonzero?)
         category = adjustment["category"]
-        object!(category, "#{path}.category")
-        category_identity = [ adjustment["source_category_id"], category["key"], category["name"] ].compact_blank
-        raise Error, "#{path}.category needs a stable identity" if category_identity.empty?
-        if adjustment["source_category_id"].present? && category["id"].present? &&
-           adjustment["source_category_id"].to_s != category["id"].to_s
-          raise Error, "#{path}.category ID does not match source_category_id"
+        unless category.nil? && allow_legacy_uncategorized
+          object!(category, "#{path}.category")
+          category_identity = [ adjustment["source_category_id"], category["key"], category["name"] ].compact_blank
+          raise Error, "#{path}.category needs a stable identity" if category_identity.empty?
+          if adjustment["source_category_id"].present? && category["id"].present? &&
+             adjustment["source_category_id"].to_s != category["id"].to_s
+            raise Error, "#{path}.category ID does not match source_category_id"
+          end
         end
       end
 
@@ -206,7 +209,15 @@ module TimeTracking
         raise Error, "issues.#{field} does not reconcile" unless close?(actual, value)
       end
       missing_category_count = finite_number!(issues["missing_category_count"], "issues.missing_category_count")
-      raise Error, "issues.missing_category_count must be zero for a finalized batch" unless missing_category_count.zero?
+      actual_missing_category_count = adjustments.count do |row|
+        row["category"].nil? && %w[total_hours regular_hours overtime_hours].any? { |field| row[field].to_d.nonzero? }
+      end
+      unless missing_category_count == actual_missing_category_count
+        raise Error, "issues.missing_category_count does not reconcile"
+      end
+      unless allow_legacy_uncategorized || missing_category_count.zero?
+        raise Error, "issues.missing_category_count must be zero for a finalized batch"
+      end
     end
 
     def assert_hours!(employee, rows, path)

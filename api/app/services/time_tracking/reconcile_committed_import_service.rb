@@ -2,6 +2,8 @@
 
 module TimeTracking
   class ReconcileCommittedImportService
+    HISTORICAL_ROUNDING_TOLERANCE = BigDecimal("0.05")
+
     class RowMismatch < ArgumentError
       attr_reader :source_user_id, :employee_id
 
@@ -49,6 +51,7 @@ module TimeTracking
         mapping_by_source_id = mappings.index_by { |mapping| value(mapping, :source_user_id).to_s }
         seen_employee_ids = Set.new
         linked = []
+        rounding_exceptions = []
 
         rows.each do |row|
           source_user_id = row.fetch("source_user_id").to_s
@@ -60,7 +63,8 @@ module TimeTracking
           raise ArgumentError, "Mapped payroll employee was not found" unless employee
           item = pay_period.payroll_items.find_by(employee_id: employee.id)
           raise ArgumentError, "#{employee.full_name} does not have a payroll item in this committed period" unless item
-          validate_hours!(item, row, employee)
+          rounding_exception = validate_hours!(item, row, employee)
+          rounding_exceptions << rounding_exception if rounding_exception
           persist_mapping!(row, employee)
           EntryAllocationRecorder.new(
             time_tracking_import: import,
@@ -76,7 +80,8 @@ module TimeTracking
           applied_by: actor,
           reconciled_at: Time.current,
           reconciled_by: actor,
-          reconciliation_note: note
+          reconciliation_note: note,
+          reconciliation_exceptions: rounding_exceptions
         )
         ids[:batch] << AirePayrollAcknowledgement.record!(
           time_tracking_import: import,
@@ -85,13 +90,18 @@ module TimeTracking
         ).id
         ids[:entries].concat(record_entry_lifecycle!.map(&:id))
 
-        { reconciled: linked, errors: [] }
+        { reconciled: linked, rounding_exceptions: rounding_exceptions, errors: [] }
       end
     end
 
     def validate_provenance!
       raw = import.raw_payload
-      PayrollBatchPayloadValidator.new(payload: raw, start_date: import.start_date, end_date: import.end_date).validate!
+      PayrollBatchPayloadValidator.new(
+        payload: raw,
+        start_date: import.start_date,
+        end_date: import.end_date,
+        allow_legacy_uncategorized: true
+      ).validate!
       checksum = raw.dig("export", "checksum")
       valid = import.processed_payload["validation_version"] == BatchImportPreviewService::VALIDATION_VERSION &&
         import.external_batch_id == raw["batch_id"] && import.external_batch_checksum == checksum &&
@@ -107,6 +117,24 @@ module TimeTracking
       actual_regular = item.hours_worked.to_d.round(2)
       actual_overtime = item.overtime_hours.to_d.round(2)
       return if actual_regular == expected_regular && actual_overtime == expected_overtime
+
+      regular_difference = actual_regular - expected_regular
+      overtime_difference = actual_overtime - expected_overtime
+      total_difference = regular_difference + overtime_difference
+      if [ regular_difference, overtime_difference, total_difference ].all? { |difference| difference.abs <= HISTORICAL_ROUNDING_TOLERANCE }
+        return {
+          "source_user_id" => row.fetch("source_user_id").to_s,
+          "employee_id" => employee.id,
+          "employee_name" => employee.full_name,
+          "aire_regular_hours" => format("%.2f", expected_regular),
+          "cornerstone_regular_hours" => format("%.2f", actual_regular),
+          "regular_difference_hours" => format("%+.2f", regular_difference),
+          "aire_overtime_hours" => format("%.2f", expected_overtime),
+          "cornerstone_overtime_hours" => format("%.2f", actual_overtime),
+          "overtime_difference_hours" => format("%+.2f", overtime_difference),
+          "total_difference_hours" => format("%+.2f", total_difference)
+        }
+      end
 
       raise RowMismatch.new(
         "#{employee.full_name} does not reconcile: Cornerstone has #{format('%.2f', actual_regular)} regular / #{format('%.2f', actual_overtime)} overtime hours, " \

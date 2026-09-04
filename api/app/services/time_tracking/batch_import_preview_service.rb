@@ -19,7 +19,12 @@ module TimeTracking
       client = Client.new(source)
       batch_summary = discover_batch!(client)
       raw = client.payroll_batch(batch_id: batch_summary.fetch("id"))
-      PayrollBatchPayloadValidator.new(payload: raw, start_date: start_date, end_date: end_date).validate!
+      PayrollBatchPayloadValidator.new(
+        payload: raw,
+        start_date: start_date,
+        end_date: end_date,
+        allow_legacy_uncategorized: pay_period.committed?
+      ).validate!
       validate_summary_identity!(batch_summary, raw)
       validate_source_workweeks!(raw, workweek)
 

@@ -112,6 +112,7 @@ module Api
             applied_at: import.applied_at,
             reconciled_at: import.reconciled_at,
             reconciliation_note: import.reconciliation_note,
+            reconciliation_exceptions: import.reconciliation_exceptions,
             source_processing_status: import.source_processing_status,
             source_processing_synced_at: import.source_processing_synced_at,
             source_processing_sync_error: import.source_processing_sync_error
