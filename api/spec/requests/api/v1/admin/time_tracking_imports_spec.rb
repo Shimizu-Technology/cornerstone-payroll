@@ -63,8 +63,9 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("import", "id")).to eq(123)
-      expect(response.parsed_body.fetch("import")).to include(
+      json = JSON.parse(response.body)
+      expect(json.dig("import", "id")).to eq(123)
+      expect(json.fetch("import")).to include(
         "applied_at" => nil,
         "source_processing_status" => nil,
         "source_processing_synced_at" => nil,
@@ -106,8 +107,9 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("import", "id")).to eq(import.id)
-      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      json = JSON.parse(response.body)
+      expect(json.dig("import", "id")).to eq(import.id)
+      expect(json.dig("results", "errors")).to eq([])
     end
 
     it "returns 422 when permanent AIRE identities conflict" do
@@ -135,7 +137,8 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/identity conflicts/)
+      json = JSON.parse(response.body)
+      expect(json.fetch("error")).to match(/identity conflicts/)
     end
   end
 
@@ -181,7 +184,8 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body.dig("results", "reconciled", 0, "employee_id")).to eq(42)
+      json = JSON.parse(response.body)
+      expect(json.dig("data", "results", "reconciled", 0, "employee_id")).to eq(42)
     end
 
     it "returns 422 for an identity conflict" do
@@ -197,7 +201,9 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/identity conflicts/)
+      json = JSON.parse(response.body)
+      expect(json.fetch("error")).to match(/identity conflicts/)
+      expect(json.fetch("details")).to eq([])
     end
 
     it "returns 404 for an unknown import" do
@@ -206,7 +212,9 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
            headers: { "X-Company-Id" => company.id.to_s }
 
       expect(response).to have_http_status(:not_found)
-      expect(response.parsed_body.fetch("error")).to eq("Time tracking import not found")
+      json = JSON.parse(response.body)
+      expect(json.fetch("error")).to eq("Time tracking import not found")
+      expect(json.fetch("details")).to eq([])
     end
   end
 end

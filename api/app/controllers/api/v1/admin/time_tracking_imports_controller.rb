@@ -49,11 +49,11 @@ module Api
             reconciliation_note: permitted[:reconciliation_note]
           ).call
 
-          render json: { results: results, import: import_json(import.reload) }
+          render json: { data: { results: results, import: import_json(import.reload) } }
         rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: { error: e.message, details: [] }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
-          render json: { error: "Time tracking import not found" }, status: :not_found
+          render json: { error: "Time tracking import not found", details: [] }, status: :not_found
         end
 
         private

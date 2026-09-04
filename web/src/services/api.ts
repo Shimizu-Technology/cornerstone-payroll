@@ -1085,8 +1085,8 @@ export const payPeriodsApi = {
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
-  reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }> =>
-    api.post<{ results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/reconcile_time_tracking_import`, data),
+  reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ data: { results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData } }> =>
+    api.post<{ data: { results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData } }>(`/admin/pay_periods/${id}/reconcile_time_tracking_import`, data),
 };
 
 export const clientPayPeriodsApi = {

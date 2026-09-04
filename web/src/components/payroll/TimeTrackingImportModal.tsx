@@ -299,7 +299,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           })),
         };
       });
-      const res = isHistoricalReconciliation
+      const response = isHistoricalReconciliation
         ? await payPeriodsApi.reconcileTimeTrackingImport(payPeriod.id, {
           import_id: preview.id,
           mappings: applyMappings.map(({ source_user_id, employee_id }) => ({ source_user_id, employee_id })),
@@ -311,6 +311,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
           acknowledge_negative_adjustments: negativeAdjustmentsReviewed,
           negative_adjustment_note: negativeAdjustmentNote.trim(),
         });
+      const res = 'data' in response ? response.data : response;
 
       if (res.results.errors.length > 0) {
         setError('Some rows could not be imported. Resolve the highlighted mappings and try again.');
