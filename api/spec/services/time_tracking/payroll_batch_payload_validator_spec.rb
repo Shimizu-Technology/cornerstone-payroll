@@ -172,4 +172,20 @@ RSpec.describe TimeTracking::PayrollBatchPayloadValidator do
       ).validate!
     end.to raise_error(described_class::Error, /missing_category_count does not reconcile/)
   end
+
+  it "rejects a fractional missing-category count near the actual integer count" do
+    payload = valid_payload
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 0.995
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+
+    expect do
+      described_class.new(
+        payload: payload,
+        start_date: "2026-08-16",
+        end_date: "2026-08-31",
+        allow_legacy_uncategorized: true
+      ).validate!
+    end.to raise_error(described_class::Error, /missing_category_count does not reconcile/)
+  end
 end

@@ -212,7 +212,7 @@ module TimeTracking
       actual_missing_category_count = adjustments.count do |row|
         row["category"].nil? && %w[total_hours regular_hours overtime_hours].any? { |field| row[field].to_d.nonzero? }
       end
-      unless close?(missing_category_count, actual_missing_category_count)
+      unless missing_category_count == actual_missing_category_count
         raise Error, "issues.missing_category_count does not reconcile"
       end
       unless allow_legacy_uncategorized || missing_category_count.zero?
