@@ -181,6 +181,7 @@ Rails.application.routes.draw do
             post :apply_timecard_import, to: "timecard_imports#apply"
             post :preview_time_tracking_import, to: "time_tracking_imports#preview"
             post :apply_time_tracking_import, to: "time_tracking_imports#apply"
+            post :reconcile_time_tracking_import, to: "time_tracking_imports#reconcile"
           end
 
           resources :payroll_intake_imports, only: [ :index, :show ] do
@@ -217,6 +218,7 @@ Rails.application.routes.draw do
         # CPR-66: Per-item check actions (payroll_item_id param)
         get  "payroll_items/:payroll_item_id/check",             to: "checks#show",           as: :payroll_item_check
         post "payroll_items/:payroll_item_id/check/mark_printed", to: "checks#mark_printed",  as: :payroll_item_check_mark_printed
+        post "payroll_items/:payroll_item_id/check/mark_delivered", to: "checks#mark_delivered", as: :payroll_item_check_mark_delivered
         patch "payroll_items/:payroll_item_id/check_number",      to: "checks#update_check_number", as: :payroll_item_check_number
         post "payroll_items/:payroll_item_id/void",              to: "checks#void",           as: :payroll_item_void
         post "payroll_items/:payroll_item_id/reprint",           to: "checks#reprint",        as: :payroll_item_reprint

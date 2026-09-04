@@ -734,6 +734,14 @@ export interface PayrollItem {
   loan_deduction?: number;
   tip_pool?: 'boh' | 'foh' | 'mixed' | null;
   import_source?: string | null;
+  time_tracking_provenance?: {
+    source: 'aire_services';
+    entry_count: number;
+    allocation_count: number;
+    total_hours: number;
+    carryover_hours: number;
+    original_work_dates: string[];
+  } | null;
   // Custom/flexible deductions
   custom_columns_data?: Record<string, number>;
   // YTD totals (snapshot at time of calculation)
@@ -755,7 +763,7 @@ export interface PayrollItem {
   check_memo?: string | null;
   check_printed_at?: string | null;
   check_print_count?: number;
-  check_status?: 'unprinted' | 'printed' | 'voided' | null;
+  check_status?: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
   voided?: boolean;
   voided_at?: string | null;
   void_reason?: string | null;
@@ -909,7 +917,7 @@ export interface SupplementalPayPeriodSummary {
     medicare_tax: number;
     net_pay: number;
     check_number: string | null;
-    check_status: 'unprinted' | 'printed' | 'voided' | null;
+    check_status: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
   }>;
   totals: {
     gross_delta: number;
@@ -1030,7 +1038,7 @@ export interface ApiError {
 
 export interface CheckEvent {
   id: number;
-  event_type: 'assigned' | 'printed' | 'voided' | 'reprinted' | 'batch_downloaded' | 'replaced' | 'renumbered';
+  event_type: 'assigned' | 'printed' | 'delivered' | 'voided' | 'reprinted' | 'batch_downloaded' | 'replaced' | 'renumbered';
   check_number: string | null;
   reason: string | null;
   user_id: number | null;
@@ -1049,7 +1057,7 @@ export interface CheckItem {
   check_number: string | null;
   net_pay: number;
   gross_pay: number;
-  check_status: 'unprinted' | 'printed' | 'voided' | null;
+  check_status: 'unprinted' | 'printed' | 'delivered' | 'voided' | null;
   check_printed_at: string | null;
   check_print_count: number;
   voided: boolean;
@@ -1062,6 +1070,7 @@ export interface CheckItem {
 export interface CheckListMeta {
   total: number;
   printed: number;
+  delivered: number;
   unprinted: number;
   voided: number;
   check_stock_type: CheckStockType;
@@ -1083,7 +1092,7 @@ export interface CheckPrintQueueItem {
   amount: number;
   kind: 'employee' | 'non_employee';
   kind_label: string;
-  status: 'unprinted' | 'printed' | 'voided' | 'pending';
+  status: 'unprinted' | 'printed' | 'delivered' | 'voided' | 'pending';
   print_count: number;
   printed_at: string | null;
   eligible: boolean;

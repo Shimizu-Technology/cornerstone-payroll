@@ -191,6 +191,23 @@ RSpec.describe ReplaceCheckService do
       expect(events.last.reason).to include("Replace (uncashed, printed)")
     end
 
+    it "does not report the still-active replacement obligation as payment_voided" do
+      allow(AirePayrollEntryAcknowledgement).to receive(:record_for_check_event!).and_call_original
+
+      result = described_class.replace!(
+        payroll_item: original_item,
+        corrected_inputs: { hours_worked: 80 },
+        reason: "Returned uncashed; corrected hours",
+        actor: actor
+      )
+
+      expect(result).not_to be_voided
+      expect(AirePayrollEntryAcknowledgement).not_to have_received(:record_for_check_event!).with(
+        check_event: kind_of(CheckEvent),
+        status: "payment_voided"
+      )
+    end
+
     it "subtracts the original from YTD then re-adds the corrected, leaving net delta of +300 gross" do
       original_gross_ytd = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024).gross_pay
 

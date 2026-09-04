@@ -52,6 +52,27 @@ module TimeTracking
       )
     end
 
+    def record_payroll_entry_processing_event(batch_id:, event_id:, status:, occurred_at:, external_pay_period_id:, external_payroll_item_id:, source_time_entry_id:, source_user_uuid: nil, payment_method: nil, payment_reference: nil, metadata: {})
+      request_json(
+        payroll_batch_processing_events_uri(batch_id),
+        validate_source: false,
+        method: :post,
+        body: {
+          event_id: event_id,
+          status: status,
+          occurred_at: occurred_at,
+          external_system: "cornerstone_payroll",
+          external_pay_period_id: external_pay_period_id,
+          external_payroll_item_id: external_payroll_item_id,
+          source_time_entry_id: source_time_entry_id,
+          source_user_uuid: source_user_uuid,
+          payment_method: payment_method,
+          payment_reference: payment_reference,
+          metadata: metadata
+        }.compact
+      )
+    end
+
     class Error < StandardError; end
 
     private

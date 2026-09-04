@@ -33,10 +33,33 @@ module Api
 
           status = results[:errors].any? ? :unprocessable_entity : :ok
           render json: { results: results, import: import_json(import.reload) }, status: status
-        rescue ArgumentError, ActiveRecord::RecordInvalid => e
+        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Time tracking import not found" }, status: :not_found
+        end
+
+        def reconcile
+          permitted = reconcile_params
+          import = @pay_period.time_tracking_imports.find(permitted[:import_id])
+          results = TimeTracking::ReconcileCommittedImportService.new(
+            import: import,
+            mappings: permitted[:mappings] || [],
+            reconciled_by: current_user,
+            reconciliation_note: permitted[:reconciliation_note]
+          ).call
+
+          render json: { data: { results: results, import: import_json(import.reload) } }
+        rescue TimeTracking::ReconcileCommittedImportService::RowMismatch => e
+          render json: {
+            error: e.message,
+            details: [],
+            data: { source_user_id: e.source_user_id, employee_id: e.employee_id }
+          }, status: :unprocessable_entity
+        rescue ArgumentError, ActiveRecord::RecordInvalid, TimeTrackingEmployeeMapping::IdentityConflict => e
+          render json: { error: e.message, details: [] }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordNotFound
+          render json: { error: "Time tracking import not found", details: [] }, status: :not_found
         end
 
         private
@@ -62,6 +85,14 @@ module Api
           )
         end
 
+        def reconcile_params
+          params.permit(
+            :import_id,
+            :reconciliation_note,
+            mappings: [ :source_user_id, :employee_id ]
+          )
+        end
+
         def import_json(import)
           {
             id: import.id,
@@ -79,6 +110,8 @@ module Api
             contract_version: import.contract_version,
             source_cutoff_at: import.source_cutoff_at,
             applied_at: import.applied_at,
+            reconciled_at: import.reconciled_at,
+            reconciliation_note: import.reconciliation_note,
             source_processing_status: import.source_processing_status,
             source_processing_synced_at: import.source_processing_synced_at,
             source_processing_sync_error: import.source_processing_sync_error
