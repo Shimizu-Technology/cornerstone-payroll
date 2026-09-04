@@ -205,6 +205,50 @@ RSpec.describe TimeTracking::BatchImportPreviewService do
     expect(categories.first).not_to have_key("effective_rate_cents")
   end
 
+  it "allows legacy uncategorized payable entries when previewing a committed payroll for reconciliation" do
+    company, _workweek, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    pay_period.update!(status: "committed", committed_at: Time.current)
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_batches).and_return(
+      "payroll_batches" => [
+        { "id" => payload["batch_id"], "start_date" => payload["start_date"], "end_date" => payload["end_date"], "cutoff_at" => payload["cutoff_at"], "checksum" => payload.dig("export", "checksum") }
+      ]
+    )
+    allow(client).to receive(:payroll_batch).and_return(payload)
+
+    row = described_class.new(pay_period: pay_period, source: source).call.processed_payload.fetch("rows").first
+
+    expect(row).to include("employee_id" => employee.id, "regular_hours" => 8.0)
+    expect(row.fetch("categories")).to contain_exactly(include("name" => "Uncategorized", "regular_hours" => 8.0))
+  end
+
+  it "keeps legacy uncategorized payable entries blocked for an open payroll import" do
+    company, _workweek, pay_period, source = setup_records
+    create(:employee, company: company, department: create(:department, company: company), email: "pilot@example.com")
+    payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date)
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+    client = instance_double(TimeTracking::Client)
+    allow(TimeTracking::Client).to receive(:new).with(source).and_return(client)
+    allow(client).to receive(:payroll_batches).and_return(
+      "payroll_batches" => [
+        { "id" => payload["batch_id"], "start_date" => payload["start_date"], "end_date" => payload["end_date"], "cutoff_at" => payload["cutoff_at"], "checksum" => payload.dig("export", "checksum") }
+      ]
+    )
+    allow(client).to receive(:payroll_batch).and_return(payload)
+
+    expect do
+      described_class.new(pay_period: pay_period, source: source).call
+    end.to raise_error(TimeTracking::PayrollBatchPayloadValidator::Error, /category must be an object/)
+  end
+
   it "returns the existing import for the same batch ID and checksum" do
     _company, _workweek, pay_period, source = setup_records
     payload = finalized_payload(start_date: pay_period.start_date, end_date: pay_period.end_date, employees: [])

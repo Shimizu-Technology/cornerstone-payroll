@@ -91,7 +91,12 @@ module TimeTracking
 
     def validate_provenance!
       raw = import.raw_payload
-      PayrollBatchPayloadValidator.new(payload: raw, start_date: import.start_date, end_date: import.end_date).validate!
+      PayrollBatchPayloadValidator.new(
+        payload: raw,
+        start_date: import.start_date,
+        end_date: import.end_date,
+        allow_legacy_uncategorized: true
+      ).validate!
       checksum = raw.dig("export", "checksum")
       valid = import.processed_payload["validation_version"] == BatchImportPreviewService::VALIDATION_VERSION &&
         import.external_batch_id == raw["batch_id"] && import.external_batch_checksum == checksum &&

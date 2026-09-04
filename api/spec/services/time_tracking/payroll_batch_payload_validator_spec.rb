@@ -129,4 +129,47 @@ RSpec.describe TimeTracking::PayrollBatchPayloadValidator do
       described_class.new(payload: payload, start_date: "2026-08-16", end_date: "2026-08-31").validate!
     end.to raise_error(described_class::Error, /does not match its employee/)
   end
+
+  it "keeps payable categories mandatory for ordinary finalized-batch imports" do
+    payload = valid_payload
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+
+    expect do
+      described_class.new(payload: payload, start_date: "2026-08-16", end_date: "2026-08-31").validate!
+    end.to raise_error(described_class::Error, /category must be an object/)
+  end
+
+  it "accepts checksum-bound uncategorized legacy entries only for historical reconciliation" do
+    payload = valid_payload
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 1
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+
+    result = described_class.new(
+      payload: payload,
+      start_date: "2026-08-16",
+      end_date: "2026-08-31",
+      allow_legacy_uncategorized: true
+    ).validate!
+
+    expect(result).to equal(payload)
+  end
+
+  it "verifies the declared legacy missing-category count" do
+    payload = valid_payload
+    payload["employees"][0]["adjustments"][0].merge!("source_category_id" => nil, "category" => nil)
+    payload["issues"]["missing_category_count"] = 2
+    payload["export"]["checksum"] = TimeTracking::CanonicalPayload.checksum(payload.except("export"))
+
+    expect do
+      described_class.new(
+        payload: payload,
+        start_date: "2026-08-16",
+        end_date: "2026-08-31",
+        allow_legacy_uncategorized: true
+      ).validate!
+    end.to raise_error(described_class::Error, /missing_category_count does not reconcile/)
+  end
 end
