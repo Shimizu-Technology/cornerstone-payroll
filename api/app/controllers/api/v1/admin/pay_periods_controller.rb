@@ -1039,7 +1039,7 @@ module Api
           end
 
           if include_items
-            json[:payroll_items] = pay_period.payroll_items.includes(:payroll_item_field_entries, employee: :department).map do |item|
+            json[:payroll_items] = pay_period.payroll_items.includes(:payroll_item_field_entries, :time_tracking_entry_allocations, employee: :department).map do |item|
               payroll_item_json(item)
             end
             json[:excluded_employee_ids] = pay_period.pay_period_excluded_employees.pluck(:employee_id)
@@ -1119,6 +1119,7 @@ module Api
             loan_deduction: item.loan_deduction,
             tip_pool: item.tip_pool,
             import_source: item.import_source,
+            time_tracking_provenance: time_tracking_provenance_json(item),
             voided: item.voided,
             voided_at: item.voided_at,
             void_reason: item.void_reason,
@@ -1126,6 +1127,20 @@ module Api
             ytd_gross: item.ytd_gross,
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
+          }
+        end
+
+        def time_tracking_provenance_json(item)
+          allocations = item.time_tracking_entry_allocations.to_a
+          return nil if allocations.empty?
+
+          {
+            source: "aire_services",
+            entry_count: allocations.map(&:source_time_entry_id).uniq.size,
+            allocation_count: allocations.size,
+            total_hours: allocations.sum(&:total_hours).to_d.round(2).to_f,
+            carryover_hours: allocations.select { |row| row.source_kind == "carryover" }.sum(&:total_hours).to_d.round(2).to_f,
+            original_work_dates: allocations.map(&:original_work_date).uniq.sort.map(&:iso8601)
           }
         end
 

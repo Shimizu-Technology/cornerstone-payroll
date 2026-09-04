@@ -19,7 +19,10 @@ class TimeTrackingImport < ApplicationRecord
   belongs_to :pay_period
   belongs_to :time_tracking_source
   belongs_to :applied_by, class_name: "User", optional: true
+  belongs_to :reconciled_by, class_name: "User", optional: true
   has_many :aire_payroll_acknowledgements, dependent: :restrict_with_error
+  has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
+  has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
 
   validates :status, inclusion: { in: STATUSES }
   validates :start_date, :end_date, :fetch_start_date, :fetch_end_date, :source_payload_hash, presence: true

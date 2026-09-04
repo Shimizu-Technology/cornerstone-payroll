@@ -18,6 +18,8 @@ class PayrollItem < ApplicationRecord
   has_many :loan_transactions, dependent: :nullify
   has_many :payroll_liability_entries, dependent: :restrict_with_error
   has_many :payroll_time_allocations, dependent: :destroy
+  has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
+  has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 
@@ -124,6 +126,29 @@ class PayrollItem < ApplicationRecord
     end
   end
 
+  def mark_delivered!(user:, ip_address: nil)
+    raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
+    raise ArgumentError, "Print the check before marking it delivered" if check_printed_at.blank?
+    raise ArgumentError, "Check actions are only available for committed pay periods" unless pay_period.committed?
+
+    ApplicationRecord.transaction do
+      lock!
+      raise ArgumentError, "Cannot mark a voided check as delivered" if voided?
+      raise ArgumentError, "Print the check before marking it delivered" if check_printed_at.blank?
+
+      existing = check_events.find_by(event_type: "delivered", check_number: check_number)
+      return { already_delivered: true, event: existing } if existing
+
+      event = check_events.create!(
+        user: user,
+        event_type: "delivered",
+        check_number: check_number,
+        ip_address: ip_address
+      )
+      { already_delivered: false, event: event }
+    end
+  end
+
   # Void this check.  Does NOT delete the record.
   # @param user [User]   the admin performing the void
   # @param reason [String] required written reason (min 10 chars)
@@ -157,6 +182,7 @@ class PayrollItem < ApplicationRecord
   # Check status helper (used in serialisation)
   def check_status
     return "voided"   if voided?
+    return "delivered" if check_events.any? { |event| event.event_type == "delivered" && event.check_number == check_number }
     return "printed"  if check_printed_at.present?
     return "unprinted" if check_number.present?
     nil

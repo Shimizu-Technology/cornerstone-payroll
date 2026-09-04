@@ -14,9 +14,10 @@ module TimeTracking
     end
 
     def call
-      acknowledgement_ids = []
+      acknowledgement_ids = { batch: [], entries: [] }
       results = @pay_period.with_lock { apply_locked!(acknowledgement_ids) }
-      AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids)
+      AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch])
+      AirePayrollEntryAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:entries])
       results
     end
 
@@ -134,6 +135,11 @@ module TimeTracking
 
           item.import_source = current_import_source
           item.save!
+          TimeTracking::EntryAllocationRecorder.new(
+            time_tracking_import: @import,
+            payroll_item: item,
+            source_employee: source_employee_for(row)
+          ).call if finalized_batch?
 
           results[:applied] << {
             employee_id: employee.id,
@@ -159,7 +165,14 @@ module TimeTracking
             status: "imported",
             occurred_at: @import.applied_at
           )
-          acknowledgement_ids << acknowledgement.id
+          acknowledgement_ids[:batch] << acknowledgement.id
+          acknowledgement_ids[:entries].concat(
+            AirePayrollEntryAcknowledgement.record_for_import!(
+              time_tracking_import: @import,
+              status: "imported",
+              occurred_at: @import.applied_at
+            ).map(&:id)
+          )
         end
       end
 
@@ -611,17 +624,31 @@ module TimeTracking
     end
 
     def persist_mapping!(row, employee)
+      source_user_uuid = row["source_user_uuid"].presence
       lookup_attrs = {
         company: @company,
         time_tracking_source: @source,
         source_user_id: row["source_user_id"].to_s
       }
-      mapping = find_or_create_mapping!(lookup_attrs, employee)
+      mapping = TimeTrackingEmployeeMapping.resolve_source_identity!(
+        company: @company,
+        source: @source,
+        source_user_id: row["source_user_id"],
+        source_user_uuid: source_user_uuid
+      )
+      mapping ||= find_or_create_mapping!(lookup_attrs, employee)
       mapping.update!(
         employee: employee,
+        source_user_id: row["source_user_id"].to_s,
+        source_user_uuid: source_user_uuid,
         source_email: row["source_email"],
         source_display_name: row["source_display_name"]
       )
+    end
+
+    def source_employee_for(row)
+      @source_employees_by_id ||= Array(@import.raw_payload["employees"]).index_by { |employee| employee.fetch("source_user_id").to_s }
+      @source_employees_by_id.fetch(row.fetch("source_user_id").to_s)
     end
 
     def find_or_create_mapping!(lookup_attrs, employee)

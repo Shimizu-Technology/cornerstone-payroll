@@ -847,6 +847,7 @@ export interface TimeTrackingPreviewCategory {
 
 export interface TimeTrackingPreviewRow {
   source_user_id: string;
+  source_user_uuid?: string | null;
   source_email: string | null;
   source_display_name: string;
   employee_id: number | null;
@@ -905,6 +906,8 @@ export interface TimeTrackingImportData {
   contract_version: string | null;
   source_cutoff_at: string | null;
   applied_at: string | null;
+  reconciled_at?: string | null;
+  reconciliation_note?: string | null;
   source_processing_status: 'imported' | 'committed' | 'payment_issued' | 'payment_failed' | null;
   source_processing_synced_at: string | null;
   source_processing_sync_error: string | null;
@@ -1082,6 +1085,8 @@ export const payPeriodsApi = {
     api.post<{ import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/preview_time_tracking_import`, data),
   applyTimeTrackingImport: (id: number, data: { import_id: number; acknowledge_negative_adjustments?: boolean; negative_adjustment_note?: string; mappings: Array<{ source_user_id: string; employee_id: number | null; include: boolean; wage_rate_mappings?: Array<{ source_category_id?: string | null; source_category_key?: string | null; source_category_name?: string | null; source_kind?: string | null; employee_wage_rate_id: number | null }> }> }): Promise<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }> =>
     api.post<{ results: { applied: unknown[]; skipped: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/apply_time_tracking_import`, data),
+  reconcileTimeTrackingImport: (id: number, data: { import_id: number; reconciliation_note: string; mappings: Array<{ source_user_id: string; employee_id: number | null }> }): Promise<{ results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }> =>
+    api.post<{ results: { reconciled: unknown[]; errors: unknown[] }; import: TimeTrackingImportData }>(`/admin/pay_periods/${id}/reconcile_time_tracking_import`, data),
 };
 
 export const clientPayPeriodsApi = {
@@ -2339,6 +2344,9 @@ export const checksApi = {
   // Mark a single check as printed
   markPrinted: (payrollItemId: number) =>
     api.post<{ payroll_item: CheckItem; already_printed: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_printed`),
+
+  markDelivered: (payrollItemId: number) =>
+    api.post<{ payroll_item: CheckItem; already_delivered: boolean }>(`/admin/payroll_items/${payrollItemId}/check/mark_delivered`),
 
   // Correct an assigned check number without changing payroll values
   updateCheckNumber: (payrollItemId: number, checkNumber: string, reason?: string) =>

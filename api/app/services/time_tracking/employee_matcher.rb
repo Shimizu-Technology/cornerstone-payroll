@@ -9,12 +9,27 @@ module TimeTracking
       @company = company
       @source = source
       @employee_scope = Employee.active.where(company_id: company.id)
-      @mappings = TimeTrackingEmployeeMapping.includes(:employee).where(company: company, time_tracking_source: source).index_by(&:source_user_id)
+      mapping_scope = TimeTrackingEmployeeMapping.includes(:employee).where(company: company, time_tracking_source: source)
+      @mappings_by_source_id = mapping_scope.index_by(&:source_user_id)
+      @mappings_by_source_uuid = mapping_scope.where.not(source_user_uuid: nil).index_by(&:source_user_uuid)
     end
 
     def match(source_employee)
       source_user_id = source_employee["source_user_id"].to_s
-      existing = @mappings[source_user_id]
+      source_user_uuid = source_employee["source_user_uuid"].to_s.presence
+      existing = if source_user_uuid
+        by_uuid = @mappings_by_source_uuid[source_user_uuid]
+        by_id = @mappings_by_source_id[source_user_id]
+        if by_uuid && by_id && by_uuid.id != by_id.id
+          raise TimeTrackingEmployeeMapping::IdentityConflict, "AIRE staff identity conflicts with two saved payroll mappings"
+        end
+        if by_id&.source_user_uuid.present? && by_id.source_user_uuid != source_user_uuid
+          raise TimeTrackingEmployeeMapping::IdentityConflict, "AIRE staff ID is already linked to a different permanent identity"
+        end
+        by_uuid || by_id
+      else
+        @mappings_by_source_id[source_user_id]
+      end
       return matched(existing.employee, "saved_mapping", 1.0) if existing&.employee&.active?
 
       email = source_employee["email"].to_s.downcase.strip

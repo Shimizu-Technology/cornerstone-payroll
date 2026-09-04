@@ -20,14 +20,15 @@ interface ChecksPanelProps {
   refreshToken?: number;
 }
 
-type CheckAction = 'preview' | 'markPrinted' | 'stub';
+type CheckAction = 'preview' | 'markPrinted' | 'markDelivered' | 'stub';
 
 function checkStatusBadge(item: CheckItem) {
   if (item.voided) return <Badge variant="danger">Voided</Badge>;
+  if (item.check_status === 'delivered') return <Badge variant="success">Delivered / paid</Badge>;
   if (item.check_printed_at)
     return (
-      <Badge variant="success">
-        Printed{item.check_print_count > 1 ? ` (×${item.check_print_count})` : ''}
+      <Badge variant="info">
+        Printed / ready{item.check_print_count > 1 ? ` (×${item.check_print_count})` : ''}
       </Badge>
     );
   if (item.check_number) return <Badge variant="warning">Unprinted</Badge>;
@@ -52,6 +53,7 @@ function eventLabel(eventType: string) {
   switch (eventType) {
     case 'assigned': return 'Assigned';
     case 'printed': return 'Printed';
+    case 'delivered': return 'Delivered';
     case 'voided': return 'Voided';
     case 'reprinted': return 'Reissued';
     case 'batch_downloaded': return 'Batch downloaded';
@@ -301,6 +303,19 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
     }
   };
 
+  const handleMarkDelivered = async (item: CheckItem) => {
+    if (!window.confirm(`Confirm that check #${item.check_number} was delivered to ${item.employee_name}? This marks the linked AIRE hours as paid.`)) return;
+    setActionLoading({ id: item.id, action: 'markDelivered' });
+    try {
+      await checksApi.markDelivered(item.id);
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to mark check as delivered');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // ---- Void complete callback ----
   const handleVoidComplete = async () => {
     setVoidTarget(null);
@@ -342,13 +357,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredChecks = normalizedSearch
     ? checks.filter((item) => {
-        const statusLabel = item.voided
-          ? 'voided'
-          : item.check_printed_at
-          ? 'printed'
-          : item.check_number
-          ? 'unprinted'
-          : 'no check';
+        const statusLabel = item.check_status || (item.check_number ? 'unprinted' : 'no check');
 
         return [
           item.employee_name,
@@ -391,6 +400,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
               <span><span className="font-medium text-gray-900">{meta.total}</span> total</span>
               <span><span className="font-medium text-yellow-700">{meta.unprinted}</span> unprinted</span>
               <span><span className="font-medium text-green-700">{meta.printed}</span> printed</span>
+              <span><span className="font-medium text-emerald-700">{meta.delivered}</span> delivered</span>
               {meta.voided > 0 && (
                 <span><span className="font-medium text-red-700">{meta.voided}</span> voided</span>
               )}
@@ -450,7 +460,7 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
       )}
 
       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
-        Before printing on live check stock, print one test page on plain paper or a photocopy of the real check and confirm the alignment.
+        Printing means the check was prepared. Mark it delivered only after the employee has received it; linked AIRE hours are not marked paid until then.
       </div>
 
       {checkNumberChanges.length > 0 && (
@@ -559,6 +569,11 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                     {!item.voided && (
                       <Button size="sm" variant="outline" onClick={() => handleMarkPrinted(item)} disabled={isActionLoading(item.id, 'markPrinted')}>
                         {isActionLoading(item.id, 'markPrinted') ? 'Loading…' : item.check_printed_at ? '+ Print' : 'Mark Printed'}
+                      </Button>
+                    )}
+                    {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
+                      <Button size="sm" onClick={() => void handleMarkDelivered(item)} disabled={isActionLoading(item.id, 'markDelivered')}>
+                        {isActionLoading(item.id, 'markDelivered') ? 'Saving…' : 'Mark Delivered'}
                       </Button>
                     )}
                     {!item.voided && item.check_number && (
@@ -693,6 +708,17 @@ export function ChecksPanel({ payPeriod, searchTerm = '', refreshToken = 0 }: Ch
                           className="text-xs px-2 py-1"
                         >
                           {isActionLoading(item.id, 'stub') ? '…' : 'Stub'}
+                        </Button>
+                      )}
+
+                      {!item.voided && item.check_printed_at && item.check_status !== 'delivered' && (
+                        <Button
+                          size="sm"
+                          onClick={() => void handleMarkDelivered(item)}
+                          disabled={isActionLoading(item.id, 'markDelivered')}
+                          className="text-xs px-2 py-1"
+                        >
+                          {isActionLoading(item.id, 'markDelivered') ? '…' : 'Delivered'}
                         </Button>
                       )}
 

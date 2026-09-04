@@ -101,6 +101,91 @@ RSpec.describe PayrollItem, type: :model do
     end
   end
 
+  describe "AIRE entry payment lifecycle" do
+    let!(:source) { create(:time_tracking_source, company: company, source_type: "aire_services") }
+    let!(:time_tracking_import) do
+      create(
+        :time_tracking_import,
+        :finalized_aire_batch,
+        pay_period: pay_period,
+        time_tracking_source: source,
+        status: "applied",
+        applied_at: Time.current
+      )
+    end
+    let!(:allocation) do
+      TimeTrackingEntryAllocation.create!(
+        company: company,
+        time_tracking_source: source,
+        time_tracking_import: time_tracking_import,
+        pay_period: pay_period,
+        payroll_item: item,
+        employee: employee,
+        source_user_id: "aire-user-1",
+        source_user_uuid: SecureRandom.uuid,
+        source_time_entry_id: "1508",
+        line_key: "flight:3000",
+        source_kind: "current",
+        original_work_date: pay_period.start_date,
+        category_snapshot: { "name" => "Flight Hours" },
+        total_hours: 8,
+        regular_hours: 8,
+        overtime_hours: 0
+      )
+    end
+
+    before do
+      allocation
+      allow(AirePayrollEntryStatusSyncJob).to receive(:perform_later).and_return(true)
+    end
+
+    it "distinguishes a prepared check from an issued payment" do
+      item.mark_printed!(user: admin_user)
+
+      expect(item.reload.check_status).to eq("printed")
+      expect(item.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id)).to contain_exactly(
+        [ "payment_prepared", "1508" ]
+      )
+
+      first_delivery = item.mark_delivered!(user: admin_user)
+      repeated_delivery = item.mark_delivered!(user: admin_user)
+
+      expect(first_delivery.fetch(:already_delivered)).to be(false)
+      expect(repeated_delivery.fetch(:already_delivered)).to be(true)
+      expect(item.reload.check_status).to eq("delivered")
+      expect(item.check_events.deliveries.count).to eq(1)
+      expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_issued").count).to eq(1)
+      expect(item.aire_payroll_entry_acknowledgements.find_by!(status: "payment_issued")).to have_attributes(
+        payment_method: "paper_check",
+        payment_reference: "5001"
+      )
+    end
+
+    it "records a void after delivery without erasing the earlier payment history" do
+      item.mark_printed!(user: admin_user)
+      item.mark_delivered!(user: admin_user)
+      item.void!(user: admin_user, reason: "Payment was returned and check was voided")
+
+      expect(item.reload.check_status).to eq("voided")
+      expect(item.aire_payroll_entry_acknowledgements.pluck(:status)).to contain_exactly(
+        "payment_prepared",
+        "payment_issued",
+        "payment_voided"
+      )
+    end
+
+    it "rolls back the check action if its durable AIRE outbox record cannot be created" do
+      allow(AirePayrollEntryAcknowledgement).to receive(:record_for_check_event!).and_raise(ActiveRecord::RecordInvalid.new)
+
+      expect do
+        item.mark_printed!(user: admin_user)
+      end.to raise_error(ActiveRecord::RecordInvalid)
+
+      expect(item.reload.check_printed_at).to be_nil
+      expect(item.check_events.prints).to be_empty
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # void!
   # ---------------------------------------------------------------------------

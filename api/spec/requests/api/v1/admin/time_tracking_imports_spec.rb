@@ -40,6 +40,8 @@ RSpec.describe "Api::V1::Admin::TimeTrackingImports", type: :request do
         contract_version: nil,
         source_cutoff_at: nil,
         applied_at: nil,
+        reconciled_at: nil,
+        reconciliation_note: nil,
         source_processing_status: nil,
         source_processing_synced_at: nil,
         source_processing_sync_error: nil
