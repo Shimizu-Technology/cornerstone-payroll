@@ -52,7 +52,7 @@ RSpec.describe TimeTrackingImport do
   end
 
   it "keeps historical reconciliation evidence immutable after the payroll is linked" do
-    original_reconciled_at = Time.current
+    original_reconciled_at = Time.current.round(6)
     original_reconciled_by = create(:user)
     original_exceptions = [ { "employee_id" => 42, "regular_difference_hours" => "-0.03" } ]
     import = create(
