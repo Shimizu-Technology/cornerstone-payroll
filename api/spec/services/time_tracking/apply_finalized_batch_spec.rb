@@ -277,12 +277,123 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     expect(item.reload).to have_attributes(hours_worked: 8.0, overtime_hours: 0.0, gross_pay: 200.0, net_pay: 180.0)
     expect(import.reload).to have_attributes(status: "applied", reconciled_by: actor)
     expect(import.reconciliation_note).to match(/signed historical payroll register/)
+    expect(result.fetch(:rounding_exceptions)).to be_empty
+    expect(import.reconciliation_exceptions).to be_empty
     expect(import.time_tracking_entry_allocations).to contain_exactly(
       have_attributes(source_time_entry_id: "historic-101", source_user_uuid: source_user_uuid, payroll_item_id: item.id)
     )
     expect(import.aire_payroll_entry_acknowledgements.pluck(:status, :source_time_entry_id)).to contain_exactly(
       [ "committed", "historic-101" ]
     )
+  end
+
+  it "records a small legacy rounding exception without changing committed payroll amounts" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "rounding@example.com")
+    adjustment = {
+      "source_time_entry_id" => "historic-rounding",
+      "line_key" => "flight-current",
+      "source_kind" => "current",
+      "original_work_date" => "2026-08-20",
+      "original_week_start" => "2026-08-16",
+      "source_category_id" => "flight",
+      "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+      "total_hours" => 8.0,
+      "regular_hours" => 8.0,
+      "overtime_hours" => 0.0
+    }
+    import = preview_import(
+      pay_period: pay_period,
+      source: source,
+      payload: payload_for(pay_period: pay_period, employee: employee, adjustments: [ adjustment ], batch_id: "AIRE-PAY-HISTORICAL-ROUNDING")
+    )
+    item = create(
+      :payroll_item,
+      pay_period: pay_period,
+      employee: employee,
+      hours_worked: 7.97,
+      overtime_hours: 0.03,
+      gross_pay: 200.0,
+      net_pay: 180.0
+    )
+    pay_period.update!(status: "committed", committed_at: Time.current)
+
+    result = TimeTracking::ReconcileCommittedImportService.new(
+      import: import,
+      mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+      reconciled_by: create(:user, company: company),
+      reconciliation_note: "Owner accepted the documented legacy rounding difference."
+    ).call
+
+    expected_exception = {
+      "source_user_id" => "aire-user-1",
+      "employee_id" => employee.id,
+      "employee_name" => employee.full_name,
+      "aire_regular_hours" => "8.00",
+      "cornerstone_regular_hours" => "7.97",
+      "regular_difference_hours" => "-0.03",
+      "aire_overtime_hours" => "0.00",
+      "cornerstone_overtime_hours" => "0.03",
+      "overtime_difference_hours" => "+0.03",
+      "total_difference_hours" => "+0.00"
+    }
+    expect(result.fetch(:rounding_exceptions)).to contain_exactly(expected_exception)
+    expect(import.reload.reconciliation_exceptions).to contain_exactly(expected_exception)
+    expect(item.reload).to have_attributes(hours_worked: 7.97, overtime_hours: 0.03, gross_pay: 200.0, net_pay: 180.0)
+  end
+
+  it "accepts a legacy rounding exception exactly at the 0.05-hour boundary" do
+    company, pay_period, source = setup_records
+    employee = create(:employee, company: company, department: create(:department, company: company), email: "boundary@example.com")
+    adjustment = {
+      "source_time_entry_id" => "historic-rounding-boundary",
+      "line_key" => "flight-current",
+      "source_kind" => "current",
+      "original_work_date" => "2026-08-20",
+      "original_week_start" => "2026-08-16",
+      "source_category_id" => "flight",
+      "category" => { "id" => "flight", "key" => "flight_hours", "name" => "Flight Hours" },
+      "total_hours" => 8.0,
+      "regular_hours" => 8.0,
+      "overtime_hours" => 0.0
+    }
+    import = preview_import(
+      pay_period: pay_period,
+      source: source,
+      payload: payload_for(
+        pay_period: pay_period,
+        employee: employee,
+        adjustments: [ adjustment ],
+        batch_id: "AIRE-PAY-HISTORICAL-ROUNDING-BOUNDARY"
+      )
+    )
+    item = create(
+      :payroll_item,
+      pay_period: pay_period,
+      employee: employee,
+      hours_worked: 7.95,
+      overtime_hours: 0.05,
+      gross_pay: 200.0,
+      net_pay: 180.0
+    )
+    pay_period.update!(status: "committed", committed_at: Time.current)
+
+    result = TimeTracking::ReconcileCommittedImportService.new(
+      import: import,
+      mappings: [ { source_user_id: "aire-user-1", employee_id: employee.id } ],
+      reconciled_by: create(:user, company: company),
+      reconciliation_note: "Owner accepted the documented boundary rounding difference."
+    ).call
+
+    expect(result.fetch(:errors)).to be_empty
+    expect(result.fetch(:rounding_exceptions)).to contain_exactly(
+      include(
+        "regular_difference_hours" => "-0.05",
+        "overtime_difference_hours" => "+0.05",
+        "total_difference_hours" => "+0.00"
+      )
+    )
+    expect(item.reload).to have_attributes(hours_worked: 7.95, overtime_hours: 0.05, gross_pay: 200.0, net_pay: 180.0)
   end
 
   {
@@ -368,7 +479,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
     end.to raise_error(ArgumentError, /committed, active pay period/)
   end
 
-  it "refuses to link a historical payroll when employee hours do not match exactly" do
+  it "refuses to link a historical payroll when employee hours exceed the legacy rounding tolerance" do
     company, pay_period, source = setup_records
     employee = create(:employee, company: company, department: create(:department, company: company), email: "mismatch@example.com")
     adjustment = {

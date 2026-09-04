@@ -99,6 +99,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [appliedCount, setAppliedCount] = useState(0);
+  const [roundingExceptionCount, setRoundingExceptionCount] = useState(0);
   const [appliedThisSession, setAppliedThisSession] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -170,6 +171,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
     setStartDate(payPeriod.start_date);
     setEndDate(payPeriod.end_date);
     setAppliedCount(0);
+    setRoundingExceptionCount(0);
     setAppliedThisSession(false);
     setSources([]);
     setSourceId('');
@@ -371,6 +373,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
       }
 
       setAppliedCount('applied' in res.results ? res.results.applied.length : res.results.reconciled.length);
+      setRoundingExceptionCount('rounding_exceptions' in res.results ? res.results.rounding_exceptions.length : 0);
       setAppliedThisSession(true);
       setPreview(res.import);
       setStep('done');
@@ -826,7 +829,7 @@ export function TimeTrackingImportModal({ open, onClose, payPeriod, employees, o
                 {!appliedThisSession && alreadyApplied
                   ? `Cornerstone recorded this batch on ${formatTimestamp(preview?.applied_at)}. Its hours were not imported again.`
                   : isHistoricalReconciliation
-                  ? `${appliedCount} employee record${appliedCount === 1 ? '' : 's'} reconciled. No payroll amounts were changed.`
+                  ? `${appliedCount} employee record${appliedCount === 1 ? '' : 's'} reconciled. No payroll amounts were changed.${roundingExceptionCount > 0 ? ` ${roundingExceptionCount} documented legacy rounding exception${roundingExceptionCount === 1 ? ' was' : 's were'} recorded.` : ''}`
                   : appliedCount === 0
                   ? isFinalizedBatch
                     ? 'The empty finalized batch and its audit evidence were recorded without adding employee hours.'

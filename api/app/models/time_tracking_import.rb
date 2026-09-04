@@ -15,6 +15,9 @@ class TimeTrackingImport < ApplicationRecord
     source_payload_hash external_batch_id external_batch_checksum contract_version source_cutoff_at
     raw_payload processed_payload warnings
   ].freeze
+  RECONCILIATION_IMMUTABLE_ATTRIBUTES = %w[
+    reconciled_at reconciled_by_id reconciliation_note reconciliation_exceptions
+  ].freeze
 
   belongs_to :pay_period
   belongs_to :time_tracking_source
@@ -30,6 +33,7 @@ class TimeTrackingImport < ApplicationRecord
   validates :external_batch_checksum, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
   validates :source_processing_status, inclusion: { in: SOURCE_PROCESSING_STATUSES }, allow_nil: true
   validate :finalized_batch_snapshot_is_immutable, on: :update
+  validate :reconciliation_evidence_is_immutable, on: :update
 
   def finalized_batch?
     external_batch_id.present? || external_batch_checksum.present? || contract_version.present? || source_cutoff_at.present?
@@ -111,5 +115,14 @@ class TimeTrackingImport < ApplicationRecord
     %w[external_batch_id external_batch_checksum contract_version source_cutoff_at].any? do |attribute|
       attribute_in_database(attribute).present?
     end
+  end
+
+  def reconciliation_evidence_is_immutable
+    return unless reconciled_at_in_database.present?
+
+    changed_fields = RECONCILIATION_IMMUTABLE_ATTRIBUTES.select { |attribute| will_save_change_to_attribute?(attribute) }
+    return if changed_fields.empty?
+
+    errors.add(:base, "Historical reconciliation evidence cannot be changed after the payroll is linked")
   end
 end
